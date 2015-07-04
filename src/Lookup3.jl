@@ -114,13 +114,14 @@ end
 # Use for hash table lookup, or anything where one collision in 2^^32 is
 # acceptable.  Do NOT use for cryptographic purposes.
 # -------------------------------------------------------------------------------
-function hash(k::AbstractVector{UInt8}, initval::UInt32=UInt32(0), length::Integer=length(k))
+function hash(k::AbstractVector{UInt8}, initval::UInt32=UInt32(0), n::Integer=length(k))
+    n <= length(k) || throw(BoundsError())
     # Set up the internal state
-    a = b = c = 0xdeadbeef + convert(UInt32, length) + initval
+    a = b = c = 0xdeadbeef + convert(UInt32, n) + initval
 
     # --------------- all but the last block: affect some 32 bits of (a,b,c)
     offset = 1
-    while length > 12
+    @inbounds while n > 12
         a += k[offset]
         a += convert(UInt32, k[offset+1])<<8
         a += convert(UInt32, k[offset+2])<<16
@@ -134,24 +135,24 @@ function hash(k::AbstractVector{UInt8}, initval::UInt32=UInt32(0), length::Integ
         c += convert(UInt32, k[offset+10])<<16
         c += convert(UInt32, k[offset+11])<<24
         (a, b, c) = mix(a, b, c)
-        length -= 12
+        n -= 12
         offset += 12
     end
 
     # -------------------------------- last block: affect all 32 bits of (c)
-    if length > 0
-        length >= 12 && (c += convert(UInt32, k[offset+11])<<24)
-        length >= 11 && (c += convert(UInt32, k[offset+10])<<16)
-        length >= 10 && (c += convert(UInt32, k[offset+9])<<8)
-        length >= 9  && (c += k[offset+8])
-        length >= 8  && (b += convert(UInt32, k[offset+7])<<24)
-        length >= 7  && (b += convert(UInt32, k[offset+6])<<16)
-        length >= 6  && (b += convert(UInt32, k[offset+5])<<8)
-        length >= 5  && (b += k[offset+4])
-        length >= 4  && (a += convert(UInt32, k[offset+3])<<24)
-        length >= 3  && (a += convert(UInt32, k[offset+2])<<16)
-        length >= 2  && (a += convert(UInt32, k[offset+1])<<8)
-        length >= 1  && (a += k[offset])
+    @inbounds if n > 0
+        n >= 12 && (c += convert(UInt32, k[offset+11])<<24)
+        n >= 11 && (c += convert(UInt32, k[offset+10])<<16)
+        n >= 10 && (c += convert(UInt32, k[offset+9])<<8)
+        n >= 9  && (c += k[offset+8])
+        n >= 8  && (b += convert(UInt32, k[offset+7])<<24)
+        n >= 7  && (b += convert(UInt32, k[offset+6])<<16)
+        n >= 6  && (b += convert(UInt32, k[offset+5])<<8)
+        n >= 5  && (b += k[offset+4])
+        n >= 4  && (a += convert(UInt32, k[offset+3])<<24)
+        n >= 3  && (a += convert(UInt32, k[offset+2])<<16)
+        n >= 2  && (a += convert(UInt32, k[offset+1])<<8)
+        n >= 1  && (a += k[offset])
         c = final(a, b, c)
     end
     c
