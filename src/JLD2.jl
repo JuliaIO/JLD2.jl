@@ -1,22 +1,67 @@
 module JLD2
-using ArrayViews
-import Base.write
+using ArrayViews, DataStructures
 import Base.sizeof
 include("Lookup3.jl")
 
 const SUPERBLOCK_SIGNATURE = reinterpret(UInt64, UInt8[0o211, 'H', 'D', 'F', '\r', '\n', 0o032, '\n'])[1]
 const OBJECT_HEADER_SIGNATURE = reinterpret(UInt32, UInt8['O', 'H', 'D', 'R'])[1]
 const UNDEFINED_ADDRESS = 0xffffffffffffffff
+
+# Currently we specify that all offsets and lengths are 8 bytes
+typealias Offset UInt64
+typealias Length UInt64
+
+immutable UnsupportedVersionException <: Exception end
+immutable UnsupportedFeatureException <: Exception end
+immutable InvalidDataException <: Exception end
+
 typealias Plain     Union(Int8,Int16,Int32,Int64,Int128,UInt8,UInt16,UInt32,UInt64,UInt128,
                           Float16,Float32,Float64)
+typealias PlainType Union(Type{Int8},Type{Int16},Type{Int32},Type{Int64},Type{Int128},
+                          Type{UInt8},Type{UInt16},Type{UInt32},Type{UInt64},Type{UInt128},
+                          Type{Float16},Type{Float32},Type{Float64})
 
-const MMAP_GROW_SIZE = 2^24
-const FILE_GROW_SIZE = 2^15
+immutable Reference
+    offset::UInt64
+end
+
+abstract H5Datatype
+
+type CommittedDatatype <: H5Datatype
+    header_offset::Offset
+    index::Int
+    datatype::H5Datatype
+
+    CommittedDatatype(header_offset, index) =
+        new(header_offset, index)
+    CommittedDatatype(header_offset, index, datatype) =
+        new(header_offset, index, datatype)
+end
+
+immutable Group{T}
+    names::T
+    offsets::Vector{Offset}
+end
+
+type JLDFile{T<:IO}
+    io::T
+    datatypes::OrderedDict{Offset,CommittedDatatype}
+    datasets::OrderedDict{ByteString,Offset}
+    jlh5type::Dict{Type,CommittedDatatype}
+    h5jltype::Dict{CommittedDatatype,Type}
+    end_of_data::Offset
+end
+JLDFile(io::IO) = JLDFile(io, OrderedDict{Offset,CommittedDatatype}(), OrderedDict{ByteString,Offset}(),
+                          Dict{Type,CommittedDatatype}(), Dict{CommittedDatatype,Type}(),
+                          UInt64(sizeof(Superblock)))
 
 #
 # MmapIO
 #
 # An IO built on top of mmap to avoid the overhead of ordinary disk IO
+const MMAP_GROW_SIZE = 2^24
+const FILE_GROW_SIZE = 2^15
+
 type MmapIO <: IO
     f::IOStream
     arr::Vector{UInt8}
@@ -24,13 +69,17 @@ type MmapIO <: IO
     endptr::Ptr{Void}
 end
 
-function MmapIO(fname::String, writable::Bool)
-    f = open(fname, "w+")
-    arr = mmap_array(UInt8, (MMAP_GROW_SIZE,), f, 0; grow=false)
+function MmapIO(fname::String, write::Bool, create::Bool, truncate::Bool)
+    truncate && !write && throw(ArgumentError("cannot truncate file that is not writable"))
+
+    f = open(fname, true, write, create, truncate, false)
+    initialsz = truncate ? 0 : filesize(fname)
+    arr = Mmap.mmap(f, Vector{UInt8}, (initialsz + MMAP_GROW_SIZE,); grow=false)
     ptr = Ptr{Void}(pointer(arr))
-    io = MmapIO(f, arr, ptr, ptr)
-    resize!(io, ptr)
+    io = MmapIO(f, arr, ptr, ptr + initialsz)
 end
+
+Base.show(io::IO, ::MmapIO) = print(io, "MmapIO")
 
 function resize!(io::MmapIO, newend::Ptr{Void})
     # Resize file
@@ -40,7 +89,7 @@ function resize!(io::MmapIO, newend::Ptr{Void})
 
     if newsz > length(io.arr)
         # If we have not mapped enough memory, map more
-        io.arr = mmap_array(UInt8, (newsz+MMAP_GROW_SIZE,), io.f, 0; grow=false)
+        io.arr = mmap_array(io.f, Vector{UInt8}, (newsz+MMAP_GROW_SIZE,); grow=false)
         newptr = pointer(io.arr)
         io.curptr += newptr - ptr
         ptr = newptr
@@ -53,7 +102,7 @@ end
 Base.truncate(io::MmapIO, pos) = truncate(io.f, pos)
 
 function Base.close(io::MmapIO)
-    msync(io.arr)
+    Mmap.sync!(io.arr)
     close(io.f)
 end
 
@@ -76,9 +125,9 @@ end
     io.curptr = ep
     nothing
 end
-
 @inline Base.write(io::MmapIO, x::UInt8) = _write(io, x)
 @inline Base.write(io::MmapIO, x::Plain)  = _write(io, x)
+
 function Base.write{T}(io::MmapIO, x::Ptr{T}, n::Integer)
     cp = io.curptr
     ep = cp + sizeof(T)*n
@@ -91,6 +140,21 @@ function Base.write{T}(io::MmapIO, x::Ptr{T}, n::Integer)
     io.curptr = ep
     nothing
 end
+
+Base.write(io::MmapIO, x::ASCIIString) = write(io, pointer(x), sizeof(x))
+Base.write(io::MmapIO, x::UTF8String) = write(io, pointer(x), sizeof(x))
+
+@inline function _read(io::MmapIO, T::DataType)
+    cp = io.curptr
+    ep = cp + sizeof(T)
+    ep > io.endptr && throw(EOFError())
+    v = unsafe_load(Ptr{T}(cp)) 
+    io.curptr = ep
+    v
+end
+@inline Base.read(io::MmapIO, T::Type{UInt8}) = _read(io, T)
+@inline Base.read(io::MmapIO, T::Type{Int8}) = _read(io, T)
+@inline Base.read(io::MmapIO, T::PlainType) = _read(io, T)
 
 function Base.seek(io::MmapIO, offset)
     io.curptr = pointer(io.arr) + offset
@@ -123,22 +187,6 @@ function end_checksum(io::MmapIO)
     v = CHECKSUM_PTR[]
     CHECKSUM_PTR[] = Ptr{Void}(0)
     Lookup3.hash(UnsafeContiguousView(Ptr{UInt8}(v), (Int(io.curptr - v),)))
-end
-
-# Currently we specify that all offsets and lengths are 8 bytes
-typealias Offset UInt64
-typealias Length UInt64
-
-immutable UnsupportedVersionException <: Exception end
-immutable UnsupportedFeatureException <: Exception end
-immutable InvalidDataException <: Exception end
-
-typealias PlainType Union(Type{Int8},Type{Int16},Type{Int32},Type{Int64},Type{Int128},
-                          Type{UInt8},Type{UInt16},Type{UInt32},Type{UInt64},Type{UInt128},
-                          Type{Float16},Type{Float32},Type{Float64})
-
-immutable Reference
-    offset::UInt64
 end
 
 # Redefine unsafe_load and unsafe_store! so that they pack the type
@@ -186,13 +234,13 @@ end
 # size of the size field
 function read_size(io::IO, flags::UInt8)
     if (flags & 1) == 0 && (flags & 2) == 0
-        read(p, UInt8)
+        read(io, UInt8)
     elseif (flags & 1) == 1 && (flags & 2) == 0
-        read(p, UInt16)
+        read(io, UInt16)
     elseif (flags & 1) == 0 && (flags & 2) == 2
-        read(p, UInt32)
+        read(io, UInt32)
     else
-        read(p, UInt64)
+        read(io, UInt64)
     end
 end
 
@@ -250,10 +298,10 @@ type Superblock
     root_group_object_header_address::Offset
 end
 
-sizeof(::Union(Type{Superblock}, Superblock)) = 
+Base.sizeof(::Union(Type{Superblock}, Superblock)) = 
     12+sizeof(Offset)*4+4
 
-function read(io::IO, ::Type{Superblock})
+function Base.read(io::IO, ::Type{Superblock})
     cio = begin_checksum(io)
 
     # Signature
@@ -265,8 +313,8 @@ function read(io::IO, ::Type{Superblock})
     version == 2 || throw(UnsupportedVersionException())
 
     # Size of offsets and size of lengths
-    size_of_offsets = read(cio, Offset)
-    size_of_lengths = read(cio, Offset)
+    size_of_offsets = read(cio, UInt8)
+    size_of_lengths = read(cio, UInt8)
     (size_of_offsets == 8 && size_of_lengths == 8) || throw(UnsupportedFeatureException())
 
     # File consistency flags
@@ -286,7 +334,7 @@ function read(io::IO, ::Type{Superblock})
                 end_of_file_address, root_group_object_header_address)
 end
 
-function write(io::IO, s::Superblock)
+function Base.write(io::IO, s::Superblock)
     cio = begin_checksum(io, sizeof(s))
     write(cio, SUPERBLOCK_SIGNATURE::UInt64)    # Signature
     write(cio, UInt8(2))                        # Version
@@ -304,29 +352,55 @@ end
 # Object headers
 #
 
-@enum(HeaderMessageType,
-      HM_NIL,
-      HM_DATASPACE,
-      HM_LINK_INFO,
-      HM_DATATYPE,
-      HM_FILL_VALUE_OLD,
-      HM_FILL_VALUE,
-      HM_LINK_MESSAGE,
-      HM_EXTERNAL_FILE_LIST,
-      HM_DATA_LAYOUT,
-      HM_BOGUS,
-      HM_GROUP_INFO,
-      HM_FILTER_PIPELINE,
-      HM_ATTRIBUTE,
-      HM_OBJECT_COMMENT,
-      HM_SHARED_MESSAGE_TABLE,
-      HM_OBJECT_HEADER_CONTINUATION,
-      HM_SYMBOL_TABLE,
-      HM_MODIFICATION_TIME,
-      HM_BTREE_K_VALUES,
-      HM_DRIVER_INFO,
-      HM_ATTRIBUTE_INFO,
-      HM_REFERENCE_COUNT)
+const HM_NIL = 0x00
+const HM_DATASPACE = 0x01
+const HM_LINK_INFO = 0x02
+const HM_DATATYPE = 0x03
+const HM_FILL_VALUE_OLD = 0x04
+const HM_FILL_VALUE = 0x05
+const HM_LINK_MESSAGE = 0x06
+const HM_EXTERNAL_FILE_LIST = 0x07
+const HM_DATA_LAYOUT = 0x08
+const HM_BOGUS = 0x09
+const HM_GROUP_INFO = 0x0a
+const HM_FILTER_PIPELINE = 0x0b
+const HM_ATTRIBUTE = 0x0c
+const HM_OBJECT_COMMENT = 0x0d
+const HM_SHARED_MESSAGE_TABLE = 0x0e
+const HM_OBJECT_HEADER_CONTINUATION = 0x0f
+const HM_SYMBOL_TABLE = 0x10
+const HM_MODIFICATION_TIME = 0x11
+const HM_BTREE_K_VALUES = 0x12
+const HM_DRIVER_INFO = 0x13
+const HM_ATTRIBUTE_INFO = 0x14
+const HM_REFERENCE_COUNT = 0x15
+
+immutable ObjectStart
+    signature::UInt32
+    version::UInt8
+    flags::UInt8
+end
+ObjectStart(flags::UInt8) = ObjectStart(OBJECT_HEADER_SIGNATURE, 2, flags)
+define_packed(ObjectStart)
+
+# Reads the start of an object including the signature, version, flags,
+# and (payload) size. Returns the size.
+function read_obj_start(io::IO)
+    os = read(io, ObjectStart)
+    os.signature == OBJECT_HEADER_SIGNATURE || throw(InvalidDataException())
+    os.version == 2 || throw(UnsupportedVersionException())
+
+    if (os.flags & OH_TIMES_STORED) != 0
+        # Skip access, modification, change and birth times
+        skip(io, 128)
+    end
+    if (os.flags & OH_ATTRIBUTE_PHASE_CHANGE_VALUES_STORED) != 0
+        # Skip maximum # of attributes fields
+        skip(io, 32)
+    end
+
+    read_size(io, os.flags)
+end
 
 immutable HeaderMessage
     msg_type::UInt8
@@ -340,31 +414,14 @@ define_packed(HeaderMessage)
 #
 
 immutable LinkInfo
+    version::UInt8
+    flags::UInt8
     fractal_heap_address::Offset
     name_index_btree::Offset
 end
-LinkInfo() = LinkInfo(UNDEFINED_ADDRESS, UNDEFINED_ADDRESS)
+define_packed(LinkInfo)
 
-sizeof(::LinkInfo) = 18
-
-function read(io::IO, ::Type{LinkInfo})
-    version = read(io, UInt8)
-    version == 0 || throw(UnsupportedVersionException())
-
-    flags = read(io, UInt8)
-    flags == 0 || throw(UnsupportedFeatureException())
-
-    fractal_heap_address = read(io, Offset)
-    name_index_btree = read(io, Offset)
-
-    LinkInfo(fractal_heap_address, name_index_btree)
-end
-
-function write(io::IO, lh::LinkInfo)
-    write(io, UInt16(0)) # Version and flags
-    write(io, lh.fractal_heap_address::Offset)
-    write(io, lh.name_index_btree::Offset)
-end
+LinkInfo() = LinkInfo(0, 0, UNDEFINED_ADDRESS, UNDEFINED_ADDRESS)
 
 @enum(CharacterSet,
       CSET_ASCII,
@@ -374,18 +431,7 @@ const LM_CREATION_ORDER_PRESENT = 2^2
 const LM_LINK_TYPE_FIELD_PRESENT = 2^3
 const LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT = 2^4
 
-immutable Link
-    name::ByteString
-    target::Offset
-end
-
-function sizeof(link::Link)
-    sz = 2 + size_size(sizeof(link.name)) + sizeof(link.name) + sizeof(Offset)
-    isa(link.name, UTF8String) && (sz += 1)
-    sz
-end
-
-function read(io::IO, ::Type{Link})
+function read_link(io::IO)
     # Version
     version = read(io, UInt8)
     version == 1 || throw(UnsupportedVersionException())
@@ -413,41 +459,39 @@ function read(io::IO, ::Type{Link})
     target = read(io, Offset)  # Link information
 
     if cset == CSET_ASCII
-        Link(ASCIIString(name), target)
+        (ASCIIString(name), target)
     else
-        Link(UTF8String(name), target)
+        (UTF8String(name), target)
     end
 end
 
-function write(io::IO, link::Link)
+sizeof_link(name::ByteString) =
+    2 + size_size(sizeof(name)) + sizeof(name) + sizeof(Offset) + isa(name, UTF8String)
+
+function write_link(io::IO, name::ByteString, target::Offset)
     # Version
     write(io, UInt8(1))
 
     # Flags
-    flags = size_flag(sizeof(link.name))
-    if isa(link.name, UTF8String)
+    flags = size_flag(sizeof(name))
+    if isa(name, UTF8String)
         flags &= LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT
     end
     write(io, flags::UInt8)
 
     # Link name character set
-    if isa(link.name, UTF8String)
+    if isa(name, UTF8String)
         write(io, UInt8(CSET_UTF8))
     end
 
     # Length of link name
-    write_size(io, sizeof(link.name))
+    write_size(io, sizeof(name))
 
     # Link name
-    write(io, pointer(link.name), sizeof(link.name))
+    write(io, name)
 
-    # Link information
-    write(io, link.target::Offset)
-end
-
-immutable Group
-    link_info::LinkInfo
-    links::Vector{Link}
+    # Link target
+    write(io, target::Offset)
 end
 
 const OH_ATTRIBUTE_CREATION_ORDER_TRACKED = 2^2
@@ -456,99 +500,85 @@ const OH_ATTRIBUTE_PHASE_CHANGE_VALUES_STORED = 2^4
 const OH_TIMES_STORED = 2^5
 
 function payload_size(group::Group)
-    sz = sizeof(group.link_info) + 2 +
-                 (length(group.links) + 2) * sizeof(HeaderMessage)
-    for link in group.links
-        sz += sizeof(link)
+    # 2 extra headers for link info and group info
+    nheaders = length(group.names) + 2
+    sz = sizeof(LinkInfo) + 2 + nheaders * sizeof(HeaderMessage)
+    for name in group.names
+        sz += sizeof_link(name)
     end
     sz
 end
 
-function sizeof(group::Group)
+function Base.sizeof(group::Group)
     sz = payload_size(group)
-    4 + 1 + 1 + size_size(sz) + sz + 4
+    sz = sizeof(ObjectStart) + size_size(sz) + sz + 4
+    for v in values(group.objects)
+        sz += sizeof(v)
+    end
+    for v in values(group.children)
+        sz += sizeof(v)
+    end
+    sz
 end
 
-function read(io::IO, ::Type{Group})
+function Base.read(io::IO, ::Type{Group})
     cio = begin_checksum(io)
-
-    # Signature
-    signature = read(cio, UInt32)
-    signature == OBJECT_HEADER_SIGNATURE || throw(InvalidDataException())
-
-    # Version
-    version = read(cio, UInt8)
-    version == 2 || throw(UnsupportedVersionException())
-
-    # Flags
-    flags = read(cio, UInt8)
-
-    if (flags & OH_TIMES_STORED) != 0
-        # Skip access, modification, change and birth times
-        skip(cio, 128)
-    end
-    if (flags & OH_ATTRIBUTE_PHASE_CHANGE_VALUES_STORED) != 0
-        # Skip maximum # of attributes fields
-        skip(cio, 32)
-    end
-
-    # Size
-    sz = read_size(cio, flags)
+    sz = read_obj_start(cio)
     pmax = position(cio) + sz
-    link_info = LinkInfo()
-    links = Link[]
 
     # Messages
-    while position(io) < pmax
+    names = ByteString[]
+    offsets = Offset[]
+    while position(cio) < pmax
         msg = read(cio, HeaderMessage)
-        endpos = position(io) + msg.size
+        endpos = position(cio) + msg.size
         if msg.msg_type == HM_LINK_INFO
-            link_info = read(cio, LinkInfo)[1]
+            link_info = read(cio, LinkInfo)
             link_info.fractal_heap_address == UNDEFINED_ADDRESS || throw(UnsupportedFeatureException())
         elseif msg.msg_type == HM_GROUP_INFO
             # This message doesn't help us much, so we ignore it for now
         elseif msg.msg_type == HM_LINK_MESSAGE
-            push!(links, read(cio, Link)[1])
+            name, offset = read_link(cio)
+            push!(names, name)
+            push!(offsets, offset)
         elseif (msg.flags & 2^3) != 0
             throw(UnsupportedFeatureException())
-        elseif msg.msg_types == HM_NIL
+        elseif msg.msg_type == HM_NIL
             break
         end
-        seek(io, endpos)
+        seek(cio, endpos)
     end
-    seek(io, pmax)
+    seek(cio, pmax)
 
     # Checksum
-    cs = unsafe_load!(Ptr{UInt32}(pmax))
-    cs == checksum(ptr, pmax) || throw(InvalidDataException())
+    end_checksum(cio) == read(io, UInt32) || throw(InvalidDataException())
 
-    Group(link_info, links)
+    Group(names, offsets)
 end
 
-function write(io::IO, group::Group)
-    group.link_info.fractal_heap_address == UNDEFINED_ADDRESS ||
-        throw(UnsupportedFeatureException())
-    sz = payload_size(group)
+function Base.write(io::IO, group::Group)
+    psz = payload_size(group)
+    sz = sizeof(ObjectStart) + size_size(psz) + psz + 4
 
-    cio = begin_checksum(io, sizeof(ObjectHeaderP) + size_size(sz) + sz)
+    cio = begin_checksum(io, sz - 4)
 
-    write(cio, OBJECT_HEADER_SIGNATURE::UInt32) # Header
-    write(cio, UInt8(2))                        # Version
-    write(cio, size_flag(sz)::UInt8)            # Flags
-    write_size(cio, sz)                         # Size
+    # Object header
+    write(cio, ObjectStart(size_flag(psz)))
+    write_size(cio, psz)
+    x = position(cio)
 
     # Link info message
-    write(cio, HeaderMessage(HM_LINK_INFO, sizeof(group.link_info), 0))
-    write(cio, group.link_info)
+    write(cio, HeaderMessage(HM_LINK_INFO, sizeof(LinkInfo), 0))
+    write(cio, LinkInfo())
 
     # Group info message
     write(cio, HeaderMessage(HM_GROUP_INFO, 2, 0))
     write(cio, UInt16(0))
 
-    # Links
-    for link in group.links
-        write(cio, HeaderMessage(HM_LINK_MESSAGE, sizeof(link), 0))
-        write(cio, link)
+    # Datatypes
+    for i = 1:length(group.names)
+        write(cio, HeaderMessage(HM_LINK_MESSAGE, sizeof_link(group.names[i]), 0))
+        write_link(io, group.names[i], group.offsets[i])
     end
 
     # Checksum
@@ -559,28 +589,32 @@ end
 # Dataspaces
 #
 
-@enum(DataspaceType, DS_SCALAR, DS_SIMPLE, DS_NULL)
+const DS_SCALAR = 0x00
+const DS_SIMPLE = 0x01
+const DS_NULL = 0x02
 
 immutable Dataspace{N}
-    dataspace_type::DataspaceType
+    dataspace_type::UInt8
     size::NTuple{N,Length}
 end
 
-immutable DataspaceHeaderP
+immutable DataspaceStart
     version::UInt8
     dimensionality::UInt8
     flags::UInt8
     dataspace_type::UInt8
 end
-define_packed(DataspaceHeaderP)
+define_packed(DataspaceStart)
 
 Dataspace(::Any) = Dataspace(DS_SCALAR, ())
 Dataspace{T,N}(x::Array{T,N}) = Dataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))))
 
 sizeof{N}(::Union(Dataspace{N},Type{Dataspace{N}})) = 4 + sizeof(Length)*N
+numel(x::Dataspace{0}) = x.dataspace_type == DS_SCALAR ? 1 : 0
+numel(x::Dataspace) = prod(x.size)
 
-function write{N}(io::IO, dspace::Dataspace{N})
-    write(io, DataspaceHeaderP(2, N, 0, dspace.dataspace_type))
+function Base.write{N}(io::IO, dspace::Dataspace{N})
+    write(io, DataspaceStart(2, N, 0, dspace.dataspace_type))
     for x in dspace.size
         write(io, x::Length)
     end
@@ -589,36 +623,35 @@ end
 #
 # Datatypes
 #
+const DT_FIXED_POINT = UInt8(0) | (UInt8(3) << 4)
+const DT_FLOATING_POINT = UInt8(1) | (UInt8(3) << 4)
+const DT_TIME = UInt8(2) | (UInt8(3) << 4)
+const DT_STRING = UInt8(3) | (UInt8(3) << 4)
+const DT_BITFIELD = UInt8(4) | (UInt8(3) << 4)
+const DT_OPAQUE = UInt8(5) | (UInt8(3) << 4)
+const DT_COMPOUND = UInt8(6) | (UInt8(3) << 4)
+const DT_REFERENCE = UInt8(7) | (UInt8(3) << 4)
+const DT_ENUMERATED = UInt8(8) | (UInt8(3) << 4)
+const DT_VARIABLE_LENGTH = UInt8(9) | (UInt8(3) << 4)
+const DT_ARRAY = UInt8(10) | (UInt8(3) << 4)
 
-@enum(DatatypeClass,
-      DT_FIXED_POINT = 0 | (UInt8(3) << 4),
-      DT_FLOATING_POINT = 1 | (UInt8(3) << 4),
-      DT_TIME = 2 | (UInt8(3) << 4),
-      DT_STRING = 3 | (UInt8(3) << 4),
-      DT_BITFIELD = 4 | (UInt8(3) << 4),
-      DT_OPAQUE = 5 | (UInt8(3) << 4),
-      DT_COMPOUND = 6 | (UInt8(3) << 4),
-      DT_REFERENCE = 7 | (UInt8(3) << 4),
-      DT_ENUMERATED = 8 | (UInt8(3) << 4),
-      DT_VARIABLE_LENGTH = 9 | (UInt8(3) << 4),
-      DT_ARRAY = 10 | (UInt8(3) << 4)
-)
-
-@enum(ByteOrder,
-      BO_LE = 0,
-      BO_BE = 1,
-      BO_VAX = 3)
-
-abstract H5Datatype
-
-immutable DatatypeHeaderP
+# This is the description for:
+#    Strings
+#    References
+immutable BasicDatatype <: H5Datatype
     class::UInt8
     bitfield1::UInt8
     bitfield2::UInt8
     bitfield3::UInt8
     size::UInt32
 end
-define_packed(DatatypeHeaderP)
+define_packed(BasicDatatype)
+StringDatatype(size::Integer) =
+    BasicDatatype(DT_STRING, 0x01, 0x00, 0x00, size)
+OpaqueDatatype(size::Integer) =
+    BasicDatatype(DT_OPAQUE, 0x00, 0x00, 0x00, size) # XXX make sure ignoring the tag is OK
+ReferenceDatatype() =
+    BasicDatatype(DT_REFERENCE, 0x00, 0x00, 0x00, sizeof(Offset))
 
 immutable FixedPointDatatype <: H5Datatype
     class::UInt8
@@ -630,6 +663,8 @@ immutable FixedPointDatatype <: H5Datatype
     bitprecision::UInt16
 end
 define_packed(FixedPointDatatype)
+FixedPointDatatype(size::Integer, signed::Bool) =
+    FixedPointDatatype(DT_FIXED_POINT, ifelse(signed, 0x08, 0x00), 0x00, 0x00, size, 0, 8*size)
 
 immutable FloatingPointDatatype <: H5Datatype
     class::UInt8
@@ -660,8 +695,8 @@ immutable CompoundDatatype <: H5Datatype
     end
 end
 
-function sizeof(dt::CompoundDatatype)
-    sz = 8 + size_size(dt.size)*length(dt.names)
+function Base.sizeof(dt::CompoundDatatype)
+    sz = sizeof(BasicDatatype) + size_size(dt.size)*length(dt.names)
     for i = 1:length(dt.names)
         # Extra byte for null padding of name
         sz += sizeof(dt.names[i]) + 1 + sizeof(dt.members[i])
@@ -669,12 +704,12 @@ function sizeof(dt::CompoundDatatype)
     sz
 end
 
-function write(io::IO, dt::CompoundDatatype)
+function Base.write(io::IO, dt::CompoundDatatype)
     n = length(dt.names)
-    write(io, DatatypeHeaderP(DT_COMPOUND, n % UInt8, (n >> 8) % UInt8, 0x00, dt.size))
+    write(io, BasicDatatype(DT_COMPOUND, n % UInt8, (n >> 8) % UInt8, 0x00, dt.size))
     for i = 1:length(dt.names)
         # Name
-        write(io, pointer(dt.names[i]), sizeof(dt.names[i]))
+        write(io, dt.names[i])
         write(io, UInt8(0x00))
 
         # Byte offset of member
@@ -691,28 +726,62 @@ function write(io::IO, dt::CompoundDatatype)
     end
 end
 
-immutable ReferenceDatatype <: H5Datatype
+immutable VariableLengthDatatype{T<:H5Datatype} <: H5Datatype
     class::UInt8
     bitfield1::UInt8
     bitfield2::UInt8
     bitfield3::UInt8
     size::UInt32
+    basetype::T
 end
-define_packed(ReferenceDatatype)
+VariableLengthDatatype(basetype::H5Datatype) =
+    VariableLengthDatatype{typeof(basetype)}(DT_VARIABLE_LENGTH, 0x00, 0x00, 0x00, sizeof(Offset)+sizeof(Length), basetype)
+VariableLengthDatatype(class, bitfield1, bitfield2, bitfield3, size, basetype::H5Datatype) =
+    VariableLengthDatatype{typeof(basetype)}(class, bitfield1, bitfield2, bitfield3, size, basetype)
 
-const REFERENCE = ReferenceDatatype(DT_REFERENCE, 0x00, 0x00, 0x00, 0x08)
+Base.sizeof(dt::VariableLengthDatatype) =
+    sizeof(BasicDatatype) + sizeof(dt.basetype)
 
-H5Datatype(x::Union(Type{Int8}, Type{Int16}, Type{Int32}, Type{Int64}, Type{Int128})) =
-    FixedPointDatatype(DT_FIXED_POINT, 0x08, 0x00, 0x00, sizeof(x), 0, 8*sizeof(x))
-H5Datatype(x::Union(Type{UInt8}, Type{UInt16}, Type{UInt32}, Type{UInt64}, Type{UInt128})) =
-    FixedPointDatatype(DT_FIXED_POINT, 0x00, 0x00, 0x00, sizeof(x), 0, 8*sizeof(x))
-H5Datatype(x::Type{Float64}) =
-    FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x3f, 0x00, 8, 0, 64, 52, 11, 0, 52, 0x000003ff)
-H5Datatype(x::Type{Float32}) =
-    FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x1f, 0x00, 4, 0, 32, 23, 8, 0, 23, 0x0000007f)
-H5Datatype(x::Type{Float16}) =
-    FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x0f, 0x00, 2, 0, 16, 10, 5, 0, 10, 0x0000000f)
-H5Datatype{T,N}(x::Type{Array{T,N}}) = H5Datatype(T)
+function Base.write(io::IO, dt::VariableLengthDatatype)
+    write(io, BasicDatatype(DT_VARIABLE_LENGTH, dt.bitfield1, dt.bitfield2, dt.bitfield3, dt.size))
+    write(io, dt.basetype)
+end
+
+Base.sizeof(dt::CommittedDatatype) = 2 + sizeof(Offset)
+
+function Base.write(io::IO, dt::CommittedDatatype)
+    write(io, UInt8(3))
+    write(io, UInt8(2))
+    write(io, dt.header_offset)
+end
+
+function commit(f::JLDFile, dt::CompoundDatatype)
+    io = f.io
+    header_offset = position(io)
+    psz = sizeof(HeaderMessage) + sizeof(dt)
+
+    cio = begin_checksum(io, sizeof(ObjectStart) + size_size(psz) + psz)
+    write(cio, ObjectStart(size_flag(psz)))
+    write_size(cio, psz)
+    write(cio, HeaderMessage(HM_DATATYPE, sizeof(dt), 64))
+    write(cio, dt)
+    write(io, end_checksum(cio))
+
+    header_offset
+end
+
+# Read the actual datatype for a committed datatype
+function Base.read(f::JLDFile, dt::CommittedDatatype)
+    if datatype_class == DT_FIXED_POINT
+        read_data(dataspace_type, dataspace_dimensions, jltype(read(io, FixedPointDatatype)), data_offset)
+    elseif datatype_class == DT_FLOATING_POINT
+        read_data(dataspace_type, dataspace_dimensions, jltype(read(io, FloatingPointDatatype)), data_offset)
+    elseif datatype_class == DT_STRING
+        read_data(dataspace_type, dataspace_dimensions, jltype(read(io, StringDatatype)), data_offset)
+    elseif datatype_class == DT_VARIABLE_LENGTH
+        read_data(dataspace_type, dataspace_dimensions, jltype(read(io, VariableLengthDatatype)), data_offset)
+    end
+end
 
 #
 # Datasets
@@ -723,56 +792,130 @@ const LC_COMPACT_STORAGE = 0x00
 const LC_CONTIGUOUS_STORAGE = 0x01
 const LC_CHUNKED_STORAGE = 0x02
 
-immutable ObjectHeaderP
-    signature::UInt32
-    version::UInt8
-    flags::UInt8
+const EMPTY_DIMENSIONS = Length[]
+function read_data(f::JLDFile)
+    io = f.io
+    cio = begin_checksum(io)
+    sz = read_obj_start(cio)
+    pmax = position(cio) + sz
+
+    # Messages
+    dataspace_type = typemin(UInt8)
+    dataspace_dimensions = EMPTY_DIMENSIONS
+    datatype_class::UInt8 = 0
+    datatype_offset::Int = 0
+    data_offset::Int = 0
+    data_length::Int = 0
+    while position(cio) < pmax
+        msg = read(cio, HeaderMessage)
+        endpos = position(cio) + msg.size
+        if msg.msg_type == HM_DATASPACE
+            dspace_start = read(cio, DataspaceStart)
+            dspace_start.version == 2 || throw(UnsupportedVersionException())
+            dataspace_type = dspace_start.dataspace_type
+            if dspace_start.dimensionality != 0
+                dataspace_dimensions = read(cio, Length, dspace_start.dimensionality)
+            end
+        elseif msg.msg_type == HM_DATATYPE
+            if (msg.flags & 2) == 2
+                # Shared datatype
+                read(cio, UInt8) == 3 || throw(UnsupportedVersionException())
+                read(cio, UInt8) == 2 || throw(UnsupportedFeatureException())
+                datatype_offset = read(cio, Offset)
+                datatype_class = typemax(UInt8)
+            else
+                # Datatype stored here
+                datatype_offset = position(cio)
+                datatype_class = read(cio, UInt8)
+            end
+        elseif msg.msg_type == HM_FILL_VALUE
+            (read(cio, UInt8) == 3 && read(cio, UInt8) == 0x09) || throw(UnsupportedFeatureException())
+        elseif msg.msg_type == HM_DATA_LAYOUT
+            read(cio, UInt8) == 3 || throw(UnsupportedVersionException())
+            if read(cio, UInt8) == LC_COMPACT_STORAGE
+                data_length = read(cio, UInt16)
+                data_offset = position(cio)
+            elseif read(cio, UInt8) == LC_CONTIGUOUS_STORAGE
+                data_offset = read(cio, Offset)
+                data_length = read(cio, Length)
+            else
+                throw(UnsupportedFeatureException())
+            end
+        elseif (msg.flags & 2^3) != 0
+            throw(UnsupportedFeatureException())
+        elseif msg.msg_type == HM_NIL
+            break
+        end
+        seek(cio, endpos)
+    end
+    seek(cio, pmax)
+
+    # Checksum
+    end_checksum(cio) == read(io, UInt32) || throw(InvalidDataException())
+
+    # TODO verify that data length matches
+
+    # Read the data
+    # For efficiency reasons, we do not use dispatch here
+    seek(io, datatype_offset)
+    if datatype_class == DT_FIXED_POINT
+        read_data(f, dataspace_type, dataspace_dimensions, jltype(f, read(io, FixedPointDatatype)), data_offset)
+    elseif datatype_class == DT_FLOATING_POINT
+        read_data(f, dataspace_type, dataspace_dimensions, jltype(f, read(io, FloatingPointDatatype)), data_offset)
+    elseif datatype_class == DT_STRING
+        read_data(f, dataspace_type, dataspace_dimensions, jltype(f, read(io, StringDatatype)), data_offset)
+    elseif datatype_class == DT_VARIABLE_LENGTH
+        read_data(f, dataspace_type, dataspace_dimensions, jltype(f, read(io, VariableLengthDatatype)), data_offset)
+    elseif datatype_class == typemax(UInt8) # Committed datatype
+        read_data(f, dataspace_type, dataspace_dimensions, jltype(f, f.datatypes[datatype_offset]), data_offset)
+    else
+        throw(UnsupportedFeatureException())
+    end
 end
-define_packed(ObjectHeaderP)
 
-immutable Dataset{N,P<:H5Datatype,D}
-    dataspace::Dataspace{N}
-    datatype::P
-    data::D
+function read_data(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_dimensions::Vector{Length}, datatype::DataType, data_offset::Int)
+    io = f.io
+    seek(io, data_offset)
+    if isempty(dataspace_dimensions)
+        jlconvert(datatype, f, io.curptr)
+    else
+        error("not yet implemeneted")
+    end
 end
 
-layout_class(dset::Dataset) = sizeof(dset.data) <= 8192 ? LC_COMPACT_STORAGE : LC_CONTIGUOUS_STORAGE
-
-function payload_size(dset::Dataset)
-    sz = sizeof(dset.dataspace) + sizeof(dset.datatype) + 2 + 4*sizeof(HeaderMessage) + 2
-    if layout_class(dset) == LC_COMPACT_STORAGE
-        sz + 2 + sizeof(dset.data)
+function payload_size(dataspace::Dataspace, datatype::H5Datatype, datasz::Int, layout_class::UInt8)
+    sz = sizeof(dataspace) + sizeof(datatype) + 2 + 4*sizeof(HeaderMessage) + 2
+    if layout_class == LC_COMPACT_STORAGE
+        sz + 2 + datasz
     else
         sz + sizeof(Offset) + sizeof(Length)
     end
 end
 
-function write_data(io::MmapIO, dset::Dataset)
-    if isa(dset.data, Array)
-        write(io, pointer(dset.data::Array), length(dset.data))
-    else
-        write(io, dset.data)
-    end
-    nothing
-end
+# Might need to do something else someday for non-mmapped IO
+write_data(f::JLDFile, data, odr) = h5convert!(f.io.curptr, odr, f, data)
 
-function write(io::IO, dset::Dataset)
+function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, data, odr)
+    io = f.io
     startpos = position(io)
-    psz = payload_size(dset)
-    fullsz = sizeof(ObjectHeaderP) + size_size(psz) + psz
+    datasz = sizeof(odr) * numel(dataspace)
+    layout_class = datasz < 8192 ? LC_COMPACT_STORAGE : LC_CONTIGUOUS_STORAGE
+    psz = payload_size(dataspace, datatype, datasz, layout_class)
+    fullsz = sizeof(ObjectStart) + size_size(psz) + psz + 4
 
-    cio = begin_checksum(io, fullsz)
+    header_offset = position(io)
+    cio = begin_checksum(io, fullsz - 4)
 
-    write(cio, ObjectHeaderP(OBJECT_HEADER_SIGNATURE, 2, size_flag(psz)))
+    write(cio, ObjectStart(size_flag(psz)))
     write_size(cio, psz)
 
     # Dataspace
-    write(cio, HeaderMessage(HM_DATASPACE, sizeof(dset.dataspace), 0))
-    write(cio, dset.dataspace)
+    write(cio, HeaderMessage(HM_DATASPACE, sizeof(dataspace), 0))
+    write(cio, dataspace)
 
     # Datatype
-    write(cio, HeaderMessage(HM_DATATYPE, sizeof(dset.datatype), 0))
-    write(cio, dset.datatype)
+    write(cio, HeaderMessage(HM_DATATYPE, sizeof(datatype), 1+2*isa(datatype, CommittedDatatype)))
+    write(cio, datatype)
 
     # Fill value
     write(cio, HeaderMessage(HM_FILL_VALUE, 2, 0))
@@ -780,76 +923,125 @@ function write(io::IO, dset::Dataset)
     write(cio, 0x09)     # Flags
 
     # Data storage layout
-    if layout_class(dset) == LC_COMPACT_STORAGE
-        write(cio, HeaderMessage(HM_DATA_LAYOUT, 4+sizeof(dset.data), 0))
+    if layout_class == LC_COMPACT_STORAGE
+        write(cio, HeaderMessage(HM_DATA_LAYOUT, 4+datasz, 0))
         write(cio, UInt8(3))                  # Version
-        write(cio, UInt8(0))                  # Layout class
-        write(cio, UInt16(sizeof(dset.data))) # Size
-        write_data(io, dset)
+        write(cio, LC_COMPACT_STORAGE)        # Layout class
+        write(cio, UInt16(datasz))            # Size
+        f.end_of_data = header_offset + fullsz
+        data_offset = position(io)
+        write_data(f, data, odr)
+        seek(io, data_offset + datasz)
         write(io, end_checksum(cio))
     else
         write(cio, HeaderMessage(HM_DATA_LAYOUT, 2+sizeof(Offset)+sizeof(Length), 0))
         write(cio, UInt8(3))                  # Version
-        write(cio, UInt8(1))                  # Layout class
-        write(cio, Offset(startpos+fullsz+4)) # Offset
-        write(cio, Length(sizeof(dset.data))) # Length
+        write(cio, LC_CONTIGUOUS_STORAGE)     # Layout class
+        write(cio, Offset(startpos + fullsz)) # Offset
+        write(cio, Length(sizeof(data)))      # Length
         write(io, end_checksum(cio))
-
-        write_data(io, dset)
-    end
-end
-
-function save(fname::String, name::String, obj)
-    superblock = Superblock(0, 0, UNDEFINED_ADDRESS, 0, 0)
-    dset = Dataset(Dataspace(obj), H5Datatype(typeof(obj)), obj)
-    group = Group(LinkInfo(), [Link(name, sizeof(superblock))])
-
-    io = MmapIO(fname, true)
-
-    seek(io, sizeof(superblock))
-    write(io, dset)
-
-    superblock.root_group_object_header_address = position(io)
-    write(io, group)
-
-    superblock.end_of_file_address = position(io)
-    truncate(io, position(io))
-
-    seek(io, 0)
-    write(io, superblock)
-
-    close(io)
-end
-
-@noinline write_dset(p, x) =
-    write(p, Dataset(Dataspace(x), H5Datatype(typeof(x)), x))
-
-function reftest(fname::String, name::String, x)
-    superblock = Superblock(0, 0, UNDEFINED_ADDRESS, 0, 0)
-
-    io = MmapIO(fname, true)
-    seek(io, sizeof(superblock))
-
-    refs = Array(Reference, length(x))
-    for i = 1:length(x)
-        refs[i] = Reference(position(io))
-        write_dset(io, x[i])
+        data_offset = position(io)
+        f.end_of_data = header_offset + fullsz + dset.datatype.size * numel(dset.datatype)
+        write_data(f, data, odr)
     end
 
-    group = Group(LinkInfo(), [Link(name, position(io))])
-    dset = Dataset(Dataspace(x), REFERENCE, refs)
-    write(io, dset)
-
-    superblock.root_group_object_header_address = position(io)
-    write(io, group)
-
-    superblock.end_of_file_address = position(io)
-    truncate(io, position(io))
-
-    seek(io, 0)
-    write(io, superblock)
-
-    close(io)
+    header_offset
 end
+@noinline function write_dataset(f, x)
+    write_dataset(f, Dataspace(x), h5type(f, typeof(x)), x, OnDiskRepresentation(typeof(x)))
+end
+
+#
+# File
+#
+
+function jldopen(fname::AbstractString, write::Bool, create::Bool, truncate::Bool)
+    io = MmapIO(fname, write, create, truncate)
+    f = JLDFile(io)
+
+    if !truncate
+        superblock = read(io, Superblock)
+        f.end_of_data = superblock.end_of_file_address
+        seek(io, superblock.root_group_object_header_address)
+        root_group = read(io, Group)
+        for i = 1:length(root_group.names)
+            name = root_group.names[i]
+            offset = root_group.offsets[i]
+            if name == "_types"
+                seek(io, offset)
+                types_group = read(io, Group)
+                for i = 1:length(types_group.offsets)
+                    f.datatypes[types_group.offsets[i]] = CommittedDatatype(types_group.offsets[i], i)
+                end
+            else
+                f.datasets[name] = offset
+            end
+        end
+    end
+
+    f
+end
+
+function jldopen(fname::AbstractString, mode::AbstractString="r")
+    mode == "r"  ? jldopen(fname, false, false, false) :
+    mode == "r+" ? jldopen(fname, true, false, false) :
+    mode == "a" || mode == "a+" ? jldopen(fname, true, true, false) :
+    mode == "w" || mode == "w+" ? jldopen(fname, true, true, true) :
+    throw(ArgumentError("invalid open mode: $mode"))
+end
+
+function Base.read(f::JLDFile, name::String)
+    f.end_of_data == UNDEFINED_ADDRESS && throw(ArgumentError("file is closed"))
+    haskey(f.datasets, name) || throw(ArgumentError("file has no dataset $name"))
+    offset = f.datasets[name]
+    seek(f.io, offset)
+    read_data(f)
+end
+
+function Base.write(f::JLDFile, name::String, obj)
+    f.end_of_data == UNDEFINED_ADDRESS && throw(ArgumentError("file is closed"))
+
+    io = f.io
+    seek(io, f.end_of_data)
+    header_offset = write_dataset(f, obj)
+    f.datasets[name] = header_offset
+    nothing
+end
+
+function Base.close(f::JLDFile)
+    io = f.io
+    seek(io, f.end_of_data)
+
+    names = ByteString[]
+    sizehint!(names, length(f.datasets)+1)
+    offsets = Offset[]
+    sizehint!(offsets, length(f.datasets)+1)
+
+    # Write types group
+    if !isempty(f.datatypes)
+        push!(names, "_types")
+        push!(offsets, position(io))
+        write(io, Group(ASCIIString[@sprintf("%08d", i) for i = 1:length(f.datatypes)],
+                        collect(keys(f.datatypes))))
+    end
+
+    # Write root group
+    root_group_object_header_address = position(io)
+    for (k, v) in f.datasets
+        push!(names, k)
+        push!(offsets, v)
+    end
+    write(io, Group(names, offsets))
+
+    eof_address = position(io)
+    truncate(io, eof_address)
+    seek(io, 0)
+    write(io, Superblock(0, 0, UNDEFINED_ADDRESS, eof_address, root_group_object_header_address))
+    f.end_of_data = UNDEFINED_ADDRESS
+    close(io)
+    nothing
+end
+
+include("jld_types.jl")
 
 end # module
