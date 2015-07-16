@@ -5,6 +5,7 @@ include("Lookup3.jl")
 
 const SUPERBLOCK_SIGNATURE = reinterpret(UInt64, UInt8[0o211, 'H', 'D', 'F', '\r', '\n', 0o032, '\n'])[1]
 const OBJECT_HEADER_SIGNATURE = reinterpret(UInt32, UInt8['O', 'H', 'D', 'R'])[1]
+const GLOBAL_HEAP_SIGNATURE = reinterpret(UInt32, UInt8['G', 'C', 'O', 'L'])[1]
 const UNDEFINED_ADDRESS = 0xffffffffffffffff
 
 # Currently we specify that all offsets and lengths are 8 bytes
@@ -25,17 +26,18 @@ immutable Reference
     offset::UInt64
 end
 
+immutable GlobalHeap
+    offset::Offset
+    length::Length
+    free::Length
+    nobjects::Int
+end
+
 abstract H5Datatype
 
-type CommittedDatatype <: H5Datatype
+immutable CommittedDatatype <: H5Datatype
     header_offset::Offset
     index::Int
-    datatype::H5Datatype
-
-    CommittedDatatype(header_offset, index) =
-        new(header_offset, index)
-    CommittedDatatype(header_offset, index, datatype) =
-        new(header_offset, index, datatype)
 end
 
 immutable Group{T}
@@ -43,17 +45,27 @@ immutable Group{T}
     offsets::Vector{Offset}
 end
 
+immutable OnDiskRepresentation{Offsets,Types} end
+immutable ReadRepresentation{T,ODR} end
+immutable WriteRepresentation{H5T<:H5Datatype,ODR}
+    datatype::H5T
+    odr::ODR
+end
+
 type JLDFile{T<:IO}
     io::T
-    datatypes::OrderedDict{Offset,CommittedDatatype}
+    datatype_locations::OrderedDict{Offset,CommittedDatatype}
+    datatypes::Vector{H5Datatype}
     datasets::OrderedDict{ByteString,Offset}
     jlh5type::Dict{Type,CommittedDatatype}
     h5jltype::Dict{CommittedDatatype,Type}
     end_of_data::Offset
+    global_heap::GlobalHeap
 end
-JLDFile(io::IO) = JLDFile(io, OrderedDict{Offset,CommittedDatatype}(), OrderedDict{ByteString,Offset}(),
+JLDFile(io::IO) = JLDFile(io, OrderedDict{Offset,CommittedDatatype}(), H5Datatype[],
+                          OrderedDict{ByteString,Offset}(),
                           Dict{Type,CommittedDatatype}(), Dict{CommittedDatatype,Type}(),
-                          UInt64(sizeof(Superblock)))
+                          UInt64(sizeof(Superblock)), GlobalHeap(UNDEFINED_ADDRESS, 0, 0, 0))
 
 #
 # MmapIO
@@ -143,6 +155,7 @@ end
 
 Base.write(io::MmapIO, x::ASCIIString) = write(io, pointer(x), sizeof(x))
 Base.write(io::MmapIO, x::UTF8String) = write(io, pointer(x), sizeof(x))
+Base.write(io::MmapIO, x::Array) = write(io, pointer(x), sizeof(x))
 
 @inline function _read(io::MmapIO, T::DataType)
     cp = io.curptr
@@ -158,6 +171,11 @@ end
 
 function Base.seek(io::MmapIO, offset)
     io.curptr = pointer(io.arr) + offset
+    nothing
+end
+
+function Base.skip(io::MmapIO, offset)
+    io.curptr += offset
     nothing
 end
 
@@ -611,7 +629,7 @@ Dataspace{T,N}(x::Array{T,N}) = Dataspace(DS_SIMPLE, convert(Tuple{Vararg{Length
 
 sizeof{N}(::Union(Dataspace{N},Type{Dataspace{N}})) = 4 + sizeof(Length)*N
 numel(x::Dataspace{0}) = x.dataspace_type == DS_SCALAR ? 1 : 0
-numel(x::Dataspace) = prod(x.size)
+numel(x::Dataspace) = Int(prod(x.size))
 
 function Base.write{N}(io::IO, dspace::Dataspace{N})
     write(io, DataspaceStart(2, N, 0, dspace.dataspace_type))
@@ -867,24 +885,43 @@ function read_data(f::JLDFile)
     elseif datatype_class == DT_VARIABLE_LENGTH
         read_data(f, dataspace_type, dataspace_dimensions, jltype(f, read(io, VariableLengthDatatype)), data_offset)
     elseif datatype_class == typemax(UInt8) # Committed datatype
-        read_data(f, dataspace_type, dataspace_dimensions, jltype(f, f.datatypes[datatype_offset]), data_offset)
+        read_data(f, dataspace_type, dataspace_dimensions, jltype(f, f.datatype_locations[datatype_offset]), data_offset)
     else
         throw(UnsupportedFeatureException())
     end
 end
 
-function read_data(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_dimensions::Vector{Length}, datatype::DataType, data_offset::Int)
+function read_data{T,ODR}(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_dimensions::Vector{Length}, rr::ReadRepresentation{T,ODR}, data_offset::Int)
     io = f.io
     seek(io, data_offset)
+    inptr = io.curptr
     if isempty(dataspace_dimensions)
-        jlconvert(datatype, f, io.curptr)
+        jlconvert(rr, f, inptr)
     else
-        error("not yet implemeneted")
+        v = Array(T, dataspace_dimensions...)
+        if isbits(T)
+            outptr = pointer(v)
+            if ODR <: T
+                unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(prod(dataspace_dimensions)))
+            else
+                @simd for i = 1:prod(dataspace_dimensions)::Offset
+                    jlconvert!(outptr, rr, f, inptr)
+                    inptr += sizeof(ODR)
+                    outptr += sizeof(T)
+                end
+            end
+        else
+            @simd for i = 1:prod(dataspace_dimensions)::Offset
+                @inbounds v[i] = jlconvert(rr, f, inptr)
+            end
+        end
+        v
     end
 end
 
-function payload_size(dataspace::Dataspace, datatype::H5Datatype, datasz::Int, layout_class::UInt8)
-    sz = sizeof(dataspace) + sizeof(datatype) + 2 + 4*sizeof(HeaderMessage) + 2
+function payload_size(dataspace::Dataspace, wr::WriteRepresentation, layout_class::UInt8)
+    sz = sizeof(dataspace) + sizeof(wr.datatype) + 2 + 4*sizeof(HeaderMessage) + 2
+    datasz = sizeof(wr.odr) * numel(dataspace)
     if layout_class == LC_COMPACT_STORAGE
         sz + 2 + datasz
     else
@@ -894,13 +931,20 @@ end
 
 # Might need to do something else someday for non-mmapped IO
 write_data(f::JLDFile, data, odr) = h5convert!(f.io.curptr, odr, f, data)
+function write_data(f::JLDFile, data::Array, odr)
+    cp = f.io.curptr
+    @simd for i = 1:length(data)
+        @inbounds h5convert!(cp, odr, f, data[i])
+        cp += sizeof(odr)
+    end
+end
 
-function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, data, odr)
+function write_dataset(f::JLDFile, dataspace::Dataspace, wr::WriteRepresentation, data)
     io = f.io
     startpos = position(io)
-    datasz = sizeof(odr) * numel(dataspace)
+    datasz = sizeof(wr.odr) * numel(dataspace)
     layout_class = datasz < 8192 ? LC_COMPACT_STORAGE : LC_CONTIGUOUS_STORAGE
-    psz = payload_size(dataspace, datatype, datasz, layout_class)
+    psz = payload_size(dataspace, wr, layout_class)
     fullsz = sizeof(ObjectStart) + size_size(psz) + psz + 4
 
     header_offset = position(io)
@@ -914,8 +958,8 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, d
     write(cio, dataspace)
 
     # Datatype
-    write(cio, HeaderMessage(HM_DATATYPE, sizeof(datatype), 1+2*isa(datatype, CommittedDatatype)))
-    write(cio, datatype)
+    write(cio, HeaderMessage(HM_DATATYPE, sizeof(wr.datatype), 1+2*isa(wr.datatype, CommittedDatatype)))
+    write(cio, wr.datatype)
 
     # Fill value
     write(cio, HeaderMessage(HM_FILL_VALUE, 2, 0))
@@ -930,7 +974,7 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, d
         write(cio, UInt16(datasz))            # Size
         f.end_of_data = header_offset + fullsz
         data_offset = position(io)
-        write_data(f, data, odr)
+        write_data(f, data, wr.odr)
         seek(io, data_offset + datasz)
         write(io, end_checksum(cio))
     else
@@ -942,14 +986,92 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, d
         write(io, end_checksum(cio))
         data_offset = position(io)
         f.end_of_data = header_offset + fullsz + dset.datatype.size * numel(dset.datatype)
-        write_data(f, data, odr)
+        write_data(f, data, wr.odr)
     end
 
     header_offset
 end
+
 @noinline function write_dataset(f, x)
-    write_dataset(f, Dataspace(x), h5type(f, typeof(x)), x, OnDiskRepresentation(typeof(x)))
+    write_dataset(f, Dataspace(x), h5type(f, typeof(x)), x)
 end
+@noinline function write_dataset{T,N}(f, x::Array{T,N})
+    write_dataset(f, Dataspace(x), h5fieldtype(f, eltype(x)), x)
+end
+
+#
+# Global heap
+#
+
+immutable GlobalHeapID
+    heap_offset::Offset
+    index::UInt32
+end
+define_packed(GlobalHeapID)
+
+isatend(f::JLDFile, gh::GlobalHeap) =
+    gh.offset != UNDEFINED_ADDRESS && f.end_of_data == gh.offset + 8 + sizeof(Length) + gh.length
+
+function write_heap_object{T}(f::JLDFile, ptr::Ptr{T}, n::Int)
+    psz = sizeof(T)*n
+    objsz = 8 + sizeof(Length) + psz
+    objsz += 8 - mod1(objsz, 8)
+
+    io = f.io
+    if objsz < f.global_heap.free
+        # Fits in existing global heap
+        gh = f.global_heap
+        heapsz = gh.length
+    elseif isatend(f, f.global_heap)
+        # Global heap is at end and can be extended
+        gh = f.global_heap
+        heapsz = gh.length - gh.free + objsz
+        seek(io. gh.offset + 8)
+        write(io, Length(heapsz))
+        f.end_of_data += objsz
+    else
+        # Need to create a new global heap
+        heapsz = max(objsz, 4096)
+        offset = f.end_of_data + 8 - f.end_of_data % 8
+        seek(io, offset)
+        write(io, GLOBAL_HEAP_SIGNATURE)
+        write(io, UInt32(1))      # Version & Reserved
+        write(io, Length(heapsz)) # Collection size
+        f.end_of_data = position(io) + heapsz
+        gh = GlobalHeap(offset, heapsz, heapsz, 0)
+    end
+
+    # Write data
+    index = gh.nobjects + 1
+    objoffset = gh.offset + 8 + sizeof(Length) + gh.length - gh.free
+    seek(io, objoffset)
+    write(io, UInt16(index)) # Heap object index
+    write(io, UInt16(1))     # Reference count
+    skip(io, 4)              # Reserved
+    write(io, Length(psz))   # Object size
+    write(io, ptr, n)        # Object data
+
+    # Update global heap object
+    gh = f.global_heap = GlobalHeap(gh.offset, heapsz, gh.free - objsz, index)
+
+    # Write free space object
+    if gh.free >= 8 + sizeof(Length)
+        seek(io, objoffset + objsz)
+        skip(io, 8)                # Object index, reference count, reserved
+        write(io, Length(gh.free)) # Object size
+    end
+
+    GlobalHeapID(gh.offset, index)
+end
+write_heap_object(f::JLDFile, x::ASCIIString) = write_heap_object(f, pointer(x), sizeof(x))
+write_heap_object(f::JLDFile, x::UTF8String) = write_heap_object(f, pointer(x), sizeof(x))
+write_heap_object(f::JLDFile, x::Array) = write_heap_object(f, pointer(x), sizeof(x))
+
+immutable Vlen
+    size::UInt32
+    id::GlobalHeapID
+end
+define_packed(Vlen)
 
 #
 # File
@@ -971,7 +1093,7 @@ function jldopen(fname::AbstractString, write::Bool, create::Bool, truncate::Boo
                 seek(io, offset)
                 types_group = read(io, Group)
                 for i = 1:length(types_group.offsets)
-                    f.datatypes[types_group.offsets[i]] = CommittedDatatype(types_group.offsets[i], i)
+                    f.datatype_locations[types_group.offsets[i]] = CommittedDatatype(types_group.offsets[i], i)
                 end
             else
                 f.datasets[name] = offset
@@ -1022,7 +1144,7 @@ function Base.close(f::JLDFile)
         push!(names, "_types")
         push!(offsets, position(io))
         write(io, Group(ASCIIString[@sprintf("%08d", i) for i = 1:length(f.datatypes)],
-                        collect(keys(f.datatypes))))
+                        collect(keys(f.datatype_locations))))
     end
 
     # Write root group
