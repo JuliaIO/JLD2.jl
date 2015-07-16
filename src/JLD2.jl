@@ -26,11 +26,11 @@ immutable Reference
     offset::UInt64
 end
 
-immutable GlobalHeap
+type GlobalHeap
     offset::Offset
     length::Length
     free::Length
-    nobjects::Int
+    objects::Vector{Offset}
 end
 
 abstract H5Datatype
@@ -60,12 +60,14 @@ type JLDFile{T<:IO}
     jlh5type::Dict{Type,CommittedDatatype}
     h5jltype::Dict{CommittedDatatype,Type}
     end_of_data::Offset
+    global_heaps::Dict{Offset,GlobalHeap}
     global_heap::GlobalHeap
 end
 JLDFile(io::IO) = JLDFile(io, OrderedDict{Offset,CommittedDatatype}(), H5Datatype[],
                           OrderedDict{ByteString,Offset}(),
                           Dict{Type,CommittedDatatype}(), Dict{CommittedDatatype,Type}(),
-                          UInt64(sizeof(Superblock)), GlobalHeap(UNDEFINED_ADDRESS, 0, 0, 0))
+                          UInt64(sizeof(Superblock)), Dict{Offset,GlobalHeap}(),
+                          GlobalHeap(UNDEFINED_ADDRESS, 0, 0, Offset[]))
 
 #
 # MmapIO
@@ -765,6 +767,23 @@ function Base.write(io::IO, dt::VariableLengthDatatype)
     write(io, dt.basetype)
 end
 
+function Base.read(io::IO, ::Type{VariableLengthDatatype})
+    dtype = read(io, BasicDatatype)
+    datatype_class = read(io, UInt8)
+    skip(io, -1)
+    if datatype_class == DT_FIXED_POINT
+        VariableLengthDatatype(dtype.class, dtype.bitfield1, dtype.bitfield2, dtype.bitfield3, dtype.size, read(io, FixedPointDatatype))
+    elseif datatype_class == DT_FLOATING_POINT
+        VariableLengthDatatype(dtype.class, dtype.bitfield1, dtype.bitfield2, dtype.bitfield3, dtype.size, read(io, FloatingPointDatatype))
+    elseif datatype_class == DT_STRING
+        VariableLengthDatatype(dtype.class, dtype.bitfield1, dtype.bitfield2, dtype.bitfield3, dtype.size, read(io, StringDatatype))
+    elseif datatype_class == DT_VARIABLE_LENGTH
+        VariableLengthDatatype(dtype.class, dtype.bitfield1, dtype.bitfield2, dtype.bitfield3, dtype.size, read(io, VariableLengthDatatype))
+    else
+        throw(UnsupportedFeatureException())
+    end
+end
+
 Base.sizeof(dt::CommittedDatatype) = 2 + sizeof(Offset)
 
 function Base.write(io::IO, dt::CommittedDatatype)
@@ -1018,31 +1037,46 @@ function write_heap_object{T}(f::JLDFile, ptr::Ptr{T}, n::Int)
     objsz += 8 - mod1(objsz, 8)
 
     io = f.io
+
+    # This is basically a memory allocation problem. Right now we do it
+    # in a pretty naive way. We:
+
+    # 1. Put the object in the last created global heap if it fits
+    # 2. Extend the last global heap if it's at the end of the file
+    # 3. Create a new global heap
+
+    # This is not a great approach if we're writing objects of
+    # different sizes interspersed with new datasets. The torture case
+    # would be a Vector{Any} of mutable objects, some of which contain
+    # large (>4080 byte) strings and some of which contain small
+    # strings. In that case, we'd be better off trying to put the small
+    # strings into existing heaps, rather than writing new ones. This
+    # should be revisited at a later date.
+
     if objsz < f.global_heap.free
         # Fits in existing global heap
         gh = f.global_heap
-        heapsz = gh.length
     elseif isatend(f, f.global_heap)
         # Global heap is at end and can be extended
         gh = f.global_heap
-        heapsz = gh.length - gh.free + objsz
+        gh.length = gh.length - gh.free + objsz
         seek(io. gh.offset + 8)
         write(io, Length(heapsz))
         f.end_of_data += objsz
     else
         # Need to create a new global heap
         heapsz = max(objsz, 4096)
-        offset = f.end_of_data + 8 - f.end_of_data % 8
+        offset = f.end_of_data + 8 - mod1(f.end_of_data, 8)
         seek(io, offset)
         write(io, GLOBAL_HEAP_SIGNATURE)
         write(io, UInt32(1))      # Version & Reserved
         write(io, Length(heapsz)) # Collection size
         f.end_of_data = position(io) + heapsz
-        gh = GlobalHeap(offset, heapsz, heapsz, 0)
+        gh = f.global_heap = f.global_heaps[offset] =  GlobalHeap(offset, heapsz, heapsz, Offset[])
     end
 
     # Write data
-    index = gh.nobjects + 1
+    index = length(gh.objects) + 1
     objoffset = gh.offset + 8 + sizeof(Length) + gh.length - gh.free
     seek(io, objoffset)
     write(io, UInt16(index)) # Heap object index
@@ -1052,7 +1086,8 @@ function write_heap_object{T}(f::JLDFile, ptr::Ptr{T}, n::Int)
     write(io, ptr, n)        # Object data
 
     # Update global heap object
-    gh = f.global_heap = GlobalHeap(gh.offset, heapsz, gh.free - objsz, index)
+    gh.free -= objsz
+    push!(gh.objects, objoffset)
 
     # Write free space object
     if gh.free >= 8 + sizeof(Length)
@@ -1066,6 +1101,44 @@ end
 write_heap_object(f::JLDFile, x::ASCIIString) = write_heap_object(f, pointer(x), sizeof(x))
 write_heap_object(f::JLDFile, x::UTF8String) = write_heap_object(f, pointer(x), sizeof(x))
 write_heap_object(f::JLDFile, x::Array) = write_heap_object(f, pointer(x), sizeof(x))
+
+function Base.read(io::IO, ::Type{GlobalHeap})
+    offset = position(io)
+    read(io, UInt32) == GLOBAL_HEAP_SIGNATURE || throw(InvalidDataException())
+    read(io, UInt32) == 1 || throw(UnsupportedVersionException())
+    heapsz = read(io, Length)
+    index = 1
+    objects = Offset[]
+    startpos = position(io)
+    free = heapsz
+    while free > 8 + sizeof(Length)
+        push!(objects, position(io))
+        objidx = read(io, UInt16)
+        objidx == 0 && break
+        objidx == index || throw(UnsupportedFeatureException())
+        skip(io, 6)                    # Reference count and reserved
+        sz = read(io, Length)          # Length
+        skip(io, sz + 8 - mod1(sz, 8)) # Payload
+        free = position(io) - startpos
+        index += 1
+    end
+    GlobalHeap(offset, heapsz, free, objects)
+end
+
+function read_heap_object{T}(f::JLDFile, hid::GlobalHeapID, ::Type{T})
+    io = f.io
+    if haskey(f.global_heaps, hid.heap_offset)
+        gh = f.global_heaps[hid.heap_offset]
+    else
+        seek(io, hid.heap_offset)
+        f.global_heaps[hid.heap_offset] = gh = read(io, GlobalHeap)
+    end
+    seek(io, gh.objects[hid.index]+8)
+    len = read(io, Length)
+    n = div(len, sizeof(T))
+    len == n * sizeof(T) || throw(InvalidDataException())
+    read(io, T, n)
+end
 
 immutable Vlen
     size::UInt32

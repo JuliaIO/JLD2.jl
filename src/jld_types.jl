@@ -177,11 +177,11 @@ h5type(::JLDFile, ::Type{Float64}) =
     WriteRepresentation(FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x3f, 0x00, 8, 0, 64, 52, 11, 0, 52, 0x000003ff), Float64)
 
 function jltype(f::JLDFile, dt::FloatingPointDatatype)
-    if dt == h5type(f, Float64)[1]
+    if dt == h5type(f, Float64).datatype
         return ReadRepresentation(Float64)
-    elseif dt == h5type(f, Float32)[1]
+    elseif dt == h5type(f, Float32).datatype
         return ReadRepresentation(Float32)
-    elseif dt == h5type(f, Float16)[1]
+    elseif dt == h5type(f, Float16).datatype
         return ReadRepresentation(Float16)
     else
         throw(UnsupportedFeatureException())
@@ -204,12 +204,12 @@ h5type(::JLDFile, ::Type{UTF8String}) =
 h5type(::JLDFile, ::Type{ByteString}) = h5type(UTF8String)
 
 function jltype(f::JLDFile, dt::VariableLengthDatatype)
-    if dt == h5type(f, ASCIIString)
-        return ReadRepresentation(ASCIIString)
-    elseif dt == h5type(f, UTF8String)
-        return ReadRepresentation(UTF8String)
+    if dt == h5type(f, ASCIIString).datatype
+        return ReadRepresentation(ASCIIString, Vlen)
+    elseif dt == h5type(f, UTF8String).datatype
+        return ReadRepresentation(UTF8String, Vlen)
     else
-        return UnsupportedFeatureException()
+        throw(UnsupportedFeatureException())
     end
 end
 
@@ -218,18 +218,14 @@ writevlen(out::Ptr, f::JLDFile, x) =
     unsafe_store!(convert(Ptr{Vlen}, out), Vlen(sizeof(x), write_heap_object(f, x)))
 
 # Read variable-length data given offset and length in ptr
-function readvlen{T}(::Type{T}, f::JLDFile, ptr::Ptr)
-    offset = unsafe_load(convert(Ptr{Offset}, ptr))
-    length = unsafe_load(convert(Ptr{Length}, ptr+sizeof(Offset)))
-    io = f.io
-    seek(io, offset)
-    read(io, T, length)
-end
+readvlen{T}(f::JLDFile, ptr::Ptr, ::Type{T}) =
+    read_heap_object(f, unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), T)
 
 h5sizeof{T<:ByteString}(::Type{T}) = sizeof(Offset)+sizeof(Length)
 h5convert!(out::Ptr, ::Type{Vlen}, file::JLDFile, x::ByteString) = writevlen(out, file, x.data)
-jlconvert(T::Union(Type{ASCIIString}, Type{UTF8String}), file::JLDFile, ptr::Ptr) = T(readvlen(UInt8, file, ptr))
-jlconvert(T::Type{ByteString}, file::JLDFile, ptr::Ptr) = bytestring(readvlen(UInt8, file, ptr))
+jlconvert(T::ReadRepresentation{ASCIIString,Vlen}, file::JLDFile, ptr::Ptr) = ASCIIString(readvlen(file, ptr, UInt8))
+jlconvert(T::ReadRepresentation{UTF8String,Vlen}, file::JLDFile, ptr::Ptr) = UTF8String(readvlen(file, ptr, UInt8))
+jlconvert(T::ReadRepresentation{ByteString,Vlen}, file::JLDFile, ptr::Ptr) = bytestring(readvlen(UInt8, file, ptr))
 
 ## UTF16Strings
 
@@ -239,12 +235,12 @@ h5fieldtype(parent::JLDFile, ::Type{UTF16String}) =
 # Stored as variable-length
 function h5type(parent::JLDFile, ::Type{UTF16String})
     haskey(parent.jlh5type, UTF16String) && return (parent.jlh5type[UTF16String], UTF16String)
-    (commit(parent, VariableLengthDatatype(H5Datatype(UInt16)), UTF16String), Vlen)
+    WriteRepresentation(commit(parent, VariableLengthDatatype(H5Datatype(UInt16)), UTF16String), Vlen)
 end
 
 h5sizeof(::Type{UTF16String}) = sizeof(Offset)+sizeof(Length)
 h5convert!(out::Ptr, ::Type{Vlen}, file::JLDFile, x::UTF16String) = writevlen(out, file, x.data)
-jlconvert(::Type{UTF16String}, file::JLDFile, ptr::Ptr) = UTF16String(readvlen(UTF16String, file, ptr))
+jlconvert(::Type{UTF16String}, file::JLDFile, ptr::Ptr) = UTF16String(readvlen(file, ptr, UInt16))
 h5fieldtype(::Type{UTF16String}) = sizeof(Offset)+sizeof(Length)
 
 ## Symbols
@@ -261,8 +257,7 @@ end
 h5sizeof(::Type{Symbol}) = sizeof(Offset)+sizeof(Length)
 h5convert!(out::Ptr, ::Type{Vlen}, file::JLDFile, x::Symbol) =
     writevlen(out, file, string(x))
-jlconvert(::Type{Symbol}, file::JLDFile, ptr::Ptr) = symbol(readvlen(UInt8, file, ptr))
-
+jlconvert(::Type{Symbol}, file::JLDFile, ptr::Ptr) = symbol(readvlen(file, ptr, UInt8))
 
 ## BigInts and BigFloats
 
@@ -282,9 +277,9 @@ h5convert!(out::Ptr, ::Type{BigFloat}, file::JLDFile, x::BigFloat) =
     writevlen(out, file, string(x))
 
 jlconvert(::Type{BigInt}, file::JLDFile, ptr::Ptr) =
-    parse(BigInt, ASCIIString(readvlen(UInt8, file, ptr)), 62)
+    parse(BigInt, ASCIIString(readvlen(file, ptr, UInt8)), 62)
 jlconvert(::Type{BigFloat}, file::JLDFile, ptr::Ptr) =
-    parse(BigFloat, ASCIIString(readvlen(UInt8, file, ptr)))
+    parse(BigFloat, ASCIIString(readvlen(file, ptr, UInt8)))
 
 ## Types
 
@@ -301,7 +296,7 @@ h5sizeof{T<:Type}(::Type{T}) = sizeof(Offset)+sizeof(Length)
 h5convert!{T<:Type}(out::Ptr, ::Type{T}, file::JLDFile, x::Type) =
     writevlen(ptr, file, full_typename(file, x))
 jlconvert{T<:Type}(::Type{T}, file::JLDFile, ptr::Ptr) =
-    julia_type(UTF8String(readvlen(UInt8, f, ptr)))
+    julia_type(UTF8String(readvlen(f, ptr, UInt8)))
 
 ## Pointers
 
