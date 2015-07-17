@@ -52,6 +52,8 @@ immutable WriteRepresentation{H5T<:H5Datatype,ODR}
     odr::ODR
 end
 
+symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)
+
 type JLDFile{T<:IO}
     io::T
     datatype_locations::OrderedDict{Offset,CommittedDatatype}
@@ -113,6 +115,14 @@ function resize!(io::MmapIO, newend::Ptr{Void})
     io.endptr = ptr + newsz
     io
 end
+
+@inline function ensureroom(io::MmapIO, n::Int)
+    ep = io.curptr + n
+    if ep > io.endptr
+        resize!(io, ep)
+    end
+end
+
 Base.truncate(io::MmapIO, pos) = truncate(io.f, pos)
 
 function Base.close(io::MmapIO)
@@ -189,9 +199,9 @@ Base.position(io::MmapIO) = Int(io.curptr - pointer(io.arr))
 # nested checksums.
 # XXX not thread-safe!
 
-const CHECKSUM_PTR = Ref{Ptr{Void}}(0)
+const CHECKSUM_PTR = Int[]
 function begin_checksum(io::MmapIO)
-    CHECKSUM_PTR[] = io.curptr
+    push!(CHECKSUM_PTR, io.curptr)
     io
 end
 function begin_checksum(io::MmapIO, sz::Int)
@@ -204,8 +214,7 @@ function begin_checksum(io::MmapIO, sz::Int)
     begin_checksum(io)
 end
 function end_checksum(io::MmapIO)
-    v = CHECKSUM_PTR[]
-    CHECKSUM_PTR[] = Ptr{Void}(0)
+    v = pop!(CHECKSUM_PTR)
     Lookup3.hash(UnsafeContiguousView(Ptr{UInt8}(v), (Int(io.curptr - v),)))
 end
 
@@ -641,8 +650,44 @@ function Base.write{N}(io::IO, dspace::Dataspace{N})
 end
 
 #
+# Attributes
+#
+
+immutable Attribute{N,H5T<:H5Datatype,ODR,T}
+    name::Symbol
+    dataspace::Dataspace{N}
+    datatype::H5T
+    odr::ODR
+    data::T
+end
+
+immutable AttributeHeader
+    version::UInt8
+    flags::UInt8
+    name_size::UInt16
+    datatype_size::UInt16
+    dataspace_size::UInt16
+end
+define_packed(AttributeHeader)
+
+Base.sizeof(attr::Attribute) = 8 + symbol_length(attr.name) + 1 + sizeof(attr.datatype) + sizeof(attr.dataspace) +
+                               numel(attr.dataspace) * sizeof(attr.odr)
+
+function Base.write(io::IO, f::JLDFile, attr::Attribute)
+    namelen = symbol_length(attr.name)
+    write(io, AttributeHeader(0x02, isa(attr.datatype, CommittedDatatype), namelen+1,
+                              sizeof(attr.datatype), sizeof(attr.dataspace)))
+    write(io, Base.unsafe_convert(Ptr{Cchar}, attr.name), namelen)
+    write(io, UInt8(0))
+    write(io, attr.datatype)
+    write(io, attr.dataspace)
+    write_data(f, attr.data, attr.odr)
+end
+
+#
 # Datatypes
 #
+
 const DT_FIXED_POINT = UInt8(0) | (UInt8(3) << 4)
 const DT_FLOATING_POINT = UInt8(1) | (UInt8(3) << 4)
 const DT_TIME = UInt8(2) | (UInt8(3) << 4)
@@ -755,7 +800,7 @@ immutable VariableLengthDatatype{T<:H5Datatype} <: H5Datatype
     basetype::T
 end
 VariableLengthDatatype(basetype::H5Datatype) =
-    VariableLengthDatatype{typeof(basetype)}(DT_VARIABLE_LENGTH, 0x00, 0x00, 0x00, sizeof(Offset)+sizeof(Length), basetype)
+    VariableLengthDatatype{typeof(basetype)}(DT_VARIABLE_LENGTH, 0x00, 0x00, 0x00, 8+sizeof(Offset), basetype)
 VariableLengthDatatype(class, bitfield1, bitfield2, bitfield3, size, basetype::H5Datatype) =
     VariableLengthDatatype{typeof(basetype)}(class, bitfield1, bitfield2, bitfield3, size, basetype)
 
@@ -792,19 +837,29 @@ function Base.write(io::IO, dt::CommittedDatatype)
     write(io, dt.header_offset)
 end
 
-function commit(f::JLDFile, dt::CompoundDatatype)
+function commit(f::JLDFile, dt::H5Datatype, attrs::Tuple{Vararg{Attribute}}=())
+    psz = sizeof(HeaderMessage) * (length(attrs) + 1) + sizeof(dt)
+    for attr in attrs
+        psz += sizeof(attr)
+    end
     io = f.io
-    header_offset = position(io)
-    psz = sizeof(HeaderMessage) + sizeof(dt)
 
-    cio = begin_checksum(io, sizeof(ObjectStart) + size_size(psz) + psz)
+    sz = sizeof(ObjectStart) + size_size(psz) + psz
+    offset = f.end_of_data
+    seek(io, offset)
+    f.end_of_data = offset + sz + 4
+
+    cio = begin_checksum(io, sz)
     write(cio, ObjectStart(size_flag(psz)))
     write_size(cio, psz)
     write(cio, HeaderMessage(HM_DATATYPE, sizeof(dt), 64))
     write(cio, dt)
+    for attr in attrs
+        write(cio, HeaderMessage(HM_ATTRIBUTE, sizeof(attr), 0))
+        write(cio, f, attr)
+    end
+    seek(io, offset + sz)
     write(io, end_checksum(cio))
-
-    header_offset
 end
 
 # Read the actual datatype for a committed datatype
@@ -938,9 +993,8 @@ function read_data{T,ODR}(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_d
     end
 end
 
-function payload_size(dataspace::Dataspace, wr::WriteRepresentation, layout_class::UInt8)
-    sz = sizeof(dataspace) + sizeof(wr.datatype) + 2 + 4*sizeof(HeaderMessage) + 2
-    datasz = sizeof(wr.odr) * numel(dataspace)
+function payload_size(dataspace::Dataspace, datatype::H5Datatype, datasz::Int, layout_class::UInt8)
+    sz = sizeof(dataspace) + sizeof(datatype) + 2 + 4*sizeof(HeaderMessage) + 2
     if layout_class == LC_COMPACT_STORAGE
         sz + 2 + datasz
     else
@@ -949,21 +1003,30 @@ function payload_size(dataspace::Dataspace, wr::WriteRepresentation, layout_clas
 end
 
 # Might need to do something else someday for non-mmapped IO
-write_data(f::JLDFile, data, odr) = h5convert!(f.io.curptr, odr, f, data)
+function write_data(f::JLDFile, data, odr)
+    io = f.io
+    ensureroom(io, sizeof(odr))
+    arr = io.arr
+    h5convert!(io.curptr, odr, f, data)
+end
+
 function write_data(f::JLDFile, data::Array, odr)
-    cp = f.io.curptr
+    io = f.io
+    ensureroom(io, sizeof(odr)*length(data))
+    arr = io.arr
+    cp = io.curptr
     @simd for i = 1:length(data)
         @inbounds h5convert!(cp, odr, f, data[i])
         cp += sizeof(odr)
     end
 end
 
-function write_dataset(f::JLDFile, dataspace::Dataspace, wr::WriteRepresentation, data)
+function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, odr, data)
     io = f.io
     startpos = position(io)
-    datasz = sizeof(wr.odr) * numel(dataspace)
+    datasz = sizeof(odr) * numel(dataspace)
     layout_class = datasz < 8192 ? LC_COMPACT_STORAGE : LC_CONTIGUOUS_STORAGE
-    psz = payload_size(dataspace, wr, layout_class)
+    psz = payload_size(dataspace, datatype, datasz, layout_class)
     fullsz = sizeof(ObjectStart) + size_size(psz) + psz + 4
 
     header_offset = position(io)
@@ -977,8 +1040,8 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, wr::WriteRepresentation
     write(cio, dataspace)
 
     # Datatype
-    write(cio, HeaderMessage(HM_DATATYPE, sizeof(wr.datatype), 1+2*isa(wr.datatype, CommittedDatatype)))
-    write(cio, wr.datatype)
+    write(cio, HeaderMessage(HM_DATATYPE, sizeof(datatype), 1+2*isa(datatype, CommittedDatatype)))
+    write(cio, datatype)
 
     # Fill value
     write(cio, HeaderMessage(HM_FILL_VALUE, 2, 0))
@@ -993,7 +1056,7 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, wr::WriteRepresentation
         write(cio, UInt16(datasz))            # Size
         f.end_of_data = header_offset + fullsz
         data_offset = position(io)
-        write_data(f, data, wr.odr)
+        write_data(f, data, odr)
         seek(io, data_offset + datasz)
         write(io, end_checksum(cio))
     else
@@ -1005,17 +1068,17 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, wr::WriteRepresentation
         write(io, end_checksum(cio))
         data_offset = position(io)
         f.end_of_data = header_offset + fullsz + dset.datatype.size * numel(dset.datatype)
-        write_data(f, data, wr.odr)
+        write_data(f, data, odr)
     end
 
     header_offset
 end
 
 @noinline function write_dataset(f, x)
-    write_dataset(f, Dataspace(x), h5type(f, typeof(x)), x)
+    write_dataset(f, Dataspace(x), h5type(f, typeof(x)), odr(typeof(x)), x)
 end
 @noinline function write_dataset{T,N}(f, x::Array{T,N})
-    write_dataset(f, Dataspace(x), h5fieldtype(f, eltype(x)), x)
+    write_dataset(f, Dataspace(x), h5fieldtype(f, eltype(x)), fieldodr(eltype(x)), x)
 end
 
 #
@@ -1098,8 +1161,6 @@ function write_heap_object{T}(f::JLDFile, ptr::Ptr{T}, n::Int)
 
     GlobalHeapID(gh.offset, index)
 end
-write_heap_object(f::JLDFile, x::ASCIIString) = write_heap_object(f, pointer(x), sizeof(x))
-write_heap_object(f::JLDFile, x::UTF8String) = write_heap_object(f, pointer(x), sizeof(x))
 write_heap_object(f::JLDFile, x::Array) = write_heap_object(f, pointer(x), sizeof(x))
 
 function Base.read(io::IO, ::Type{GlobalHeap})
@@ -1139,12 +1200,6 @@ function read_heap_object{T}(f::JLDFile, hid::GlobalHeapID, ::Type{T})
     len == n * sizeof(T) || throw(InvalidDataException())
     read(io, T, n)
 end
-
-immutable Vlen
-    size::UInt32
-    id::GlobalHeapID
-end
-define_packed(Vlen)
 
 #
 # File

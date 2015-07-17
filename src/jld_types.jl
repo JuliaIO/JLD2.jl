@@ -10,6 +10,28 @@ typealias TupleType{T<:Tuple} Type{T}
 typealias CommitParam Union(Type{Val{false}}, Type{Val{true}})
 typetuple(types) = Tuple{types...}
 
+## Variable length datatypes
+
+immutable Vlen{T}
+    size::UInt32
+    id::GlobalHeapID
+end
+sizeof{T<:Vlen}(::Type{T}) = 4 + sizeof(GlobalHeapID)
+
+# Write variable-length data and store the offset and length to out pointer
+function writevlen{T}(out::Ptr, f::JLDFile, x::Vector{T})
+    unsafe_store!(convert(Ptr{UInt32}, out), sizeof(x))
+    unsafe_store!(convert(Ptr{GlobalHeapID}, out)+4, write_heap_object(f, x))
+end
+h5convert!{T}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x) =
+    writevlen(out, f, convert(Vector{T}, x))
+
+# Read variable-length data given offset and length in ptr
+readvlen{T}(f::JLDFile, ptr::Ptr, ::Type{T}) =
+    read_heap_object(f, unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), T)
+jlconvert{T,S}(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr) =
+    convert(T, readvlen(f, ptr, S))
+
 ## Helper functions
 @generated function haspadding{T}(::Type{T})
     isempty(T.types) && return false
@@ -29,10 +51,24 @@ isghost(T::DataType) = isbits(T) && sizeof(T) == 0
 @generated function sizeof{Offsets,Types}(::OnDiskRepresentation{Offsets,Types})
     Offsets[end]+sizeof(Types.parameters[end])
 end
-@generated function OnDiskRepresentation{T}(::Type{T})
+
+fieldodr(::Type{Union()}) = Union()
+@generated function fieldodr{T}(::Type{T}, initialized::Bool)
+    if sizeof(T) == 0
+        # A ghost type or pointer singleton, so no need to store at all
+        Union()
+    elseif isbits(T) || (!T.mutable && initialized)
+        # isbits or guaranteed initialized immutable, so store inline
+        odr(ty)
+    else
+        Reference
+    end
+end
+
+@generated function odr{T}(::Type{T})
     if sizeof(T) == 0
         # A singleton type, so no need to store at all
-        return None
+        return Union()
     elseif applicable(h5sizeof, (Type{T},)) || (isbits(T) && !haspadding(T))
         # Has a specialized convert method or is an unpadded type
         return T
@@ -42,26 +78,10 @@ end
     types = [];
     offset = 0;
     for i = 1:length(T.types)
-        ty = T.types[i]
-        if sizeof(ty) == 0 || T <: Union()
-            # A ghost type or pointer singleton, so no need to store at all
-            h5ty = None
-            sz = 0
-        elseif applicable(h5sizeof, (Type{ty},))
-            # Has a specialized convert method
-            h5ty = ty
-            sz = h5sizeof(ty)
-        elseif isbits(ty) || (!ty.mutable && i <= ty.ninitialized)
-            odr = OnDiskRepresentation(ty)
-            h5ty = odr
-            sz = sizeof(odr)
-        else
-            h5ty = Reference
-            sz = sizeof(Offset)
-        end
-        push!(types, h5ty)
+        fodr = fieldodr(T.types[i], i <= T.ninitialized)
+        push!(types, fodr)
         push!(offsets, offset)
-        offset += sz
+        offset += sizeof(fodr)
     end
 
     OnDiskRepresentation{tuple(offsets...),Tuple{types...}}()
@@ -74,7 +94,7 @@ function make_compound(parent::JLDFile, names::AbstractVector, types::SimpleVect
     members = Array(H5Datatype, length(types))
     offset = 0
     for i = 1:length(types)
-        dtype = h5fieldtype(parent, types[i]).datatype
+        dtype = h5fieldtype(parent, types[i])
         if isa(dtype, CommittedDatatype)
             # HDF5 cannot store relationships among committed
             # datatypes. We mangle the names by appending a sequential
@@ -93,12 +113,26 @@ function make_compound(parent::JLDFile, names::AbstractVector, types::SimpleVect
 end
 
 # Write an HDF5 datatype to the file
-function commit(parent::JLDFile, dtype::H5Datatype, T::ANY)
-    id = length(parent.datatypes)+1
-    offset = commit(parent, dtype)
+function commit(f::JLDFile, dtype::H5Datatype, T::DataType)
+    io = f.io
+    if !(T <: DataType)
+        dtdt = h5type(f, DataType)
+    end
+    offset = f.end_of_data
+
+    seek(io, offset)
+    id = length(f.datatypes)+1
     cdt = CommittedDatatype(offset, id)
-    push!(parent.datatypes, cdt)
-    parent.datatype_locations[offset] = cdt
+    f.datatype_locations[offset] = cdt
+    f.jlh5type[T] = cdt
+    f.h5jltype[cdt] = T
+    push!(f.datatypes, cdt)
+    if T <: DataType
+        dtdt = cdt
+    end
+
+    commit(f, dtype, (Attribute(:julia_type, Dataspace(T), dtdt, odr(DataType), T),))
+
     cdt
 end
 
@@ -146,9 +180,9 @@ typealias PrimitiveTypes     Union(Int8, Int16, Int32, Int64, Int128, UInt8, UIn
 h5fieldtype(parent::JLDFile, T::PrimitiveTypeTypes) = h5type(parent, T)
 
 h5type(::JLDFile, T::Union(Type{Int8}, Type{Int16}, Type{Int32}, Type{Int64}, Type{Int128})) =
-    WriteRepresentation(FixedPointDatatype(sizeof(T), true), T)
+    FixedPointDatatype(sizeof(T), true)
 h5type(::JLDFile, T::Union(Type{UInt8}, Type{UInt16}, Type{UInt32}, Type{UInt64}, Type{UInt128})) =
-    WriteRepresentation(FixedPointDatatype(sizeof(T), false), T)
+    FixedPointDatatype(sizeof(T), false)
 
 function jltype(f::JLDFile, dt::FixedPointDatatype)
     signed = dt.bitfield1 == 0x08 ? true : dt.bitfield1 == 0x00 ? false : throw(UnsupportedFeatureException())
@@ -170,131 +204,138 @@ function jltype(f::JLDFile, dt::FixedPointDatatype)
 end
 
 h5type(::JLDFile, ::Type{Float16}) =
-    WriteRepresentation(FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x0f, 0x00, 2, 0, 16, 10, 5, 0, 10, 0x0000000f), Float16)
+    FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x0f, 0x00, 2, 0, 16, 10, 5, 0, 10, 0x0000000f)
 h5type(::JLDFile, ::Type{Float32}) =
-    WriteRepresentation(FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x1f, 0x00, 4, 0, 32, 23, 8, 0, 23, 0x0000007f), Float32)
+    FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x1f, 0x00, 4, 0, 32, 23, 8, 0, 23, 0x0000007f)
 h5type(::JLDFile, ::Type{Float64}) =
-    WriteRepresentation(FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x3f, 0x00, 8, 0, 64, 52, 11, 0, 52, 0x000003ff), Float64)
+    FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x3f, 0x00, 8, 0, 64, 52, 11, 0, 52, 0x000003ff)
 
 function jltype(f::JLDFile, dt::FloatingPointDatatype)
-    if dt == h5type(f, Float64).datatype
+    if dt == h5type(f, Float64)
         return ReadRepresentation(Float64)
-    elseif dt == h5type(f, Float32).datatype
+    elseif dt == h5type(f, Float32)
         return ReadRepresentation(Float32)
-    elseif dt == h5type(f, Float16).datatype
+    elseif dt == h5type(f, Float16)
         return ReadRepresentation(Float16)
     else
         throw(UnsupportedFeatureException())
     end
 end
 
-h5sizeof(T::PrimitiveTypeTypes) = sizeof(T)
-
 ## ByteStrings
 
-h5fieldtype{T<:ByteString}(parent::JLDFile, ::Type{T}) = h5type(parent, T)
+h5fieldtype{T<:ByteString}(f::JLDFile, ::Type{T}) = h5type(f, T)
+fieldodr{T<:ByteString}(::Type{T}, ::Bool) = Vlen{UInt8}
 
 # Stored as variable-length strings
-h5type(::JLDFile, ::Type{ASCIIString}) =
-    WriteRepresentation(VariableLengthDatatype(DT_VARIABLE_LENGTH, 0x11, 0x00, 0x00, sizeof(Offset)+sizeof(Length),
-                        FixedPointDatatype(1, false)), Vlen)
-h5type(::JLDFile, ::Type{UTF8String}) =
-    WriteRepresentation(VariableLengthDatatype(DT_VARIABLE_LENGTH, 0x11, 0x01, 0x00, sizeof(Offset)+sizeof(Length),
-                        FixedPointDatatype(1, false)), Vlen)
-h5type(::JLDFile, ::Type{ByteString}) = h5type(UTF8String)
+const VLEN_ASCII = VariableLengthDatatype(DT_VARIABLE_LENGTH, 0x11, 0x00, 0x00,
+                                          sizeof(Vlen{UInt8}),
+                                          FixedPointDatatype(1, false))
+const VLEN_UTF8 = VariableLengthDatatype(DT_VARIABLE_LENGTH, 0x11, 0x01, 0x00,
+                                         sizeof(Vlen{UInt8}),
+                                         FixedPointDatatype(1, false))
+h5type(::JLDFile, ::Type{ASCIIString}) = VLEN_ASCII
+h5type(::JLDFile, ::Type{UTF8String}) = VLEN_UTF8
+h5type(::JLDFile, ::Type{ByteString}) = VLEN_UTF8
+odr{T<:ByteString}(::Type{T}) = Vlen{UInt8}
 
 function jltype(f::JLDFile, dt::VariableLengthDatatype)
-    if dt == h5type(f, ASCIIString).datatype
-        return ReadRepresentation(ASCIIString, Vlen)
-    elseif dt == h5type(f, UTF8String).datatype
-        return ReadRepresentation(UTF8String, Vlen)
+    if dt == VLEN_ASCII
+        return ReadRepresentation(ASCIIString, Vlen{UInt8})
+    elseif dt == VLEN_UTF8
+        return ReadRepresentation(UTF8String, Vlen{UInt8})
     else
         throw(UnsupportedFeatureException())
     end
 end
 
-# Write variable-length data and store the offset and length to out pointer
-writevlen(out::Ptr, f::JLDFile, x) =
-    unsafe_store!(convert(Ptr{Vlen}, out), Vlen(sizeof(x), write_heap_object(f, x)))
-
-# Read variable-length data given offset and length in ptr
-readvlen{T}(f::JLDFile, ptr::Ptr, ::Type{T}) =
-    read_heap_object(f, unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), T)
-
-h5sizeof{T<:ByteString}(::Type{T}) = sizeof(Offset)+sizeof(Length)
-h5convert!(out::Ptr, ::Type{Vlen}, file::JLDFile, x::ByteString) = writevlen(out, file, x.data)
-jlconvert(T::ReadRepresentation{ASCIIString,Vlen}, file::JLDFile, ptr::Ptr) = ASCIIString(readvlen(file, ptr, UInt8))
-jlconvert(T::ReadRepresentation{UTF8String,Vlen}, file::JLDFile, ptr::Ptr) = UTF8String(readvlen(file, ptr, UInt8))
-jlconvert(T::ReadRepresentation{ByteString,Vlen}, file::JLDFile, ptr::Ptr) = bytestring(readvlen(UInt8, file, ptr))
+jlconvert(T::ReadRepresentation{ByteString,Vlen{UInt8}}, file::JLDFile, ptr::Ptr) =
+    bytestring(readvlen(file, ptr, UInt8))
 
 ## UTF16Strings
 
-h5fieldtype(parent::JLDFile, ::Type{UTF16String}) =
-    h5type(parent, UTF16String)
+h5fieldtype(::JLDFile, ::Type{UTF16String}) = h5type(f, UTF16String)
+fieldodr(::Type{UTF16String}, ::Bool) = Vlen{UInt16}
 
-# Stored as variable-length
-function h5type(parent::JLDFile, ::Type{UTF16String})
-    haskey(parent.jlh5type, UTF16String) && return (parent.jlh5type[UTF16String], UTF16String)
-    WriteRepresentation(commit(parent, VariableLengthDatatype(H5Datatype(UInt16)), UTF16String), Vlen)
-end
-
-h5sizeof(::Type{UTF16String}) = sizeof(Offset)+sizeof(Length)
-h5convert!(out::Ptr, ::Type{Vlen}, file::JLDFile, x::UTF16String) = writevlen(out, file, x.data)
-jlconvert(::Type{UTF16String}, file::JLDFile, ptr::Ptr) = UTF16String(readvlen(file, ptr, UInt16))
-h5fieldtype(::Type{UTF16String}) = sizeof(Offset)+sizeof(Length)
+h5type(f::JLDFile, ::Type{UTF16String}) =
+    haskey(f.jlh5type, UTF16String) ? f.jlh5type[UTF16String] :
+                                      commit(f, VariableLengthDatatype(h5type(f, UInt16)), UTF16String)
+odr(::Type{UTF16String}) = Vlen{UInt16}
 
 ## Symbols
 
-h5fieldtype(parent::JLDFile, ::Type{Symbol}) =
-    h5type(parent, Symbol)
+h5fieldtype(f::JLDFile, ::Type{Symbol}) = h5type(f, Symbol)
+fieldodr(::Type{Symbol}, ::Bool) = Vlen{UInt8}
 
 # Stored as variable-length
-function h5type(parent::JLDFile, ::Type{Symbol})
-    haskey(parent.jlh5type, Symbol) && return (parent.jlh5type[Symbol], Symbol)
-    (commit(parent, h5type(parent, UTF8String), Symbol), Vlen)
-end
+h5type(f::JLDFile, ::Type{Symbol}) =
+    haskey(f.jlh5type, Symbol) ? f.jlh5type[Symbol] :
+                                 commit(f, h5type(f, UTF8String), Symbol)
+odr(::Type{Symbol}) = Vlen{UInt8}
 
-h5sizeof(::Type{Symbol}) = sizeof(Offset)+sizeof(Length)
-h5convert!(out::Ptr, ::Type{Vlen}, file::JLDFile, x::Symbol) =
-    writevlen(out, file, string(x))
-jlconvert(::Type{Symbol}, file::JLDFile, ptr::Ptr) = symbol(readvlen(file, ptr, UInt8))
+function h5convert!(out::Ptr, ::Type{Vlen{UInt8}}, f::JLDFile, x::Symbol)
+    ptr = Base.unsafe_convert(Ptr{Cchar}, x)
+    len = symbol_length(x)
+    unsafe_store!(convert(Ptr{UInt32}, out), len)
+    unsafe_store!(convert(Ptr{GlobalHeapID}, out+4), write_heap_object(f, ptr, Int(len)))
+end
+jlconvert(::ReadRepresentation{Symbol,Vlen{UInt8}}, f::JLDFile, ptr::Ptr) = symbol(readvlen(f, ptr, UInt8))
 
 ## BigInts and BigFloats
 
-h5fieldtype(parent::JLDFile, T::Union(Type{BigInt}, Type{BigFloat})) =
-    h5type(parent, T)
+h5fieldtype(f::JLDFile, T::Union(Type{BigInt}, Type{BigFloat})) =
+    h5type(f, T)
+fieldodr(::Union(Type{BigInt}, Type{BigFloat}), ::Bool) = Vlen{UInt8}
 
 # Stored as a variable-length string
-function h5type(parent::JLDFile, T::Union(Type{BigInt}, Type{BigFloat}))
-    haskey(parent.jlh5type, T) && return (parent.jlh5type[T], T)
-    (commit(parent, h5type(parent, ASCIIString), T), Vlen)
-end
+h5type(f::JLDFile, T::Union(Type{BigInt}, Type{BigFloat})) =
+    haskey(f.jlh5type, T) ? f.jlh5type[T] :
+                            commit(f, h5type(f, ASCIIString), T)
+odr(::Union(Type{BigInt}, Type{BigFloat})) = Vlen{UInt8}
 
-h5sizeof(::Union(Type{BigInt}, Type{BigFloat})) = sizeof(Offset)+sizeof(Length)
-h5convert!(out::Ptr, ::Type{BigInt}, file::JLDFile, x::BigInt) =
-    writevlen(out, file, base(62, x))
-h5convert!(out::Ptr, ::Type{BigFloat}, file::JLDFile, x::BigFloat) =
-    writevlen(out, file, string(x))
+h5convert!(out::Ptr, ::Type{BigInt}, f::JLDFile, x::BigInt) =
+    writevlen(out, f, base(62, x))
+h5convert!(out::Ptr, ::Type{BigFloat}, f::JLDFile, x::BigFloat) =
+    writevlen(out, f, string(x))
 
-jlconvert(::Type{BigInt}, file::JLDFile, ptr::Ptr) =
-    parse(BigInt, ASCIIString(readvlen(file, ptr, UInt8)), 62)
-jlconvert(::Type{BigFloat}, file::JLDFile, ptr::Ptr) =
-    parse(BigFloat, ASCIIString(readvlen(file, ptr, UInt8)))
+jlconvert(::Type{BigInt}, f::JLDFile, ptr::Ptr) =
+    parse(BigInt, ASCIIString(readvlen(f, ptr, UInt8)), 62)
+jlconvert(::Type{BigFloat}, f::JLDFile, ptr::Ptr) =
+    parse(BigFloat, ASCIIString(readvlen(f, ptr, UInt8)))
 
 ## Types
 
-h5fieldtype{T<:Type}(parent::JLDFile, ::Type{T}) =
-    h5type(parent, Type)
+h5fieldtype(f::JLDFile, ::Type{DataType}) = h5type(f, DataType)
+fieldodr(::Type{DataType}, ::Bool) = odr(DataType)
 
 # Stored as a variable-length string
-function h5type{T<:Type}(parent::JLDFile, ::Type{T})
-    haskey(parent.jlh5type, Type) && return (parent.jlh5type[Type], Type)
-    (commit(parent, h5type(parent, UTF8String), Type), Vlen)
+const H5TYPE_DATATYPE = CompoundDatatype(
+    sizeof(Vlen{UInt8})+sizeof(Vlen{Reference}),
+    ["name", "parameters"],
+    [0, sizeof(Vlen{UInt8})],
+    [VLEN_UTF8, VariableLengthDatatype(ReferenceDatatype())]
+)
+typealias DataTypeODR OnDiskRepresentation{(0,sizeof(Vlen{UInt8})),Tuple{Vlen{UInt8},Vlen{Reference}}}
+function h5type(f::JLDFile, ::Type{DataType})
+    haskey(f.jlh5type, DataType) && return f.jlh5type[DataType]
+    commit(f, H5TYPE_DATATYPE, DataType)
 end
+odr(::Type{DataType}) = DataTypeODR()
 
-h5sizeof{T<:Type}(::Type{T}) = sizeof(Offset)+sizeof(Length)
-h5convert!{T<:Type}(out::Ptr, ::Type{T}, file::JLDFile, x::Type) =
-    writevlen(ptr, file, full_typename(file, x))
+function h5convert!(out::Ptr, ::DataTypeODR, f::JLDFile, T::DataType)
+    tn = Symbol[]
+    m = T.name.module
+    while m != module_parent(m)
+        push!(tn, module_name(m))
+        m = module_parent(m)
+    end
+    reverse!(tn)
+    push!(tn, T.name.name)
+    writevlen(out, f, join(tn, ".").data)
+    if !isempty(T.parameters)
+        writevlen(out+sizeof(Vlen{UInt8}), f, Reference[write_ref(x) for x in T.parameters])
+    end
+end
 jlconvert{T<:Type}(::Type{T}, file::JLDFile, ptr::Ptr) =
     julia_type(UTF8String(readvlen(f, ptr, UInt8)))
 
