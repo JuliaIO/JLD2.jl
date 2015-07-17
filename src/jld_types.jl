@@ -20,10 +20,10 @@ sizeof{T<:Vlen}(::Type{T}) = 4 + sizeof(GlobalHeapID)
 
 # Write variable-length data and store the offset and length to out pointer
 function writevlen{T}(out::Ptr, f::JLDFile, x::Vector{T})
-    unsafe_store!(convert(Ptr{UInt32}, out), sizeof(x))
+    unsafe_store!(convert(Ptr{UInt32}, out), length(x))
     unsafe_store!(convert(Ptr{GlobalHeapID}, out)+4, write_heap_object(f, x))
 end
-h5convert!{T}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x) =
+h5convert!{T}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x, ::JLDWriteSession) =
     writevlen(out, f, convert(Vector{T}, x))
 
 # Read variable-length data given offset and length in ptr
@@ -115,9 +115,7 @@ end
 # Write an HDF5 datatype to the file
 function commit(f::JLDFile, dtype::H5Datatype, T::DataType)
     io = f.io
-    if !(T <: DataType)
-        dtdt = h5type(f, DataType)
-    end
+    dtdt = h5type(f, DataType)
     offset = f.end_of_data
 
     seek(io, offset)
@@ -127,11 +125,8 @@ function commit(f::JLDFile, dtype::H5Datatype, T::DataType)
     f.jlh5type[T] = cdt
     f.h5jltype[cdt] = T
     push!(f.datatypes, cdt)
-    if T <: DataType
-        dtdt = cdt
-    end
 
-    commit(f, dtype, (Attribute(:julia_type, Dataspace(T), dtdt, odr(DataType), T),))
+    commit(f, dtype, (Attribute(:julia_type, Dataspace(T), dtdt, odr(DataType), T, f.datatype_wsession),))
 
     cdt
 end
@@ -273,7 +268,7 @@ h5type(f::JLDFile, ::Type{Symbol}) =
                                  commit(f, h5type(f, UTF8String), Symbol)
 odr(::Type{Symbol}) = Vlen{UInt8}
 
-function h5convert!(out::Ptr, ::Type{Vlen{UInt8}}, f::JLDFile, x::Symbol)
+function h5convert!(out::Ptr, ::Type{Vlen{UInt8}}, f::JLDFile, x::Symbol, ::JLDWriteSession)
     ptr = Base.unsafe_convert(Ptr{Cchar}, x)
     len = symbol_length(x)
     unsafe_store!(convert(Ptr{UInt32}, out), len)
@@ -293,9 +288,9 @@ h5type(f::JLDFile, T::Union(Type{BigInt}, Type{BigFloat})) =
                             commit(f, h5type(f, ASCIIString), T)
 odr(::Union(Type{BigInt}, Type{BigFloat})) = Vlen{UInt8}
 
-h5convert!(out::Ptr, ::Type{BigInt}, f::JLDFile, x::BigInt) =
+h5convert!(out::Ptr, ::Type{BigInt}, f::JLDFile, x::BigInt, ::JLDWriteSession) =
     writevlen(out, f, base(62, x))
-h5convert!(out::Ptr, ::Type{BigFloat}, f::JLDFile, x::BigFloat) =
+h5convert!(out::Ptr, ::Type{BigFloat}, f::JLDFile, x::BigFloat, ::JLDWriteSession) =
     writevlen(out, f, string(x))
 
 jlconvert(::Type{BigInt}, f::JLDFile, ptr::Ptr) =
@@ -318,11 +313,24 @@ const H5TYPE_DATATYPE = CompoundDatatype(
 typealias DataTypeODR OnDiskRepresentation{(0,sizeof(Vlen{UInt8})),Tuple{Vlen{UInt8},Vlen{Reference}}}
 function h5type(f::JLDFile, ::Type{DataType})
     haskey(f.jlh5type, DataType) && return f.jlh5type[DataType]
-    commit(f, H5TYPE_DATATYPE, DataType)
+    io = f.io
+    offset = f.end_of_data
+
+    seek(io, offset)
+    id = length(f.datatypes)+1
+    cdt = CommittedDatatype(offset, id)
+    f.datatype_locations[offset] = cdt
+    f.jlh5type[DataType] = cdt
+    f.h5jltype[cdt] = DataType
+    push!(f.datatypes, cdt)
+
+    commit(f, H5TYPE_DATATYPE, (Attribute(:julia_type, Dataspace(DataType), cdt, odr(DataType), DataType, f.datatype_wsession),))
+
+    cdt
 end
 odr(::Type{DataType}) = DataTypeODR()
 
-function h5convert!(out::Ptr, ::DataTypeODR, f::JLDFile, T::DataType)
+function h5convert!(out::Ptr, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     tn = Symbol[]
     m = T.name.module
     while m != module_parent(m)
@@ -333,7 +341,7 @@ function h5convert!(out::Ptr, ::DataTypeODR, f::JLDFile, T::DataType)
     push!(tn, T.name.name)
     writevlen(out, f, join(tn, ".").data)
     if !isempty(T.parameters)
-        writevlen(out+sizeof(Vlen{UInt8}), f, Reference[write_ref(x) for x in T.parameters])
+        writevlen(out+sizeof(Vlen{UInt8}), f, Reference[write_ref(f, x, wsession) for x in T.parameters])
     end
 end
 jlconvert{T<:Type}(::Type{T}, file::JLDFile, ptr::Ptr) =
@@ -535,7 +543,7 @@ unknown_type_err(T) =
     error("""$T is not of a type supported by JLD
              Please report this error at https://github.com/timholy/HDF5.jl""")
 
-@generated function h5convert!(out::Ptr, odr::OnDiskRepresentation, file::JLDFile, x)
+@generated function h5convert!(out::Ptr, odr::OnDiskRepresentation, file::JLDFile, x, wsession::JLDWriteSession)
     T = x
     offsets, members = odr.parameters
 
@@ -567,7 +575,7 @@ unknown_type_err(T) =
     ex
 end
 # All remaining are just unsafe_store! calls
-h5convert!{T}(out::Ptr, ::Type{T}, ::JLDFile, x::T) =
+h5convert!{T}(out::Ptr, ::Type{T}, ::JLDFile, x::T, ::JLDWriteSession) =
     unsafe_store!(convert(Ptr{typeof(x)}, out), x)
 
 ## Find the corresponding Julia type for a given HDF5 type

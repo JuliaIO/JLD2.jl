@@ -22,6 +22,11 @@ typealias PlainType Union(Type{Int8},Type{Int16},Type{Int32},Type{Int64},Type{In
                           Type{UInt8},Type{UInt16},Type{UInt32},Type{UInt64},Type{UInt128},
                           Type{Float16},Type{Float32},Type{Float64})
 
+immutable JLDWriteSession
+    h5ref::ObjectIdDict
+end
+JLDWriteSession() = JLDWriteSession(ObjectIdDict())
+
 immutable Reference
     offset::UInt64
 end
@@ -58,6 +63,7 @@ type JLDFile{T<:IO}
     io::T
     datatype_locations::OrderedDict{Offset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
+    datatype_wsession::JLDWriteSession
     datasets::OrderedDict{ByteString,Offset}
     jlh5type::Dict{Type,CommittedDatatype}
     h5jltype::Dict{CommittedDatatype,Type}
@@ -65,7 +71,7 @@ type JLDFile{T<:IO}
     global_heaps::Dict{Offset,GlobalHeap}
     global_heap::GlobalHeap
 end
-JLDFile(io::IO) = JLDFile(io, OrderedDict{Offset,CommittedDatatype}(), H5Datatype[],
+JLDFile(io::IO) = JLDFile(io, OrderedDict{Offset,CommittedDatatype}(), H5Datatype[], JLDWriteSession(),
                           OrderedDict{ByteString,Offset}(),
                           Dict{Type,CommittedDatatype}(), Dict{CommittedDatatype,Type}(),
                           UInt64(sizeof(Superblock)), Dict{Offset,GlobalHeap}(),
@@ -659,6 +665,7 @@ immutable Attribute{N,H5T<:H5Datatype,ODR,T}
     datatype::H5T
     odr::ODR
     data::T
+    wsession::JLDWriteSession
 end
 
 immutable AttributeHeader
@@ -681,7 +688,7 @@ function Base.write(io::IO, f::JLDFile, attr::Attribute)
     write(io, UInt8(0))
     write(io, attr.datatype)
     write(io, attr.dataspace)
-    write_data(f, attr.data, attr.odr)
+    write_data(f, attr.data, attr.odr, attr.wsession)
 end
 
 #
@@ -1003,27 +1010,28 @@ function payload_size(dataspace::Dataspace, datatype::H5Datatype, datasz::Int, l
 end
 
 # Might need to do something else someday for non-mmapped IO
-function write_data(f::JLDFile, data, odr)
+function write_data(f::JLDFile, data, odr, wsession::JLDWriteSession)
     io = f.io
     ensureroom(io, sizeof(odr))
     arr = io.arr
-    h5convert!(io.curptr, odr, f, data)
+    h5convert!(io.curptr, odr, f, data, wsession)
 end
 
-function write_data(f::JLDFile, data::Array, odr)
+function write_data(f::JLDFile, data::Array, odr, wsession::JLDWriteSession)
     io = f.io
     ensureroom(io, sizeof(odr)*length(data))
     arr = io.arr
     cp = io.curptr
     @simd for i = 1:length(data)
-        @inbounds h5convert!(cp, odr, f, data[i])
+        @inbounds h5convert!(cp, odr, f, data[i], wsession)
         cp += sizeof(odr)
     end
 end
 
-function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, odr, data)
+function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, odr, data, wsession::JLDWriteSession)
     io = f.io
-    startpos = position(io)
+    startpos = f.end_of_data
+    seek(io, startpos)
     datasz = sizeof(odr) * numel(dataspace)
     layout_class = datasz < 8192 ? LC_COMPACT_STORAGE : LC_CONTIGUOUS_STORAGE
     psz = payload_size(dataspace, datatype, datasz, layout_class)
@@ -1056,7 +1064,7 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, o
         write(cio, UInt16(datasz))            # Size
         f.end_of_data = header_offset + fullsz
         data_offset = position(io)
-        write_data(f, data, odr)
+        write_data(f, data, odr, wsession)
         seek(io, data_offset + datasz)
         write(io, end_checksum(cio))
     else
@@ -1068,18 +1076,21 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, o
         write(io, end_checksum(cio))
         data_offset = position(io)
         f.end_of_data = header_offset + fullsz + dset.datatype.size * numel(dset.datatype)
-        write_data(f, data, odr)
+        write_data(f, data, odr, wsession)
     end
 
     header_offset
 end
 
-@noinline function write_dataset(f, x)
-    write_dataset(f, Dataspace(x), h5type(f, typeof(x)), odr(typeof(x)), x)
+@noinline function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
+    write_dataset(f, Dataspace(x), h5type(f, typeof(x)), odr(typeof(x)), x, wsession)
 end
-@noinline function write_dataset{T,N}(f, x::Array{T,N})
-    write_dataset(f, Dataspace(x), h5fieldtype(f, eltype(x)), fieldodr(eltype(x)), x)
+@noinline function write_dataset{T,N}(f::JLDFile, x::Array{T,N}, wsession::JLDWriteSession)
+    write_dataset(f, Dataspace(x), h5fieldtype(f, eltype(x)), fieldodr(eltype(x)), x, wsession)
 end
+
+write_ref(f::JLDFile, x, wsession::JLDWriteSession) =
+    Reference(write_dataset(f, x, wsession))::Reference
 
 #
 # Global heap
@@ -1161,7 +1172,7 @@ function write_heap_object{T}(f::JLDFile, ptr::Ptr{T}, n::Int)
 
     GlobalHeapID(gh.offset, index)
 end
-write_heap_object(f::JLDFile, x::Array) = write_heap_object(f, pointer(x), sizeof(x))
+write_heap_object(f::JLDFile, x::Array) = write_heap_object(f, pointer(x), length(x))
 
 function Base.read(io::IO, ::Type{GlobalHeap})
     offset = position(io)
@@ -1248,12 +1259,12 @@ function Base.read(f::JLDFile, name::String)
     read_data(f)
 end
 
-function Base.write(f::JLDFile, name::String, obj)
+function Base.write(f::JLDFile, name::String, obj, wsession::JLDWriteSession=JLDWriteSession())
     f.end_of_data == UNDEFINED_ADDRESS && throw(ArgumentError("file is closed"))
 
     io = f.io
     seek(io, f.end_of_data)
-    header_offset = write_dataset(f, obj)
+    header_offset = write_dataset(f, obj, wsession)
     f.datasets[name] = header_offset
     nothing
 end
