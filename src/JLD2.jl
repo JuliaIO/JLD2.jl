@@ -718,8 +718,10 @@ immutable BasicDatatype <: H5Datatype
     size::UInt32
 end
 define_packed(BasicDatatype)
-StringDatatype(size::Integer) =
+StringDatatype(::Type{ASCIIString}, size::Integer) =
     BasicDatatype(DT_STRING, 0x01, 0x00, 0x00, size)
+StringDatatype(::Type{UTF8String}, size::Integer) =
+    BasicDatatype(DT_STRING, 0x11, 0x00, 0x00, size)
 OpaqueDatatype(size::Integer) =
     BasicDatatype(DT_OPAQUE, 0x00, 0x00, 0x00, size) # XXX make sure ignoring the tag is OK
 ReferenceDatatype() =
@@ -972,7 +974,8 @@ function read_data(f::JLDFile)
     end
 end
 
-function read_data{T,ODR}(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_dimensions::Vector{Length}, rr::ReadRepresentation{T,ODR}, data_offset::Int)
+function read_data{T,ODR}(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_dimensions::Vector{Length},
+                          rr::ReadRepresentation{T,ODR}, data_offset::Int)
     io = f.io
     seek(io, data_offset)
     inptr = io.curptr
@@ -1012,20 +1015,21 @@ end
 # Might need to do something else someday for non-mmapped IO
 function write_data(f::JLDFile, data, odr, wsession::JLDWriteSession)
     io = f.io
-    ensureroom(io, sizeof(odr))
     arr = io.arr
-    h5convert!(io.curptr, odr, f, data, wsession)
+    cp = io.curptr
+    h5convert!(cp, odr, f, data, wsession)
+    io.curptr = cp + sizeof(odr)
 end
 
 function write_data(f::JLDFile, data::Array, odr, wsession::JLDWriteSession)
     io = f.io
-    ensureroom(io, sizeof(odr)*length(data))
     arr = io.arr
     cp = io.curptr
     @simd for i = 1:length(data)
         @inbounds h5convert!(cp, odr, f, data[i], wsession)
         cp += sizeof(odr)
     end
+    io.curptr = cp
 end
 
 function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, odr, data, wsession::JLDWriteSession)
@@ -1083,10 +1087,7 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, o
 end
 
 @noinline function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
-    write_dataset(f, Dataspace(x), h5type(f, typeof(x)), odr(typeof(x)), x, wsession)
-end
-@noinline function write_dataset{T,N}(f::JLDFile, x::Array{T,N}, wsession::JLDWriteSession)
-    write_dataset(f, Dataspace(x), h5fieldtype(f, eltype(x)), fieldodr(eltype(x)), x, wsession)
+    write_dataset(f, Dataspace(x), h5type(f, x), objodr(x), x, wsession)
 end
 
 write_ref(f::JLDFile, x, wsession::JLDWriteSession) =
