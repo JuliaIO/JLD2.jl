@@ -52,10 +52,6 @@ end
 
 immutable OnDiskRepresentation{Offsets,Types} end
 immutable ReadRepresentation{T,ODR} end
-immutable WriteRepresentation{H5T<:H5Datatype,ODR}
-    datatype::H5T
-    odr::ODR
-end
 
 symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)
 
@@ -111,7 +107,7 @@ function resize!(io::MmapIO, newend::Ptr{Void})
 
     if newsz > length(io.arr)
         # If we have not mapped enough memory, map more
-        io.arr = mmap_array(io.f, Vector{UInt8}, (newsz+MMAP_GROW_SIZE,); grow=false)
+        io.arr = Mmap.mmap(io.f, Vector{UInt8}, (newsz + MMAP_GROW_SIZE,); grow=false)
         newptr = pointer(io.arr)
         io.curptr += newptr - ptr
         ptr = newptr
@@ -127,6 +123,7 @@ end
     if ep > io.endptr
         resize!(io, ep)
     end
+    nothing
 end
 
 Base.truncate(io::MmapIO, pos) = truncate(io.f, pos)
@@ -205,7 +202,7 @@ Base.position(io::MmapIO) = Int(io.curptr - pointer(io.arr))
 # nested checksums.
 # XXX not thread-safe!
 
-const CHECKSUM_PTR = Int[]
+const CHECKSUM_PTR = Ptr{Void}[]
 function begin_checksum(io::MmapIO)
     push!(CHECKSUM_PTR, io.curptr)
     io
@@ -1015,22 +1012,34 @@ end
 # Might need to do something else someday for non-mmapped IO
 function write_data(f::JLDFile, data, odr, wsession::JLDWriteSession)
     io = f.io
+    ensureroom(io, sizeof(odr))
     arr = io.arr
     cp = io.curptr
     h5convert!(cp, odr, f, data, wsession)
     io.curptr = cp + sizeof(odr)
+    arr # Keep old array rooted until the end
 end
 
 function write_data(f::JLDFile, data::Array, odr, wsession::JLDWriteSession)
     io = f.io
+    ensureroom(io, sizeof(odr) * length(data))
     arr = io.arr
     cp = io.curptr
+    ep = io.endptr
     @simd for i = 1:length(data)
-        @inbounds h5convert!(cp, odr, f, data[i], wsession)
+        if isbits(eltype(data)) || true #isdefined(data, i)
+            # For now, just don't write anything unless the field is defined
+            @inbounds h5convert!(cp, odr, f, data[i], wsession)
+        else
+            @inbounds h5convert_uninitialized!(cp, odr)
+        end
         cp += sizeof(odr)
     end
     io.curptr = cp
+    arr # Keep old array rooted until the end
 end
+# Force specialization on DataType
+write_data(f::JLDFile, data::Array, odr::Type{Tuple{}}, wsession::JLDWriteSession) = error("ODR is invalid")
 
 function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, odr, data, wsession::JLDWriteSession)
     io = f.io
@@ -1079,12 +1088,15 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, o
         write(cio, Length(sizeof(data)))      # Length
         write(io, end_checksum(cio))
         data_offset = position(io)
-        f.end_of_data = header_offset + fullsz + dset.datatype.size * numel(dset.datatype)
+        f.end_of_data = header_offset + fullsz + datasz
         write_data(f, data, odr, wsession)
     end
 
     header_offset
 end
+# Force specialization on DataType
+write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, odr::Type{Tuple{}}, data, wsession::JLDWriteSession) =
+    error("ODR is invalid")
 
 @noinline function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
     write_dataset(f, Dataspace(x), h5type(f, x), objodr(x), x, wsession)

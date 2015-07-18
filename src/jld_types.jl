@@ -210,7 +210,6 @@ end
 ## - Define h5convert! and jlconvert
 ## - If the type is an immutable, define jlconvert!
 
-WriteRepresentation{T}(h5type::H5Datatype, ::Type{T}) = WriteRepresentation{typeof(h5type),Type{T}}(h5type, T)
 ReadRepresentation{T}(::Type{T}, S) = ReadRepresentation{T,S}()
 ReadRepresentation{T}(::Type{T}) = ReadRepresentation{T,T}()
 
@@ -265,7 +264,14 @@ end
 
 h5type(f::JLDFile, x::PrimitiveTypes) = h5fieldtype(f, typeof(x), true)
 
-## General purpose handling of variable-length datatypes
+## Routines for references
+
+h5convert!(out::Ptr, odr::Type{Reference}, file::JLDFile, x, wsession::JLDWriteSession) =
+    (unsafe_store!(convert(Ptr{Reference}, out), write_ref(file, x, wsession)); nothing)
+h5convert_uninitialized!(out::Ptr, odr::Type{Reference}) =
+    (unsafe_store!(convert(Ptr{Reference}, out), Reference(0)); nothing)
+
+## Routines for variable-length datatypes
 
 immutable Vlen{T}
     size::UInt32
@@ -279,13 +285,16 @@ function writevlen{T}(out::Ptr, f::JLDFile, x::Vector{T})
     unsafe_store!(convert(Ptr{GlobalHeapID}, out)+4, write_heap_object(f, x))
 end
 h5convert!{T}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x, ::JLDWriteSession) =
-    writevlen(out, f, convert(Vector{T}, x))
+    (writevlen(out, f, convert(Vector{T}, x)); nothing)
 
 # Read variable-length data given offset and length in ptr
 readvlen{T}(f::JLDFile, ptr::Ptr, ::Type{T}) =
     read_heap_object(f, unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), T)
 jlconvert{T,S}(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr) =
     convert(T, readvlen(f, ptr, S))
+
+h5convert_uninitialized!{T<:Vlen}(out::Ptr, odr::Type{T}) =
+    (unsafe_store!(convert(Ptr{Int128}, out), 0); nothing)
 
 ## ByteStrings
 
@@ -323,9 +332,9 @@ function jltype(f::JLDFile, dt::VariableLengthDatatype)
 end
 
 h5convert!(out::Ptr, ::FixedLengthString, f::JLDFile, x, ::JLDWriteSession) =
-    unsafe_copy!(convert(Ptr{UInt8}, out), pointer(x.data), length(x.data))
+    (unsafe_copy!(convert(Ptr{UInt8}, out), pointer(x.data), length(x.data)); nothing)
 h5convert!{T<:ByteString}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x, ::JLDWriteSession) =
-    writevlen(out, f, convert(Vector{UInt8}, x))
+    (writevlen(out, f, convert(Vector{UInt8}, x)); nothing)
 jlconvert{T,S<:ByteString}(::Union(ReadRepresentation{T,S}, ReadRepresentation{T,S}), f::JLDFile, ptr::Ptr) =
     convert(T, readvlen(f, ptr, UInt8))
 jlconvert(T::ReadRepresentation{ByteString,Vlen{UTF8String}}, file::JLDFile, ptr::Ptr) =
@@ -356,6 +365,7 @@ function h5convert!(out::Ptr, ::Type{Vlen{UTF8String}}, f::JLDFile, x::Symbol, :
     len = symbol_length(x)
     unsafe_store!(convert(Ptr{UInt32}, out), len)
     unsafe_store!(convert(Ptr{GlobalHeapID}, out+4), write_heap_object(f, ptr, Int(len)))
+    nothing
 end
 jlconvert(::ReadRepresentation{Symbol,Vlen{UTF8String}}, f::JLDFile, ptr::Ptr) = symbol(readvlen(f, ptr, UInt8))
 
@@ -370,9 +380,9 @@ h5type(f::JLDFile, x::Union(BigInt, BigFloat)) = h5fieldtype(f, typeof(x), true)
 odr(::Union(Type{BigInt}, Type{BigFloat})) = fieldodr(ASCIIString, true)
 
 h5convert!(out::Ptr, ::Type{Vlen{ASCIIString}}, f::JLDFile, x::BigInt, ::JLDWriteSession) =
-    writevlen(out, f, base(62, x))
+    (writevlen(out, f, base(62, x)); nothing)
 h5convert!(out::Ptr, ::Type{Vlen{ASCIIString}}, f::JLDFile, x::BigFloat, ::JLDWriteSession) =
-    writevlen(out, f, string(x))
+    (writevlen(out, f, string(x)); nothing)
 
 jlconvert(::ReadRepresentation{BigInt,Vlen{ASCIIString}}, f::JLDFile, ptr::Ptr) =
     parse(BigInt, ASCIIString(readvlen(f, ptr, UInt8)), 62)
@@ -424,6 +434,7 @@ function h5convert!(out::Ptr, ::DataTypeODR, f::JLDFile, T::DataType, wsession::
     if !isempty(T.parameters)
         writevlen(out+sizeof(Vlen{UInt8}), f, Reference[write_ref(f, x, wsession) for x in T.parameters])
     end
+    nothing
 end
 jlconvert{T<:Type}(::Type{T}, file::JLDFile, ptr::Ptr) =
     julia_type(UTF8String(readvlen(f, ptr, UInt8)))
@@ -440,7 +451,7 @@ h5fieldtype{T,N}(::JLDFile, ::Type{Array{T,N}}, ::Bool) = ReferenceDatatype()
 fieldodr{T,N}(::Type{Array{T,N}}, ::Bool) = Reference
 
 h5type{T}(f::JLDFile, ::Array{T}) = h5fieldtype(f, T, false)
-odr{T,N}(::Type{Array{T,N}}) = odr(T)
+odr{T,N}(::Type{Array{T,N}}) = fieldodr(T, false)
 
 ## User-defined types
 ##
@@ -590,20 +601,8 @@ unknown_type_err(T) =
     for i = 1:length(offsets)
         offset = offsets[i]
         member = members.parameters[i]
-        if member == Reference
-            if isa(T, TupleType)
-                push!(args, :(unsafe_store!(convert(Ptr{Reference}, out)+$offset,
-                                            write_ref(file, x[$i], wsession))))
-            else
-                push!(args, quote
-                    if isdefined(x, $i)
-                        ref = write_ref(file, getfield(x, $i), wsession)
-                    else
-                        ref = Reference(0)
-                    end
-                    unsafe_store!(convert(Ptr{Reference}, out)+$offset, ref)
-                end)
-            end
+        if member == Reference && i > T.ninitialized
+            push!(args, :(h5convert_uninitialized!(out+$offset, $(member))))
         elseif member != nothing
             push!(args, :(h5convert!(out+$offset, $(member), file, $getindex_fn(x, $i), wsession)))
         end
@@ -611,9 +610,10 @@ unknown_type_err(T) =
     push!(args, nothing)
     ex
 end
+
 # All remaining are just unsafe_store! calls
 h5convert!{T}(out::Ptr, ::Type{T}, ::JLDFile, x::T, ::JLDWriteSession) =
-    unsafe_store!(convert(Ptr{typeof(x)}, out), x)
+    (unsafe_store!(convert(Ptr{typeof(x)}, out), x); nothing)
 
 ## Find the corresponding Julia type for a given HDF5 type
 
