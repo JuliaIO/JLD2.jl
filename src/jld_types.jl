@@ -266,8 +266,8 @@ h5type(f::JLDFile, x::PrimitiveTypes) = h5fieldtype(f, typeof(x), true)
 
 ## Routines for references
 
-h5convert!(out::Ptr, odr::Type{Reference}, file::JLDFile, x, wsession::JLDWriteSession) =
-    (unsafe_store!(convert(Ptr{Reference}, out), write_ref(file, x, wsession)); nothing)
+h5convert!(out::Ptr, odr::Type{Reference}, f::JLDFile, x, wsession::JLDWriteSession) =
+    (unsafe_store!(convert(Ptr{Reference}, out), write_ref(f, wsession, x)); nothing)
 h5convert_uninitialized!(out::Ptr, odr::Type{Reference}) =
     (unsafe_store!(convert(Ptr{Reference}, out), Reference(0)); nothing)
 
@@ -432,7 +432,7 @@ function h5convert!(out::Ptr, ::DataTypeODR, f::JLDFile, T::DataType, wsession::
     push!(tn, T.name.name)
     writevlen(out, f, join(tn, ".").data)
     if !isempty(T.parameters)
-        writevlen(out+sizeof(Vlen{UInt8}), f, Reference[write_ref(f, x, wsession) for x in T.parameters])
+        writevlen(out+sizeof(Vlen{UInt8}), f, Reference[write_ref(f, wsession, x) for x in T.parameters])
     end
     nothing
 end

@@ -78,7 +78,7 @@ JLDFile(io::IO) = JLDFile(io, OrderedDict{Offset,CommittedDatatype}(), H5Datatyp
 #
 # An IO built on top of mmap to avoid the overhead of ordinary disk IO
 const MMAP_GROW_SIZE = 2^24
-const FILE_GROW_SIZE = 2^15
+const FILE_GROW_SIZE = 2^18
 
 type MmapIO <: IO
     f::IOStream
@@ -203,8 +203,14 @@ Base.position(io::MmapIO) = Int(io.curptr - pointer(io.arr))
 # XXX not thread-safe!
 
 const CHECKSUM_PTR = Ptr{Void}[]
+const NCHECKSUM = Ref{Int}(0)
 function begin_checksum(io::MmapIO)
-    push!(CHECKSUM_PTR, io.curptr)
+    idx = NCHECKSUM[] += 1
+    if idx > length(CHECKSUM_PTR)
+        push!(CHECKSUM_PTR, io.curptr)
+    else
+        CHECKSUM_PTR[idx] = io.curptr
+    end
     io
 end
 function begin_checksum(io::MmapIO, sz::Int)
@@ -217,7 +223,8 @@ function begin_checksum(io::MmapIO, sz::Int)
     begin_checksum(io)
 end
 function end_checksum(io::MmapIO)
-    v = pop!(CHECKSUM_PTR)
+    v = CHECKSUM_PTR[NCHECKSUM[]]
+    NCHECKSUM[] -= 1
     Lookup3.hash(UnsafeContiguousView(Ptr{UInt8}(v), (Int(io.curptr - v),)))
 end
 
@@ -1020,14 +1027,14 @@ function write_data(f::JLDFile, data, odr, wsession::JLDWriteSession)
     arr # Keep old array rooted until the end
 end
 
-function write_data(f::JLDFile, data::Array, odr, wsession::JLDWriteSession)
+function write_data{T}(f::JLDFile, data::Array{T}, odr, wsession::JLDWriteSession)
     io = f.io
     ensureroom(io, sizeof(odr) * length(data))
     arr = io.arr
     cp = io.curptr
     ep = io.endptr
     @simd for i = 1:length(data)
-        if isbits(eltype(data)) || true #isdefined(data, i)
+        if (isleaftype(T) && isbits(T)) || isdefined(data, i)
             # For now, just don't write anything unless the field is defined
             @inbounds h5convert!(cp, odr, f, data[i], wsession)
         else
@@ -1098,12 +1105,19 @@ end
 write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, odr::Type{Tuple{}}, data, wsession::JLDWriteSession) =
     error("ODR is invalid")
 
-@noinline function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
+write_dataset(f::JLDFile, x, wsession::JLDWriteSession) =
     write_dataset(f, Dataspace(x), h5type(f, x), objodr(x), x, wsession)
-end
 
-write_ref(f::JLDFile, x, wsession::JLDWriteSession) =
+@noinline write_ref(f::JLDFile, wsession::JLDWriteSession, x) =
     Reference(write_dataset(f, x, wsession))::Reference
+
+# function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
+#     ref = get(wsession.h5ref, x, Reference(0))::Reference
+#     ref != Reference(0) && return ref
+#     ref = Reference(write_dataset(f, x, wsession))::Reference
+#     wsession.h5ref[x] = ref
+#     ref
+# end
 
 #
 # Global heap
