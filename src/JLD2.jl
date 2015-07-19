@@ -1027,6 +1027,10 @@ function write_data(f::JLDFile, data, odr, wsession::JLDWriteSession)
     arr # Keep old array rooted until the end
 end
 
+# Like isdefined, but assumes arr is a pointer array, and can be inlined
+unsafe_isdefined(arr::Array, i::Int) =
+    unsafe_load(Ptr{Ptr{Void}}(pointer(arr)+(i-1)*sizeof(Ptr{Void}))) != Ptr{Void}(0)
+
 function write_data{T}(f::JLDFile, data::Array{T}, odr, wsession::JLDWriteSession)
     io = f.io
     ensureroom(io, sizeof(odr) * length(data))
@@ -1034,7 +1038,7 @@ function write_data{T}(f::JLDFile, data::Array{T}, odr, wsession::JLDWriteSessio
     cp = io.curptr
     ep = io.endptr
     @simd for i = 1:length(data)
-        if (isleaftype(T) && isbits(T)) || isdefined(data, i)
+        if (isleaftype(T) && isbits(T)) || unsafe_isdefined(data, i)
             # For now, just don't write anything unless the field is defined
             @inbounds h5convert!(cp, odr, f, data[i], wsession)
         else
@@ -1108,16 +1112,21 @@ write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, odr::Type{
 write_dataset(f::JLDFile, x, wsession::JLDWriteSession) =
     write_dataset(f, Dataspace(x), h5type(f, x), objodr(x), x, wsession)
 
-@noinline write_ref(f::JLDFile, wsession::JLDWriteSession, x) =
-    Reference(write_dataset(f, x, wsession))::Reference
+@noinline function write_ref_nonbits(f::JLDFile, wsession::JLDWriteSession, x)
+    ref = get(wsession.h5ref, x, Reference(0))::Reference
+    ref != Reference(0) && return ref
+    ref = Reference(write_dataset(f, x, wsession))::Reference
+    wsession.h5ref[x] = ref
+    ref
+end
 
-# function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
-#     ref = get(wsession.h5ref, x, Reference(0))::Reference
-#     ref != Reference(0) && return ref
-#     ref = Reference(write_dataset(f, x, wsession))::Reference
-#     wsession.h5ref[x] = ref
-#     ref
-# end
+@inline function write_ref(f::JLDFile, wsession::JLDWriteSession, x)
+    if isbits(typeof(x))
+        Reference(write_dataset(f, x, wsession))::Reference
+    else
+        write_ref_nonbits(f, wsession, x)::Reference
+    end
+end
 
 #
 # Global heap

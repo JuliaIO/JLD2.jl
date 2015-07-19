@@ -266,8 +266,16 @@ h5type(f::JLDFile, x::PrimitiveTypes) = h5fieldtype(f, typeof(x), true)
 
 ## Routines for references
 
-h5convert!(out::Ptr, odr::Type{Reference}, f::JLDFile, x, wsession::JLDWriteSession) =
-    (unsafe_store!(convert(Ptr{Reference}, out), write_ref(f, wsession, x)); nothing)
+# A hack to prevent us from needing to box the output pointer
+# XXX not thread-safe!
+const BOXED_PTR = Ref{Ptr{Void}}()
+@inline function h5convert!(out::Ptr, odr::Type{Reference}, f::JLDFile, x::ANY, wsession::JLDWriteSession)
+    BOXED_PTR[] = out
+    h5convert_with_boxed_ptr!(f, x, wsession)
+end
+@noinline function h5convert_with_boxed_ptr!(f::JLDFile, x, wsession::JLDWriteSession)
+    unsafe_store!(convert(Ptr{Reference}, BOXED_PTR[]), write_ref(f, wsession, x)); nothing
+end
 h5convert_uninitialized!(out::Ptr, odr::Type{Reference}) =
     (unsafe_store!(convert(Ptr{Reference}, out), Reference(0)); nothing)
 
