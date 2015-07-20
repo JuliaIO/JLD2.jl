@@ -1024,18 +1024,19 @@ function read_data{T,ODR}(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_d
         v = Array(T, dataspace_dimensions...)
         if isbits(T)
             outptr = pointer(v)
-            if ODR <: T
+            if rr.odr <: T
                 unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(prod(dataspace_dimensions)))
             else
                 @simd for i = 1:prod(dataspace_dimensions)::Offset
                     jlconvert!(outptr, rr, f, inptr)
-                    inptr += sizeof(ODR)
+                    inptr += sizeof(rr.odr)
                     outptr += sizeof(T)
                 end
             end
         else
             @simd for i = 1:prod(dataspace_dimensions)::Offset
                 @inbounds v[i] = jlconvert(rr, f, inptr)
+                inptr += sizeof(rr.odr)
             end
         end
         v

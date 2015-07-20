@@ -372,7 +372,7 @@ function jltype(f::JLDFile, dt::BasicDatatype)
             throw(UnsupportedFeatureException())
         end
     elseif dt.class == DT_OPAQUE
-        error("attempted to read a bare (non-committed) datatype")
+        error("attempted to read a bare (non-committed) opaque datatype")
     elseif dt.class == DT_REFERENCE
         return ReadRepresentation(Any, Reference)
     else
