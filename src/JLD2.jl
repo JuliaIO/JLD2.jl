@@ -515,7 +515,7 @@ function write_link(io::IO, name::ByteString, target::Offset)
     # Flags
     flags = size_flag(sizeof(name))
     if isa(name, UTF8String)
-        flags &= LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT
+        flags |= LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT
     end
     write(io, flags::UInt8)
 
@@ -655,7 +655,7 @@ end
 
 Dataspace() = Dataspace(DS_NULL, (), ())
 @generated function Dataspace(x::Any)
-    if x.size == 0
+    if !hasdata(x)
         Dataspace()
     else
         Dataspace(DS_SCALAR, (), ())
@@ -1116,9 +1116,11 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, o
         write(cio, LC_COMPACT_STORAGE)        # Layout class
         write(cio, UInt16(datasz))            # Size
         f.end_of_data = header_offset + fullsz
-        data_offset = position(io)
-        write_data(f, data, odr, wsession)
-        seek(io, data_offset + datasz)
+        if datasz != 0
+            data_offset = position(io)
+            write_data(f, data, odr, wsession)
+            seek(io, data_offset + datasz)
+        end
         write(io, end_checksum(cio))
     else
         write(cio, HeaderMessage(HM_DATA_LAYOUT, 2+sizeof(Offset)+sizeof(Length), 0))
@@ -1127,9 +1129,11 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, o
         write(cio, Offset(startpos + fullsz)) # Offset
         write(cio, Length(sizeof(data)))      # Length
         write(io, end_checksum(cio))
-        data_offset = position(io)
         f.end_of_data = header_offset + fullsz + datasz
-        write_data(f, data, odr, wsession)
+        if datasz != 0
+            data_offset = position(io)
+            write_data(f, data, odr, wsession)
+        end
     end
 
     header_offset
@@ -1180,8 +1184,8 @@ define_packed(GlobalHeapID)
 isatend(f::JLDFile, gh::GlobalHeap) =
     gh.offset != UNDEFINED_ADDRESS && f.end_of_data == gh.offset + 8 + sizeof(Length) + gh.length
 
-function write_heap_object{T}(f::JLDFile, ptr::Ptr{T}, n::Int)
-    psz = sizeof(T)*n
+function write_heap_object(f::JLDFile, odr, data::Vector, wsession::JLDWriteSession)
+    psz = sizeof(odr)*length(data)
     objsz = 8 + sizeof(Length) + psz
     objsz += 8 - mod1(objsz, 8)
 
@@ -1192,7 +1196,7 @@ function write_heap_object{T}(f::JLDFile, ptr::Ptr{T}, n::Int)
 
     # 1. Put the object in the last created global heap if it fits
     # 2. Extend the last global heap if it's at the end of the file
-    # 3. Create a new global heap
+    # 3. Create a new global heap if we can't do 1 or 2
 
     # This is not a great approach if we're writing objects of
     # different sizes interspersed with new datasets. The torture case
@@ -1202,16 +1206,18 @@ function write_heap_object{T}(f::JLDFile, ptr::Ptr{T}, n::Int)
     # strings into existing heaps, rather than writing new ones. This
     # should be revisited at a later date.
 
-    if objsz < f.global_heap.free
+    if objsz + 8 + sizeof(Length) < f.global_heap.free
         # Fits in existing global heap
         gh = f.global_heap
     elseif isatend(f, f.global_heap)
         # Global heap is at end and can be extended
         gh = f.global_heap
-        gh.length = gh.length - gh.free + objsz
+        delta = objsz - gh.free + 8 + sizeof(Length)
+        gh.free += delta
+        gh.length += delta
         seek(io, gh.offset + 8)
         write(io, gh.length)
-        f.end_of_data += objsz
+        f.end_of_data += delta
     else
         # Need to create a new global heap
         heapsz = max(objsz, 4096)
@@ -1221,18 +1227,17 @@ function write_heap_object{T}(f::JLDFile, ptr::Ptr{T}, n::Int)
         write(io, UInt32(1))      # Version & Reserved
         write(io, Length(heapsz)) # Collection size
         f.end_of_data = position(io) + heapsz
-        gh = f.global_heap = f.global_heaps[offset] =  GlobalHeap(offset, heapsz, heapsz, Offset[])
+        gh = f.global_heap = f.global_heaps[offset] = GlobalHeap(offset, heapsz, heapsz, Offset[])
     end
 
     # Write data
     index = length(gh.objects) + 1
     objoffset = gh.offset + 8 + sizeof(Length) + gh.length - gh.free
     seek(io, objoffset)
-    write(io, UInt16(index)) # Heap object index
-    write(io, UInt16(1))     # Reference count
-    skip(io, 4)              # Reserved
-    write(io, Length(psz))   # Object size
-    write(io, ptr, n)        # Object data
+    write(io, UInt16(index))           # Heap object index
+    write(io, UInt16(1))               # Reference count
+    skip(io, 4)                        # Reserved
+    write(io, Length(psz))             # Object size
 
     # Update global heap object
     gh.free -= objsz
@@ -1242,12 +1247,15 @@ function write_heap_object{T}(f::JLDFile, ptr::Ptr{T}, n::Int)
     if gh.free >= 8 + sizeof(Length)
         seek(io, objoffset + objsz)
         skip(io, 8)                # Object index, reference count, reserved
-        write(io, Length(gh.free)) # Object size
+        write(io, Length(gh.free - 8 - sizeof(Length))) # Object size
     end
+
+    # Write data
+    seek(io, objoffset + 8+sizeof(Length))
+    write_data(f, data, odr, wsession) # Object data
 
     GlobalHeapID(gh.offset, index)
 end
-write_heap_object(f::JLDFile, x::Array) = write_heap_object(f, pointer(x), length(x))
 
 function Base.read(io::IO, ::Type{GlobalHeap})
     offset = position(io)
