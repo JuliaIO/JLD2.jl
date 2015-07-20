@@ -199,6 +199,13 @@ function commit(f::JLDFile, dtype::H5Datatype, T::Type, attributes::Attribute...
     cdt::CommittedDatatype
 end
 
+# jltype is the inverse of h5type
+function jltype(f::JLDFile, dtype::CommittedDatatype)
+    @Base.get! f.h5jltype dtype begin
+
+    end
+end
+
 ## Serialization of datatypes to JLD
 ##
 ## h5fieldtype - gets the H5Datatype corresponding to a given
@@ -229,8 +236,9 @@ end
 ## - Define h5convert! and jlconvert
 ## - If the type is an immutable, define jlconvert!
 
-ReadRepresentation{T}(::Type{T}, S) = ReadRepresentation{T,S}()
-ReadRepresentation{T}(::Type{T}) = ReadRepresentation{T,T}()
+ReadRepresentation{T}(::Type{T}, S) = ReadRepresentation{T,typeof(S)}(S)
+ReadRepresentation{T,S}(::Type{T}, ::Type{S}) = ReadRepresentation{T,Type{S}}(S)
+ReadRepresentation{T}(::Type{T}) = ReadRepresentation{T,Type{T}}(T)
 
 # This construction prevents these methods from getting called on type unions
 typealias PrimitiveTypeTypes Union(Type{Int8}, Type{Int16}, Type{Int32}, Type{Int64}, Type{Int128},
@@ -270,11 +278,11 @@ h5fieldtype(::JLDFile, ::Type{Float64}, ::Bool) =
     FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x3f, 0x00, 8, 0, 64, 52, 11, 0, 52, 0x000003ff)
 
 function jltype(f::JLDFile, dt::FloatingPointDatatype)
-    if dt == h5type(f, Float64)
+    if dt == h5fieldtype(f, Float64, true)
         return ReadRepresentation(Float64)
-    elseif dt == h5type(f, Float32)
+    elseif dt == h5fieldtype(f, Float32, true)
         return ReadRepresentation(Float32)
-    elseif dt == h5type(f, Float16)
+    elseif dt == h5fieldtype(f, Float16, true)
         return ReadRepresentation(Float16)
     else
         throw(UnsupportedFeatureException())
@@ -323,7 +331,7 @@ h5convert!{T}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSessio
 # Read variable-length data given offset and length in ptr
 readvlen{T}(f::JLDFile, ptr::Ptr, ::Type{T}) =
     read_heap_object(f, unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), T)
-jlconvert{T,S}(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr) =
+jlconvert{T,S}(::ReadRepresentation{T,Type{Vlen{S}}}, f::JLDFile, ptr::Ptr) =
     convert(T, readvlen(f, ptr, S))
 
 h5convert_uninitialized!{T<:Vlen}(out::Ptr, odr::Type{T}) =
@@ -350,9 +358,27 @@ immutable FixedLengthString{T<:ByteString}
 end
 sizeof(x::FixedLengthString) = x.length
 
-h5type(f::JLDFile, x::ByteString) = StringDatatype(typeof(x), length(x))
+h5type(f::JLDFile, x::ByteString) = StringDatatype(typeof(x), sizeof(x))
 odr{T<:ByteString}(::Type{T}) = error("cannot call odr on a ByteString type")
-objodr(x::ByteString) = FixedLengthString{typeof(x)}(length(x))
+objodr(x::ByteString) = FixedLengthString{typeof(x)}(sizeof(x))
+
+function jltype(f::JLDFile, dt::BasicDatatype)
+    if dt.class == DT_STRING
+        if dt.bitfield1 == 0x01 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
+            return ReadRepresentation(ASCIIString, FixedLengthString{ASCIIString}(dt.size))
+        elseif dt.bitfield1 == 0x11 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
+            return ReadRepresentation(UTF8String, FixedLengthString{UTF8String}(dt.size))
+        else
+            throw(UnsupportedFeatureException())
+        end
+    elseif dt.class == DT_OPAQUE
+        error("attempted to read a bare (non-committed) datatype")
+    elseif dt.class == DT_REFERENCE
+        return ReadRepresentation(Any, Reference)
+    else
+        throw(UnsupportedFeatureException())
+    end
+end
 
 function jltype(f::JLDFile, dt::VariableLengthDatatype)
     if dt == VLEN_ASCII
@@ -368,10 +394,12 @@ h5convert!(out::Ptr, ::FixedLengthString, f::JLDFile, x, ::JLDWriteSession) =
     (unsafe_copy!(convert(Ptr{UInt8}, out), pointer(x.data), length(x.data)); nothing)
 h5convert!{T<:ByteString}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) =
     writevlen!(out, UInt8, f, x.data, wsession)
-jlconvert{T,S<:ByteString}(::Union(ReadRepresentation{T,S}, ReadRepresentation{T,S}), f::JLDFile, ptr::Ptr) =
-    convert(T, readvlen(f, ptr, UInt8))
-jlconvert(T::ReadRepresentation{ByteString,Vlen{UTF8String}}, file::JLDFile, ptr::Ptr) =
+jlconvert{T,S<:ByteString}(::ReadRepresentation{T,Type{Vlen{S}}}, f::JLDFile, ptr::Ptr) =
+    convert(T, S(readvlen(f, ptr, UInt8)))
+jlconvert(T::ReadRepresentation{ByteString,Type{Vlen{UTF8String}}}, file::JLDFile, ptr::Ptr) =
     bytestring(readvlen(file, ptr, UInt8))
+jlconvert{T,S<:ByteString}(rr::ReadRepresentation{T,FixedLengthString{S}}, file::JLDFile, ptr::Ptr) =
+    convert(T, S(pointer_to_array(convert(Ptr{UInt8}, ptr), rr.odr.length)))
 
 ## UTF16Strings
 

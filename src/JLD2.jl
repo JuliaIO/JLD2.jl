@@ -52,7 +52,9 @@ immutable Group{T}
 end
 
 immutable OnDiskRepresentation{Offsets,Types} end
-immutable ReadRepresentation{T,ODR} end
+immutable ReadRepresentation{T,ODR}
+    odr::ODR
+end
 
 symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)
 
@@ -896,15 +898,34 @@ function commit(f::JLDFile, dt::H5Datatype, attrs::Tuple{Vararg{Attribute}}=())
 end
 
 # Read the actual datatype for a committed datatype
-function Base.read(f::JLDFile, dt::CommittedDatatype)
-    if datatype_class == DT_FIXED_POINT
-        read_data(dataspace_type, dataspace_dimensions, jltype(read(io, FixedPointDatatype)), data_offset)
-    elseif datatype_class == DT_FLOATING_POINT
-        read_data(dataspace_type, dataspace_dimensions, jltype(read(io, FloatingPointDatatype)), data_offset)
-    elseif datatype_class == DT_STRING
-        read_data(dataspace_type, dataspace_dimensions, jltype(read(io, StringDatatype)), data_offset)
-    elseif datatype_class == DT_VARIABLE_LENGTH
-        read_data(dataspace_type, dataspace_dimensions, jltype(read(io, VariableLengthDatatype)), data_offset)
+function replace(x, from, to)
+    ex = copy(x)
+    for i = 1:length(ex.args)
+        x = ex.args[i]
+        if x == from
+            ex.args[i] = to
+        elseif isa(x, Expr)
+            ex.args[i] = replace(x, from, to)
+        else
+            ex.args[i] = esc(x)
+        end
+    end
+    ex
+end
+
+macro read_datatype(io, datatype_class, datatype, then)
+    quote
+        if $(esc(datatype_class)) == DT_FIXED_POINT
+            $(replace(then, datatype, :(read($(esc(io)), FixedPointDatatype))))
+        elseif $(esc(datatype_class)) == DT_FLOATING_POINT
+            $(replace(then, datatype, :(read($(esc(io)), FloatingPointDatatype))))
+        elseif $(esc(datatype_class)) == DT_STRING || $(esc(datatype_class)) == DT_OPAQUE || $(esc(datatype_class)) == DT_REFERENCE
+            $(replace(then, datatype, :(read($(esc(io)), BasicDatatype))))
+        elseif $(esc(datatype_class)) == DT_VARIABLE_LENGTH
+            $(replace(then, datatype, :(read($(esc(io)), VariableLengthDatatype))))
+        else
+            throw(UnsupportedFeatureException())
+        end
     end
 end
 
@@ -983,18 +1004,12 @@ function read_data(f::JLDFile)
     # Read the data
     # For efficiency reasons, we do not use dispatch here
     seek(io, datatype_offset)
-    if datatype_class == DT_FIXED_POINT
-        read_data(f, dataspace_type, dataspace_dimensions, jltype(f, read(io, FixedPointDatatype)), data_offset)
-    elseif datatype_class == DT_FLOATING_POINT
-        read_data(f, dataspace_type, dataspace_dimensions, jltype(f, read(io, FloatingPointDatatype)), data_offset)
-    elseif datatype_class == DT_STRING
-        read_data(f, dataspace_type, dataspace_dimensions, jltype(f, read(io, StringDatatype)), data_offset)
-    elseif datatype_class == DT_VARIABLE_LENGTH
-        read_data(f, dataspace_type, dataspace_dimensions, jltype(f, read(io, VariableLengthDatatype)), data_offset)
-    elseif datatype_class == typemax(UInt8) # Committed datatype
+    if datatype_class == typemax(UInt8) # Committed datatype
         read_data(f, dataspace_type, dataspace_dimensions, jltype(f, f.datatype_locations[datatype_offset]), data_offset)
     else
-        throw(UnsupportedFeatureException())
+        @read_datatype io datatype_class dt begin
+            read_data(f, dataspace_type, dataspace_dimensions, jltype(f, dt), data_offset)
+        end
     end
 end
 
