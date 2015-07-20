@@ -2,6 +2,7 @@ module JLD2
 using ArrayViews, DataStructures
 import Base.sizeof
 include("Lookup3.jl")
+export jldopen
 
 const SUPERBLOCK_SIGNATURE = reinterpret(UInt64, UInt8[0o211, 'H', 'D', 'F', '\r', '\n', 0o032, '\n'])[1]
 const OBJECT_HEADER_SIGNATURE = reinterpret(UInt32, UInt8['O', 'H', 'D', 'R'])[1]
@@ -466,9 +467,9 @@ LinkInfo() = LinkInfo(0, 0, UNDEFINED_ADDRESS, UNDEFINED_ADDRESS)
       CSET_ASCII,
       CSET_UTF8)
 
-const LM_CREATION_ORDER_PRESENT = 2^2
-const LM_LINK_TYPE_FIELD_PRESENT = 2^3
-const LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT = 2^4
+const LM_CREATION_ORDER_PRESENT = UInt8(2^2)
+const LM_LINK_TYPE_FIELD_PRESENT = UInt8(2^3)
+const LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT = UInt8(2^4)
 
 function read_link(io::IO)
     # Version
@@ -632,9 +633,10 @@ const DS_SCALAR = 0x00
 const DS_SIMPLE = 0x01
 const DS_NULL = 0x02
 
-immutable Dataspace{N}
+immutable Dataspace{N,A}
     dataspace_type::UInt8
     size::NTuple{N,Length}
+    attributes::A
 end
 
 immutable DataspaceStart
@@ -645,8 +647,27 @@ immutable DataspaceStart
 end
 define_packed(DataspaceStart)
 
-Dataspace(::Any) = Dataspace(DS_SCALAR, ())
-Dataspace{T,N}(x::Array{T,N}) = Dataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))))
+function nulldataspace{N}(x::NTuple{N,Int})
+    Dataspace(DS_NULL, (), (Attribute(:dimensions, Dataspace(DS_SIMPLE, (Length(N),), ()),
+                            FixedPointDatatype(sizeof(Length), false),
+                            Length, Length[x for x in reverse(x)]),))
+end
+
+Dataspace() = Dataspace(DS_NULL, (), ())
+@generated function Dataspace(x::Any)
+    if x.size == 0
+        Dataspace()
+    else
+        Dataspace(DS_SCALAR, (), ())
+    end
+end
+@generated function Dataspace{T,N}(x::Array{T,N})
+    if !hasdata(T)
+        :(nulldataspace(size(x)))
+    else
+        :(Dataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))), ()))
+    end
+end
 
 sizeof{N}(::Union(Dataspace{N},Type{Dataspace{N}})) = 4 + sizeof(Length)*N
 numel(x::Dataspace{0}) = x.dataspace_type == DS_SCALAR ? 1 : 0
@@ -663,13 +684,12 @@ end
 # Attributes
 #
 
-immutable Attribute{N,H5T<:H5Datatype,ODR,T}
+immutable Attribute{DS<:Dataspace,H5T<:H5Datatype,ODR,T}
     name::Symbol
-    dataspace::Dataspace{N}
+    dataspace::DS
     datatype::H5T
     odr::ODR
     data::T
-    wsession::JLDWriteSession
 end
 
 immutable AttributeHeader
@@ -684,7 +704,7 @@ define_packed(AttributeHeader)
 Base.sizeof(attr::Attribute) = 8 + symbol_length(attr.name) + 1 + sizeof(attr.datatype) + sizeof(attr.dataspace) +
                                numel(attr.dataspace) * sizeof(attr.odr)
 
-function Base.write(io::IO, f::JLDFile, attr::Attribute)
+function Base.write(io::IO, f::JLDFile, attr::Attribute, wsession::JLDWriteSession)
     namelen = symbol_length(attr.name)
     write(io, AttributeHeader(0x02, isa(attr.datatype, CommittedDatatype), namelen+1,
                               sizeof(attr.datatype), sizeof(attr.dataspace)))
@@ -692,7 +712,7 @@ function Base.write(io::IO, f::JLDFile, attr::Attribute)
     write(io, UInt8(0))
     write(io, attr.datatype)
     write(io, attr.dataspace)
-    write_data(f, attr.data, attr.odr, attr.wsession)
+    write_data(f, attr.data, attr.odr, wsession)
 end
 
 #
@@ -869,7 +889,7 @@ function commit(f::JLDFile, dt::H5Datatype, attrs::Tuple{Vararg{Attribute}}=())
     write(cio, dt)
     for attr in attrs
         write(cio, HeaderMessage(HM_ATTRIBUTE, sizeof(attr), 0))
-        write(cio, f, attr)
+        write(cio, f, attr, f.datatype_wsession)
     end
     seek(io, offset + sz)
     write(io, end_checksum(cio))
@@ -1008,7 +1028,10 @@ function read_data{T,ODR}(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_d
 end
 
 function payload_size(dataspace::Dataspace, datatype::H5Datatype, datasz::Int, layout_class::UInt8)
-    sz = sizeof(dataspace) + sizeof(datatype) + 2 + 4*sizeof(HeaderMessage) + 2
+    sz = sizeof(dataspace) + sizeof(datatype) + 2 + (4 + length(dataspace.attributes))*sizeof(HeaderMessage) + 2
+    for attr in dataspace.attributes
+        sz += sizeof(attr)
+    end
     if layout_class == LC_COMPACT_STORAGE
         sz + 2 + datasz
     else
@@ -1080,6 +1103,12 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, o
     write(cio, UInt8(3)) # Version
     write(cio, 0x09)     # Flags
 
+    # Attributes
+    for attr in dataspace.attributes
+        write(cio, HeaderMessage(HM_ATTRIBUTE, sizeof(attr), 0))
+        write(cio, f, attr, f.datatype_wsession)
+    end
+
     # Data storage layout
     if layout_class == LC_COMPACT_STORAGE
         write(cio, HeaderMessage(HM_DATA_LAYOUT, 4+datasz, 0))
@@ -1105,12 +1134,22 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, o
 
     header_offset
 end
+
 # Force specialization on DataType
 write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, odr::Type{Tuple{}}, data, wsession::JLDWriteSession) =
     error("ODR is invalid")
 
 write_dataset(f::JLDFile, x, wsession::JLDWriteSession) =
     write_dataset(f, Dataspace(x), h5type(f, x), objodr(x), x, wsession)
+
+function write_dataset(f::JLDFile, x::Array, wsession::JLDWriteSession)
+    # Avoid type instability due to empty arrays
+    if isempty(x)
+        write_dataset(f, nulldataspace(size(x)), h5type(f, x), objodr(x), x, wsession)
+    else
+        write_dataset(f, Dataspace(x), h5type(f, x), objodr(x), x, wsession)
+    end
+end
 
 @noinline function write_ref_nonbits(f::JLDFile, wsession::JLDWriteSession, x)
     ref = get(wsession.h5ref, x, Reference(0))::Reference
@@ -1170,8 +1209,8 @@ function write_heap_object{T}(f::JLDFile, ptr::Ptr{T}, n::Int)
         # Global heap is at end and can be extended
         gh = f.global_heap
         gh.length = gh.length - gh.free + objsz
-        seek(io. gh.offset + 8)
-        write(io, Length(heapsz))
+        seek(io, gh.offset + 8)
+        write(io, gh.length)
         f.end_of_data += objsz
     else
         # Need to create a new global heap

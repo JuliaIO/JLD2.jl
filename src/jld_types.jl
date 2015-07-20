@@ -11,6 +11,12 @@ typealias CommitParam Union(Type{Val{false}}, Type{Val{true}})
 typetuple(types) = Tuple{types...}
 
 ## Helper functions
+
+# Determines whether a specific field type should be saved in the file
+hasdata(::Type{Union{}}) = false
+hasdata{T<:Array}(::Type{T}) = true
+hasdata{T}(::Type{T}) = !isleaftype(T) || T.size != 0
+
 @generated function sizeof{Offsets,Types}(::OnDiskRepresentation{Offsets,Types})
     Offsets[end]+sizeof(Types.parameters[end])
 end
@@ -40,9 +46,12 @@ fieldodr(::Type{Union()}) = Union()
         if sizeof(T) == 0
             # A ghost type or pointer singleton, so no need to store at all
             return Union()
-        elseif isa(T, DataType) && (isbits(T) || (!T.mutable && initialized))
-            # isbits or guaranteed initialized immutable, so store inline
-            return odr(T)
+        elseif isa(T, DataType)
+            if isbits(T)
+                return :(odr(T))
+            elseif !T.mutable
+                return :(initialized ? odr(T) : Reference)
+            end
         end
     end
     Reference
@@ -107,19 +116,13 @@ objodr(x) = odr(typeof(x))
 # reflecting the on-disk representation
 #
 # Performance note: this should be inferrable.
-@generated function h5type{T}(f::JLDFile, x::T)
-    if sizeof(T) == 0
-        nothing
+function h5type{T}(f::JLDFile, x::T)
+    haskey(f.jlh5type, T) && return f.jlh5type[T]
+    if isempty(T.types)
+        # bitstype
+        commit(f, OpaqueDatatype(sizeof(T)), T)
     else
-        quote
-            haskey(f.jlh5type, T) && return f.jlh5type[T]
-            if isempty(T.types)
-                # bitstype
-                commit(f, OpaqueDatatype(sizeof(T)), T)
-            else
-                commit_compound(f, fieldnames(T), T)
-            end
-        end
+        commit_compound(f, fieldnames(T), T)
     end
 end
 
@@ -153,7 +156,7 @@ function commit_compound(f::JLDFile, names::AbstractVector, T::DataType)
     
     if hasfieldtype
         fieldtypeattr = Attribute(:field_datatypes, Dataspace(fieldtypes), ReferenceDatatype(),
-                                  Reference, fieldtypes, f.datatype_wsession)
+                                  Reference, fieldtypes)
         commit(f, CompoundDatatype(offset, h5names, offsets, members), T, fieldtypeattr)::CommittedDatatype
     else
         commit(f, CompoundDatatype(offset, h5names, offsets, members), T)::CommittedDatatype
@@ -174,7 +177,7 @@ function commit(f::JLDFile, dtype::H5Datatype, T::DataType, attributes::Attribut
     f.h5jltype[cdt] = T
     push!(f.datatypes, dtype)
 
-    typeattr = Attribute(:julia_type, Dataspace(T), dtdt, odr(DataType), T, f.datatype_wsession)
+    typeattr = Attribute(:julia_type, Dataspace(T), dtdt, odr(DataType), T)
     commit(f, dtype, tuple(typeattr, attributes...))
 
     cdt::CommittedDatatype
@@ -269,6 +272,9 @@ h5type(f::JLDFile, x::PrimitiveTypes) = h5fieldtype(f, typeof(x), true)
 # A hack to prevent us from needing to box the output pointer
 # XXX not thread-safe!
 const BOXED_PTR = Ref{Ptr{Void}}()
+function h5convert!(out::Ptr, odr::Type{Reference}, f::JLDFile, x::Reference, wsession::JLDWriteSession)
+    (unsafe_store!(convert(Ptr{Reference}, out), x); nothing)
+end
 @inline function h5convert!(out::Ptr, odr::Type{Reference}, f::JLDFile, x::ANY, wsession::JLDWriteSession)
     BOXED_PTR[] = out
     h5convert_with_boxed_ptr!(f, x, wsession)
@@ -388,9 +394,9 @@ h5type(f::JLDFile, x::Union(BigInt, BigFloat)) = h5fieldtype(f, typeof(x), true)
 odr(::Union(Type{BigInt}, Type{BigFloat})) = fieldodr(ASCIIString, true)
 
 h5convert!(out::Ptr, ::Type{Vlen{ASCIIString}}, f::JLDFile, x::BigInt, ::JLDWriteSession) =
-    (writevlen(out, f, base(62, x)); nothing)
+    (writevlen(out, f, base(62, x).data); nothing)
 h5convert!(out::Ptr, ::Type{Vlen{ASCIIString}}, f::JLDFile, x::BigFloat, ::JLDWriteSession) =
-    (writevlen(out, f, string(x)); nothing)
+    (writevlen(out, f, string(x).data); nothing)
 
 jlconvert(::ReadRepresentation{BigInt,Vlen{ASCIIString}}, f::JLDFile, ptr::Ptr) =
     parse(BigInt, ASCIIString(readvlen(f, ptr, UInt8)), 62)
@@ -423,7 +429,7 @@ function h5type(f::JLDFile, ::Type{DataType})
     f.h5jltype[cdt] = DataType
     push!(f.datatypes, cdt)
 
-    commit(f, H5TYPE_DATATYPE, (Attribute(:julia_type, Dataspace(DataType), cdt, odr(DataType), DataType, f.datatype_wsession),))
+    commit(f, H5TYPE_DATATYPE, (Attribute(:julia_type, Dataspace(DataType), cdt, odr(DataType), DataType),))
 
     cdt
 end
@@ -449,7 +455,10 @@ jlconvert{T<:Type}(::Type{T}, file::JLDFile, ptr::Ptr) =
 
 ## Pointers
 
-odr{T<:Ptr}(::Type{T}) = throw(PointerException())
+immutable PointerException <: Exception; end
+show(io::IO, ::PointerException) = print(io, "cannot write a pointer to JLD file")
+h5fieldtype{T<:Ptr}(::JLDFile, ::Type{T}, ::Bool) = throw(PointerException())
+h5type(::JLDFile, ::Ptr) = throw(PointerException())
 
 ## Arrays
 
@@ -458,7 +467,13 @@ odr{T<:Ptr}(::Type{T}) = throw(PointerException())
 h5fieldtype{T,N}(::JLDFile, ::Type{Array{T,N}}, ::Bool) = ReferenceDatatype()
 fieldodr{T,N}(::Type{Array{T,N}}, ::Bool) = Reference
 
-h5type{T}(f::JLDFile, ::Array{T}) = h5fieldtype(f, T, false)
+@generated function h5type{T}(f::JLDFile, ::Array{T})
+    if !hasdata(T)
+        :(OpaqueDatatype(1))
+    else
+        :(h5fieldtype(f, T, false))
+    end
+end
 odr{T,N}(::Type{Array{T,N}}) = fieldodr(T, false)
 
 ## User-defined types
@@ -618,6 +633,10 @@ unknown_type_err(T) =
     push!(args, nothing)
     ex
 end
+
+# In some cases, we save a datatype but don't store any data (because
+# it's a pointer singleton or ghost)
+h5convert!(::Ptr, ::Type{Union{}}, ::JLDFile, ::ANY, ::JLDWriteSession) = nothing
 
 # All remaining are just unsafe_store! calls
 h5convert!{T}(out::Ptr, ::Type{T}, ::JLDFile, x::T, ::JLDWriteSession) =
