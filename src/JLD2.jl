@@ -1155,7 +1155,7 @@ function write_dataset(f::JLDFile, x::Array, wsession::JLDWriteSession)
     end
 end
 
-@noinline function write_ref_nonbits(f::JLDFile, wsession::JLDWriteSession, x)
+@noinline function write_ref_nonbits(f::JLDFile, x, wsession::JLDWriteSession)
     ref = get(wsession.h5ref, x, Reference(0))::Reference
     ref != Reference(0) && return ref
     ref = Reference(write_dataset(f, x, wsession))::Reference
@@ -1163,11 +1163,11 @@ end
     ref
 end
 
-@inline function write_ref(f::JLDFile, wsession::JLDWriteSession, x)
+@inline function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
     if isbits(typeof(x))
         Reference(write_dataset(f, x, wsession))::Reference
     else
-        write_ref_nonbits(f, wsession, x)::Reference
+        write_ref_nonbits(f, x, wsession)::Reference
     end
 end
 

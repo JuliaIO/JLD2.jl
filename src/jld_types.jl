@@ -288,15 +288,17 @@ h5type(f::JLDFile, x::PrimitiveTypes) = h5fieldtype(f, typeof(x), true)
 # A hack to prevent us from needing to box the output pointer
 # XXX not thread-safe!
 const BOXED_PTR = Ref{Ptr{Void}}()
-function h5convert!(out::Ptr, odr::Type{Reference}, f::JLDFile, x::Reference, wsession::JLDWriteSession)
-    (unsafe_store!(convert(Ptr{Reference}, out), x); nothing)
-end
 @inline function h5convert!(out::Ptr, odr::Type{Reference}, f::JLDFile, x::ANY, wsession::JLDWriteSession)
     BOXED_PTR[] = out
     h5convert_with_boxed_ptr!(f, x, wsession)
 end
-@noinline function h5convert_with_boxed_ptr!(f::JLDFile, x, wsession::JLDWriteSession)
-    unsafe_store!(convert(Ptr{Reference}, BOXED_PTR[]), write_ref(f, wsession, x)); nothing
+function h5convert_with_boxed_ptr!(f::JLDFile, x::Reference, wsession::JLDWriteSession)
+    unsafe_store!(convert(Ptr{Reference}, BOXED_PTR[]), x)
+    nothing
+end
+function h5convert_with_boxed_ptr!(f::JLDFile, x, wsession::JLDWriteSession)
+    unsafe_store!(convert(Ptr{Reference}, BOXED_PTR[]), write_ref(f, x, wsession))
+    nothing
 end
 h5convert_uninitialized!(out::Ptr, odr::Type{Reference}) =
     (unsafe_store!(convert(Ptr{Reference}, out), Reference(0)); nothing)
@@ -463,7 +465,7 @@ function h5convert!(out::Ptr, ::DataTypeODR, f::JLDFile, T::DataType, wsession::
     push!(tn, T.name.name)
     writevlen!(out, UInt8, f, join(tn, ".").data, f.datatype_wsession)
     if !isempty(T.parameters)
-        writevlen!(out+sizeof(Vlen{UInt8}), Reference, f, Reference[write_ref(f, wsession, x) for x in T.parameters], f.datatype_wsession)
+        writevlen!(out+sizeof(Vlen{UInt8}), Reference, f, Reference[write_ref(f, x, wsession) for x in T.parameters], f.datatype_wsession)
     end
     nothing
 end
