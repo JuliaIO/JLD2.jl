@@ -19,22 +19,11 @@ ReadRepresentation(T) = ReadRepresentation{T,T}()
 sizeof{T,S}(::ReadRepresentation{T,S}) = sizeof(S)
 
 # Determines whether a specific field type should be saved in the file
-hasdata(::Type{Union{}}) = false
+hasfielddata(::Type{Union{}}) = false
+hasfielddata{T}(::Type{Type{T}}) = true
+hasfielddata{T}(::Type{T}) = !isleaftype(T) || !isbits(T) || sizeof(T) != 0
 hasdata{T}(::Type{Type{T}}) = true
-@generated function hasdata{T}(::Type{T})
-    if !isleaftype(T)
-        true
-    elseif sizeof(T) == 0
-        false
-    elseif isempty(T.types)
-        true
-    else
-        for x in T.types
-            (x <: T && T <: x) || hasdata(x) && return true
-        end
-        false
-    end
-end
+hasdata{T}(::Type{T}) = sizeof(T) != 0
 
 # Gets the size of an on-disk representation
 @generated function sizeof{Offsets,Types,ODRs}(::OnDiskRepresentation{Offsets,Types,ODRs})
@@ -64,8 +53,8 @@ fieldnames(x::ANY) = Base.fieldnames(x)
 fieldodr(::Type{Union{}}, ::Bool) = nothing
 @generated function fieldodr{T}(::Type{T}, initialized::Bool)
     if isleaftype(T)
-        if !hasdata(T)
-            # A ghost type or pointer singleton, so no need to store at all
+        if !hasfielddata(T)
+            # A ghost type, so no need to store at all
             return nothing
         elseif isa(T, DataType)
             if isbits(T)
@@ -87,7 +76,7 @@ end
 h5fieldtype(f::JLDFile, ::Type{Union()}, ::Bool) = nothing
 function h5fieldtype(f::JLDFile, T::DataType, initialized::Bool)
     if isleaftype(T)
-        if !hasdata(T)
+        if !hasfielddata(T)
             return nothing
         elseif isbits(T) || (initialized && !T.mutable)
             haskey(f.jlh5type, T) && return f.jlh5type[T]
@@ -109,7 +98,7 @@ h5fieldtype(f::JLDFile, ::ANY, ::Bool) = ReferenceDatatype()
 # as references
 @generated function odr{T}(::Type{T})
     if !hasdata(T)
-        # A singleton type, so no need to store at all
+        # A pointer singleton or ghost, so no need to store at all
         return nothing
     elseif isbits(T) && !haspadding(T)
         # Has a specialized convert method or is an unpadded type
@@ -161,7 +150,7 @@ function commit_compound(f::JLDFile, names::AbstractVector, T::DataType)
 
     offset = 0
     for i = 1:length(types)
-        !hasdata(types[i]) && continue
+        !hasfielddata(types[i]) && continue
         dtype = h5fieldtype(f, types[i], i <= T.ninitialized)
         dtype == nothing && continue
         push!(h5names, string(names[i]))
@@ -290,11 +279,13 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype, field_dataty
     types = Array(Any, length(T.types))
     odrs = Array(Any, length(T.types))
     fn = fieldnames(T)
+    dtindex = 0
     for i = 1:length(T.types)
         wstype = T.types[i]
-        if !hasdata(wstype)
-            offsets[i] = i == 1 ? 0 : offsets[i-1] + sizeof(types[i-1])
-            types[i] = nothing
+        if !hasfielddata(wstype)
+            types[i] = wstype
+            odrs[i] = nothing
+            offsets[i] = dtindex == 0 ? 0 : (dt.offsets[dtindex] + dt.members[dtindex].size::UInt32)
         else
             stringfield = string(fn[i])
             if !haskey(dtnames, stringfield)
@@ -306,7 +297,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype, field_dataty
             if !isa(field_datatypes_attr, Void) && (ref = refs[dtindex]) != Reference(0)
                 dtrr = jltype(f, f.datatype_locations[ref.offset])
             else
-                dtrr = jltype(f, dt.members[i])
+                dtrr = jltype(f, dt.members[dtindex])
             end
 
             readtype, odr = typeof(dtrr).parameters
@@ -329,7 +320,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype, field_dataty
     end
 
     if !all(mapped)
-        warn("""the following fields are present in type $T in the file but not present in the type the workspace:
+        warn("""the following fields are present in type $T saved in the file but not present in the type the workspace:
 
                 $(join(dt.names[!mapped], "\n"))
 
@@ -485,10 +476,8 @@ h5convert_uninitialized!{T<:Vlen}(out::Ptr, odr::Type{T}) =
     (unsafe_store!(convert(Ptr{Int128}, out), 0); nothing)
 
 # Read variable-length data given offset and length in ptr
-load_vlen{T}(f::JLDFile, ptr::Ptr, ::Type{T}) =
-    read_heap_object(f, unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), T)
 jlconvert{T,S}(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr) =
-    convert(T, load_vlen(f, ptr, S))::T
+    read_heap_object(f, unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), ReadRepresentation(T, S))
 jlconvert_isinitialized{T,S}(::ReadRepresentation{T,Vlen{S}}, ptr::Ptr) =
     unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)) != GlobalHeapID(0, 0)
 
@@ -550,9 +539,7 @@ h5convert!(out::Ptr, ::FixedLengthString, f::JLDFile, x, ::JLDWriteSession) =
 h5convert!{T<:ByteString}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) =
     store_vlen!(out, UInt8, f, x.data, wsession)
 jlconvert{T,S<:ByteString}(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr) =
-    convert(T, S(load_vlen(f, ptr, UInt8)))::T
-jlconvert(T::ReadRepresentation{ByteString,Vlen{UTF8String}}, f::JLDFile, ptr::Ptr) =
-    bytestring(load_vlen(f, ptr, UInt8))
+    convert(T, S(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr)))::T
 function jlconvert{S<:ByteString}(rr::FixedLengthString{S}, ::JLDFile, ptr::Ptr)
     data = Array(UInt8, rr.length)
     unsafe_copy!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
@@ -584,7 +571,7 @@ h5convert!(out::Ptr, fl::FixedLengthString{UTF16String}, f::JLDFile, x::UTF16Str
 
 # Add the embedded null back in when reading
 function jlconvert(T::ReadRepresentation{UTF16String,Vlen{UInt16}}, f::JLDFile, ptr::Ptr)
-    vl = load_vlen(f, ptr, UInt16)
+    vl = jlconvert(ReadRepresentation(UInt16, Vlen{UInt16}), f, ptr)
     push!(vl, 0)
     UTF16String(vl)
 end
@@ -611,7 +598,8 @@ constructrr(::JLDFile, ::Type{Symbol}, dt::VariableLengthDatatype{FixedPointData
     dt == H5TYPE_VLEN_UTF8 ? (ReadRepresentation(Symbol, Vlen{UTF8String}), true) :
                              throw(UnsupportedFeatureException())
 
-jlconvert(::ReadRepresentation{Symbol,Vlen{UTF8String}}, f::JLDFile, ptr::Ptr) = symbol(load_vlen(f, ptr, UInt8))
+jlconvert(::ReadRepresentation{Symbol,Vlen{UTF8String}}, f::JLDFile, ptr::Ptr) =
+    symbol(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr))
 
 ## BigInts and BigFloats
 
@@ -633,9 +621,9 @@ constructrr(::JLDFile, T::Union{Type{BigInt},Type{BigFloat}}, dt::VariableLength
                               throw(UnsupportedFeatureException())
 
 jlconvert(::ReadRepresentation{BigInt,Vlen{ASCIIString}}, f::JLDFile, ptr::Ptr) =
-    parse(BigInt, ASCIIString(load_vlen(f, ptr, UInt8)), 62)
+    parse(BigInt, ASCIIString(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr)), 62)
 jlconvert(::ReadRepresentation{BigFloat,Vlen{ASCIIString}}, f::JLDFile, ptr::Ptr) =
-    parse(BigFloat, ASCIIString(load_vlen(f, ptr, UInt8)))
+    parse(BigFloat, ASCIIString(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr)))
 
 ## DataTypes
 
@@ -664,7 +652,7 @@ function h5fieldtype(f::JLDFile, ::Type{DataType}, ::Bool)
 
     cdt
 end
-fieldodr{T<:DataType}(::Type{T}, ::Bool) = DataTypeODR()
+fieldodr(::Type{DataType}, ::Bool) = DataTypeODR()
 
 h5type(f::JLDFile, ::DataType) = h5fieldtype(f, DataType, true)
 odr{T<:DataType}(::Type{T}) = DataTypeODR()
@@ -687,7 +675,7 @@ end
 
 immutable UnknownType{Path} end
 function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile, ptr::Ptr)
-    path = bytestring(load_vlen(f, ptr, UInt8))
+    path = bytestring(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr))
     parts = split(path, '.')
     m = Main
     for part in parts
@@ -700,8 +688,7 @@ function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile, ptr::Pt
     
     hasparameters = unsafe_load(convert(Ptr{UInt32}, ptr+sizeof(Vlen{UInt8}))) != 0
     if hasparameters
-        refs = load_vlen(f, ptr+sizeof(Vlen{UInt8}), Reference)
-        params = [read_dataset(f, x.offset) for x in refs]
+        params = jlconvert(ReadRepresentation(Any, Vlen{Reference}), f, ptr+sizeof(Vlen{UInt8}))
         try
             return m{params...}::DataType
         catch e
@@ -721,10 +708,10 @@ const H5TYPE_UNION = VariableLengthDatatype(H5TYPE_DATATYPE)
 
 h5fieldtype(f::JLDFile, ::Type{Union}, ::Bool) =
     haskey(f.jlh5type, Union) ? f.jlh5type[Union] : commit(f, H5TYPE_UNION, Union)
-fieldodr{T<:Union}(::Type{T}, ::Bool) = Vlen{DataTypeODR()}
+fieldodr(::Type{Union}, ::Bool) = Vlen{DataTypeODR()}
 
 h5type(f::JLDFile, ::Union) = h5fieldtype(f, Union, true)
-odr{T<:Union}(::Type{T}) = fieldodr(Union, true)
+odr(::Type{Union}) = fieldodr(Union, true)
 
 h5convert!(out::Ptr, ::Type{Vlen{DataTypeODR()}}, f::JLDFile, x::Union, wsession::JLDWriteSession) =
     store_vlen!(out, DataTypeODR(), f, DataType[x for x in x.types], wsession)
@@ -734,11 +721,8 @@ function constructrr(::JLDFile, ::Type{Union}, dt::VariableLengthDatatype, ::Voi
                          throw(UnsupportedFeatureException())
 end
 
-function jlconvert(::ReadRepresentation{Union, Vlen{DataTypeODR()}}, f::JLDFile, ptr::Ptr)
-    refs = load_vlen(f, ptr, Reference)
-    params = DataType[read_dataset(f, x.offset) for x in refs]
-    Union{params...}
-end
+jlconvert(::ReadRepresentation{Union, Vlen{DataTypeODR()}}, f::JLDFile, ptr::Ptr) =
+    Union{jlconvert(ReadRepresentation(DataType, Vlen{DataTypeODR()}), f, ptr)...}
 
 ## Pointers
 
@@ -757,9 +741,30 @@ h5fieldtype{T<:Array}(::JLDFile, ::Type{T}, ::Bool) = ReferenceDatatype()
 fieldodr{T<:Array}(::Type{T}, ::Bool) = Reference
 
 @generated function h5type{T}(f::JLDFile, ::Array{T})
-    !hasdata(T) ? ReferenceDatatype() : :(h5fieldtype(f, T, false))
+    !hasfielddata(T) ? ReferenceDatatype() : :(h5fieldtype(f, T, false))
 end
 odr{T,N}(::Type{Array{T,N}}) = fieldodr(T, false)
+
+## SimpleVectors
+
+const H5TYPE_SIMPLEVECTOR = VariableLengthDatatype(ReferenceDatatype())
+
+h5type(f::JLDFile, ::SimpleVector) =
+    haskey(f.jlh5type, SimpleVector) ? f.jlh5type[SimpleVector] :
+                                       commit(f, H5TYPE_SIMPLEVECTOR, SimpleVector)
+odr(::Type{SimpleVector}) = Vlen{Reference}
+
+h5convert!(out::Ptr, ::Type{Vlen{Reference}}, f::JLDFile, x::SimpleVector, wsession::JLDWriteSession) =
+    store_vlen!(out, Reference, f, collect(x), wsession)
+
+
+function constructrr(::JLDFile, ::Type{SimpleVector}, dt::VariableLengthDatatype, ::Void)
+    dt == H5TYPE_SIMPLEVECTOR ? (ReadRepresentation(SimpleVector, Vlen{Reference}), true) :
+                                throw(UnsupportedFeatureException())
+end
+
+jlconvert(::ReadRepresentation{SimpleVector,Vlen{Reference}}, f::JLDFile, ptr::Ptr) =
+    Base.svec(jlconvert(ReadRepresentation(Any, Vlen{Reference}), f, ptr)...)
 
 ## User-defined types
 ##
@@ -787,7 +792,7 @@ show(io::IO, x::UndefinedFieldException) =
 jlconvert_isinitialized(::Any, ::Ptr) = true
 @generated function jlconvert{T,S}(::ReadRepresentation{T,S}, f::JLDFile, ptr::Ptr)
     isa(S, DataType) && return :(convert(T, unsafe_load(convert(Ptr{S}, ptr))))
-    S === nothing && return T.instance
+    S === nothing && return Expr(:new, T)
     @assert isa(S, OnDiskRepresentation)
 
     offsets, types, odrs = typeof(S).parameters
@@ -812,7 +817,7 @@ jlconvert_isinitialized(::Any, ::Ptr) = true
 
         if odr === nothing
             # Type is not stored or single instance
-            push!(:($fsym = $(ttype.instance)))
+            push!(args, :($fsym = $(Expr(:new, ttype))))
         elseif i <= T.ninitialized || isbits(ttype)
             # Reference must always be initialized
             push!(args, quote

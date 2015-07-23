@@ -233,7 +233,7 @@ function define_packed(ty::DataType)
 end
 
 immutable JLDWriteSession
-    h5ref::ObjectIdDict
+    h5offset::ObjectIdDict
 end
 JLDWriteSession() = JLDWriteSession(ObjectIdDict())
 
@@ -268,21 +268,25 @@ symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)
 
 type JLDFile{T<:IO}
     io::T
+    writable::Bool
+    written::Bool
     datatype_locations::OrderedDict{Offset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession
     datasets::OrderedDict{ByteString,Offset}
     jlh5type::Dict{Type,CommittedDatatype}
     h5jltype::Dict{CommittedDatatype,ReadRepresentation}
+    jloffset::Dict{Offset,WeakRef}
     end_of_data::Offset
     global_heaps::Dict{Offset,GlobalHeap}
     global_heap::GlobalHeap
 end
-JLDFile(io::IO) = JLDFile(io, OrderedDict{Offset,CommittedDatatype}(), H5Datatype[], JLDWriteSession(),
-                          OrderedDict{ByteString,Offset}(),
-                          Dict{Type,CommittedDatatype}(), Dict{CommittedDatatype,ReadRepresentation}(),
-                          UInt64(sizeof(Superblock)), Dict{Offset,GlobalHeap}(),
-                          GlobalHeap(UNDEFINED_ADDRESS, 0, 0, Offset[]))
+JLDFile(io::IO, writable::Bool, written::Bool) =
+    JLDFile(io, writable, written, OrderedDict{Offset,CommittedDatatype}(), H5Datatype[],
+            JLDWriteSession(), OrderedDict{ByteString,Offset}(), Dict{Type,CommittedDatatype}(),
+            Dict{CommittedDatatype,ReadRepresentation}(), Dict{Offset,WeakRef}(),
+            UInt64(sizeof(Superblock)), Dict{Offset,GlobalHeap}(),
+            GlobalHeap(UNDEFINED_ADDRESS, 0, 0, Offset[]))
 
 # Loads a variable-length size according to flags
 # Expects that the first two bits of flags mean:
@@ -669,33 +673,24 @@ define_packed(DataspaceStart)
 
 const EMPTY_DIMENSIONS = Length[]
 
-@generated function nulldataspace{T}(f::JLDFile, x::Array{T}, odr)
-    attr = :(WrittenAttribute(f, :dimensions, Length[x for x in reverse(size(x))]))
-    if odr === Void || odr === Type{Reference}
-        :(Dataspace(DS_NULL, (), ($attr, WrittenAttribute(f, :julia_type, T))))
-    else
-        :(Dataspace(DS_NULL, (), ($attr,)))
-    end
-end
-
 Dataspace() = Dataspace(DS_NULL, (), ())
-@generated function Dataspace(f::JLDFile, x::Any, odr)
-    if !hasdata(x)
-        Dataspace()
-    else
-        Dataspace(DS_SCALAR, (), ())
-    end
-end
-@generated function Dataspace{T,N}(f::JLDFile, x::Array{T,N}, odr)
-    if !hasdata(T)
-        :(nulldataspace(f, x, odr))
-    elseif odr === Void || odr === Type{Reference}
-        :(Dataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))),
-          (WrittenAttribute(f, :julia_type, T),)))
-    else
-        :(Dataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))), ()))
-    end
-end
+Dataspace(::JLDFile, ::Any, odr::Void) = Dataspace()
+Dataspace(::JLDFile, ::Any, ::Any) = Dataspace(DS_SCALAR, (), ())
+
+nulldataspace{T}(f::JLDFile, x::Array{T}, ::Union(Void, Type{Reference})) =
+    Dataspace(DS_NULL, (),
+              (WrittenAttribute(f, :dimensions, Length[x for x in reverse(size(x))]),
+               WrittenAttribute(f, :julia_type, T)))
+nulldataspace(f::JLDFile, x::Array, ::Any) =
+    Dataspace(DS_NULL, (),
+              (WrittenAttribute(f, :dimensions, Length[x for x in reverse(size(x))]),))
+
+Dataspace(f::JLDFile, x::Array, ::Void) = nulldataspace(f, x, nothing)
+Dataspace{T,N}(f::JLDFile, x::Array{T,N}, ::Type{Reference}) =
+    Dataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))),
+              (WrittenAttribute(f, :julia_type, T),))
+Dataspace(f::JLDFile, x::Array, ::Any) =
+    Dataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))), ())
 
 sizeof{N}(::Union(Dataspace{N},Type{Dataspace{N}})) = 4 + sizeof(Length)*N
 numel(x::Dataspace{0}) = x.dataspace_type == DS_SCALAR ? 1 : 0
@@ -1110,6 +1105,12 @@ const LC_CONTIGUOUS_STORAGE = 0x01
 const LC_CHUNKED_STORAGE = 0x02
 
 function read_dataset(f::JLDFile, offset::Offset)
+    if haskey(f.jloffset, offset)
+        # Stored as WeakRefs and may no longer exist
+        val = f.jloffset[offset].value
+        val !== nothing && return val
+    end
+
     io = f.io
     seek(io, offset)
     cio = begin_checksum(io)
@@ -1135,10 +1136,11 @@ function read_dataset(f::JLDFile, offset::Offset)
             (read(cio, UInt8) == 3 && read(cio, UInt8) == 0x09) || throw(UnsupportedFeatureException())
         elseif msg.msg_type == HM_DATA_LAYOUT
             read(cio, UInt8) == 3 || throw(UnsupportedVersionException())
-            if read(cio, UInt8) == LC_COMPACT_STORAGE
+            storage_type = read(cio, UInt8)
+            if storage_type == LC_COMPACT_STORAGE
                 data_length = read(cio, UInt16)
                 data_offset = position(cio)
-            elseif read(cio, UInt8) == LC_CONTIGUOUS_STORAGE
+            elseif storage_type == LC_CONTIGUOUS_STORAGE
                 data_offset = read(cio, Offset)
                 data_length = read(cio, Length)
             else
@@ -1163,7 +1165,11 @@ function read_dataset(f::JLDFile, offset::Offset)
     end_checksum(cio) == read(io, UInt32) || throw(InvalidDataException())
 
     # TODO verify that data length matches
-    read_data(f, dataspace_type, dataspace_dimensions, datatype_class, datatype_offset, data_offset, attrs)
+    val = read_data(f, dataspace_type, dataspace_dimensions, datatype_class, datatype_offset, data_offset, attrs)
+    if !isbits(typeof(val))
+        f.jloffset[offset] = WeakRef(val)
+    end
+    val
 end
 
 # Read data from an attribute
@@ -1407,7 +1413,7 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, o
     end
 
     if !isbits(typeof(data))
-        wsession.h5ref[data] = Reference(header_offset)
+        wsession.h5offset[data] = Offset(header_offset)
     end
 
     header_offset
@@ -1433,8 +1439,8 @@ function write_dataset(f::JLDFile, x::Array, wsession::JLDWriteSession)
 end
 
 @noinline function write_ref_nonbits(f::JLDFile, x, wsession::JLDWriteSession)
-    ref = get(wsession.h5ref, x, Reference(0))::Reference
-    ref != Reference(0) && return ref
+    offset = get(wsession.h5offset, x, Offset(0))::Offset
+    offset != 0 && return Reference(offset)
     ref = Reference(write_dataset(f, x, wsession))::Reference
     ref
 end
@@ -1564,7 +1570,7 @@ function Base.read(io::IO, ::Type{GlobalHeap})
 end
 
 # TODO make this take an ODR
-function read_heap_object{T}(f::JLDFile, hid::GlobalHeapID, ::Type{T})
+function read_heap_object{T,RR}(f::JLDFile{MmapIO}, hid::GlobalHeapID, rr::ReadRepresentation{T,RR})
     io = f.io
     if haskey(f.global_heaps, hid.heap_offset)
         gh = f.global_heaps[hid.heap_offset]
@@ -1573,10 +1579,23 @@ function read_heap_object{T}(f::JLDFile, hid::GlobalHeapID, ::Type{T})
         f.global_heaps[hid.heap_offset] = gh = read(io, GlobalHeap)
     end
     seek(io, gh.objects[hid.index]+8)
-    len = read(io, Length)
-    n = div(len, sizeof(T))
-    len == n * sizeof(T) || throw(InvalidDataException())
-    read(io, T, n)
+    len = Int(read(io, Length))
+    n = div(len, sizeof(RR))
+    len == n * sizeof(RR) || throw(InvalidDataException())
+    
+    inptr = f.io.curptr
+    v = Array(T, n)
+    if isa(RR, DataType) && RR <: T && isbits(T)
+        unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(n))
+    else
+        @simd for i = 1:n
+            if jlconvert_isinitialized(rr, inptr)
+                @inbounds v[i] = jlconvert(rr, f, inptr)
+            end
+            inptr += sizeof(RR)
+        end
+    end
+    v
 end
 
 #
@@ -1585,7 +1604,7 @@ end
 
 function jldopen(fname::AbstractString, write::Bool, create::Bool, truncate::Bool)
     io = MmapIO(fname, write, create, truncate)
-    f = JLDFile(io)
+    f = JLDFile(io, write, truncate)
 
     if !truncate
         superblock = read(io, Superblock)
@@ -1627,6 +1646,8 @@ end
 
 function Base.write(f::JLDFile, name::String, obj, wsession::JLDWriteSession=JLDWriteSession())
     f.end_of_data == UNDEFINED_ADDRESS && throw(ArgumentError("file is closed"))
+    !f.writable && throw(ArgumentError("file was opened read-only"))
+    f.written = true
 
     io = f.io
     seek(io, f.end_of_data)
@@ -1637,33 +1658,35 @@ end
 
 function Base.close(f::JLDFile)
     io = f.io
-    seek(io, f.end_of_data)
+    if f.written
+        seek(io, f.end_of_data)
 
-    names = ByteString[]
-    sizehint!(names, length(f.datasets)+1)
-    offsets = Offset[]
-    sizehint!(offsets, length(f.datasets)+1)
+        names = ByteString[]
+        sizehint!(names, length(f.datasets)+1)
+        offsets = Offset[]
+        sizehint!(offsets, length(f.datasets)+1)
 
-    # Write types group
-    if !isempty(f.datatypes)
-        push!(names, "_types")
-        push!(offsets, position(io))
-        write(io, Group(ASCIIString[@sprintf("%08d", i) for i = 1:length(f.datatypes)],
-                        collect(keys(f.datatype_locations))))
+        # Write types group
+        if !isempty(f.datatypes)
+            push!(names, "_types")
+            push!(offsets, position(io))
+            write(io, Group(ASCIIString[@sprintf("%08d", i) for i = 1:length(f.datatypes)],
+                            collect(keys(f.datatype_locations))))
+        end
+
+        # Write root group
+        root_group_object_header_address = position(io)
+        for (k, v) in f.datasets
+            push!(names, k)
+            push!(offsets, v)
+        end
+        write(io, Group(names, offsets))
+
+        eof_address = position(io)
+        truncate(io, eof_address)
+        seek(io, 0)
+        write(io, Superblock(0, 0, UNDEFINED_ADDRESS, eof_address, root_group_object_header_address))
     end
-
-    # Write root group
-    root_group_object_header_address = position(io)
-    for (k, v) in f.datasets
-        push!(names, k)
-        push!(offsets, v)
-    end
-    write(io, Group(names, offsets))
-
-    eof_address = position(io)
-    truncate(io, eof_address)
-    seek(io, 0)
-    write(io, Superblock(0, 0, UNDEFINED_ADDRESS, eof_address, root_group_object_header_address))
     f.end_of_data = UNDEFINED_ADDRESS
     close(io)
     nothing
