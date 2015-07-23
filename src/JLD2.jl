@@ -198,7 +198,6 @@ function end_checksum(io::MmapIO)
 end
 
 # Redefine unsafe_load and unsafe_store! so that they pack the type
-# Assumes default constructor
 function define_packed(ty::DataType)
     @assert isbits(ty)
     packed_offsets = cumsum([sizeof(x) for x in ty.types])
@@ -211,8 +210,8 @@ function define_packed(ty::DataType)
                 $([:(unsafe_store!(convert(Ptr{$(ty.types[i])}, p+$(packed_offsets[i])), getfield(x, $i)))
                    for i = 1:length(packed_offsets)]...)
             end
-            function Base.unsafe_load(p::Ptr{$ty}, ::Type{$ty})
-                $(Expr(:call, ty, [:(unsafe_load(convert(Ptr{$(ty.types[i])}, p+$(packed_offsets[i]))))
+            function Base.unsafe_load(p::Ptr{$ty})
+                $(Expr(:new, ty, [:(unsafe_load(convert(Ptr{$(ty.types[i])}, p+$(packed_offsets[i]))))
                                    for i = 1:length(packed_offsets)]...))
             end
             Base.sizeof(::Union($ty, Type{$ty})) = $sz
@@ -221,8 +220,9 @@ function define_packed(ty::DataType)
 
     @eval begin
         @inline Base.write(io::MmapIO, x::$ty) = _write(io, x)
+        @inline Base.read(io::MmapIO, x::Type{$ty}) = _read(io, x)
         function Base.read(io::IO, ::Type{$ty})
-            $(Expr(:call, ty, [:(read(io, $(ty.types[i]))) for i = 1:length(packed_offsets)]...))
+            $(Expr(:new, ty, [:(read(io, $(ty.types[i]))) for i = 1:length(packed_offsets)]...))
         end
         function Base.write(io::IO, x::$ty)
             $([:(write(io, getfield(x, $i))) for i = 1:length(packed_offsets)]...)
@@ -1267,7 +1267,7 @@ end
 function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace_dimensions::Vector{Length},
                           rr::ReadRepresentation{T,RR},
                           attributes::Union(Vector{ReadAttribute},Void))
-    v = Array(T, reverse!(dataspace_dimensions)...)
+    v = Array(T, reverse!(dataspace_dimensions)...)::Array{T}
     n = prod(dataspace_dimensions)
     if isa(RR, DataType) && RR <: T && isbits(T)
         unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(n))
