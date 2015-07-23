@@ -205,7 +205,7 @@ end
 # jltype is the inverse of h5type, providing a ReadRepresentation for an
 # H5Datatype. We handle committed datatypes here, and other datatypes below.
 function jltype(f::JLDFile, cdt::CommittedDatatype)
-    haskey(f.h5jltype, cdt) && return f.h5jltype[cdt]
+    haskey(f.h5jltype, cdt) && return f.h5jltype[cdt]::ReadRepresentation
     dt, attrs = read_committed_datatype(f, cdt)
 
     julia_type_attr = nothing

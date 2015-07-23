@@ -275,7 +275,7 @@ type JLDFile{T<:IO}
     datatype_wsession::JLDWriteSession
     datasets::OrderedDict{ByteString,Offset}
     jlh5type::Dict{Type,CommittedDatatype}
-    h5jltype::Dict{CommittedDatatype,ReadRepresentation}
+    h5jltype::ObjectIdDict
     jloffset::Dict{Offset,WeakRef}
     end_of_data::Offset
     global_heaps::Dict{Offset,GlobalHeap}
@@ -284,7 +284,7 @@ end
 JLDFile(io::IO, writable::Bool, written::Bool) =
     JLDFile(io, writable, written, OrderedDict{Offset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), OrderedDict{ByteString,Offset}(), Dict{Type,CommittedDatatype}(),
-            Dict{CommittedDatatype,ReadRepresentation}(), Dict{Offset,WeakRef}(),
+            ObjectIdDict(), Dict{Offset,WeakRef}(),
             UInt64(sizeof(Superblock)), Dict{Offset,GlobalHeap}(),
             GlobalHeap(UNDEFINED_ADDRESS, 0, 0, Offset[]))
 
@@ -298,13 +298,13 @@ JLDFile(io::IO, writable::Bool, written::Bool) =
 # size of the size field
 function read_size(io::IO, flags::UInt8)
     if (flags & 1) == 0 && (flags & 2) == 0
-        read(io, UInt8)
+        Int(read(io, UInt8))
     elseif (flags & 1) == 1 && (flags & 2) == 0
-        read(io, UInt16)
+        Int(read(io, UInt16))
     elseif (flags & 1) == 0 && (flags & 2) == 2
-        read(io, UInt32)
+        Int(read(io, UInt32))
     else
-        read(io, UInt64)
+        Int(read(io, UInt64))
     end
 end
 
