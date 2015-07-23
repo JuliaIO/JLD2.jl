@@ -1270,7 +1270,12 @@ function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace_dimensions::Ve
     v = Array(T, reverse!(dataspace_dimensions)...)::Array{T}
     n = prod(dataspace_dimensions)
     if isa(RR, DataType) && RR <: T && isbits(T)
-        unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(n))
+        # It turns out that regular IO is faster here (at least on OS X)
+        mmapio = f.io
+        regulario = mmapio.f
+        seek(regulario, position(mmapio))
+        read!(regulario, v)
+        # unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(n))
     # Would this actually help with performance?
     # elseif isbits(T)
     #     @simd for i = 1:n
