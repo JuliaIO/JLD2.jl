@@ -12,8 +12,6 @@ sizeof{T,S}(::ReadRepresentation{T,S}) = sizeof(S)
 hasfielddata(::Type{Union{}}) = false
 hasfielddata{T}(::Type{Type{T}}) = true
 hasfielddata{T}(::Type{T}) = !isleaftype(T) || !isbits(T) || sizeof(T) != 0
-hasdata{T}(::Type{Type{T}}) = true
-hasdata{T}(::Type{T}) = sizeof(T) != 0
 
 # Gets the size of an on-disk representation
 @generated function sizeof{Offsets,Types,ODRs}(::OnDiskRepresentation{Offsets,Types,ODRs})
@@ -87,7 +85,7 @@ h5fieldtype(f::JLDFile, ::ANY, ::Bool) = ReferenceDatatype()
 # fieldodr, but actually encoding the data for things that odr stores
 # as references
 @generated function odr{T}(::Type{T})
-    if !hasdata(T)
+    if sizeof(T) == 0
         # A pointer singleton or ghost, so no need to store at all
         return nothing
     elseif isbits(T) && !haspadding(T)
@@ -120,7 +118,7 @@ objodr(x) = odr(typeof(x))
 # Performance note: this should be inferrable.
 function h5type{T}(f::JLDFile, x::T)
     haskey(f.jlh5type, T) && return f.jlh5type[T]
-    if !hasdata(T)
+    if sizeof(T) == 0
         commit(f, OpaqueDatatype(1), T)
     elseif isempty(T.types) # bitstype
         commit(f, OpaqueDatatype(sizeof(T)), T)
@@ -243,7 +241,7 @@ function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, ::Void)
     dt.class == DT_OPAQUE || throw(UnsupportedFeatureException())
     if sizeof(T) == dt.size
         (ReadRepresentation(T), true)
-    elseif !hasdata(T) && dt.size == 1
+    elseif sizeof(T) == 0 && dt.size == 1
         (ReadRepresentation(T, nothing), true)
     else
         warn("bitstype $T has size $(sizeof(T)), but written type has size $(dt.size); reconstructing")
