@@ -572,8 +572,6 @@ constructrr(::JLDFile, ::Type{UTF16String}, dt::VariableLengthDatatype{FixedPoin
 
 ## Symbols
 
-hasdata(::Type{Symbol}) = true
-
 h5fieldtype(f::JLDFile, ::Type{Symbol}, ::Bool) = 
     haskey(f.jlh5type, Symbol) ? f.jlh5type[Symbol] : commit(f, H5TYPE_VLEN_UTF8, Symbol)
 fieldodr(::Type{Symbol}, ::Bool) = Vlen{UTF8String}
@@ -625,7 +623,7 @@ const H5TYPE_DATATYPE = CompoundDatatype(
 )
 typealias DataTypeODR OnDiskRepresentation{(0,sizeof(Vlen{UTF8String})),Tuple{UTF8String,Vector{Any}},Tuple{Vlen{UTF8String},Vlen{Reference}}}
 
-function h5fieldtype(f::JLDFile, ::Type{DataType}, ::Bool)
+function h5fieldtype{T<:DataType}(f::JLDFile, ::Type{T}, ::Bool)
     haskey(f.jlh5type, DataType) && return f.jlh5type[DataType]
     io = f.io
     offset = f.end_of_data
@@ -636,13 +634,13 @@ function h5fieldtype(f::JLDFile, ::Type{DataType}, ::Bool)
     f.datatype_locations[offset] = cdt
     f.jlh5type[DataType] = cdt
     f.h5jltype[cdt] = ReadRepresentation(DataType, DataTypeODR())
-    push!(f.datatypes, cdt)
+    push!(f.datatypes, H5TYPE_DATATYPE)
 
     commit(f, H5TYPE_DATATYPE, (WrittenAttribute(:julia_type, Dataspace(f, DataType, odr(DataType)), cdt, odr(DataType), DataType),))
 
     cdt
 end
-fieldodr(::Type{DataType}, ::Bool) = DataTypeODR()
+fieldodr{T<:DataType}(::Type{T}, ::Bool) = DataTypeODR()
 
 h5type(f::JLDFile, ::DataType) = h5fieldtype(f, DataType, true)
 odr{T<:DataType}(::Type{T}) = DataTypeODR()
@@ -696,9 +694,11 @@ end
 
 const H5TYPE_UNION = VariableLengthDatatype(H5TYPE_DATATYPE)
 
-h5fieldtype(f::JLDFile, ::Type{Union}, ::Bool) =
+h5fieldtype{T<:Union}(f::JLDFile, ::Type{T}, ::Bool) =
     haskey(f.jlh5type, Union) ? f.jlh5type[Union] : commit(f, H5TYPE_UNION, Union)
-fieldodr(::Type{Union}, ::Bool) = Vlen{DataTypeODR()}
+fieldodr{T<:Union}(::Type{T}, ::Bool) = Vlen{DataTypeODR()}
+h5fieldtype(f::JLDFile, ::Type{Union{}}, initialized::Bool) = nothing
+fieldodr(::Type{Union{}}, initialized::Bool) = nothing
 
 h5type(f::JLDFile, ::Union) = h5fieldtype(f, Union, true)
 odr(::Type{Union}) = fieldodr(Union, true)
@@ -725,8 +725,6 @@ h5type(::JLDFile, ::Ptr) = throw(PointerException())
 
 # These show up as having T.size == 0, hence the need for
 # specialization.
-hasdata{T<:Array}(::Type{T}) = true
-
 h5fieldtype{T<:Array}(::JLDFile, ::Type{T}, ::Bool) = ReferenceDatatype()
 fieldodr{T<:Array}(::Type{T}, ::Bool) = Reference
 

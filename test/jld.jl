@@ -63,6 +63,7 @@ ex = quote
     end
 end
 T = UInt8
+Tarr = DataType[UInt8, UInt16, UInt32, UInt64, UInt128]
 char = 'x'
 unicode_char = '\U10ffff'
 α = 22
@@ -87,6 +88,7 @@ objwithpointer = ObjWithPointer(0)
 # Custom BitsType (#99)
 bitstype 64 MyBT
 bt = reinterpret(MyBT, @compat Int64(55))
+btarray = fill(bt, 5, 7)
 # Symbol arrays (#100)
 sa_asc = [:a, :b]
 sa_utf8 = [:α, :β]
@@ -121,6 +123,11 @@ immutable EmptyIIOtherField
     y::Float64
 end
 emptyiiotherfield = EmptyIIOtherField(EmptyImmutable(), 5.0)
+immutable EmptyIIType
+    x::Type{Float64}
+    y::EmptyImmutable
+end
+emptyiitype = EmptyIIType(Float64, EmptyImmutable())
 
 # Unicode type field names (#118)
 type MyUnicodeStruct☺{τ}
@@ -195,6 +202,8 @@ empty_arr_4 = cell(0, 97)
 # Moderately big dataset (which will be mmapped)
 bigdata = [1:10000;]
 # BigFloats and BigInts
+bigint = big(3)
+bigfloat = big(3.2)
 bigints = big(3).^(1:100)
 bigfloats = big(3.2).^(1:100)
 # None
@@ -336,6 +345,7 @@ println(fn)
 @write fid d
 @write fid ex
 @write fid T
+@write fid Tarr
 @write fid char
 @write fid unicode_char
 @write fid α
@@ -352,6 +362,7 @@ println(fn)
 @write fid ms_undef
 @test_throws JLD2.PointerException @write fid objwithpointer
 @write fid bt
+@write fid btarray
 @write fid sa_asc
 @write fid sa_utf8
 @write fid subarray
@@ -365,6 +376,7 @@ println(fn)
 @write fid emptyti
 @write fid emptytt
 @write fid emptyiiotherfield
+@write fid emptyiitype
 @write fid unicodestruct☺
 @write fid array_of_matrices
 @write fid tup
@@ -384,6 +396,8 @@ println(fn)
 @write fid empty_arr_3
 @write fid empty_arr_4
 @write fid bigdata
+@write fid bigfloat
+@write fid bigint
 @write fid bigfloats
 @write fid bigints
 @write fid none
@@ -438,6 +452,7 @@ fidr = jldopen(fn, "r")
 exr = read(fidr, "ex")   # line numbers are stripped, don't expect equality
 checkexpr(ex, exr)
 @check fidr T
+@check fidr Tarr
 @check fidr char
 @check fidr unicode_char
 @check fidr α
@@ -465,6 +480,7 @@ if !isa(ms_undef, MyStruct) || ms_undef.len != 0 || isdefined(ms_undef, :data)
 end
 
 @check fidr bt
+@check fidr btarray
 @check fidr sa_asc
 @check fidr sa_utf8
 @check fidr subarray
@@ -478,6 +494,7 @@ end
 @check fidr emptyti
 @check fidr emptytt
 @check fidr emptyiiotherfield
+@check fidr emptyiitype
 @check fidr unicodestruct☺
 @check fidr array_of_matrices
 @check fidr tup
@@ -505,6 +522,8 @@ obj = read(fidr, "obj_ref")
 @check fidr empty_arr_3
 @check fidr empty_arr_4
 @check fidr bigdata
+@check fidr bigfloat
+@check fidr bigint
 @check fidr bigfloats
 @check fidr bigints
 @check fidr none
