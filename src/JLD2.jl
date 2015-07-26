@@ -82,13 +82,6 @@ function Base.close(io::MmapIO)
     close(io.f)
 end
 
-@inline function unsafe_write(io::MmapIO, x)
-    cp = io.curptr
-    unsafe_store!(Ptr{typeof(x)}(cp), x)
-    io.curptr = cp + sizeof(x)
-    nothing
-end
-
 @inline function _write(io::MmapIO, x)
     cp = io.curptr
     ep = cp + sizeof(x)
@@ -569,18 +562,6 @@ function payload_size(group::Group)
     sz = sizeof(LinkInfo) + 2 + nheaders * sizeof(HeaderMessage)
     for name in group.names
         sz += sizeof_link(name)
-    end
-    sz
-end
-
-function Base.sizeof(group::Group)
-    sz = payload_size(group)
-    sz = sizeof(ObjectStart) + size_size(sz) + sz + 4
-    for v in values(group.objects)
-        sz += sizeof(v)
-    end
-    for v in values(group.children)
-        sz += sizeof(v)
     end
     sz
 end

@@ -1,14 +1,4 @@
-# Controls whether tuples and non-pointerfree immutables, which Julia
-# stores as references, are stored inline in compound types when
-# possible. Currently this is problematic because Julia fields of these
-# types may be undefined.
-const INLINE_TUPLE = false
-
-const EMPTY_TUPLE_TYPE = Tuple{}
-typealias TypesType SimpleVector
 typealias TupleType{T<:Tuple} Type{T}
-typealias CommitParam Union(Type{Val{false}}, Type{Val{true}})
-typetuple(types) = Tuple{types...}
 
 ## Generic machinery
 
@@ -901,7 +891,7 @@ end
 
 # In some cases, we save a datatype but don't store any data (because
 # it's a pointer singleton or ghost)
-h5convert!(::Ptr, ::Type{Union{}}, ::JLDFile, ::ANY, ::JLDWriteSession) = nothing
+h5convert!(::Ptr, ::Void, ::JLDFile, ::ANY, ::JLDWriteSession) = nothing
 
 # All remaining are just unsafe_store! calls
 h5convert!{T}(out::Ptr, ::Type{T}, ::JLDFile, x::T, ::JLDWriteSession) =
