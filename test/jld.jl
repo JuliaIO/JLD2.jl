@@ -16,6 +16,8 @@ end
 # Define variables of different types
 x = 3.7
 A = reshape(1:15, 3, 5)
+A3 = reshape(1:30, 3, 5, 2)
+A4 = reshape(1:120, 2, 3, 4, 5)
 Aarray = Vector{Float64}[[1.2,1.3],[2.2,2.3,2.4]]
 basic_types = Any[UInt8(42), UInt16(42), UInt32(42), UInt64(42), UInt128(42),
                   Int8(42), Int16(42), Int32(42), Int64(42), Int128(42),
@@ -316,6 +318,8 @@ fid = jldopen(fn, "w")
 println(fn)
 @write fid x
 @write fid A
+@write fid A3
+@write fid A4
 @write fid Aarray
 @write fid basic_types
 @write fid str
@@ -422,6 +426,8 @@ close(fid)
 fidr = jldopen(fn, "r")
 @check fidr x
 @check fidr A
+@check fidr A3
+@check fidr A4
 @check fidr Aarray
 @check fidr basic_types
 @check fidr str

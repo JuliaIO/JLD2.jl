@@ -650,7 +650,7 @@ immutable DataspaceStart
 end
 define_packed(DataspaceStart)
 
-const EMPTY_DIMENSIONS = Length[]
+const EMPTY_DIMENSIONS = Int[]
 
 Dataspace() = Dataspace(DS_NULL, (), ())
 Dataspace(::JLDFile, ::Any, odr::Void) = Dataspace()
@@ -658,11 +658,11 @@ Dataspace(::JLDFile, ::Any, ::Any) = Dataspace(DS_SCALAR, (), ())
 
 nulldataspace{T}(f::JLDFile, x::Array{T}, ::Union(Void, Type{Reference})) =
     Dataspace(DS_NULL, (),
-              (WrittenAttribute(f, :dimensions, Length[x for x in reverse(size(x))]),
+              (WrittenAttribute(f, :dimensions, Int[x for x in reverse(size(x))]),
                WrittenAttribute(f, :julia_type, T)))
 nulldataspace(f::JLDFile, x::Array, ::Any) =
     Dataspace(DS_NULL, (),
-              (WrittenAttribute(f, :dimensions, Length[x for x in reverse(size(x))]),))
+              (WrittenAttribute(f, :dimensions, Int[x for x in reverse(size(x))]),))
 
 Dataspace(f::JLDFile, x::Array, ::Void) = nulldataspace(f, x, nothing)
 Dataspace{T,N}(f::JLDFile, x::Array{T,N}, ::Type{Reference}) =
@@ -683,7 +683,7 @@ function Base.write{N}(io::IO, dspace::Dataspace{N})
 end
 
 # Reads a dataspace from the file and returns a
-# (dataspace_type::UInt8, dataspace_dimensions::Vector{Length})
+# (dataspace_type::UInt8, dataspace_dimensions:G:Vector{Length})
 # tuple, where dataspace_type is one of the DS_* constants and
 # dataspace_dimensions are the corresponding dimensions
 @inline function read_dataspace_message(io::IO)
@@ -691,7 +691,7 @@ end
     dspace_start.version == 2 || throw(UnsupportedVersionException())
     dataspace_type = dspace_start.dataspace_type
     if dspace_start.dimensionality != 0
-        dataspace_dimensions = read(io, Length, dspace_start.dimensionality)
+        dataspace_dimensions = convert(Vector{Int}, read(io, Int64, dspace_start.dimensionality))
     else
         dataspace_dimensions = EMPTY_DIMENSIONS
     end
@@ -717,7 +717,7 @@ end
 immutable ReadAttribute
     name::Symbol
     dataspace_type::UInt8
-    dataspace_dimensions::Vector{Length}
+    dataspace_dimensions::Vector{Int}
     datatype_class::UInt8
     datatype_offset::Offset
     data_offset::Offset
@@ -1175,7 +1175,7 @@ end
 # datatype is assumed to be committed, and datatype_offset points to
 # the offset of the committed datatype's header. Otherwise,
 # datatype_offset points to the offset of the datatype attribute.
-function read_data(f::JLDFile, dataspace_type::UInt8, dataspace_dimensions::Vector{Length},
+function read_data(f::JLDFile, dataspace_type::UInt8, dataspace_dimensions::Vector{Int},
                    datatype_class::UInt8, datatype_offset::Offset, data_offset::Offset,
                    attributes::Union(Vector{ReadAttribute}, Void)=nothing)
     # See if there is a julia type attribute
@@ -1196,7 +1196,7 @@ end
 
 rrtype{T}(::ReadRepresentation{T}) = T
 
-function read_data(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_dimensions::Vector{Length},
+function read_data(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_dimensions::Vector{Int},
                    rr, attributes::Union(Vector{ReadAttribute},Void)=nothing)
     io = f.io
     inptr = io.curptr
@@ -1230,7 +1230,7 @@ function read_data(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_dimensio
             io.curptr = inptr
             v
         elseif dimensions_attr_index != 0
-            dimensions = read_data(f, attributes[dimensions_attr_index])::Vector{Length}
+            dimensions = read_data(f, attributes[dimensions_attr_index])::Vector{Int}
             T = julia_type_attr_index != 0 ? read_data(f, attributes[julia_type_attr_index]) : rrtype(rr)
             Array(T, reverse!(dimensions)...)
         else
@@ -1241,18 +1241,33 @@ function read_data(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_dimensio
     end
 end
 
-function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace_dimensions::Vector{Length},
+function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace_dimensions::Vector{Int},
                           rr::ReadRepresentation{T,RR},
                           attributes::Union(Vector{ReadAttribute},Void))
-    v = Array(T, reverse!(dataspace_dimensions)...)::Array{T}
+    if length(dataspace_dimensions) == 1
+        v = ccall(:jl_alloc_array_1d, Array{T,1}, (Any,Int), Array{T,1}, dataspace_dimensions[1])
+    elseif length(dataspace_dimensions) == 2
+        v = ccall(:jl_alloc_array_2d, Array{T,2}, (Any,Int,Int), Array{T,2},
+                  dataspace_dimensions[2], dataspace_dimensions[1])
+    elseif length(dataspace_dimensions) == 3
+        v = ccall(:jl_alloc_array_3d, Array{T,3}, (Any,Int,Int,Int), Array{T,3},
+                  dataspace_dimensions[3], dataspace_dimensions[2], dataspace_dimensions[1])
+    else
+        AT = Array{T,length(dataspace_dimensions)}
+        v = ccall(:jl_new_array, AT, (Any,Any), AT, tuple(reverse!(dataspace_dimensions)...))
+    end
+
     n = prod(dataspace_dimensions)
     if isa(RR, DataType) && RR <: T && isbits(T)
-        # It turns out that regular IO is faster here (at least on OS X)
-        mmapio = f.io
-        regulario = mmapio.f
-        seek(regulario, position(mmapio))
-        read!(regulario, v)
-        # unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(n))
+        if n*sizeof(RR) > 16384 # TODO tweak
+            # It turns out that regular IO is faster here (at least on OS X)
+            mmapio = f.io
+            regulario = mmapio.f
+            seek(regulario, position(mmapio))
+            read!(regulario, v)
+        else
+            unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(n))
+        end
     # Would this actually help with performance?
     # elseif isbits(T)
     #     @simd for i = 1:n
@@ -1271,14 +1286,14 @@ function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace_dimensions::Ve
     v
 end
 
-function read_array(f::JLDFile, inptr::Ptr{Void}, dataspace_dimensions::Vector{Length},
+function read_array(f::JLDFile, inptr::Ptr{Void}, dataspace_dimensions::Vector{Int},
                     rr::ReadRepresentation{Any,Reference},
                     attributes::Vector{ReadAttribute})
     # Since this is an array of references, there should be an attribute informing us of the type
     for x in attributes
         if x.name == :julia_type
             T = read_data(f, x)::Type
-            return invoke(read_array, Tuple{JLDFile, Ptr{Void}, Vector{Length}, ReadRepresentation, Vector{ReadAttribute}},
+            return invoke(read_array, Tuple{JLDFile, Ptr{Void}, Vector{Int}, ReadRepresentation, Vector{ReadAttribute}},
                           f, inptr, dataspace_dimensions, ReadRepresentation{T,Reference}(), attributes)
         end
     end
