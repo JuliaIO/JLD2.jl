@@ -220,10 +220,13 @@ function define_packed(ty::DataType)
     nothing
 end
 
-immutable JLDWriteSession
-    h5offset::ObjectIdDict
+immutable JLDWriteSession{T<:Union(ObjectIdDict,None)}
+    h5offset::T
+
+    JLDWriteSession() = new()
+    JLDWriteSession(h5offset) = new(h5offset)
 end
-JLDWriteSession() = JLDWriteSession(ObjectIdDict())
+JLDWriteSession() = JLDWriteSession{ObjectIdDict}(ObjectIdDict())
 
 immutable Reference
     offset::UInt64
@@ -700,17 +703,15 @@ end
 #
 
 # TODO: fix inference when there are attributes
-immutable WrittenAttribute{DS<:Dataspace,H5T<:H5Datatype,ODR,T}
+immutable WrittenAttribute{DS<:Dataspace,H5T<:H5Datatype,T}
     name::Symbol
     dataspace::DS
     datatype::H5T
-    odr::ODR
     data::T
 end
 
 function WrittenAttribute{T}(f::JLDFile, name::Symbol, data::T)
-    odr = objodr(data)
-    WrittenAttribute(name, Dataspace(f, data, odr), h5type(f, data), odr, data)
+    WrittenAttribute(name, Dataspace(f, data, objodr(data)), h5type(f, data), data)
 end
 
 immutable ReadAttribute
@@ -734,7 +735,7 @@ end
 define_packed(AttributeHeader)
 
 Base.sizeof(attr::WrittenAttribute) = 8 + symbol_length(attr.name) + 1 + sizeof(attr.datatype) + sizeof(attr.dataspace) +
-                                     numel(attr.dataspace) * sizeof(attr.odr)
+                                     numel(attr.dataspace) * sizeof(objodr(attr.data))
 
 function write_attribute(io::IO, f::JLDFile, attr::WrittenAttribute, wsession::JLDWriteSession)
     namelen = symbol_length(attr.name)
@@ -744,7 +745,7 @@ function write_attribute(io::IO, f::JLDFile, attr::WrittenAttribute, wsession::J
     write(io, UInt8(0))
     write(io, attr.datatype)
     write(io, attr.dataspace)
-    write_data(f, attr.data, attr.odr, wsession)
+    write_data(f, attr.data, objodr(attr.data), wsession)
 end
 
 function read_attribute(io::IO, f::JLDFile)
@@ -1393,7 +1394,7 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, o
         end
     end
 
-    if !isbits(typeof(data))
+    if isa(wsession, JLDWriteSession{ObjectIdDict}) && !isbits(typeof(data))
         wsession.h5offset[data] = Offset(header_offset)
     end
 
@@ -1427,7 +1428,7 @@ end
 end
 
 @inline function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
-    if isbits(typeof(x))
+    if isbits(typeof(x)) || isa(wsession, JLDWriteSession{None})
         Reference(write_dataset(f, x, wsession))::Reference
     else
         write_ref_nonbits(f, x, wsession)::Reference
