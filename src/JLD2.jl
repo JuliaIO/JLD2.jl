@@ -636,11 +636,18 @@ const DS_SCALAR = 0x00
 const DS_SIMPLE = 0x01
 const DS_NULL = 0x02
 
-immutable Dataspace{N,A<:Tuple}
+immutable WriteDataspace{N,A<:Tuple}
     dataspace_type::UInt8
     size::NTuple{N,Length}
     attributes::A
 end
+
+immutable ReadDataspace
+    dataspace_type::UInt8
+    dimensionality::Int
+    dimensions_offset::Int
+end
+ReadDataspace() = ReadDataspace(DS_SCALAR, 0, -1)
 
 immutable DataspaceStart
     version::UInt8
@@ -652,30 +659,30 @@ define_packed(DataspaceStart)
 
 const EMPTY_DIMENSIONS = Int[]
 
-Dataspace() = Dataspace(DS_NULL, (), ())
-Dataspace(::JLDFile, ::Any, odr::Void) = Dataspace()
-Dataspace(::JLDFile, ::Any, ::Any) = Dataspace(DS_SCALAR, (), ())
+WriteDataspace() = WriteDataspace(DS_NULL, (), ())
+WriteDataspace(::JLDFile, ::Any, odr::Void) = WriteDataspace()
+WriteDataspace(::JLDFile, ::Any, ::Any) = WriteDataspace(DS_SCALAR, (), ())
 
 nulldataspace{T}(f::JLDFile, x::Array{T}, ::Union(Void, Type{Reference})) =
-    Dataspace(DS_NULL, (),
+    WriteDataspace(DS_NULL, (),
               (WrittenAttribute(f, :dimensions, Int[x for x in reverse(size(x))]),
                WrittenAttribute(f, :julia_type, T)))
 nulldataspace(f::JLDFile, x::Array, ::Any) =
-    Dataspace(DS_NULL, (),
+    WriteDataspace(DS_NULL, (),
               (WrittenAttribute(f, :dimensions, Int[x for x in reverse(size(x))]),))
 
-Dataspace(f::JLDFile, x::Array, ::Void) = nulldataspace(f, x, nothing)
-Dataspace{T,N}(f::JLDFile, x::Array{T,N}, ::Type{Reference}) =
-    Dataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))),
+WriteDataspace(f::JLDFile, x::Array, ::Void) = nulldataspace(f, x, nothing)
+WriteDataspace{T,N}(f::JLDFile, x::Array{T,N}, ::Type{Reference}) =
+    WriteDataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))),
               (WrittenAttribute(f, :julia_type, T),))
-Dataspace(f::JLDFile, x::Array, ::Any) =
-    Dataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))), ())
+WriteDataspace(f::JLDFile, x::Array, ::Any) =
+    WriteDataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))), ())
 
-sizeof{N}(::Union(Dataspace{N},Type{Dataspace{N}})) = 4 + sizeof(Length)*N
-numel(x::Dataspace{0}) = x.dataspace_type == DS_SCALAR ? 1 : 0
-numel(x::Dataspace) = Int(prod(x.size))
+sizeof{N}(::Union(WriteDataspace{N},Type{WriteDataspace{N}})) = 4 + sizeof(Length)*N
+numel(x::WriteDataspace{0}) = x.dataspace_type == DS_SCALAR ? 1 : 0
+numel(x::WriteDataspace) = Int(prod(x.size))
 
-function Base.write{N}(io::IO, dspace::Dataspace{N})
+function Base.write{N}(io::IO, dspace::WriteDataspace{N})
     write(io, DataspaceStart(2, N, 0, dspace.dataspace_type))
     for x in dspace.size
         write(io, x::Length)
@@ -686,16 +693,11 @@ end
 # (dataspace_type::UInt8, dataspace_dimensions:G:Vector{Length})
 # tuple, where dataspace_type is one of the DS_* constants and
 # dataspace_dimensions are the corresponding dimensions
-@inline function read_dataspace_message(io::IO)
+function read_dataspace_message(io::IO)
     dspace_start = read(io, DataspaceStart)
     dspace_start.version == 2 || throw(UnsupportedVersionException())
     dataspace_type = dspace_start.dataspace_type
-    if dspace_start.dimensionality != 0
-        dataspace_dimensions = convert(Vector{Int}, read(io, Int64, dspace_start.dimensionality))
-    else
-        dataspace_dimensions = EMPTY_DIMENSIONS
-    end
-    (dataspace_type, dataspace_dimensions)
+    ReadDataspace(dataspace_type, dspace_start.dimensionality, position(io))
 end
 
 #
@@ -703,7 +705,7 @@ end
 #
 
 # TODO: fix inference when there are attributes
-immutable WrittenAttribute{DS<:Dataspace,H5T<:H5Datatype,T}
+immutable WrittenAttribute{DS<:WriteDataspace,H5T<:H5Datatype,T}
     name::Symbol
     dataspace::DS
     datatype::H5T
@@ -711,13 +713,12 @@ immutable WrittenAttribute{DS<:Dataspace,H5T<:H5Datatype,T}
 end
 
 function WrittenAttribute{T}(f::JLDFile, name::Symbol, data::T)
-    WrittenAttribute(name, Dataspace(f, data, objodr(data)), h5type(f, data), data)
+    WrittenAttribute(name, WriteDataspace(f, data, objodr(data)), h5type(f, data), data)
 end
 
 immutable ReadAttribute
     name::Symbol
-    dataspace_type::UInt8
-    dataspace_dimensions::Vector{Int}
+    dataspace::ReadDataspace
     datatype_class::UInt8
     datatype_offset::Offset
     data_offset::Offset
@@ -762,10 +763,10 @@ function read_attribute(io::IO, f::JLDFile)
     seek(io, datatype_end)
 
     dataspace_end = position(io) + ah.dataspace_size
-    dataspace_type, dataspace_dimensions = read_dataspace_message(io)
+    dataspace = read_dataspace_message(io)
     seek(io, dataspace_end)
 
-    ReadAttribute(name, dataspace_type, dataspace_dimensions, datatype_class, datatype_offset, Offset(position(io)))
+    ReadAttribute(name, dataspace, datatype_class, datatype_offset, Offset(position(io)))
 end
 
 #
@@ -1095,8 +1096,7 @@ function read_dataset(f::JLDFile, offset::Offset)
     pmax = position(cio) + sz
 
     # Messages
-    dataspace_type = typemin(UInt8)
-    dataspace_dimensions = EMPTY_DIMENSIONS
+    dataspace = ReadDataspace()
     attrs = EMPTY_READ_ATTRIBUTES
     datatype_class::UInt8 = 0
     datatype_offset::Offset = 0
@@ -1106,7 +1106,7 @@ function read_dataset(f::JLDFile, offset::Offset)
         msg = read(cio, HeaderMessage)
         endpos = position(cio) + msg.size
         if msg.msg_type == HM_DATASPACE
-            dataspace_type, dataspace_dimensions = read_dataspace_message(io)
+            dataspace = read_dataspace_message(io)
         elseif msg.msg_type == HM_DATATYPE
             datatype_class, datatype_offset = read_datatype_message(io, (msg.flags & 2) == 2)
         elseif msg.msg_type == HM_FILL_VALUE
@@ -1142,7 +1142,7 @@ function read_dataset(f::JLDFile, offset::Offset)
     end_checksum(cio) == read(io, UInt32) || throw(InvalidDataException())
 
     # TODO verify that data length matches
-    val = read_data(f, dataspace_type, dataspace_dimensions, datatype_class, datatype_offset, data_offset, attrs)
+    val = read_data(f, dataspace, datatype_class, datatype_offset, data_offset, attrs)
     if !isbits(typeof(val))
         f.jloffset[offset] = WeakRef(val)
     end
@@ -1150,22 +1150,22 @@ function read_dataset(f::JLDFile, offset::Offset)
 end
 
 # Read data from an attribute
-read_data(f::JLDFile, attr::ReadAttribute) =
-    read_data(f, attr.dataspace_type, attr.dataspace_dimensions,
-              attr.datatype_class, attr.datatype_offset, attr.data_offset)
+read_attr_data(f::JLDFile, attr::ReadAttribute) =
+    read_data(f, attr.dataspace, attr.datatype_class, attr.datatype_offset, attr.data_offset)
 
 # Read data from an attribute, assuming a specific HDF5 datatype and
 # ReadRepresentation. If the HDF5 datatype does not match, throws an
 # UnsupportedFeatureException. This allows better type stability while
 # simultaneously validating the data.
-function read_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype, rr::ReadRepresentation)
+function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype, rr::ReadRepresentation)
     io = f.io
     if attr.datatype_class == class(expected_datatype)
         seek(io, attr.datatype_offset)
         dt = read(io, typeof(expected_datatype))
         if dt == expected_datatype
             seek(f.io, attr.data_offset)
-            return read_data(f, attr.dataspace_type, attr.dataspace_dimensions, rr)
+            # BOXED_READ_DATASPACE[] = attr.dataspace
+            return read_data(f, dataspace, rr)
         end
     end
     throw(UnsupportedFeatureException())
@@ -1175,7 +1175,7 @@ end
 # datatype is assumed to be committed, and datatype_offset points to
 # the offset of the committed datatype's header. Otherwise,
 # datatype_offset points to the offset of the datatype attribute.
-function read_data(f::JLDFile, dataspace_type::UInt8, dataspace_dimensions::Vector{Int},
+function read_data(f::JLDFile, dataspace::ReadDataspace,
                    datatype_class::UInt8, datatype_offset::Offset, data_offset::Offset,
                    attributes::Union(Vector{ReadAttribute}, Void)=nothing)
     # See if there is a julia type attribute
@@ -1183,32 +1183,38 @@ function read_data(f::JLDFile, dataspace_type::UInt8, dataspace_dimensions::Vect
     if datatype_class == typemax(UInt8) # Committed datatype
         rr = jltype(f, f.datatype_locations[datatype_offset])
         seek(io, data_offset)
-        read_data(f, dataspace_type, dataspace_dimensions, rr, attributes)
+        # BOXED_READ_DATASPACE[] = dataspace
+        read_data(f, dataspace, rr, attributes)
     else
         seek(io, datatype_offset)
         @read_datatype io datatype_class dt begin
             rr = jltype(f, dt)
             seek(io, data_offset)
-            read_data(f, dataspace_type, dataspace_dimensions, rr, attributes)
+            # BOXED_READ_DATASPACE[] = dataspace
+            read_data(f, dataspace, rr, attributes)
         end
     end
 end
 
 rrtype{T}(::ReadRepresentation{T}) = T
 
-function read_data(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_dimensions::Vector{Int},
-                   rr, attributes::Union(Vector{ReadAttribute},Void)=nothing)
+# We can avoid a box by putting the dataspace here instead of passing
+# it to read_data.  That reduces the allocation footprint, but doesn't
+# really seem to help with performance.
+# const BOXED_READ_DATASPACE = Ref{ReadDataspace}()
+function read_data(f::JLDFile{MmapIO}, dataspace::ReadDataspace, rr,
+                   attributes::Union(Vector{ReadAttribute},Void)=nothing)
+    # dataspace = BOXED_READ_DATASPACE[]
     io = f.io
     inptr = io.curptr
-    if dataspace_type == DS_SCALAR
+    if dataspace.dataspace_type == DS_SCALAR
         s = jlconvert(rr, f, inptr)
         io.curptr = inptr + sizeof(rr)
         s
-    elseif dataspace_type == DS_SIMPLE
-        v = read_array(f, inptr, dataspace_dimensions, rr, attributes)
-        io.curptr = inptr + sizeof(rr) * prod(dataspace_dimensions)
+    elseif dataspace.dataspace_type == DS_SIMPLE
+        v = read_array(f, inptr, dataspace, rr, attributes)
         v
-    elseif dataspace_type == DS_NULL
+    elseif dataspace.dataspace_type == DS_NULL
         # We should have a dimensions attribute
         # We may also have a julia_type attribute
         dimensions_attr_index = 0
@@ -1230,8 +1236,8 @@ function read_data(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_dimensio
             io.curptr = inptr
             v
         elseif dimensions_attr_index != 0
-            dimensions = read_data(f, attributes[dimensions_attr_index])::Vector{Int}
-            T = julia_type_attr_index != 0 ? read_data(f, attributes[julia_type_attr_index]) : rrtype(rr)
+            dimensions = read_attr_data(f, attributes[dimensions_attr_index])::Vector{Int}
+            T = julia_type_attr_index != 0 ? read_attr_data(f, attributes[julia_type_attr_index]) : rrtype(rr)
             Array(T, reverse!(dimensions)...)
         else
             throw(UnsupportedFeatureException())
@@ -1241,29 +1247,37 @@ function read_data(f::JLDFile{MmapIO}, dataspace_type::UInt8, dataspace_dimensio
     end
 end
 
-function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace_dimensions::Vector{Int},
+function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace,
                           rr::ReadRepresentation{T,RR},
                           attributes::Union(Vector{ReadAttribute},Void))
-    if length(dataspace_dimensions) == 1
-        v = ccall(:jl_alloc_array_1d, Array{T,1}, (Any,Int), Array{T,1}, dataspace_dimensions[1])
-    elseif length(dataspace_dimensions) == 2
-        v = ccall(:jl_alloc_array_2d, Array{T,2}, (Any,Int,Int), Array{T,2},
-                  dataspace_dimensions[2], dataspace_dimensions[1])
-    elseif length(dataspace_dimensions) == 3
-        v = ccall(:jl_alloc_array_3d, Array{T,3}, (Any,Int,Int,Int), Array{T,3},
-                  dataspace_dimensions[3], dataspace_dimensions[2], dataspace_dimensions[1])
+    io = f.io
+    seek(io, dataspace.dimensions_offset)
+    if dataspace.dimensionality == 1
+        n = read(io, Int)
+        v = Array(T, n)
+    elseif dataspace.dimensionality == 2
+        d2 = read(io, Int)
+        d1 = read(io, Int)
+        n = d1*d2
+        v = Array(T, d1, d2)
+    elseif dataspace.dimensionality == 3
+        d3 = read(io, Int)
+        d2 = read(io, Int)
+        d1 = read(io, Int)
+        n = d1*d2*d3
+        v = Array(T, d1, d2, d3)
     else
-        AT = Array{T,length(dataspace_dimensions)}
-        v = ccall(:jl_new_array, AT, (Any,Any), AT, tuple(reverse!(dataspace_dimensions)...))
+        ds = reverse!(read(io, Int, dataspace.dimensionality))
+        n = prod(ds)
+        v = Array(T, tuple(ds...))
     end
 
-    n = prod(dataspace_dimensions)
     if isa(RR, DataType) && RR <: T && isbits(T)
         if n*sizeof(RR) > 16384 # TODO tweak
             # It turns out that regular IO is faster here (at least on OS X)
             mmapio = f.io
             regulario = mmapio.f
-            seek(regulario, position(mmapio))
+            seek(regulario, inptr - pointer(f.io.arr))
             read!(regulario, v)
         else
             unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(n))
@@ -1283,18 +1297,20 @@ function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace_dimensions::Ve
             inptr += sizeof(RR)
         end
     end
+
+    io.curptr = inptr + sizeof(RR) * n
     v
 end
 
-function read_array(f::JLDFile, inptr::Ptr{Void}, dataspace_dimensions::Vector{Int},
+function read_array(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace,
                     rr::ReadRepresentation{Any,Reference},
                     attributes::Vector{ReadAttribute})
     # Since this is an array of references, there should be an attribute informing us of the type
     for x in attributes
         if x.name == :julia_type
-            T = read_data(f, x)::Type
-            return invoke(read_array, Tuple{JLDFile, Ptr{Void}, Vector{Int}, ReadRepresentation, Vector{ReadAttribute}},
-                          f, inptr, dataspace_dimensions, ReadRepresentation{T,Reference}(), attributes)
+            T = read_attr_data(f, x)::Type
+            return invoke(read_array, Tuple{JLDFile, Ptr{Void}, ReadDataspace, ReadRepresentation, Vector{ReadAttribute}},
+                          f, inptr, dataspace, ReadRepresentation{T,Reference}(), attributes)
         end
     end
 
@@ -1302,7 +1318,7 @@ function read_array(f::JLDFile, inptr::Ptr{Void}, dataspace_dimensions::Vector{I
     throw(UnsupportedFeatureException())
 end
 
-function payload_size(dataspace::Dataspace, datatype::H5Datatype, datasz::Int, layout_class::UInt8)
+function payload_size(dataspace::WriteDataspace, datatype::H5Datatype, datasz::Int, layout_class::UInt8)
     sz = sizeof(dataspace) + sizeof(datatype) + 2 + (4 + length(dataspace.attributes))*sizeof(HeaderMessage) + 2
     for attr in dataspace.attributes
         sz += sizeof(attr)
@@ -1351,7 +1367,7 @@ end
 # Force specialization on DataType
 write_data(f::JLDFile, data::Array, odr::Type{Union{}}, wsession::JLDWriteSession) = error("ODR is invalid")
 
-function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, odr, data, wsession::JLDWriteSession)
+function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr, data, wsession::JLDWriteSession)
     io = f.io
     datasz = sizeof(odr) * numel(dataspace)
     layout_class = datasz < 8192 ? LC_COMPACT_STORAGE : LC_CONTIGUOUS_STORAGE
@@ -1417,12 +1433,12 @@ function write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, o
 end
 
 # Force specialization on DataType
-write_dataset(f::JLDFile, dataspace::Dataspace, datatype::H5Datatype, odr::Type{Union{}}, data, wsession::JLDWriteSession) =
+write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::Type{Union{}}, data, wsession::JLDWriteSession) =
     error("ODR is invalid")
 
 function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
     odr = objodr(x)
-    write_dataset(f, Dataspace(f, x, odr), h5type(f, x), odr, x, wsession)
+    write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
 end
 
 function write_dataset(f::JLDFile, x::Array, wsession::JLDWriteSession)
@@ -1431,7 +1447,7 @@ function write_dataset(f::JLDFile, x::Array, wsession::JLDWriteSession)
     if isempty(x)
         write_dataset(f, nulldataspace(f, x, odr), h5type(f, x), odr, x, wsession)
     else
-        write_dataset(f, Dataspace(f, x, odr), h5type(f, x), odr, x, wsession)
+        write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
     end
 end
 

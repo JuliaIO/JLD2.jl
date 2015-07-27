@@ -155,7 +155,7 @@ function commit_compound(f::JLDFile, names::AbstractVector, T::DataType)
 
     @assert offset != 0
     if hasfieldtype
-        fieldtypeattr = WrittenAttribute(:field_datatypes, Dataspace(f, fieldtypes, DataType), ReferenceDatatype(),
+        fieldtypeattr = WrittenAttribute(:field_datatypes, WriteDataspace(f, fieldtypes, DataType), ReferenceDatatype(),
                                          fieldtypes)
         commit(f, CompoundDatatype(offset, h5names, offsets, members), T, fieldtypeattr)::CommittedDatatype
     else
@@ -170,7 +170,7 @@ function commit(f::JLDFile, dtype::H5Datatype, T::DataType, attributes::WrittenA
     # This needs to be written this way or type inference gets unhappy...
     # Also needs to happen here so that we write the DataType type
     # before we try to find where this type will be written
-    typeattr = WrittenAttribute(:julia_type, Dataspace(f, DataType, odr(DataType)), h5type(f, DataType), T)
+    typeattr = WrittenAttribute(:julia_type, WriteDataspace(f, DataType, odr(DataType)), h5type(f, DataType), T)
 
     offset = f.end_of_data
 
@@ -224,7 +224,7 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     end
 
     # datatype = read_data(f, julia_type_attr, H5TYPE_DATATYPE, ReadRepresentation(DataType, DataTypeODR()))
-    datatype = read_data(f, julia_type_attr)
+    datatype = read_attr_data(f, julia_type_attr)
     rr, canonical = constructrr(f, datatype, dt, field_datatypes_attr)
     rr = rr::ReadRepresentation
 
@@ -257,7 +257,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype, field_dataty
 
     # Read field_datatypes_attr if it exists
     if !isa(field_datatypes_attr, Void)
-        refs = read_data(f, field_datatypes_attr, ReferenceDatatype(), ReadRepresentation(Reference))
+        refs = read_attr_data(f, field_datatypes_attr, ReferenceDatatype(), ReadRepresentation(Reference))
     end
 
     offsets = Array(Int, length(T.types))
@@ -631,7 +631,7 @@ function h5fieldtype{T<:DataType}(f::JLDFile, ::Type{T}, ::Initialized)
     f.h5jltype[cdt] = ReadRepresentation(DataType, DataTypeODR())
     push!(f.datatypes, H5TYPE_DATATYPE)
 
-    commit(f, H5TYPE_DATATYPE, (WrittenAttribute(:julia_type, Dataspace(f, DataType, odr(DataType)), cdt, DataType),))
+    commit(f, H5TYPE_DATATYPE, (WrittenAttribute(:julia_type, WriteDataspace(f, DataType, odr(DataType)), cdt, DataType),))
 
     cdt
 end
