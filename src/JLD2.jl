@@ -164,30 +164,25 @@ Base.position(io::MmapIO) = Int(io.curptr - pointer(io.arr))
 # nested checksums.
 # XXX not thread-safe!
 
-const CHECKSUM_PTR = Ptr{Void}[]
+const CHECKSUM_POS = Int[]
 const NCHECKSUM = Ref{Int}(0)
 function begin_checksum(io::MmapIO)
     idx = NCHECKSUM[] += 1
-    if idx > length(CHECKSUM_PTR)
-        push!(CHECKSUM_PTR, io.curptr)
+    if idx > length(CHECKSUM_POS)
+        push!(CHECKSUM_POS, position(io))
     else
-        CHECKSUM_PTR[idx] = io.curptr
+        CHECKSUM_POS[idx] = position(io)
     end
     io
 end
 function begin_checksum(io::MmapIO, sz::Int)
-    # Ensure that we have enough room for sz bytes
-    cp = io.curptr
-    if cp+sz > io.endptr
-        resize!(io, cp+sz)
-        cp = io.curptr
-    end
+    ensureroom(io, sz)
     begin_checksum(io)
 end
 function end_checksum(io::MmapIO)
-    v = CHECKSUM_PTR[NCHECKSUM[]]
+    v = CHECKSUM_POS[NCHECKSUM[]]
     NCHECKSUM[] -= 1
-    Lookup3.hash(UnsafeContiguousView(Ptr{UInt8}(v), (Int(io.curptr - v),)))
+    Lookup3.hash(UnsafeContiguousView(pointer(io.arr) + v, (position(io) - v,)))
 end
 
 # Redefine unsafe_load and unsafe_store! so that they pack the type
