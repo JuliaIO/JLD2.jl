@@ -1165,7 +1165,7 @@ function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Da
         if dt == expected_datatype
             seek(f.io, attr.data_offset)
             # BOXED_READ_DATASPACE[] = attr.dataspace
-            return read_data(f, dataspace, rr)
+            return read_data(f, attr.dataspace, rr)
         end
     end
     throw(UnsupportedFeatureException())
