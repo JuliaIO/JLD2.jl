@@ -264,6 +264,8 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype, field_dataty
     types = Array(Any, length(T.types))
     odrs = Array(Any, length(T.types))
     fn = fieldnames(T)
+    fo = fieldoffsets(T)
+    samelayout = isbits(T) && sizeof(T) == dt.size
     dtindex = 0
     for i = 1:length(T.types)
         wstype = T.types[i]
@@ -299,6 +301,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype, field_dataty
             types[i] = readtype
             odrs[i] = odr
             offsets[i] = dt.offsets[dtindex]
+            samelayout = samelayout && offsets[i] == fo[i] && types[i] === wstype
 
             mapped[dtindex] = true
         end
@@ -311,7 +314,13 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype, field_dataty
 
                 Data in these fields will not be accessible""")
     end
-    (ReadRepresentation(T, OnDiskRepresentation{tuple(offsets...),Tuple{types...},Tuple{odrs...}}()), false)
+
+    if samelayout
+        (ReadRepresentation(T), true)
+    else
+        rodr = OnDiskRepresentation{tuple(offsets...),Tuple{types...},Tuple{odrs...}}()
+        (ReadRepresentation(T, rodr), rodr == odr(T))
+    end
 end
 
 ## Type reconstruction
