@@ -313,7 +313,7 @@ bitstype 64 Typ{T}
 typ{T}(x::Int64, ::Type{T}) = Base.box(Typ{T}, Base.unbox(Int64,x))
 abstract UnexportedT
 end
- 
+
 fid = jldopen(fn, "w")
 println(fn)
 @write fid x

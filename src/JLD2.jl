@@ -118,7 +118,7 @@ Base.write(io::MmapIO, x::Array) = write(io, pointer(x), sizeof(x))
     cp = io.curptr
     ep = cp + sizeof(T)
     ep > io.endptr && throw(EOFError())
-    v = unsafe_load(Ptr{T}(cp)) 
+    v = unsafe_load(Ptr{T}(cp))
     io.curptr = ep
     v
 end
@@ -354,7 +354,7 @@ type Superblock
     root_group_object_header_address::Offset
 end
 
-Base.sizeof(::Union(Type{Superblock}, Superblock)) = 
+Base.sizeof(::Union(Type{Superblock}, Superblock)) =
     12+sizeof(Offset)*4+4
 
 function Base.read(io::IO, ::Type{Superblock})
@@ -1595,7 +1595,7 @@ function read_heap_object{T,RR}(f::JLDFile{MmapIO}, hid::GlobalHeapID, rr::ReadR
     len = Int(read(io, Length))
     n = div(len, sizeof(RR))
     len == n * sizeof(RR) || throw(InvalidDataException())
-    
+
     inptr = f.io.curptr
     v = Array(T, n)
     if isa(RR, DataType) && RR <: T && isbits(T)
