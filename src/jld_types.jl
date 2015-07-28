@@ -435,8 +435,11 @@ jlconvert_isinitialized(::ReadRepresentation{Reference,Reference}, ptr::Ptr) = t
 #     unsafe_store!(convert(Ptr{Reference, outptr}), unsafe_load(convert(Ptr{Reference}, ptr)))
 
 # Reading references as other types
-jlconvert{T}(::ReadRepresentation{T,Reference}, f::JLDFile, ptr::Ptr) =
-    convert(T, read_dataset(f, unsafe_load(convert(Ptr{Offset}, ptr))))::T
+@inline function jlconvert{T}(::ReadRepresentation{T,Reference}, f::JLDFile, ptr::Ptr)
+    x = read_dataset(f, unsafe_load(convert(Ptr{Offset}, ptr)))
+    isa(x, T) && return x::T
+    convert(T, x)::T
+end
 jlconvert_isinitialized{T}(::ReadRepresentation{T,Reference}, ptr::Ptr) =
     unsafe_load(convert(Ptr{Reference}, ptr)) != Reference(0)
 
