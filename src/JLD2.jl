@@ -1273,13 +1273,17 @@ function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace
         v = Array(T, tuple(ds...))
     end
 
-    if isa(RR, DataType) && RR <: T && isbits(T)
-        if n*sizeof(RR) > 16384 # TODO tweak
+    if RR === T && isbits(T)
+        nb = n*sizeof(RR)
+        if nb > 16384 # TODO tweak
             # It turns out that regular IO is faster here (at least on OS X)
             mmapio = f.io
             regulario = mmapio.f
             seek(regulario, inptr - pointer(f.io.arr))
-            read!(regulario, v)
+            if ccall(:ios_readall, UInt,
+                     (Ptr{Void}, Ptr{Void}, UInt), regulario.ios, v, nb) < nb
+                throw(EOFError())
+            end
         else
             unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(n))
         end

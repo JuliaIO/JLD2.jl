@@ -431,6 +431,7 @@ h5convert_uninitialized!(out::Ptr, odr::Type{Reference}) =
 jlconvert(::ReadRepresentation{Reference,Reference}, f::JLDFile, ptr::Ptr) =
     unsafe_load(convert(Ptr{Reference}, ptr))
 jlconvert_isinitialized(::ReadRepresentation{Reference,Reference}, ptr::Ptr) = true
+jlconvert_canbeuninitialized(::ReadRepresentation{Reference,Reference}) = false
 # jlconvert!(outptr::Ptr, ::ReadRepresentation{Reference,Reference}, f::JLDFile, ptr::Ptr) =
 #     unsafe_store!(convert(Ptr{Reference, outptr}), unsafe_load(convert(Ptr{Reference}, ptr)))
 
@@ -442,6 +443,7 @@ jlconvert_isinitialized(::ReadRepresentation{Reference,Reference}, ptr::Ptr) = t
 end
 jlconvert_isinitialized{T}(::ReadRepresentation{T,Reference}, ptr::Ptr) =
     unsafe_load(convert(Ptr{Reference}, ptr)) != Reference(0)
+jlconvert_canbeuninitialized{T}(::ReadRepresentation{T,Reference}) = true
 
 ## Routines for variable-length datatypes
 
@@ -468,6 +470,7 @@ jlconvert{T,S}(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr) =
     read_heap_object(f, unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), ReadRepresentation(T, S))
 jlconvert_isinitialized{T,S}(::ReadRepresentation{T,Vlen{S}}, ptr::Ptr) =
     unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)) != GlobalHeapID(0, 0)
+jlconvert_canbeuninitialized{T,S}(::ReadRepresentation{T,Vlen{S}}) = true
 
 ## ByteStrings
 
@@ -776,6 +779,7 @@ show(io::IO, x::UndefinedFieldException) =
                  but was undefined in the file""")
 
 jlconvert_isinitialized(::Any, ::Ptr) = true
+jlconvert_canbeuninitialized(::Any) = false
 @generated function jlconvert{T,S}(::ReadRepresentation{T,S}, f::JLDFile, ptr::Ptr)
     isa(S, DataType) && return :(convert(T, unsafe_load(convert(Ptr{S}, ptr))))
     S === nothing && return Expr(:new, T)
@@ -787,6 +791,11 @@ jlconvert_isinitialized(::Any, ::Ptr) = true
 
     blk = Expr(:block)
     args = blk.args
+    if isbits(T)
+        # For bits types, we should always inline, because otherwise we'll just
+        # pass a lot of crap around in registers
+        push!(args, Expr(:meta, :inline))
+    end
     fsyms = []
     fn = fieldnames(T)
     offset = 0
@@ -804,18 +813,22 @@ jlconvert_isinitialized(::Any, ::Ptr) = true
         if odr === nothing
             # Type is not stored or single instance
             push!(args, :($fsym = $(Expr(:new, ttype))))
-        elseif i <= T.ninitialized || isbits(ttype)
-            # Reference must always be initialized
-            push!(args, quote
-                jlconvert_isinitialized($rr, ptr+$offset) || throw(UndefinedFieldException(T,$(QuoteNode(fn[i]))))
-                $fsym = convert($ttype, jlconvert($rr, f, ptr+$offset)::$rtype)::$ttype
-            end)
         else
-            # Reference may not be initialized
-            push!(args, quote
-                jlconvert_isinitialized($rr, ptr+$offset) || return $(Expr(:new, T, fsyms[1:i-1]...))
-                $fsym = convert($ttype, jlconvert($rr, f, ptr+$offset)::$rtype)::$ttype
-            end)
+            push!(args, Expr(:block,
+                if jlconvert_canbeuninitialized(ReadRepresentation{rtype,odr}())
+                    quote
+                        if !jlconvert_isinitialized($rr, ptr+$offset)
+                            $(if i <= T.ninitialized
+                                # Reference must always be initialized
+                                :(throw(UndefinedFieldException(T,$(QuoteNode(fn[i])))))
+                            else
+                                # Reference could be uninitialized
+                                :(return $(Expr(:new, T, fsyms[1:i-1]...)))
+                            end)
+                        end
+                    end
+                end,
+                :($fsym = convert($ttype, jlconvert($rr, f, ptr+$offset)::$rtype)::$ttype)))
         end
     end
     push!(args, Expr(:new, T, fsyms...))
