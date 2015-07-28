@@ -222,11 +222,12 @@ end
 
 immutable JLDWriteSession{T<:Union(Dict{UInt,Offset},None)}
     h5offset::T
+    objects::Vector{Any}
 
     JLDWriteSession() = new()
-    JLDWriteSession(h5offset) = new(h5offset)
+    JLDWriteSession(h5offset, objects) = new(h5offset, objects)
 end
-JLDWriteSession() = JLDWriteSession{Dict{UInt,Offset}}(Dict{UInt,Offset}())
+JLDWriteSession() = JLDWriteSession{Dict{UInt,Offset}}(Dict{UInt,Offset}(), Any[])
 
 immutable Reference
     offset::UInt64
@@ -1425,8 +1426,9 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
         end
     end
 
-    if !isa(wsession, JLDWriteSession{None}) && !isbits(typeof(data))
+    if typeof(data).mutable && !isa(wsession, JLDWriteSession{None})
         wsession.h5offset[object_id(data)] = Offset(header_offset)
+        push!(wsession.objects, data)
     end
 
     header_offset
@@ -1451,16 +1453,16 @@ function write_dataset(f::JLDFile, x::Array, wsession::JLDWriteSession)
     end
 end
 
-@noinline function write_ref_nonbits(f::JLDFile, x, wsession::JLDWriteSession)
+@noinline function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
     offset = get(wsession.h5offset, object_id(x), Offset(0))::Offset
     offset != 0 ? Reference(offset) : Reference(write_dataset(f, x, wsession)::UInt64)
 end
 
 @inline function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
-    if isbits(typeof(x)) || isa(wsession, JLDWriteSession{None})
+    if typeof(x).mutable || isa(wsession, JLDWriteSession{None})
         Reference(write_dataset(f, x, wsession))::Reference
     else
-        write_ref_nonbits(f, x, wsession)::Reference
+        write_ref_mutable(f, x, wsession)::Reference
     end
 end
 
