@@ -1459,7 +1459,7 @@ end
 end
 
 @inline function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
-    if typeof(x).mutable || isa(wsession, JLDWriteSession{None})
+    if !typeof(x).mutable || isa(wsession, JLDWriteSession{None})
         Reference(write_dataset(f, x, wsession))::Reference
     else
         write_ref_mutable(f, x, wsession)::Reference
