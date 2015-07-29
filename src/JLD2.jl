@@ -1580,7 +1580,7 @@ function Base.read(io::IO, ::Type{GlobalHeap})
         skip(io, 6)                    # Reference count and reserved
         sz = read(io, Length)          # Length
         skip(io, sz + 8 - mod1(sz, 8)) # Payload
-        free = position(io) - startpos
+        free = heapsz - Length(position(io) - startpos)
         index += 1
     end
     GlobalHeap(offset, heapsz, free, objects)
