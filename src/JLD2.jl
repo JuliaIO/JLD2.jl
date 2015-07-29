@@ -1234,17 +1234,50 @@ function read_data(f::JLDFile{MmapIO}, dataspace::ReadDataspace, rr,
         if dimensions_attr_index == 0 && julia_type_attr_index == 0
             @assert sizeof(rr) == 0
             v = jlconvert(rr, f, inptr)
-            io.curptr = inptr
-            v
         elseif dimensions_attr_index != 0
-            dimensions = read_attr_data(f, attributes[dimensions_attr_index])::Vector{Int}
-            T = julia_type_attr_index != 0 ? read_attr_data(f, attributes[julia_type_attr_index]) : rrtype(rr)
-            Array(T, reverse!(dimensions)...)
+            # TODO make sure the dataspace matches
+            dimensions_attr = attributes[dimensions_attr_index]
+            seek(io, dimensions_attr.dataspace.dimensions_offset)
+            ndims = read(io, Int)
+            if julia_type_attr_index != 0
+                T = read_attr_data(f, attributes[julia_type_attr_index])
+                seek(io, dimensions_attr.data_offset)
+                v = construct_array(io, T, ndims)
+            else
+                seek(io, dimensions_attr.data_offset)
+                v = construct_array(io, rrtype(rr), ndims)
+            end
         else
             throw(UnsupportedFeatureException())
         end
+        io.curptr = inptr
+        v
     else
         throw(UnsupportedFeatureException())
+    end
+end
+
+# Construct array by reading ndims dimensions from io
+# Assumes io has already been seeked t oteh correct position
+function construct_array{T}(io::IO, ::Type{T}, ndims::Integer)
+    if ndims == 1
+        n = read(io, Int)
+        Array(T, n)
+    elseif ndims == 2
+        d2 = read(io, Int)
+        d1 = read(io, Int)
+        n = d1*d2
+        Array(T, d1, d2)
+    elseif ndims == 3
+        d3 = read(io, Int)
+        d2 = read(io, Int)
+        d1 = read(io, Int)
+        n = d1*d2*d3
+        Array(T, d1, d2, d3)
+    else
+        ds = reverse!(read(io, Int, ndims))
+        n = prod(ds)
+        Array(T, tuple(ds...))
     end
 end
 
@@ -1253,29 +1286,12 @@ function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace
                           attributes::Union(Vector{ReadAttribute},Void))
     io = f.io
     seek(io, dataspace.dimensions_offset)
-    if dataspace.dimensionality == 1
-        n = read(io, Int)
-        v = Array(T, n)
-    elseif dataspace.dimensionality == 2
-        d2 = read(io, Int)
-        d1 = read(io, Int)
-        n = d1*d2
-        v = Array(T, d1, d2)
-    elseif dataspace.dimensionality == 3
-        d3 = read(io, Int)
-        d2 = read(io, Int)
-        d1 = read(io, Int)
-        n = d1*d2*d3
-        v = Array(T, d1, d2, d3)
-    else
-        ds = reverse!(read(io, Int, dataspace.dimensionality))
-        n = prod(ds)
-        v = Array(T, tuple(ds...))
-    end
+    v = construct_array(io, T, dataspace.dimensionality)
+    n = length(v)
 
     if RR === T && isbits(T)
         nb = n*sizeof(RR)
-        if nb > 16384 # TODO tweak
+        if nb > 1048576 # TODO tweak
             # It turns out that regular IO is faster here (at least on OS X)
             mmapio = f.io
             regulario = mmapio.f
