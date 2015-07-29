@@ -418,6 +418,9 @@ h5type(f::JLDFile, x::PrimitiveTypes) = h5fieldtype(f, typeof(x), Val{true})
 
 # A hack to prevent us from needing to box the output pointer
 # XXX not thread-safe!
+h5type(::JLDFile, ::Reference) = ReferenceDatatype()
+odr(::Type{Reference}) = Reference
+
 const BOXED_PTR = Ref{Ptr{Void}}()
 @inline function h5convert!(out::Ptr, odr::Type{Reference}, f::JLDFile, x::ANY, wsession::JLDWriteSession)
     BOXED_PTR[] = out

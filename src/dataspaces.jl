@@ -37,7 +37,7 @@ WriteDataspace(::JLDFile, ::Any, ::Any) = WriteDataspace(DS_SCALAR, (), ())
 nulldataspace{T}(f::JLDFile, x::Array{T}, ::Union(Void, Type{Reference})) =
     WriteDataspace(DS_NULL, (),
               (WrittenAttribute(f, :dimensions, Int[x for x in reverse(size(x))]),
-               WrittenAttribute(f, :julia_type, T)))
+               WrittenAttribute(f, :julia_type, write_ref(f, T, f.datatype_wsession))))
 nulldataspace(f::JLDFile, x::Array, ::Any) =
     WriteDataspace(DS_NULL, (),
               (WrittenAttribute(f, :dimensions, Int[x for x in reverse(size(x))]),))
@@ -45,7 +45,7 @@ nulldataspace(f::JLDFile, x::Array, ::Any) =
 WriteDataspace(f::JLDFile, x::Array, ::Void) = nulldataspace(f, x, nothing)
 WriteDataspace{T,N}(f::JLDFile, x::Array{T,N}, ::Type{Reference}) =
     WriteDataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))),
-              (WrittenAttribute(f, :julia_type, T),))
+              (WrittenAttribute(f, :julia_type, write_ref(f, T, f.datatype_wsession)),))
 WriteDataspace(f::JLDFile, x::Array, ::Any) =
     WriteDataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))), ())
 
