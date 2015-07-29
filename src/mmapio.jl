@@ -28,7 +28,7 @@ function Base.resize!(io::MmapIO, newend::Ptr{Void})
     # Resize file
     ptr = pointer(io.arr)
     newsz = Int(max(newend - ptr, io.curptr - ptr + FILE_GROW_SIZE))
-    truncate(io.f, newsz)
+    systemerror("pwrite", ccall(:jl_pwrite, Cssize_t, (Cint, Ptr{UInt8}, Uint, FileOffset), fd(io.f), &UInt8(0), 1, newsz - 1) < 1)
 
     if newsz > length(io.arr)
         # If we have not mapped enough memory, map more
