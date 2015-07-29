@@ -1199,6 +1199,20 @@ end
 
 rrtype{T}(::ReadRepresentation{T}) = T
 
+function find_dimensions_type_attrs(attributes::Vector{ReadAttribute})
+    dimensions_attr_index = 0
+    julia_type_attr_index = 0
+    for i = 1:length(attributes)
+        x = attributes[i]
+        if x.name == :dimensions
+            dimensions_attr_index = i
+        elseif x.name == :julia_type
+            julia_type_attr_index = i
+        end
+    end
+    (dimensions_attr_index, julia_type_attr_index)
+end
+
 # We can avoid a box by putting the dataspace here instead of passing
 # it to read_data.  That reduces the allocation footprint, but doesn't
 # really seem to help with performance.
@@ -1218,16 +1232,7 @@ function read_data(f::JLDFile{MmapIO}, dataspace::ReadDataspace, rr,
     elseif dataspace.dataspace_type == DS_NULL
         # We should have a dimensions attribute
         # We may also have a julia_type attribute
-        dimensions_attr_index = 0
-        julia_type_attr_index = 0
-        for i = 1:length(attributes)
-            x = attributes[i]
-            if x.name == :dimensions
-                dimensions_attr_index = i
-            elseif x.name == :julia_type
-                julia_type_attr_index = i
-            end
-        end
+        dimensions_attr_index, julia_type_attr_index = find_dimensions_type_attrs(attributes)
 
         # If no dimensions attribute and no julia_type attribute, this
         # should be a singleton
