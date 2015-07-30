@@ -273,12 +273,14 @@ iseq(x::Array{None}, y::Array{None}) = size(x) == size(y)
 macro check(fid, sym)
     ex = quote
         let tmp
+            println($(string(sym)))
             try
                 tmp = read($fid, $(string(sym)))
             catch e
                 warn("Error reading ", $(string(sym)))
                 rethrow(e)
             end
+            println(tmp)
             if !iseq(tmp, $sym)
                 written = $sym
                 error("For ", $(string(sym)), ", read value $tmp does not agree with written value $written")
