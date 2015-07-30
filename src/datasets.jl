@@ -182,7 +182,7 @@ get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Void) =
 function get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Vector{ReadAttribute})
     ndims = dataspace.dimensionality
     offset = dataspace.dimensions_offset
-    if isempty(attributes)
+    if !isempty(attributes)
         for x in attributes
             if x.name == :dimensions
                 (x.dataspace.dataspace_type == DS_SIMPLE &&
