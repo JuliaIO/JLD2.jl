@@ -45,10 +45,10 @@ function read_datatype_message(io::IO, committed)
         # Shared datatype
         read(io, UInt8) == 3 || throw(UnsupportedVersionException())
         read(io, UInt8) == 2 || throw(UnsupportedFeatureException())
-        (typemax(UInt8), read(io, Offset))
+        (typemax(UInt8), FileOffset(read(io, Offset)))
     else
         # Datatype stored here
-        (read(io, UInt8), Offset(position(io)-1))
+        (read(io, UInt8), FileOffset(position(io)-1))
     end
 end
 

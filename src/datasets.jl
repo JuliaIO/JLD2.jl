@@ -24,8 +24,8 @@ function read_dataset(f::JLDFile, offset::Offset)
     dataspace = ReadDataspace()
     attrs = EMPTY_READ_ATTRIBUTES
     datatype_class::UInt8 = 0
-    datatype_offset::Offset = 0
-    data_offset::Offset = 0
+    datatype_offset::FileOffset = 0
+    data_offset::FileOffset = 0
     data_length::Int = 0
     while position(cio) < pmax
         msg = read(cio, HeaderMessage)
@@ -101,7 +101,7 @@ end
 # the offset of the committed datatype's header. Otherwise,
 # datatype_offset points to the offset of the datatype attribute.
 function read_data(f::JLDFile, dataspace::ReadDataspace,
-                   datatype_class::UInt8, datatype_offset::Offset, data_offset::Offset,
+                   datatype_class::UInt8, datatype_offset::FileOffset, data_offset::FileOffset,
                    attributes::Union(Vector{ReadAttribute}, Void)=nothing)
     # See if there is a julia type attribute
     io = f.io
@@ -121,8 +121,9 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
     end
 end
 
-rrtype{T}(::ReadRepresentation{T}) = T
 rrodr{T,S}(::ReadRepresentation{T,S}) = S
+empty_eltype(::ReadRepresentation{Any,Reference}) = Union{}
+empty_eltype{T}(::ReadRepresentation{T}) = T
 
 function find_dimensions_type_attrs(attributes::Vector{ReadAttribute})
     dimensions_attr_index = 0
@@ -157,37 +158,42 @@ function read_data(f::JLDFile{MmapIO}, dataspace::ReadDataspace, rr,
     elseif dataspace.dataspace_type == DS_NULL
         dimensions_attr_index, julia_type_attr_index = find_dimensions_type_attrs(attributes)
 
-        if dimensions_attr_index == 0 && julia_type_attr_index == 0
-            if isa(rrodr(rr), Void)
-                # No dimensions attribute and ODR has no data => instance of
-                # ghost or singleton type
-                v = jlconvert(rr, f, inptr)
-            else
-                # No dimensions attribute and ODR has data => empty array
-                v = Array(rrtype(rr), 0)
-            end
-        elseif dimensions_attr_index == 0
-            # julia_type attribute and no dimensions attribute => empty vector
-            v = Array(read_attr_data(f, attributes[julia_type_attr_index]), 0)
+        if dimensions_attr_index == 0
+            isa(rrodr(rr), Void) || throw(UnsupportedFeatureException())
+            jlconvert(rr, f, inptr)
         else
-            # dimensions attribute => empty ND array of type
+            # dimensions attribute => array of empty type
             dimensions_attr = attributes[dimensions_attr_index]
             seek(io, dimensions_attr.dataspace.dimensions_offset)
             ndims = read(io, Int)
-            if julia_type_attr_index != 0
-                T = read_attr_data(f, attributes[julia_type_attr_index])
-                seek(io, dimensions_attr.data_offset)
-                v = construct_array(io, T, ndims)
-            else
-                seek(io, dimensions_attr.data_offset)
-                v = construct_array(io, rrtype(rr), ndims)
-            end
+            seek(io, dimensions_attr.data_offset)
+            v = construct_array(io, empty_eltype(rr), ndims)
+            io.curptr = inptr
+            v
         end
-        io.curptr = inptr
-        v
     else
         throw(UnsupportedFeatureException())
     end
+end
+
+get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Void) =
+    (dataspace.dimensionality, dataspace.dimensions_offset)
+
+function get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Vector{ReadAttribute})
+    ndims = dataspace.dimensionality
+    offset = dataspace.dimensions_offset
+    if isempty(attributes)
+        for x in attributes
+            if x.name == :dimensions
+                (x.dataspace.dataspace_type == DS_SIMPLE &&
+                 x.dataspace.dimensionality == 1) || throw(InvalidDataException())
+                seek(f.io, x.dataspace.dimensions_offset)
+                ndims = UInt8(read(f.io, Length))
+                offset = x.data_offset
+            end
+        end
+    end
+    (ndims, offset)
 end
 
 # Construct array by reading ndims dimensions from io
@@ -199,17 +205,14 @@ function construct_array{T}(io::IO, ::Type{T}, ndims::Integer)
     elseif ndims == 2
         d2 = read(io, Int)
         d1 = read(io, Int)
-        n = d1*d2
         Array(T, d1, d2)
     elseif ndims == 3
         d3 = read(io, Int)
         d2 = read(io, Int)
         d1 = read(io, Int)
-        n = d1*d2*d3
         Array(T, d1, d2, d3)
     else
         ds = reverse!(read(io, Int, ndims))
-        n = prod(ds)
         Array(T, tuple(ds...))
     end
 end
@@ -218,8 +221,9 @@ function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace
                           rr::ReadRepresentation{T,RR},
                           attributes::Union(Vector{ReadAttribute},Void))
     io = f.io
-    seek(io, dataspace.dimensions_offset)
-    v = construct_array(io, T, dataspace.dimensionality)
+    ndims, offset = get_ndims_offset(f, dataspace, attributes)
+    seek(io, offset)
+    v = construct_array(io, T, ndims)
     n = length(v)
 
     if RR === T && isbits(T)
@@ -394,16 +398,6 @@ write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::
 function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
     odr = objodr(x)
     write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
-end
-
-function write_dataset(f::JLDFile, x::Array, wsession::JLDWriteSession)
-    # Avoid type instability due to empty arrays
-    odr = objodr(x)
-    if isempty(x)
-        write_dataset(f, nulldataspace(f, x, odr), h5type(f, x), odr, x, wsession)
-    else
-        write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
-    end
 end
 
 @noinline function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)

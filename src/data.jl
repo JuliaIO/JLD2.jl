@@ -741,8 +741,10 @@ h5type(::JLDFile, ::Ptr) = throw(PointerException())
 h5fieldtype{T<:Array}(::JLDFile, ::Type{T}, ::Initialized) = ReferenceDatatype()
 fieldodr{T<:Array}(::Type{T}, ::Bool) = Reference
 
+# Union{} is not a datatype, so write it as a reference
+h5type(f::JLDFile, ::Array{Union{}}) = ReferenceDatatype()
 @generated function h5type{T}(f::JLDFile, ::Array{T})
-    !hasfielddata(T) ? ReferenceDatatype() : :(h5fieldtype(f, T, Val{false}))
+    !hasfielddata(T) ? :(h5type(f, $(Expr(:new, T)))) : :(h5fieldtype(f, T, Val{false}))
 end
 odr{T,N}(::Type{Array{T,N}}) = fieldodr(T, false)
 

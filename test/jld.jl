@@ -235,6 +235,12 @@ bitsparamint16  = BitsParams{@compat Int16(1)}()
 # Tuple of tuples
 tuple_of_tuples = (1, 2, (3, 4, [5, 6]), [7, 8])
 
+# Zero-dimensional arrays
+zerod = Array(Int)
+zerod[] = 1
+zerod_any = Array(Any)
+zerod_any[] = 1.0+1.0im
+
 # SimpleVector
 if VERSION >= v"0.4.0-dev+4319"
     simplevec = Base.svec(1, 2, Int64, "foo")
@@ -424,7 +430,9 @@ println(fn)
 @write fid bitsparamint
 @write fid bitsparamuint
 @write fid tuple_of_tuples
-VERSION >= v"0.4.0-dev+4319" && @write fid simplevec
+@write fid zerod
+@write fid zerod_any
+@write fid simplevec
 @write fid natyperef
 
 close(fid)
@@ -554,7 +562,9 @@ obj = read(fidr, "obj_ref")
 @check fidr bitsparamint
 @check fidr bitsparamuint
 @check fidr tuple_of_tuples
-VERSION >= v"0.4.0-dev+4319" && @check fidr simplevec
+@check fidr zerod
+@check fidr zerod_any
+@check fidr simplevec
 @check fidr natyperef
 
 close(fidr)

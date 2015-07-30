@@ -18,8 +18,8 @@ immutable ReadAttribute
     name::Symbol
     dataspace::ReadDataspace
     datatype_class::UInt8
-    datatype_offset::Offset
-    data_offset::Offset
+    datatype_offset::FileOffset
+    data_offset::FileOffset
 end
 
 const EMPTY_READ_ATTRIBUTES = ReadAttribute[]
@@ -64,5 +64,5 @@ function read_attribute(io::IO, f::JLDFile)
     dataspace = read_dataspace_message(io)
     seek(io, dataspace_end)
 
-    ReadAttribute(name, dataspace, datatype_class, datatype_offset, Offset(position(io)))
+    ReadAttribute(name, dataspace, datatype_class, datatype_offset, FileOffset(position(io)))
 end
