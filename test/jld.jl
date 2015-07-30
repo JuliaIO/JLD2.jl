@@ -101,9 +101,12 @@ arr_empty_tuple = (@compat Tuple{})[]
 immutable EmptyImmutable end
 emptyimmutable = EmptyImmutable()
 arr_emptyimmutable = [emptyimmutable]
+empty_arr_emptyimmutable = EmptyImmutable[]
 type EmptyType end
 emptytype = EmptyType()
 arr_emptytype = [emptytype]
+empty_arr_emptytype = EmptyImmutable[]
+uninitialized_arr_emptytype = Array(EmptyType, 1)
 immutable EmptyII
     x::EmptyImmutable
 end
@@ -372,9 +375,12 @@ println(fn)
 @write fid subarray
 @write fid arr_empty_tuple
 @write fid emptyimmutable
-@write fid emptytype
 @write fid arr_emptyimmutable
+@write fid empty_arr_emptyimmutable
+@write fid emptytype
 @write fid arr_emptytype
+@write fid empty_arr_emptytype
+@write fid uninitialized_arr_emptytype
 @write fid emptyii
 @write fid emptyit
 @write fid emptyti
@@ -492,9 +498,12 @@ end
 @check fidr subarray
 @check fidr arr_empty_tuple
 @check fidr emptyimmutable
-@check fidr emptytype
 @check fidr arr_emptyimmutable
+@check fidr empty_arr_emptyimmutable
+@check fidr emptytype
 @check fidr arr_emptytype
+@check fidr empty_arr_emptytype
+@check fidr uninitialized_arr_emptytype
 @check fidr emptyii
 @check fidr emptyit
 @check fidr emptyti

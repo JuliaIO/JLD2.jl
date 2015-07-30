@@ -122,6 +122,7 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
 end
 
 rrtype{T}(::ReadRepresentation{T}) = T
+rrodr{T,S}(::ReadRepresentation{T,S}) = S
 
 function find_dimensions_type_attrs(attributes::Vector{ReadAttribute})
     dimensions_attr_index = 0
@@ -154,17 +155,22 @@ function read_data(f::JLDFile{MmapIO}, dataspace::ReadDataspace, rr,
         v = read_array(f, inptr, dataspace, rr, attributes)
         v
     elseif dataspace.dataspace_type == DS_NULL
-        # We should have a dimensions attribute
-        # We may also have a julia_type attribute
         dimensions_attr_index, julia_type_attr_index = find_dimensions_type_attrs(attributes)
 
-        # If no dimensions attribute and no julia_type attribute, this
-        # should be a singleton
         if dimensions_attr_index == 0 && julia_type_attr_index == 0
-            @assert sizeof(rr) == 0
-            v = jlconvert(rr, f, inptr)
-        elseif dimensions_attr_index != 0
-            # TODO make sure the dataspace matches
+            if isa(rrodr(rr), Void)
+                # No dimensions attribute and ODR has no data => instance of
+                # ghost or singleton type
+                v = jlconvert(rr, f, inptr)
+            else
+                # No dimensions attribute and ODR has data => empty array
+                v = Array(rrtype(rr), 0)
+            end
+        elseif dimensions_attr_index == 0
+            # julia_type attribute and no dimensions attribute => empty vector
+            v = Array(read_attr_data(f, attributes[julia_type_attr_index]), 0)
+        else
+            # dimensions attribute => empty ND array of type
             dimensions_attr = attributes[dimensions_attr_index]
             seek(io, dimensions_attr.dataspace.dimensions_offset)
             ndims = read(io, Int)
@@ -176,8 +182,6 @@ function read_data(f::JLDFile{MmapIO}, dataspace::ReadDataspace, rr,
                 seek(io, dimensions_attr.data_offset)
                 v = construct_array(io, rrtype(rr), ndims)
             end
-        else
-            throw(UnsupportedFeatureException())
         end
         io.curptr = inptr
         v
