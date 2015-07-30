@@ -256,6 +256,17 @@ Base.(:(!=))(::Nothing, ::NALikeType) = NALikeType()
 natyperef = Any[NALikeType(), NALikeType()]
 
 iseq(x,y) = isequal(x,y)
+function iseq(x::Array{EmptyType}, y::Array{EmptyType})
+    size(x) != size(y) && return false
+    for i = 1:length(x)
+        def = isdefined(x, i)
+        def != isdefined(y, i) && return false
+        if def
+            x[i] != y[i] && return false
+        end
+    end
+    return true
+end
 iseq(x::MyStruct, y::MyStruct) = (x.len == y.len && x.data == y.data)
 iseq(x::MyImmutable, y::MyImmutable) = (isequal(x.x, y.x) && isequal(x.y, y.y) && isequal(x.z, y.z))
 iseq(x::Union(EmptyTI, EmptyTT), y::Union(EmptyTI, EmptyTT)) = isequal(x.x, y.x)
@@ -273,14 +284,12 @@ iseq(x::Array{None}, y::Array{None}) = size(x) == size(y)
 macro check(fid, sym)
     ex = quote
         let tmp
-            println($(string(sym)))
             try
                 tmp = read($fid, $(string(sym)))
             catch e
                 warn("Error reading ", $(string(sym)))
                 rethrow(e)
             end
-            println(tmp)
             if !iseq(tmp, $sym)
                 written = $sym
                 error("For ", $(string(sym)), ", read value $tmp does not agree with written value $written")
