@@ -119,7 +119,7 @@ class(dt::Union(BasicDatatype, FixedPointDatatype, FloatingPointDatatype)) = dt.
 
 immutable CompoundDatatype <: H5Datatype
     size::UInt32
-    names::Vector{ByteString}
+    names::Vector{Symbol}
     offsets::Vector{Int}
     members::Vector{H5Datatype}
 
@@ -135,11 +135,12 @@ Base.(:(==))(x::CompoundDatatype, y::CompoundDatatype) = x.size == y.size && x.n
 hash(::CompoundDatatype) = throw(ArgumentError("hash not defined for CompoundDatatype"))
 
 class(dt::CompoundDatatype) = DT_COMPOUND
+strlen(x) = Int(ccall(:strlen, Csize_t, (Ptr{UInt8},), x))
 function Base.sizeof(dt::CompoundDatatype)
     sz = sizeof(BasicDatatype) + size_size(dt.size)*length(dt.names)
     for i = 1:length(dt.names)
         # Extra byte for null padding of name
-        sz += sizeof(dt.names[i]) + 1 + sizeof(dt.members[i])
+        sz += strlen(dt.names[i]) + 1 + sizeof(dt.members[i])
     end
     sz
 end
@@ -149,8 +150,8 @@ function Base.write(io::IO, dt::CompoundDatatype)
     write(io, BasicDatatype(DT_COMPOUND, n % UInt8, (n >> 8) % UInt8, 0x00, dt.size))
     for i = 1:length(dt.names)
         # Name
-        write(io, dt.names[i])
-        write(io, UInt8(0x00))
+        name_ptr = Base.unsafe_convert(Ptr{UInt8}, dt.names[i])
+        write(io, name_ptr, strlen(name_ptr)+1)
 
         # Byte offset of member
         if dt.size <= typemax(UInt8)
@@ -171,12 +172,12 @@ function Base.read(io::IO, ::Type{CompoundDatatype})
     nfields = UInt16(dt.bitfield1) | UInt16(dt.bitfield2 << 8)
     dt.bitfield3 == 0 || throw(UnsupportedFeatureException())
 
-    names = Array(ByteString, nfields)
+    names = Array(Symbol, nfields)
     offsets = Array(Int, nfields)
     members = Array(H5Datatype, nfields)
     for i = 1:nfields
         # Name
-        names[i] = read_bytestring(io)
+        names[i] = symbol(read_bytestring(io))
 
         # Byte offset of member
         if dt.size <= typemax(UInt8)
