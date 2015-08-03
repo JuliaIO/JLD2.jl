@@ -266,7 +266,12 @@ function read_array(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace,
     # Since this is an array of references, there should be an attribute informing us of the type
     for x in attributes
         if x.name == :julia_type
-            T = read_attr_data(f, x)::Type
+            T = read_attr_data(f, x)
+            if isa(T, UnknownType)
+                str = typestring(T)
+                warn("type $(str) does not exist in workspace; interpreting Array{$str} as Array{Any}")
+                T = Any
+            end
             return invoke(read_array, Tuple{JLDFile, Ptr{Void}, ReadDataspace, ReadRepresentation, Vector{ReadAttribute}},
                           f, inptr, dataspace, ReadRepresentation{T,Reference}(), attributes)
         end
