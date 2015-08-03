@@ -1028,10 +1028,12 @@ end
     ex = Expr(:block)
     args = ex.args
     for i = 1:length(offsets)
-        offset = offsets[i]
         member = members[i]
+        isa(member, Void) && continue
+
+        offset = offsets[i]
         conv = :(h5convert!(out+$offset, $(member), file, convert($(types[i]), $getindex_fn(x, $i)), wsession))
-        if i > T.ninitialized && !isbits(x.types[i])
+        if i > T.ninitialized && (!isleaftype(x.types[i]) || !isbits(x.types[i]))
             push!(args, quote
                 if !isdefined(x, $i)
                     h5convert_uninitialized!(out+$offset, $(member))

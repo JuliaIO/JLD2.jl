@@ -241,6 +241,15 @@ zerod[] = 1
 zerod_any = Array(Any)
 zerod_any[] = 1.0+1.0im
 
+# Type with None typed field
+immutable NoneTypedField{T}
+    a::Int
+    b::T
+
+    NoneTypedField(a) = new(a)
+end
+nonetypedfield = NoneTypedField{Union{}}(47)
+
 # SimpleVector
 if VERSION >= v"0.4.0-dev+4319"
     simplevec = Base.svec(1, 2, Int64, "foo")
@@ -270,6 +279,7 @@ end
 iseq(x::MyStruct, y::MyStruct) = (x.len == y.len && x.data == y.data)
 iseq(x::MyImmutable, y::MyImmutable) = (isequal(x.x, y.x) && isequal(x.y, y.y) && isequal(x.z, y.z))
 iseq(x::Union(EmptyTI, EmptyTT), y::Union(EmptyTI, EmptyTT)) = isequal(x.x, y.x)
+iseq(x::NoneTypedField{Union{}}, y::NoneTypedField{Union{}}) = x.a === y.a
 iseq(c1::Array{Base.Sys.CPUinfo}, c2::Array{Base.Sys.CPUinfo}) = length(c1) == length(c2) && all([iseq(c1[i], c2[i]) for i = 1:length(c1)])
 function iseq(c1::Base.Sys.CPUinfo, c2::Base.Sys.CPUinfo)
     for n in fieldnames(Base.Sys.CPUinfo)
@@ -443,6 +453,7 @@ println(fn)
 @write fid tuple_of_tuples
 @write fid zerod
 @write fid zerod_any
+@write fid nonetypedfield
 @write fid simplevec
 @write fid natyperef
 
@@ -575,6 +586,7 @@ obj = read(fidr, "obj_ref")
 @check fidr tuple_of_tuples
 @check fidr zerod
 @check fidr zerod_any
+@check fidr nonetypedfield
 @check fidr simplevec
 @check fidr natyperef
 
