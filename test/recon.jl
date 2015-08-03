@@ -72,6 +72,9 @@ immutable TestTypeContainer5{T,S}
     a::T
     b::S
 end
+immutable TestType17
+    x::Int
+end
 
 fn = joinpath(tempdir(),"test.jld")
 file = jldopen(fn, "w")
@@ -101,6 +104,7 @@ write(file, "x19", TestTypeContainer2(TestType4(3), 4))
 write(file, "x20", TestTypeContainer3(TestType4(3), 4))
 write(file, "x21", TestTypeContainer4(TestType4(3), 4))
 write(file, "x22", TestTypeContainer5(TestType4(3), 4))
+write(file, "x23", TestType17(5678910))
 
 close(file)
 
@@ -146,10 +150,6 @@ immutable TestType16{T<:Integer}
     x::T
     y::Int
 end
-immutable TestType17{T}
-    x::T
-    y::Int
-end
 immutable TestTypeContainer2{T}
     a::T
     b::ASCIIString
@@ -166,6 +166,7 @@ immutable TestTypeContainer5{T}
     a::T
     b::Int
 end
+const TestType17 = 5
 
 file = jldopen(LastMain.fn, "r")
 x = read(file, "x1")
@@ -259,5 +260,8 @@ x = read(file, "x22")
 @test !isa(x, TestTypeContainer5)
 @test x.a.x === 3
 @test x.b === 4
+
+x = read(file, "x23")
+@test x.x === 5678910
 
 close(file)
