@@ -205,7 +205,7 @@ empty_arr_2 = Array(Int, 56, 0)
 empty_arr_3 = Any[]
 empty_arr_4 = cell(0, 97)
 # Moderately big dataset (which will be mmapped)
-bigdata = [1:10000;]
+bigdata = [1:1000000;]
 # BigFloats and BigInts
 bigint = big(3)
 bigfloat = big(3.2)

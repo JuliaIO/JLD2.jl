@@ -125,18 +125,16 @@ rrodr{T,S}(::ReadRepresentation{T,S}) = S
 empty_eltype(::ReadRepresentation{Any,Reference}) = Union{}
 empty_eltype{T}(::ReadRepresentation{T}) = T
 
-function find_dimensions_type_attrs(attributes::Vector{ReadAttribute})
+function find_dimensions_attr(attributes::Vector{ReadAttribute})
     dimensions_attr_index = 0
     julia_type_attr_index = 0
     for i = 1:length(attributes)
         x = attributes[i]
         if x.name == :dimensions
             dimensions_attr_index = i
-        elseif x.name == :julia_type
-            julia_type_attr_index = i
         end
     end
-    (dimensions_attr_index, julia_type_attr_index)
+    dimensions_attr_index
 end
 
 # We can avoid a box by putting the dataspace here instead of passing
@@ -156,7 +154,7 @@ function read_data(f::JLDFile{MmapIO}, dataspace::ReadDataspace, rr,
         v = read_array(f, inptr, dataspace, rr, attributes)
         v
     elseif dataspace.dataspace_type == DS_NULL
-        dimensions_attr_index, julia_type_attr_index = find_dimensions_type_attrs(attributes)
+        dimensions_attr_index = find_dimensions_attr(attributes)
 
         if dimensions_attr_index == 0
             isa(rrodr(rr), Void) || throw(UnsupportedFeatureException())
