@@ -896,7 +896,7 @@ jlconvert(::ReadRepresentation{Union, Vlen{DataTypeODR()}}, f::JLDFile, ptr::Ptr
 ## Pointers
 
 immutable PointerException <: Exception; end
-show(io::IO, ::PointerException) = print(io, "cannot write a pointer to JLD file")
+Base.showerror(io::IO, ::PointerException) = print(io, "cannot write a pointer to JLD file")
 h5fieldtype{T<:Ptr}(::JLDFile, ::Type{T}, ::Initialized) = throw(PointerException())
 h5type(::JLDFile, ::Ptr) = throw(PointerException())
 
@@ -949,9 +949,9 @@ immutable UndefinedFieldException
     fieldname::Symbol
 end
 
-show(io::IO, x::UndefinedFieldException) =
-    print(io, """field $fieldname of type $ty must be defined in the current workspace,
-                 but was undefined in the file""")
+Base.showerror(io::IO, x::UndefinedFieldException) =
+    print(io, "field \"", x.fieldname, "\" of type ", x.ty,
+          " must be defined in the current workspace, but was undefined in the file")
 
 jlconvert_isinitialized(::Any, ::Ptr) = true
 jlconvert_canbeuninitialized(::Any) = false

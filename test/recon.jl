@@ -36,6 +36,10 @@ end
 immutable TestType12
     x::ASCIIString
 end
+type TestType13
+    a
+    TestType13() = new()
+end
 
 immutable TestTypeContainer{T}
     a::T
@@ -62,6 +66,7 @@ write(file, "x11", reinterpret(TestType9, 0x1234))
 write(file, "x12", TestType10(1234, 0x56))
 write(file, "x13", TestType11(78910, 0x11))
 write(file, "x14", TestType12("abcdefg"))
+write(file, "x15", TestType13())
 close(file)
 
 workspace()
@@ -90,6 +95,9 @@ immutable TestType11
 end
 immutable TestType12
     x::Int
+end
+type TestType13
+    a
 end
 
 file = jldopen(LastMain.fn, "r")
@@ -147,5 +155,7 @@ x = read(file, "x13")
 x = read(file, "x14")
 @test !isa(x, TestType12)
 @test x.x == "abcdefg"
+
+@test_throws JLD2.UndefinedFieldException x = read(file, "x15")
 
 close(file)
