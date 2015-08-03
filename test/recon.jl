@@ -64,6 +64,14 @@ immutable TestTypeContainer3{T,S}
     a::T
     b::S
 end
+immutable TestTypeContainer4{T}
+    a::T
+    b::Int
+end
+immutable TestTypeContainer5{T,S}
+    a::T
+    b::S
+end
 
 fn = joinpath(tempdir(),"test.jld")
 file = jldopen(fn, "w")
@@ -91,6 +99,8 @@ write(file, "x17", TestType15(8.91011, 12))
 write(file, "x18", TestType16(12.131415, 1617))
 write(file, "x19", TestTypeContainer2(TestType4(3), 4))
 write(file, "x20", TestTypeContainer3(TestType4(3), 4))
+write(file, "x21", TestTypeContainer4(TestType4(3), 4))
+write(file, "x22", TestTypeContainer5(TestType4(3), 4))
 
 close(file)
 
@@ -147,6 +157,14 @@ end
 immutable TestTypeContainer3{T,S}
     a::T
     b::S
+end
+immutable TestTypeContainer4{T,S}
+    a::T
+    b::S
+end
+immutable TestTypeContainer5{T}
+    a::T
+    b::Int
 end
 
 file = jldopen(LastMain.fn, "r")
@@ -229,6 +247,16 @@ x = read(file, "x19")
 
 x = read(file, "x20")
 @test isa(x, TestTypeContainer3{Any,Int})
+@test x.a.x === 3
+@test x.b === 4
+
+x = read(file, "x21")
+@test !isa(x, TestTypeContainer4)
+@test x.a.x === 3
+@test x.b === 4
+
+x = read(file, "x22")
+@test !isa(x, TestTypeContainer5)
 @test x.a.x === 3
 @test x.b === 4
 

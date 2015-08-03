@@ -399,16 +399,16 @@ function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatyp
         # This is a "pseudo-RR" since the tuple is not fully parametrized, but
         # the parameters must depend on the types actually encoded in the file
         (ReadRepresentation(Tuple, rodr), false)
+    elseif length(unk.name.parameters) != length(unk.parameters)
+        warn("read type ", typestring(unk), " has a different number of parameters from type ",
+             unk.name, " in workspace; reconstructing")
+        reconstruct_compound(f, typestring(unk), dt, field_datatypes)
     else
         params = copy(unk.parameters)
         for i = 1:length(params)
             if isa(params[i], UnknownType)
-                param = unk.name.parameters[i]
-                if isa(param, TypeVar)
-                    params[i] = param.ub
-                else
-                    params[i] = param
-                end
+                param = unk.name.parameters[i]::TypeVar
+                params[i] = param.ub
             end
         end
 
