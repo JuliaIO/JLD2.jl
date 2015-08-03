@@ -362,7 +362,11 @@ end
 # only used to create gensymmed names for reconstructed types.
 function typestring(T::UnknownType)
     tn = IOBuffer()
-    print(tn, T.name)
+    if isa(T.name, DataType)
+        write(tn, typename(T.name))
+    else
+        print(tn, T.name)
+    end
     if isdefined(T, :parameters)
         write(tn, '{')
         for x in T.parameters
@@ -392,7 +396,12 @@ function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatyp
         params = copy(unk.parameters)
         for i = 1:length(params)
             if isa(params[i], UnknownType)
-                params[i] = unk.name.parameters[i]
+                param = unk.name.parameters[i]
+                if isa(param, TypeVar)
+                    params[i] = param.ub
+                else
+                    params[i] = param
+                end
             end
         end
 
@@ -400,8 +409,9 @@ function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatyp
         # reconstruct_compound.
         try
             T = unk.name{params...}
-            rr = constructrr(f, T, dt, field_datatypes, empty)
+            (rr,) = constructrr(f, T, dt, field_datatypes, empty)
             warn("some parameters could not be resolved for type ", typestring(unk), "; reading as $T")
+            return (rr, false)
         catch err
             !isa(err, TypeMappingException) && rethrow(err)
             return reconstruct_compound(f, typestring(unk), dt, field_datatypes)
@@ -1007,10 +1017,6 @@ jlconvert_canbeuninitialized(::Any) = false
 
     blk
 end
-
-unknown_type_err(T) =
-    error("""$T is not of a type supported by JLD
-             Please report this error at https://github.com/timholy/HDF5.jl""")
 
 @generated function h5convert!(out::Ptr, odr::OnDiskRepresentation, file::JLDFile, x, wsession::JLDWriteSession)
     T = x

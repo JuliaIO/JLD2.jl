@@ -25,6 +25,11 @@ immutable TestType8
     d::TestType7
 end
 
+immutable TestTypeContainer{T}
+    a::T
+    b::Int
+end
+
 fn = joinpath(tempdir(),"test.jld")
 file = jldopen(fn, "w")
 write(file, "x1", TestType1(57))
@@ -40,6 +45,7 @@ write(file, "x9", (TestType4(1),
                    (TestType5(TestType4(2)),
                     [TestType5(TestType4(i)) for i = 1:5]),
                    TestType6()))
+write(file, "x10", TestTypeContainer(TestType4(3), 4))
 close(file)
 
 workspace()
@@ -52,6 +58,10 @@ type TestType2
 end
 immutable TestType3
     x::TestType1
+end
+immutable TestTypeContainer{T}
+    a::T
+    b::Int
 end
 
 file = jldopen(LastMain.fn, "r")
@@ -87,4 +97,9 @@ for i = 1:5
     @test x[2][2][i].x.x == i
 end
 @test isempty(fieldnames(typeof(x[3])))
+
+x = read(file, "x10")
+@test isa(x, TestTypeContainer)
+@test x.a.x === 3
+@test x.b === 4
 close(file)
