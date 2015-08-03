@@ -270,6 +270,12 @@ immutable TypeMappingException <: Exception; end
 function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
                      field_datatypes::Union{Vector{Reference},Void}, ::Bool,
                      hard_failure::Bool=false)
+    # If read type is not a leaf type, reconstruct
+    if !isleaftype(T)
+        warn("read type $T is not a leaf type in workspace; reconstructing")
+        return reconstruct_compound(f, string(T), dt, field_datatypes)
+    end
+
     # Map names in dt to their indices
     dtnames = Dict{Symbol,Int}()
     for i = 1:length(dt.names)
@@ -368,7 +374,9 @@ function typestring(T::UnknownType)
     end
     if isdefined(T, :parameters)
         write(tn, '{')
-        for x in T.parameters
+        for i = 1:length(T.parameters)
+            x = T.parameters[i]
+            i != 1 && write(tn, ',')
             if isa(x, UnknownType)
                 write(tn, typestring(x))
             else
@@ -406,13 +414,21 @@ function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatyp
 
         # Try to construct the rr for the relaxed type. On failure, fall back to
         # reconstruct_compound.
+        local T
         try
             T = unk.name{params...}
-            (rr,) = constructrr(f, T, dt, field_datatypes, empty)
-            warn("some parameters could not be resolved for type ", typestring(unk), "; reading as $T")
+        catch err
+            warn("type parameters for ", typestring(unk)" do not match type ", unk.name, " in workspace; reconstructing")
+            return reconstruct_compound(f, typestring(unk), dt, field_datatypes)
+        end
+
+        try
+            (rr,) = constructrr(f, T, dt, field_datatypes, empty, true)
+            warn("some parameters could not be resolved for type ", typestring(unk), "; reading as ", T)
             return (rr, false)
         catch err
             !isa(err, TypeMappingException) && rethrow(err)
+            warn("some parameters could not be resolved for type ", typestring(unk), "; reconstructing")
             return reconstruct_compound(f, typestring(unk), dt, field_datatypes)
         end
     end

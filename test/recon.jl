@@ -24,6 +24,10 @@ immutable TestType8
     c::TestType6
     d::TestType7
 end
+immutable TestTypeContainer{T}
+    a::T
+    b::Int
+end
 bitstype 16 TestType9
 immutable TestType10
     a::Int
@@ -40,10 +44,25 @@ type TestType13
     a
     TestType13() = new()
 end
-
-immutable TestTypeContainer{T}
+immutable TestType14{T}
+    x::T
+    y::Int
+end
+immutable TestType15{T,S}
+    x::T
+    y::S
+end
+immutable TestType16{T}
+    x::T
+    y::Int
+end
+immutable TestTypeContainer2{T}
     a::T
     b::Int
+end
+immutable TestTypeContainer3{T,S}
+    a::T
+    b::S
 end
 
 fn = joinpath(tempdir(),"test.jld")
@@ -67,6 +86,12 @@ write(file, "x12", TestType10(1234, 0x56))
 write(file, "x13", TestType11(78910, 0x11))
 write(file, "x14", TestType12("abcdefg"))
 write(file, "x15", TestType13())
+write(file, "x16", TestType14(1.2345, 67))
+write(file, "x17", TestType15(8.91011, 12))
+write(file, "x18", TestType16(12.131415, 1617))
+write(file, "x19", TestTypeContainer2(TestType4(3), 4))
+write(file, "x20", TestTypeContainer3(TestType4(3), 4))
+
 close(file)
 
 workspace()
@@ -98,6 +123,30 @@ immutable TestType12
 end
 type TestType13
     a
+end
+immutable TestType14{T,S}
+    x::T
+    y::S
+end
+immutable TestType15{T}
+    x::T
+    y::Float64
+end
+immutable TestType16{T<:Integer}
+    x::T
+    y::Int
+end
+immutable TestType17{T}
+    x::T
+    y::Int
+end
+immutable TestTypeContainer2{T}
+    a::T
+    b::ASCIIString
+end
+immutable TestTypeContainer3{T,S}
+    a::T
+    b::S
 end
 
 file = jldopen(LastMain.fn, "r")
@@ -135,7 +184,7 @@ end
 @test isempty(fieldnames(typeof(x[3])))
 
 x = read(file, "x10")
-@test isa(x, TestTypeContainer)
+@test isa(x, TestTypeContainer{Any})
 @test x.a.x === 3
 @test x.b === 4
 
@@ -157,5 +206,30 @@ x = read(file, "x14")
 @test x.x == "abcdefg"
 
 @test_throws JLD2.UndefinedFieldException x = read(file, "x15")
+
+x = read(file, "x16")
+@test !isa(x, TestType14)
+@test x.x === 1.2345
+@test x.y === 67
+
+x = read(file, "x17")
+@test !isa(x, TestType15)
+@test x.x === 8.91011
+@test x.y === 12
+
+x = read(file, "x18")
+@test !isa(x, TestType16)
+@test x.x === 12.131415
+@test x.y === 1617
+
+x = read(file, "x19")
+@test !isa(x, TestTypeContainer2)
+@test x.a.x === 3
+@test x.b === 4
+
+x = read(file, "x20")
+@test isa(x, TestTypeContainer3{Any,Int})
+@test x.a.x === 3
+@test x.b === 4
 
 close(file)
