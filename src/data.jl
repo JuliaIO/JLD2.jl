@@ -67,7 +67,6 @@ end
 
 # h5fieldtype is fieldodr's HDF5 companion. It should give the HDF5
 # datatype reflecting the on-disk representation.
-h5fieldtype(f::JLDFile, ::Type{Union()}, ::Initialized) = nothing
 @generated function h5fieldtype{T}(f::JLDFile, ::Type{T}, initialized::Initialized)
     if isleaftype(T)
         if !hasfielddata(T)
