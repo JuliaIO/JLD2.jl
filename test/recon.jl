@@ -24,6 +24,18 @@ immutable TestType8
     c::TestType6
     d::TestType7
 end
+bitstype 16 TestType9
+immutable TestType10
+    a::Int
+    b::UInt8
+end
+immutable TestType11
+    a::Int
+    b::UInt8
+end
+immutable TestType12
+    x::ASCIIString
+end
 
 immutable TestTypeContainer{T}
     a::T
@@ -46,6 +58,10 @@ write(file, "x9", (TestType4(1),
                     [TestType5(TestType4(i)) for i = 1:5]),
                    TestType6()))
 write(file, "x10", TestTypeContainer(TestType4(3), 4))
+write(file, "x11", reinterpret(TestType9, 0x1234))
+write(file, "x12", TestType10(1234, 0x56))
+write(file, "x13", TestType11(78910, 0x11))
+write(file, "x14", TestType12("abcdefg"))
 close(file)
 
 workspace()
@@ -62,6 +78,18 @@ end
 immutable TestTypeContainer{T}
     a::T
     b::Int
+end
+bitstype 8 TestType9
+immutable TestType10
+    a::Int
+    b::UInt8
+    c::UInt8
+end
+immutable TestType11
+    b::UInt8
+end
+immutable TestType12
+    x::Int
 end
 
 file = jldopen(LastMain.fn, "r")
@@ -102,4 +130,22 @@ x = read(file, "x10")
 @test isa(x, TestTypeContainer)
 @test x.a.x === 3
 @test x.b === 4
+
+x = read(file, "x11")
+@test !isa(x, TestType9)
+@test reinterpret(UInt16, x) === 0x1234
+
+x = read(file, "x12")
+@test !isa(x, TestType10)
+@test x.a === 1234
+@test x.b === 0x56
+
+x = read(file, "x13")
+@test isa(x, TestType11)
+@test x.b === 0x11
+
+x = read(file, "x14")
+@test !isa(x, TestType12)
+@test x.x == "abcdefg"
+
 close(file)

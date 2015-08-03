@@ -260,7 +260,7 @@ function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, ::Void, empty::B
     elseif sizeof(T) == 0 && empty
         (ReadRepresentation(T, nothing), true)
     else
-        warn("bitstype $T has size $(sizeof(T)), but written type has size $(dt.size); reconstructing")
+        warn("bitstype $T has size $(sizeof(T)*8), but written type has size $(dt.size*8); reconstructing")
         reconstruct_bitstype(T.name.name, dt.size, empty)
     end
 end
@@ -295,7 +295,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
             if !haskey(dtnames, fn[i])
                 hard_failure && throw(TypeMappingException())
                 warn("saved type ", T, " is missing field ", fn[i], " in workspace type; reconstructing")
-                return reconstruct_compound(f, string(T), dt, field_datatypes_attr)
+                return reconstruct_compound(f, string(T), dt, field_datatypes)
             end
 
             dtindex = dtnames[fn[i]]
@@ -312,8 +312,8 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
                 # Saved type does not match type in workspace and no
                 # convert method exists, so we definitely need to reconstruct.
                 hard_failure && throw(TypeMappingException())
-                warn("saved type ", T, " has field ", stringfield, "::", readtype,
-                     ", but workspace type has field ", stringfield, "::", wstype,
+                warn("saved type ", T, " has field ", fn[i], "::", readtype,
+                     ", but workspace type has field ", fn[i], "::", wstype,
                      ", and no applicable convert method exists; reconstructing")
                 return reconstruct_compound(f, string(T), dt, field_datatypes)
             end
