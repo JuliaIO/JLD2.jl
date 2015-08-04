@@ -17,54 +17,60 @@ function read_dataset(f::JLDFile, offset::RelOffset)
     io = f.io
     seek(io, fileoffset(f, offset))
     cio = begin_checksum(io)
-    sz = read_obj_start(cio)
-    pmax = position(cio) + sz
 
-    # Messages
     dataspace = ReadDataspace()
     attrs = EMPTY_READ_ATTRIBUTES
     datatype_class::UInt8 = 0
     datatype_offset::FileOffset = 0
     data_offset::FileOffset = 0
     data_length::Int = 0
-    while position(cio) < pmax
-        msg = read(cio, HeaderMessage)
-        endpos = position(cio) + msg.size
-        if msg.msg_type == HM_DATASPACE
-            dataspace = read_dataspace_message(io)
-        elseif msg.msg_type == HM_DATATYPE
-            datatype_class, datatype_offset = read_datatype_message(io, f, (msg.flags & 2) == 2)
-        elseif msg.msg_type == HM_FILL_VALUE
-            (read(cio, UInt8) == 3 && read(cio, UInt8) == 0x09) || throw(UnsupportedFeatureException())
-        elseif msg.msg_type == HM_DATA_LAYOUT
-            read(cio, UInt8) == 3 || throw(UnsupportedVersionException())
-            storage_type = read(cio, UInt8)
-            if storage_type == LC_COMPACT_STORAGE
-                data_length = read(cio, UInt16)
-                data_offset = position(cio)
-            elseif storage_type == LC_CONTIGUOUS_STORAGE
-                data_offset = fileoffset(f, read(cio, RelOffset))
-                data_length = read(cio, Length)
-            else
-                throw(UnsupportedFeatureException())
-            end
-        elseif msg.msg_type == HM_ATTRIBUTE
-            if attrs === EMPTY_READ_ATTRIBUTES
-                attrs = ReadAttribute[read_attribute(cio, f)]
-            else
-                push!(attrs, read_attribute(cio, f))
-            end
-        elseif (msg.flags & 2^3) != 0
-            throw(UnsupportedFeatureException())
-        elseif msg.msg_type == HM_NIL
-            break
-        end
-        seek(cio, endpos)
-    end
-    seek(cio, pmax)
+    chk::UInt32 = 0
 
-    # Checksum
-    end_checksum(cio) == read(io, UInt32) || throw(InvalidDataException())
+    try
+        sz = read_obj_start(cio)
+        pmax = position(cio) + sz
+
+        # Messages
+        while position(cio) < pmax
+            msg = read(cio, HeaderMessage)
+            endpos = position(cio) + msg.size
+            if msg.msg_type == HM_DATASPACE
+                dataspace = read_dataspace_message(io)
+            elseif msg.msg_type == HM_DATATYPE
+                datatype_class, datatype_offset = read_datatype_message(io, f, (msg.flags & 2) == 2)
+            elseif msg.msg_type == HM_FILL_VALUE
+                (read(cio, UInt8) == 3 && read(cio, UInt8) == 0x09) || throw(UnsupportedFeatureException())
+            elseif msg.msg_type == HM_DATA_LAYOUT
+                read(cio, UInt8) == 3 || throw(UnsupportedVersionException())
+                storage_type = read(cio, UInt8)
+                if storage_type == LC_COMPACT_STORAGE
+                    data_length = read(cio, UInt16)
+                    data_offset = position(cio)
+                elseif storage_type == LC_CONTIGUOUS_STORAGE
+                    data_offset = fileoffset(f, read(cio, RelOffset))
+                    data_length = read(cio, Length)
+                else
+                    throw(UnsupportedFeatureException())
+                end
+            elseif msg.msg_type == HM_ATTRIBUTE
+                if attrs === EMPTY_READ_ATTRIBUTES
+                    attrs = ReadAttribute[read_attribute(cio, f)]
+                else
+                    push!(attrs, read_attribute(cio, f))
+                end
+            elseif (msg.flags & 2^3) != 0
+                throw(UnsupportedFeatureException())
+            elseif msg.msg_type == HM_NIL
+                break
+            end
+            seek(cio, endpos)
+        end
+        seek(cio, pmax)
+    finally
+        chk = end_checksum(cio)
+    end
+
+    chk == read(io, UInt32) || throw(InvalidDataException())
 
     # TODO verify that data length matches
     val = read_data(f, dataspace, datatype_class, datatype_offset, data_offset, attrs)
@@ -340,50 +346,54 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
     f.end_of_data = header_offset + fullsz + (layout_class == LC_CONTIGUOUS_STORAGE ? datasz : 0)
 
     cio = begin_checksum(io, fullsz - 4)
+    chk::UInt32 = 0
+    try
+        write(cio, ObjectStart(size_flag(psz)))
+        write_size(cio, psz)
 
-    write(cio, ObjectStart(size_flag(psz)))
-    write_size(cio, psz)
+        # Dataspace
+        write(cio, HeaderMessage(HM_DATASPACE, sizeof(dataspace), 0))
+        write(cio, dataspace)
 
-    # Dataspace
-    write(cio, HeaderMessage(HM_DATASPACE, sizeof(dataspace), 0))
-    write(cio, dataspace)
+        # Datatype
+        write(cio, HeaderMessage(HM_DATATYPE, sizeof(datatype), 1+2*isa(datatype, CommittedDatatype)))
+        write(cio, datatype)
 
-    # Datatype
-    write(cio, HeaderMessage(HM_DATATYPE, sizeof(datatype), 1+2*isa(datatype, CommittedDatatype)))
-    write(cio, datatype)
+        # Fill value
+        write(cio, HeaderMessage(HM_FILL_VALUE, 2, 0))
+        write(cio, UInt8(3)) # Version
+        write(cio, 0x09)     # Flags
 
-    # Fill value
-    write(cio, HeaderMessage(HM_FILL_VALUE, 2, 0))
-    write(cio, UInt8(3)) # Version
-    write(cio, 0x09)     # Flags
+        # Attributes
+        for attr in dataspace.attributes
+            write(cio, HeaderMessage(HM_ATTRIBUTE, sizeof(attr), 0))
+            write_attribute(cio, f, attr, f.datatype_wsession)
+        end
 
-    # Attributes
-    for attr in dataspace.attributes
-        write(cio, HeaderMessage(HM_ATTRIBUTE, sizeof(attr), 0))
-        write_attribute(cio, f, attr, f.datatype_wsession)
+        # Data storage layout
+        if layout_class == LC_COMPACT_STORAGE
+            write(cio, HeaderMessage(HM_DATA_LAYOUT, 4+datasz, 0))
+            write(cio, UInt8(3))                  # Version
+            write(cio, LC_COMPACT_STORAGE)        # Layout class
+            write(cio, UInt16(datasz))            # Size
+            if datasz != 0
+                write_data(f, data, odr, wsession)
+                seek(io, header_offset + fullsz - 4)
+            end
+        else
+            write(cio, HeaderMessage(HM_DATA_LAYOUT, 2+sizeof(RelOffset)+sizeof(Length), 0))
+            write(cio, UInt8(3))                            # Version
+            write(cio, LC_CONTIGUOUS_STORAGE)               # Layout class
+            write(cio, h5offset(f, header_offset + fullsz)) # RelOffset
+            write(cio, Length(sizeof(data)))                # Length
+        end
+    finally
+        chk = end_checksum(cio)
     end
 
-    # Data storage layout
-    if layout_class == LC_COMPACT_STORAGE
-        write(cio, HeaderMessage(HM_DATA_LAYOUT, 4+datasz, 0))
-        write(cio, UInt8(3))                  # Version
-        write(cio, LC_COMPACT_STORAGE)        # Layout class
-        write(cio, UInt16(datasz))            # Size
-        if datasz != 0
-            write_data(f, data, odr, wsession)
-            seek(io, header_offset + fullsz - 4)
-        end
-        write(io, end_checksum(cio))
-    else
-        write(cio, HeaderMessage(HM_DATA_LAYOUT, 2+sizeof(RelOffset)+sizeof(Length), 0))
-        write(cio, UInt8(3))                            # Version
-        write(cio, LC_CONTIGUOUS_STORAGE)               # Layout class
-        write(cio, h5offset(f, header_offset + fullsz)) # RelOffset
-        write(cio, Length(sizeof(data)))                # Length
-        write(io, end_checksum(cio))
-        if datasz != 0
-            write_data(f, data, odr, wsession)
-        end
+    write(io, chk)
+    if layout_class == LC_CONTIGUOUS_STORAGE && datasz != 0
+        write_data(f, data, odr, wsession)
     end
 
     if typeof(data).mutable && !isa(wsession, JLDWriteSession{None})
