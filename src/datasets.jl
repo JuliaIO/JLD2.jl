@@ -89,8 +89,8 @@ function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Da
         dt = read(io, typeof(expected_datatype))
         if dt == expected_datatype
             seek(f.io, attr.data_offset)
-            # BOXED_READ_DATASPACE[] = attr.dataspace
-            return read_data(f, attr.dataspace, rr)
+            BOXED_READ_DATASPACE[] = attr.dataspace
+            return read_data(f, rr)
         end
     end
     throw(UnsupportedFeatureException())
@@ -108,15 +108,15 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
     if datatype_class == typemax(UInt8) # Committed datatype
         rr = jltype(f, f.datatype_locations[h5offset(f, datatype_offset)])
         seek(io, data_offset)
-        # BOXED_READ_DATASPACE[] = dataspace
-        read_data(f, dataspace, rr, attributes)
+        BOXED_READ_DATASPACE[] = dataspace
+        read_data(f, rr, attributes)
     else
         seek(io, datatype_offset)
         @read_datatype io datatype_class dt begin
             rr = jltype(f, dt)
             seek(io, data_offset)
-            # BOXED_READ_DATASPACE[] = dataspace
-            read_data(f, dataspace, rr, attributes)
+            BOXED_READ_DATASPACE[] = dataspace
+            read_data(f, rr, attributes)
         end
     end
 end
@@ -140,10 +140,10 @@ end
 # We can avoid a box by putting the dataspace here instead of passing
 # it to read_data.  That reduces the allocation footprint, but doesn't
 # really seem to help with performance.
-# const BOXED_READ_DATASPACE = Ref{ReadDataspace}()
-function read_data(f::JLDFile{MmapIO}, dataspace::ReadDataspace, rr,
+const BOXED_READ_DATASPACE = Ref{ReadDataspace}()
+function read_data(f::JLDFile{MmapIO}, rr,
                    attributes::Union(Vector{ReadAttribute},Void)=nothing)
-    # dataspace = BOXED_READ_DATASPACE[]
+    dataspace = BOXED_READ_DATASPACE[]
     io = f.io
     inptr = io.curptr
     if dataspace.dataspace_type == DS_SCALAR
