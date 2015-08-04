@@ -132,7 +132,7 @@ end
 
 Base.(:(==))(x::CompoundDatatype, y::CompoundDatatype) = x.size == y.size && x.names == y.names &&
                                                x.offsets == y.offsets && x.members == y.members
-hash(::CompoundDatatype) = throw(ArgumentError("hash not defined for CompoundDatatype"))
+Base.hash(::CompoundDatatype) = throw(ArgumentError("hash not defined for CompoundDatatype"))
 
 class(dt::CompoundDatatype) = DT_COMPOUND
 strlen(x) = Int(ccall(:strlen, Csize_t, (Ptr{UInt8},), x))
@@ -215,7 +215,7 @@ VariableLengthDatatype(class, bitfield1, bitfield2, bitfield3, size, basetype::H
 Base.(:(==))(x::VariableLengthDatatype, y::VariableLengthDatatype) = x.class == y.class && x.bitfield1 == y.bitfield1 &&
                                                            x.bitfield2 == y.bitfield2 && x.size == y.size &&
                                                            x.basetype == y.basetype
-hash(::VariableLengthDatatype) = throw(ArgumentError("hash not defined for CompoundDatatype"))
+Base.hash(::VariableLengthDatatype) = throw(ArgumentError("hash not defined for CompoundDatatype"))
 
 class(dt::VariableLengthDatatype) = dt.class
 Base.sizeof(dt::VariableLengthDatatype) =

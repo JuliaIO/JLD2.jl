@@ -35,6 +35,9 @@ immutable RelOffset
     offset::UInt64
 end
 define_packed(RelOffset)
+Base.(:(==))(x::RelOffset, y::RelOffset) = x === y
+Base.hash(x::RelOffset) = hash(x.offset)
+
 const UNDEFINED_ADDRESS = RelOffset(0xffffffffffffffff)
 const NULL_REFERENCE = RelOffset(0)
 
