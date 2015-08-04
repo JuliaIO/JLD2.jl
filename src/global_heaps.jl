@@ -137,7 +137,7 @@ function read_heap_object{T,RR}(f::JLDFile{MmapIO}, hid::GlobalHeapID, rr::ReadR
         unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(n))
     else
         @simd for i = 1:n
-            if jlconvert_isinitialized(rr, inptr)
+            if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, inptr)
                 @inbounds v[i] = jlconvert(rr, f, inptr)
             end
             inptr += sizeof(RR)

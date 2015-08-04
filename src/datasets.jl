@@ -247,7 +247,7 @@ function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace
     #     end
     else
         @simd for i = 1:n
-            if jlconvert_isinitialized(rr, inptr)
+            if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, inptr)
                 @inbounds v[i] = jlconvert(rr, f, inptr)
             end
             inptr += sizeof(RR)
