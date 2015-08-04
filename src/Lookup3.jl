@@ -121,38 +121,99 @@ function hash(k::AbstractVector{UInt8}, initval::UInt32=UInt32(0), n::Integer=le
 
     # --------------- all but the last block: affect some 32 bits of (a,b,c)
     offset = 1
+    # @inbounds while n > 12
+    #     a += k[offset]
+    #     a += convert(UInt32, k[offset+1])<<8
+    #     a += convert(UInt32, k[offset+2])<<16
+    #     a += convert(UInt32, k[offset+3])<<24
+    #     @show a
+    #     b += k[offset+4]
+    #     b += convert(UInt32, k[offset+5])<<8
+    #     b += convert(UInt32, k[offset+6])<<16
+    #     b += convert(UInt32, k[offset+7])<<24
+    #     @show b
+    #     c += k[offset+8]
+    #     c += convert(UInt32, k[offset+9])<<8
+    #     c += convert(UInt32, k[offset+10])<<16
+    #     c += convert(UInt32, k[offset+11])<<24
+    #     @show c
+    #     (a, b, c) = mix(a, b, c)
+    #     n -= 12
+    #     offset += 12
+    # end
     @inbounds while n > 12
-        a += k[offset]
-        a += convert(UInt32, k[offset+1])<<8
-        a += convert(UInt32, k[offset+2])<<16
-        a += convert(UInt32, k[offset+3])<<24
-        b += k[offset+4]
-        b += convert(UInt32, k[offset+5])<<8
-        b += convert(UInt32, k[offset+6])<<16
-        b += convert(UInt32, k[offset+7])<<24
-        c += k[offset+8]
-        c += convert(UInt32, k[offset+9])<<8
-        c += convert(UInt32, k[offset+10])<<16
-        c += convert(UInt32, k[offset+11])<<24
+        a += unsafe_load(convert(Ptr{UInt32}, pointer(k, offset)))
+        offset += 4
+        b += unsafe_load(convert(Ptr{UInt32}, pointer(k, offset)))
+        offset += 4
+        c += unsafe_load(convert(Ptr{UInt32}, pointer(k, offset)))
         (a, b, c) = mix(a, b, c)
+        offset += 4
         n -= 12
-        offset += 12
     end
 
     # -------------------------------- last block: affect all 32 bits of (c)
+    # @inbounds if n > 0
+    #     n >= 12 && (c += convert(UInt32, k[offset+11])<<24)
+    #     n >= 11 && (c += convert(UInt32, k[offset+10])<<16)
+    #     n >= 10 && (c += convert(UInt32, k[offset+9])<<8)
+    #     n >= 9  && (c += k[offset+8])
+    #     n >= 8  && (b += convert(UInt32, k[offset+7])<<24)
+    #     n >= 7  && (b += convert(UInt32, k[offset+6])<<16)
+    #     n >= 6  && (b += convert(UInt32, k[offset+5])<<8)
+    #     n >= 5  && (b += k[offset+4])
+    #     n >= 4  && (a += convert(UInt32, k[offset+3])<<24)
+    #     n >= 3  && (a += convert(UInt32, k[offset+2])<<16)
+    #     n >= 2  && (a += convert(UInt32, k[offset+1])<<8)
+    #     n >= 1  && (a += k[offset])
+    #     c = final(a, b, c)
+    # end
     @inbounds if n > 0
-        n >= 12 && (c += convert(UInt32, k[offset+11])<<24)
-        n >= 11 && (c += convert(UInt32, k[offset+10])<<16)
-        n >= 10 && (c += convert(UInt32, k[offset+9])<<8)
-        n >= 9  && (c += k[offset+8])
-        n >= 8  && (b += convert(UInt32, k[offset+7])<<24)
-        n >= 7  && (b += convert(UInt32, k[offset+6])<<16)
-        n >= 6  && (b += convert(UInt32, k[offset+5])<<8)
-        n >= 5  && (b += k[offset+4])
-        n >= 4  && (a += convert(UInt32, k[offset+3])<<24)
-        n >= 3  && (a += convert(UInt32, k[offset+2])<<16)
-        n >= 2  && (a += convert(UInt32, k[offset+1])<<8)
-        n >= 1  && (a += k[offset])
+        if n == 12
+            c += unsafe_load(convert(Ptr{UInt32}, pointer(k, offset+8)))
+            @goto n8
+        elseif n == 11
+            c += convert(UInt32, k[offset+10])<<16
+            @goto n10
+        elseif n == 10
+            @label n10
+            c += convert(UInt32, k[offset+9])<<8
+            @goto n9
+        elseif n == 9
+            @label n9
+            c += k[offset+8]
+            @goto n8
+        elseif n == 8
+            @label n8
+            b += unsafe_load(convert(Ptr{UInt32}, pointer(k, offset+4)))
+            @goto n4
+        elseif n == 7
+            @label n7
+            b += convert(UInt32, k[offset+6])<<16
+            @goto n6
+        elseif n == 6
+            @label n6
+            b += convert(UInt32, k[offset+5])<<8
+            @goto n5
+        elseif n == 5
+            @label n5
+            b += k[offset+4]
+            @goto n4
+        elseif n == 4
+            @label n4
+            a += unsafe_load(convert(Ptr{UInt32}, pointer(k, offset)))
+        elseif n == 3
+            @label n3
+            a += convert(UInt32, k[offset+2])<<16
+            @goto n2
+        elseif n == 2
+            @label n2
+            a += convert(UInt32, k[offset+1])<<8
+            @goto n1
+        elseif n == 1
+            @label n1
+            a += k[offset]
+        end
         c = final(a, b, c)
     end
     c
