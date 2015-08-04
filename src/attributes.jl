@@ -57,12 +57,12 @@ function read_attribute(io::IO, f::JLDFile)
     read(io, UInt8) == 0 || throw(InvalidDataException())
 
     datatype_end = position(io) + ah.datatype_size
-    datatype_class, datatype_offset = read_datatype_message(io, committed)
+    datatype_class, datatype_offset = read_datatype_message(io, f, committed)
     seek(io, datatype_end)
 
     dataspace_end = position(io) + ah.dataspace_size
     dataspace = read_dataspace_message(io)
     seek(io, dataspace_end)
 
-    ReadAttribute(name, dataspace, datatype_class, datatype_offset, FileOffset(position(io)))
+    ReadAttribute(name, dataspace, datatype_class, datatype_offset, position(io))
 end

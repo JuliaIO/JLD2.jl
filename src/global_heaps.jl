@@ -9,7 +9,7 @@ end
 define_packed(GlobalHeapID)
 
 isatend(f::JLDFile, gh::GlobalHeap) =
-    gh.offset != UNDEFINED_ADDRESS && f.end_of_data == gh.offset + 8 + sizeof(Length) + gh.length
+    gh.offset != 0 && f.end_of_data == gh.offset + 8 + sizeof(Length) + gh.length
 
 heap_object_length(data::AbstractArray) = length(data)
 heap_object_length(::Any) = 1
@@ -57,7 +57,8 @@ function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
         write(io, UInt32(1))      # Version & Reserved
         write(io, Length(heapsz)) # Collection size
         f.end_of_data = position(io) + heapsz
-        gh = f.global_heap = f.global_heaps[offset] = GlobalHeap(offset, heapsz, heapsz, Offset[])
+        gh = f.global_heap = f.global_heaps[h5offset(f, offset)] =
+            GlobalHeap(offset, heapsz, heapsz, FileOffset[])
     end
 
     # Write data
@@ -84,7 +85,7 @@ function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
     seek(io, objoffset + 8+sizeof(Length))
     write_data(f, data, odr, wsession) # Object data
 
-    GlobalHeapID(gh.offset, index)
+    GlobalHeapID(h5offset(f, gh.offset), index)
 end
 
 # Force specialization on DataType
@@ -97,7 +98,7 @@ function Base.read(io::IO, ::Type{GlobalHeap})
     read(io, UInt32) == 1 || throw(UnsupportedVersionException())
     heapsz = read(io, Length)
     index = 1
-    objects = Offset[]
+    objects = FileOffset[]
     startpos = position(io)
     free = heapsz
     while free > 8 + sizeof(Length)
@@ -120,7 +121,7 @@ function read_heap_object{T,RR}(f::JLDFile{MmapIO}, hid::GlobalHeapID, rr::ReadR
     if haskey(f.global_heaps, hid.heap_offset)
         gh = f.global_heaps[hid.heap_offset]
     else
-        seek(io, hid.heap_offset)
+        seek(io, fileoffset(f, hid.heap_offset))
         f.global_heaps[hid.heap_offset] = gh = read(io, GlobalHeap)
     end
     seek(io, gh.objects[hid.index]+8)

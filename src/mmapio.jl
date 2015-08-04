@@ -122,17 +122,17 @@ function read_bytestring(io::MmapIO)
     str
 end
 
-function Base.seek(io::MmapIO, offset)
+function Base.seek(io::MmapIO, offset::Integer)
     io.curptr = pointer(io.arr) + offset
     nothing
 end
 
-function Base.skip(io::MmapIO, offset)
+function Base.skip(io::MmapIO, offset::Integer)
     io.curptr += offset
     nothing
 end
 
-Base.position(io::MmapIO) = Int(io.curptr - pointer(io.arr))
+Base.position(io::MmapIO) = FileOffset(io.curptr - pointer(io.arr))
 
 # We sometimes need to compute checksums. We do this by first calling
 # begin_checksum when starting to handle whatever needs checksumming,

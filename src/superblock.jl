@@ -6,9 +6,9 @@
 # Superblock (Version 2)
 type Superblock
     file_consistency_flags::UInt8
-    base_address::Offset
+    base_address::FileOffset
     superblock_extension_address::Offset
-    end_of_file_address::Offset
+    end_of_file_address::FileOffset
     root_group_object_header_address::Offset
 end
 
@@ -20,7 +20,7 @@ function Base.read(io::IO, ::Type{Superblock})
 
     # Signature
     signature = read(cio, UInt64)
-    signature == SUPERBLOCK_SIGNATURE || throw(UnsupportedVersionException())
+    signature == SUPERBLOCK_SIGNATURE || throw(InvalidDataException())
 
     # Version
     version  = read(cio, UInt8)
@@ -35,9 +35,9 @@ function Base.read(io::IO, ::Type{Superblock})
     file_consistency_flags = read(cio, UInt8)
 
     # Addresses
-    base_address = read(cio, Offset)
+    base_address = read(cio, FileOffset)
     superblock_extension_address = read(cio, Offset)
-    end_of_file_address = read(cio, Offset)
+    end_of_file_address = read(cio, FileOffset)
     root_group_object_header_address = read(cio, Offset)
 
     # Checksum
@@ -55,9 +55,9 @@ function Base.write(io::IO, s::Superblock)
     write(cio, UInt8(8))                        # Size of offsets
     write(cio, UInt8(8))                        # Size of lengths
     write(cio, s.file_consistency_flags::UInt8)
-    write(cio, s.base_address::Offset)
+    write(cio, s.base_address::FileOffset)
     write(cio, s.superblock_extension_address::Offset)
-    write(cio, s.end_of_file_address::Offset)
+    write(cio, s.end_of_file_address::FileOffset)
     write(cio, s.root_group_object_header_address::Offset)
     write(io, end_checksum(cio))
 end

@@ -40,12 +40,12 @@ ReferenceDatatype() =
 # committed datatype and the class is typemax(UInt8). Otherwise, the
 # offset is the offset of the datatype in the file, and the class is
 # the corresponding datatype class.
-function read_datatype_message(io::IO, committed)
+function read_datatype_message(io::IO, f::JLDFile, committed)
     if committed
         # Shared datatype
         read(io, UInt8) == 3 || throw(UnsupportedVersionException())
         read(io, UInt8) == 2 || throw(UnsupportedFeatureException())
-        (typemax(UInt8), FileOffset(read(io, Offset)))
+        (typemax(UInt8), FileOffset(fileoffset(f, read(io, Offset))))
     else
         # Datatype stored here
         (read(io, UInt8), FileOffset(position(io)-1))
@@ -271,7 +271,7 @@ end
 # Read the actual datatype for a committed datatype
 function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
     io = f.io
-    seek(io, cdt.header_offset)
+    seek(io, fileoffset(f, cdt.header_offset))
     cio = begin_checksum(io)
     sz = read_obj_start(cio)
     pmax = position(cio) + sz

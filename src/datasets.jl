@@ -15,7 +15,7 @@ function read_dataset(f::JLDFile, offset::Offset)
     end
 
     io = f.io
-    seek(io, offset)
+    seek(io, fileoffset(f, offset))
     cio = begin_checksum(io)
     sz = read_obj_start(cio)
     pmax = position(cio) + sz
@@ -33,7 +33,7 @@ function read_dataset(f::JLDFile, offset::Offset)
         if msg.msg_type == HM_DATASPACE
             dataspace = read_dataspace_message(io)
         elseif msg.msg_type == HM_DATATYPE
-            datatype_class, datatype_offset = read_datatype_message(io, (msg.flags & 2) == 2)
+            datatype_class, datatype_offset = read_datatype_message(io, f, (msg.flags & 2) == 2)
         elseif msg.msg_type == HM_FILL_VALUE
             (read(cio, UInt8) == 3 && read(cio, UInt8) == 0x09) || throw(UnsupportedFeatureException())
         elseif msg.msg_type == HM_DATA_LAYOUT
@@ -43,7 +43,7 @@ function read_dataset(f::JLDFile, offset::Offset)
                 data_length = read(cio, UInt16)
                 data_offset = position(cio)
             elseif storage_type == LC_CONTIGUOUS_STORAGE
-                data_offset = read(cio, Offset)
+                data_offset = fileoffset(f, read(cio, Offset))
                 data_length = read(cio, Length)
             else
                 throw(UnsupportedFeatureException())
@@ -106,7 +106,7 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
     # See if there is a julia type attribute
     io = f.io
     if datatype_class == typemax(UInt8) # Committed datatype
-        rr = jltype(f, f.datatype_locations[datatype_offset])
+        rr = jltype(f, f.datatype_locations[h5offset(f, datatype_offset)])
         seek(io, data_offset)
         # BOXED_READ_DATASPACE[] = dataspace
         read_data(f, dataspace, rr, attributes)
@@ -376,10 +376,10 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
         write(io, end_checksum(cio))
     else
         write(cio, HeaderMessage(HM_DATA_LAYOUT, 2+sizeof(Offset)+sizeof(Length), 0))
-        write(cio, UInt8(3))                       # Version
-        write(cio, LC_CONTIGUOUS_STORAGE)          # Layout class
-        write(cio, Offset(header_offset + fullsz)) # Offset
-        write(cio, Length(sizeof(data)))           # Length
+        write(cio, UInt8(3))                            # Version
+        write(cio, LC_CONTIGUOUS_STORAGE)               # Layout class
+        write(cio, h5offset(f, header_offset + fullsz)) # Offset
+        write(cio, Length(sizeof(data)))                # Length
         write(io, end_checksum(cio))
         if datasz != 0
             write_data(f, data, odr, wsession)
@@ -387,11 +387,11 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
     end
 
     if typeof(data).mutable && !isa(wsession, JLDWriteSession{None})
-        wsession.h5offset[object_id(data)] = Offset(header_offset)
+        wsession.h5offset[object_id(data)] = h5offset(f, header_offset)
         push!(wsession.objects, data)
     end
 
-    header_offset
+    h5offset(f, header_offset)
 end
 
 # Force specialization on DataType
@@ -404,13 +404,13 @@ function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
 end
 
 @noinline function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
-    offset = get(wsession.h5offset, object_id(x), Offset(0))::Offset
-    offset != 0 ? Reference(offset) : Reference(write_dataset(f, x, wsession)::UInt64)
+    offset = get(wsession.h5offset, object_id(x), Offset(0))
+    offset != Offset(0) ? Reference(offset) : Reference(write_dataset(f, x, wsession)::Offset)
 end
 
 @inline function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
     if !typeof(x).mutable || isa(wsession, JLDWriteSession{None})
-        Reference(write_dataset(f, x, wsession))::Reference
+        Reference(write_dataset(f, x, wsession)::Offset)
     else
         write_ref_mutable(f, x, wsession)::Reference
     end

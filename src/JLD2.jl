@@ -6,11 +6,12 @@ export jldopen
 const SUPERBLOCK_SIGNATURE = reinterpret(UInt64, UInt8[0o211, 'H', 'D', 'F', '\r', '\n', 0o032, '\n'])[1]
 const OBJECT_HEADER_SIGNATURE = reinterpret(UInt32, UInt8['O', 'H', 'D', 'R'])[1]
 const GLOBAL_HEAP_SIGNATURE = reinterpret(UInt32, UInt8['G', 'C', 'O', 'L'])[1]
-const UNDEFINED_ADDRESS = 0xffffffffffffffff
 
 # Currently we specify that all offsets and lengths are 8 bytes
-typealias Offset UInt64
 typealias Length UInt64
+
+# Currently we specify a 512 byte header
+const FILE_HEADER_LENGTH = 512
 
 immutable UnsupportedVersionException <: Exception end
 immutable UnsupportedFeatureException <: Exception end
@@ -26,6 +27,16 @@ include("Lookup3.jl")
 include("mmapio.jl")
 include("misc.jl")
 
+# Offset represents an HDF5 relative offset. It differs from FileOffset (used
+# elsewhere) in that it is relative to the superblock base address. In practice,
+# this means that FILE_HEADER_LENGTH has been subtracted. `fileoffset` and
+# `h5offset` convert between Offsets and FileOffsets
+immutable Offset
+    offset::UInt64
+end
+define_packed(Offset)
+const UNDEFINED_ADDRESS = Offset(0xffffffffffffffff)
+
 immutable JLDWriteSession{T<:Union(Dict{UInt,Offset},None)}
     h5offset::T
     objects::Vector{Any}
@@ -36,15 +47,16 @@ end
 JLDWriteSession() = JLDWriteSession{Dict{UInt,Offset}}(Dict{UInt,Offset}(), Any[])
 
 immutable Reference
-    offset::UInt64
+    offset::Offset
 end
 define_packed(Reference)
+const NULL_REFERENCE = Reference(Offset(0))
 
 type GlobalHeap
-    offset::Offset
+    offset::FileOffset
     length::Length
     free::Length
-    objects::Vector{Offset}
+    objects::Vector{FileOffset}
 end
 
 abstract H5Datatype
@@ -70,7 +82,7 @@ type JLDFile{T<:IO}
     jlh5type::Dict{Type,CommittedDatatype}
     h5jltype::ObjectIdDict
     jloffset::Dict{Offset,WeakRef}
-    end_of_data::Offset
+    end_of_data::FileOffset
     global_heaps::Dict{Offset,GlobalHeap}
     global_heap::GlobalHeap
 end
@@ -78,8 +90,11 @@ JLDFile(io::IO, writable::Bool, written::Bool) =
     JLDFile(io, writable, written, OrderedDict{Offset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), OrderedDict{ByteString,Offset}(), Dict{Type,CommittedDatatype}(),
             ObjectIdDict(), Dict{Offset,WeakRef}(),
-            UInt64(sizeof(Superblock)), Dict{Offset,GlobalHeap}(),
-            GlobalHeap(UNDEFINED_ADDRESS, 0, 0, Offset[]))
+            FileOffset(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{Offset,GlobalHeap}(),
+            GlobalHeap(0, 0, 0, FileOffset[]))
+
+fileoffset(f::JLDFile, x::Offset) = FileOffset(x.offset + FILE_HEADER_LENGTH)
+h5offset(f::JLDFile, x::FileOffset) = Offset(x - FILE_HEADER_LENGTH)
 
 #
 # File
@@ -90,15 +105,16 @@ function jldopen(fname::AbstractString, write::Bool, create::Bool, truncate::Boo
     f = JLDFile(io, write, truncate)
 
     if !truncate
+        seek(io, FILE_HEADER_LENGTH)
         superblock = read(io, Superblock)
         f.end_of_data = superblock.end_of_file_address
-        seek(io, superblock.root_group_object_header_address)
+        seek(io, fileoffset(f, superblock.root_group_object_header_address))
         root_group = read(io, Group)
         for i = 1:length(root_group.names)
             name = root_group.names[i]
             offset = root_group.offsets[i]
             if name == "_types"
-                seek(io, offset)
+                seek(io, fileoffset(f, offset))
                 types_group = read(io, Group)
                 for i = 1:length(types_group.offsets)
                     f.datatype_locations[types_group.offsets[i]] = CommittedDatatype(types_group.offsets[i], i)
@@ -122,13 +138,13 @@ function jldopen(fname::AbstractString, mode::AbstractString="r")
 end
 
 function Base.read(f::JLDFile, name::String)
-    f.end_of_data == UNDEFINED_ADDRESS && throw(ArgumentError("file is closed"))
+    f.end_of_data == 0 && throw(ArgumentError("file is closed"))
     haskey(f.datasets, name) || throw(ArgumentError("file has no dataset $name"))
     read_dataset(f, f.datasets[name])
 end
 
 function Base.write(f::JLDFile, name::String, obj, wsession::JLDWriteSession=JLDWriteSession())
-    f.end_of_data == UNDEFINED_ADDRESS && throw(ArgumentError("file is closed"))
+    f.end_of_data == 0 && throw(ArgumentError("file is closed"))
     !f.writable && throw(ArgumentError("file was opened read-only"))
     f.written = true
 
@@ -152,25 +168,26 @@ function Base.close(f::JLDFile)
         # Write types group
         if !isempty(f.datatypes)
             push!(names, "_types")
-            push!(offsets, position(io))
+            push!(offsets, h5offset(f, position(io)))
             write(io, Group(ASCIIString[@sprintf("%08d", i) for i = 1:length(f.datatypes)],
                             collect(keys(f.datatype_locations))))
         end
 
         # Write root group
-        root_group_object_header_address = position(io)
+        root_group_object_header_address = h5offset(f, position(io))
         for (k, v) in f.datasets
             push!(names, k)
             push!(offsets, v)
         end
         write(io, Group(names, offsets))
 
-        eof_address = position(io)
-        truncate(io, eof_address)
-        seek(io, 0)
-        write(io, Superblock(0, 0, UNDEFINED_ADDRESS, eof_address, root_group_object_header_address))
+        eof_position = position(io)
+        truncate(io, eof_position)
+        seek(io, FILE_HEADER_LENGTH)
+        write(io, Superblock(0, FILE_HEADER_LENGTH, UNDEFINED_ADDRESS,
+              eof_position, root_group_object_header_address))
     end
-    f.end_of_data = UNDEFINED_ADDRESS
+    f.end_of_data = 0
     close(io)
     nothing
 end
