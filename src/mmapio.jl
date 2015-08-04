@@ -24,11 +24,22 @@ end
 
 Base.show(io::IO, ::MmapIO) = print(io, "MmapIO")
 
+if OS_NAME === :Linux
+    # This is substantially faster than truncate on Linux, but slower on OS X.
+    # TODO: Benchmark on Windows
+    grow(io::IOStream, sz::Integer) =
+        systemerror("pwrite", ccall(:jl_pwrite, Cssize_t,
+                                    (Cint, Ptr{UInt8}, Uint, FileOffset),
+                                    fd(io.f), &UInt8(0), 1, newsz - 1) < 1)
+else
+    grow(io::IOStream, sz::Integer) = truncate(io, sz)
+end
+
 function Base.resize!(io::MmapIO, newend::Ptr{Void})
     # Resize file
     ptr = pointer(io.arr)
     newsz = Int(max(newend - ptr, io.curptr - ptr + FILE_GROW_SIZE))
-    systemerror("pwrite", ccall(:jl_pwrite, Cssize_t, (Cint, Ptr{UInt8}, Uint, FileOffset), fd(io.f), &UInt8(0), 1, newsz - 1) < 1)
+    grow(io.f, newsz)
 
     if newsz > length(io.arr)
         # If we have not mapped enough memory, map more
@@ -140,23 +151,23 @@ Base.position(io::MmapIO) = FileOffset(io.curptr - pointer(io.arr))
 # nested checksums.
 # XXX not thread-safe!
 
-const CHECKSUM_POS = Int[]
+const CHECKSUM_POS = FileOffset[]
 const NCHECKSUM = Ref{Int}(0)
 function begin_checksum(io::MmapIO)
     idx = NCHECKSUM[] += 1
     if idx > length(CHECKSUM_POS)
         push!(CHECKSUM_POS, position(io))
     else
-        CHECKSUM_POS[idx] = position(io)
+        @inbounds CHECKSUM_POS[idx] = position(io)
     end
     io
 end
-function begin_checksum(io::MmapIO, sz::Int)
+function begin_checksum(io::MmapIO, sz::Integer)
     ensureroom(io, sz)
     begin_checksum(io)
 end
 function end_checksum(io::MmapIO)
-    v = CHECKSUM_POS[NCHECKSUM[]]
+    @inbounds v = CHECKSUM_POS[NCHECKSUM[]]
     NCHECKSUM[] -= 1
     Lookup3.hash(UnsafeContiguousView(pointer(io.arr) + v, (position(io) - v,)))
 end
