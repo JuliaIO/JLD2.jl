@@ -105,40 +105,35 @@ end
 
 function Base.read(io::IO, ::Type{Group})
     cio = begin_checksum(io)
+    sz = read_obj_start(cio)
+    pmax = position(cio) + sz
+
+    # Messages
     names = ByteString[]
     offsets = RelOffset[]
-
-    chk::UInt32 = 0
-    try
-        sz = read_obj_start(cio)
-        pmax = position(cio) + sz
-
-        # Messages
-        while position(cio) < pmax
-            msg = read(cio, HeaderMessage)
-            endpos = position(cio) + msg.size
-            if msg.msg_type == HM_LINK_INFO
-                link_info = read(cio, LinkInfo)
-                link_info.fractal_heap_address == UNDEFINED_ADDRESS || throw(UnsupportedFeatureException())
-            elseif msg.msg_type == HM_GROUP_INFO
-                # This message doesn't help us much, so we ignore it for now
-            elseif msg.msg_type == HM_LINK_MESSAGE
-                name, offset = read_link(cio)
-                push!(names, name)
-                push!(offsets, offset)
-            elseif (msg.flags & 2^3) != 0
-                throw(UnsupportedFeatureException())
-            elseif msg.msg_type == HM_NIL
-                break
-            end
-            seek(cio, endpos)
+    while position(cio) < pmax
+        msg = read(cio, HeaderMessage)
+        endpos = position(cio) + msg.size
+        if msg.msg_type == HM_LINK_INFO
+            link_info = read(cio, LinkInfo)
+            link_info.fractal_heap_address == UNDEFINED_ADDRESS || throw(UnsupportedFeatureException())
+        elseif msg.msg_type == HM_GROUP_INFO
+            # This message doesn't help us much, so we ignore it for now
+        elseif msg.msg_type == HM_LINK_MESSAGE
+            name, offset = read_link(cio)
+            push!(names, name)
+            push!(offsets, offset)
+        elseif (msg.flags & 2^3) != 0
+            throw(UnsupportedFeatureException())
+        elseif msg.msg_type == HM_NIL
+            break
         end
-        seek(cio, pmax)
-    finally
-        chk = end_checksum(cio)
+        seek(cio, endpos)
     end
+    seek(cio, pmax)
 
-    chk == read(io, UInt32) || throw(InvalidDataException())
+    # Checksum
+    end_checksum(cio) == read(io, UInt32) || throw(InvalidDataException())
 
     Group(names, offsets)
 end
@@ -148,30 +143,26 @@ function Base.write(io::IO, group::Group)
     sz = sizeof(ObjectStart) + size_size(psz) + psz + 4
 
     cio = begin_checksum(io, sz - 4)
-    chk::UInt32 = 0
 
-    try
-        # Object header
-        write(cio, ObjectStart(size_flag(psz)))
-        write_size(cio, psz)
+    # Object header
+    write(cio, ObjectStart(size_flag(psz)))
+    write_size(cio, psz)
+    x = position(cio)
 
-        # Link info message
-        write(cio, HeaderMessage(HM_LINK_INFO, sizeof(LinkInfo), 0))
-        write(cio, LinkInfo())
+    # Link info message
+    write(cio, HeaderMessage(HM_LINK_INFO, sizeof(LinkInfo), 0))
+    write(cio, LinkInfo())
 
-        # Group info message
-        write(cio, HeaderMessage(HM_GROUP_INFO, 2, 0))
-        write(cio, UInt16(0))
+    # Group info message
+    write(cio, HeaderMessage(HM_GROUP_INFO, 2, 0))
+    write(cio, UInt16(0))
 
-        # Datatypes
-        for i = 1:length(group.names)
-            write(cio, HeaderMessage(HM_LINK_MESSAGE, sizeof_link(group.names[i]), 0))
-            write_link(io, group.names[i], group.offsets[i])
-        end
-    finally
-        chk = end_checksum(cio)
+    # Datatypes
+    for i = 1:length(group.names)
+        write(cio, HeaderMessage(HM_LINK_MESSAGE, sizeof_link(group.names[i]), 0))
+        write_link(io, group.names[i], group.offsets[i])
     end
 
     # Checksum
-    write(io, chk)
+    write(io, end_checksum(cio))
 end

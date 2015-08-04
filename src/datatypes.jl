@@ -256,22 +256,16 @@ function commit(f::JLDFile, dt::H5Datatype, attrs::Tuple{Vararg{WrittenAttribute
     f.end_of_data = offset + sz + 4
 
     cio = begin_checksum(io, sz)
-    chk::UInt32 = 0
-    try
-        write(cio, ObjectStart(size_flag(psz)))
-        write_size(cio, psz)
-        write(cio, HeaderMessage(HM_DATATYPE, sizeof(dt), 64))
-        write(cio, dt)
-        for attr in attrs
-            write(cio, HeaderMessage(HM_ATTRIBUTE, sizeof(attr), 0))
-            write_attribute(cio, f, attr, f.datatype_wsession)
-        end
-        seek(io, offset + sz)
-    finally
-        chk = end_checksum(cio)
+    write(cio, ObjectStart(size_flag(psz)))
+    write_size(cio, psz)
+    write(cio, HeaderMessage(HM_DATATYPE, sizeof(dt), 64))
+    write(cio, dt)
+    for attr in attrs
+        write(cio, HeaderMessage(HM_ATTRIBUTE, sizeof(attr), 0))
+        write_attribute(cio, f, attr, f.datatype_wsession)
     end
-
-    write(io, chk)
+    seek(io, offset + sz)
+    write(io, end_checksum(cio))
 end
 
 # Read the actual datatype for a committed datatype
@@ -279,34 +273,29 @@ function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
     io = f.io
     seek(io, fileoffset(f, cdt.header_offset))
     cio = begin_checksum(io)
+    sz = read_obj_start(cio)
+    pmax = position(cio) + sz
 
+    # Messages
     datatype_class::UInt8 = 0
     datatype_offset::Int = 0
     attrs = ReadAttribute[]
-    chk::UInt32 = 0
-
-    try
-        sz = read_obj_start(cio)
-        pmax = position(cio) + sz
-
-        # Messages
-        while position(cio) < pmax
-            msg = read(cio, HeaderMessage)
-            endpos = position(cio) + msg.size
-            if msg.msg_type == HM_DATATYPE
-                # Datatype stored here
-                datatype_offset = position(cio)
-                datatype_class = read(cio, UInt8)
-            elseif msg.msg_type == HM_ATTRIBUTE
-                push!(attrs, read_attribute(cio, f))
-            end
-            seek(cio, endpos)
+    while position(cio) < pmax
+        msg = read(cio, HeaderMessage)
+        endpos = position(cio) + msg.size
+        if msg.msg_type == HM_DATATYPE
+            # Datatype stored here
+            datatype_offset = position(cio)
+            datatype_class = read(cio, UInt8)
+        elseif msg.msg_type == HM_ATTRIBUTE
+            push!(attrs, read_attribute(cio, f))
         end
-        seek(cio, pmax)
-    finally
-        chk = end_checksum(cio)
+        seek(cio, endpos)
     end
-    chk == read(io, UInt32) || throw(InvalidDataException())
+    seek(cio, pmax)
+
+    # Checksum
+    end_checksum(cio) == read(io, UInt32) || throw(InvalidDataException())
 
     seek(io, datatype_offset)
     @read_datatype io datatype_class dt begin
