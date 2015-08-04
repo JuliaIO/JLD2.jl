@@ -4,14 +4,14 @@
 
 immutable Group{T}
     names::T
-    offsets::Vector{Offset}
+    offsets::Vector{RelOffset}
 end
 
 immutable LinkInfo
     version::UInt8
     flags::UInt8
-    fractal_heap_address::Offset
-    name_index_btree::Offset
+    fractal_heap_address::RelOffset
+    name_index_btree::RelOffset
 end
 define_packed(LinkInfo)
 
@@ -50,7 +50,7 @@ function read_link(io::IO)
 
     sz = read_size(io, flags)  # Size
     name = read(io, UInt8, sz) # Link name
-    target = read(io, Offset)  # Link information
+    target = read(io, RelOffset)  # Link information
 
     if cset == CSET_ASCII
         (ASCIIString(name), target)
@@ -60,9 +60,9 @@ function read_link(io::IO)
 end
 
 sizeof_link(name::ByteString) =
-    2 + size_size(sizeof(name)) + sizeof(name) + sizeof(Offset) + isa(name, UTF8String)
+    2 + size_size(sizeof(name)) + sizeof(name) + sizeof(RelOffset) + isa(name, UTF8String)
 
-function write_link(io::IO, name::ByteString, target::Offset)
+function write_link(io::IO, name::ByteString, target::RelOffset)
     # Version
     write(io, UInt8(1))
 
@@ -85,7 +85,7 @@ function write_link(io::IO, name::ByteString, target::Offset)
     write(io, name)
 
     # Link target
-    write(io, target::Offset)
+    write(io, target::RelOffset)
 end
 
 const OH_ATTRIBUTE_CREATION_ORDER_TRACKED = 2^2
@@ -110,7 +110,7 @@ function Base.read(io::IO, ::Type{Group})
 
     # Messages
     names = ByteString[]
-    offsets = Offset[]
+    offsets = RelOffset[]
     while position(cio) < pmax
         msg = read(cio, HeaderMessage)
         endpos = position(cio) + msg.size

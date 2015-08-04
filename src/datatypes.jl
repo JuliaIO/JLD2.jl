@@ -33,9 +33,9 @@ StringDatatype(::Type{UTF8String}, size::Integer) =
 OpaqueDatatype(size::Integer) =
     BasicDatatype(DT_OPAQUE, 0x00, 0x00, 0x00, size) # XXX make sure ignoring the tag is OK
 ReferenceDatatype() =
-    BasicDatatype(DT_REFERENCE, 0x00, 0x00, 0x00, sizeof(Offset))
+    BasicDatatype(DT_REFERENCE, 0x00, 0x00, 0x00, sizeof(RelOffset))
 
-# Reads a datatype message and returns a (offset::Offset, class::UInt8)
+# Reads a datatype message and returns a (offset::RelOffset, class::UInt8)
 # tuple. If the datatype is committed, the offset is the offset of the
 # committed datatype and the class is typemax(UInt8). Otherwise, the
 # offset is the offset of the datatype in the file, and the class is
@@ -45,7 +45,7 @@ function read_datatype_message(io::IO, f::JLDFile, committed)
         # Shared datatype
         read(io, UInt8) == 3 || throw(UnsupportedVersionException())
         read(io, UInt8) == 2 || throw(UnsupportedFeatureException())
-        (typemax(UInt8), FileOffset(fileoffset(f, read(io, Offset))))
+        (typemax(UInt8), FileOffset(fileoffset(f, read(io, RelOffset))))
     else
         # Datatype stored here
         (read(io, UInt8), FileOffset(position(io)-1))
@@ -208,7 +208,7 @@ immutable VariableLengthDatatype{T<:H5Datatype} <: H5Datatype
     basetype::T
 end
 VariableLengthDatatype(basetype::H5Datatype) =
-    VariableLengthDatatype{typeof(basetype)}(DT_VARIABLE_LENGTH, 0x00, 0x00, 0x00, 8+sizeof(Offset), basetype)
+    VariableLengthDatatype{typeof(basetype)}(DT_VARIABLE_LENGTH, 0x00, 0x00, 0x00, 8+sizeof(RelOffset), basetype)
 VariableLengthDatatype(class, bitfield1, bitfield2, bitfield3, size, basetype::H5Datatype) =
     VariableLengthDatatype{typeof(basetype)}(class, bitfield1, bitfield2, bitfield3, size, basetype)
 
@@ -235,7 +235,7 @@ function Base.read(io::IO, ::Type{VariableLengthDatatype})
     end
 end
 
-Base.sizeof(dt::CommittedDatatype) = 2 + sizeof(Offset)
+Base.sizeof(dt::CommittedDatatype) = 2 + sizeof(RelOffset)
 
 function Base.write(io::IO, dt::CommittedDatatype)
     write(io, UInt8(3))

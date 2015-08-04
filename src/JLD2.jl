@@ -27,30 +27,25 @@ include("Lookup3.jl")
 include("mmapio.jl")
 include("misc.jl")
 
-# Offset represents an HDF5 relative offset. It differs from FileOffset (used
+# RelOffset represents an HDF5 relative offset. It differs from FileOffset (used
 # elsewhere) in that it is relative to the superblock base address. In practice,
 # this means that FILE_HEADER_LENGTH has been subtracted. `fileoffset` and
-# `h5offset` convert between Offsets and FileOffsets
-immutable Offset
+# `h5offset` convert between RelOffsets and FileOffsets
+immutable RelOffset
     offset::UInt64
 end
-define_packed(Offset)
-const UNDEFINED_ADDRESS = Offset(0xffffffffffffffff)
+define_packed(RelOffset)
+const UNDEFINED_ADDRESS = RelOffset(0xffffffffffffffff)
+const NULL_REFERENCE = RelOffset(0)
 
-immutable JLDWriteSession{T<:Union(Dict{UInt,Offset},None)}
+immutable JLDWriteSession{T<:Union(Dict{UInt,RelOffset},None)}
     h5offset::T
     objects::Vector{Any}
 
     JLDWriteSession() = new()
     JLDWriteSession(h5offset, objects) = new(h5offset, objects)
 end
-JLDWriteSession() = JLDWriteSession{Dict{UInt,Offset}}(Dict{UInt,Offset}(), Any[])
-
-immutable Reference
-    offset::Offset
-end
-define_packed(Reference)
-const NULL_REFERENCE = Reference(Offset(0))
+JLDWriteSession() = JLDWriteSession{Dict{UInt,RelOffset}}(Dict{UInt,RelOffset}(), Any[])
 
 type GlobalHeap
     offset::FileOffset
@@ -62,11 +57,11 @@ end
 abstract H5Datatype
 
 immutable CommittedDatatype <: H5Datatype
-    header_offset::Offset
+    header_offset::RelOffset
     index::Int
 end
 
-immutable OnDiskRepresentation{Offsets,Types,ODRs} end
+immutable OnDiskRepresentation{RelOffsets,Types,ODRs} end
 immutable ReadRepresentation{T,ODR} end
 
 symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)
@@ -75,26 +70,26 @@ type JLDFile{T<:IO}
     io::T
     writable::Bool
     written::Bool
-    datatype_locations::OrderedDict{Offset,CommittedDatatype}
+    datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession
-    datasets::OrderedDict{ByteString,Offset}
+    datasets::OrderedDict{ByteString,RelOffset}
     jlh5type::Dict{Type,CommittedDatatype}
     h5jltype::ObjectIdDict
-    jloffset::Dict{Offset,WeakRef}
+    jloffset::Dict{RelOffset,WeakRef}
     end_of_data::FileOffset
-    global_heaps::Dict{Offset,GlobalHeap}
+    global_heaps::Dict{RelOffset,GlobalHeap}
     global_heap::GlobalHeap
 end
 JLDFile(io::IO, writable::Bool, written::Bool) =
-    JLDFile(io, writable, written, OrderedDict{Offset,CommittedDatatype}(), H5Datatype[],
-            JLDWriteSession(), OrderedDict{ByteString,Offset}(), Dict{Type,CommittedDatatype}(),
-            ObjectIdDict(), Dict{Offset,WeakRef}(),
-            FileOffset(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{Offset,GlobalHeap}(),
+    JLDFile(io, writable, written, OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
+            JLDWriteSession(), OrderedDict{ByteString,RelOffset}(), Dict{Type,CommittedDatatype}(),
+            ObjectIdDict(), Dict{RelOffset,WeakRef}(),
+            FileOffset(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, FileOffset[]))
 
-fileoffset(f::JLDFile, x::Offset) = FileOffset(x.offset + FILE_HEADER_LENGTH)
-h5offset(f::JLDFile, x::FileOffset) = Offset(x - FILE_HEADER_LENGTH)
+fileoffset(f::JLDFile, x::RelOffset) = FileOffset(x.offset + FILE_HEADER_LENGTH)
+h5offset(f::JLDFile, x::FileOffset) = RelOffset(x - FILE_HEADER_LENGTH)
 
 #
 # File
@@ -162,7 +157,7 @@ function Base.close(f::JLDFile)
 
         names = ByteString[]
         sizehint!(names, length(f.datasets)+1)
-        offsets = Offset[]
+        offsets = RelOffset[]
         sizehint!(offsets, length(f.datasets)+1)
 
         # Write types group

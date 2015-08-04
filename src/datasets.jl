@@ -7,7 +7,7 @@ const LC_COMPACT_STORAGE = 0x00
 const LC_CONTIGUOUS_STORAGE = 0x01
 const LC_CHUNKED_STORAGE = 0x02
 
-function read_dataset(f::JLDFile, offset::Offset)
+function read_dataset(f::JLDFile, offset::RelOffset)
     if haskey(f.jloffset, offset)
         # Stored as WeakRefs and may no longer exist
         val = f.jloffset[offset].value
@@ -43,7 +43,7 @@ function read_dataset(f::JLDFile, offset::Offset)
                 data_length = read(cio, UInt16)
                 data_offset = position(cio)
             elseif storage_type == LC_CONTIGUOUS_STORAGE
-                data_offset = fileoffset(f, read(cio, Offset))
+                data_offset = fileoffset(f, read(cio, RelOffset))
                 data_length = read(cio, Length)
             else
                 throw(UnsupportedFeatureException())
@@ -122,7 +122,7 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
 end
 
 rrodr{T,S}(::ReadRepresentation{T,S}) = S
-empty_eltype(::ReadRepresentation{Any,Reference}) = Union{}
+empty_eltype(::ReadRepresentation{Any,RelOffset}) = Union{}
 empty_eltype{T}(::ReadRepresentation{T}) = T
 
 function find_dimensions_attr(attributes::Vector{ReadAttribute})
@@ -259,7 +259,7 @@ function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace
 end
 
 function read_array(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace,
-                    rr::ReadRepresentation{Any,Reference},
+                    rr::ReadRepresentation{Any,RelOffset},
                     attributes::Vector{ReadAttribute})
     # Since this is an array of references, there should be an attribute informing us of the type
     for x in attributes
@@ -271,7 +271,7 @@ function read_array(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace,
                 T = Any
             end
             return invoke(read_array, Tuple{JLDFile, Ptr{Void}, ReadDataspace, ReadRepresentation, Vector{ReadAttribute}},
-                          f, inptr, dataspace, ReadRepresentation{T,Reference}(), attributes)
+                          f, inptr, dataspace, ReadRepresentation{T,RelOffset}(), attributes)
         end
     end
 
@@ -287,7 +287,7 @@ function payload_size(dataspace::WriteDataspace, datatype::H5Datatype, datasz::I
     if layout_class == LC_COMPACT_STORAGE
         sz + 2 + datasz
     else
-        sz + sizeof(Offset) + sizeof(Length)
+        sz + sizeof(RelOffset) + sizeof(Length)
     end
 end
 
@@ -375,10 +375,10 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
         end
         write(io, end_checksum(cio))
     else
-        write(cio, HeaderMessage(HM_DATA_LAYOUT, 2+sizeof(Offset)+sizeof(Length), 0))
+        write(cio, HeaderMessage(HM_DATA_LAYOUT, 2+sizeof(RelOffset)+sizeof(Length), 0))
         write(cio, UInt8(3))                            # Version
         write(cio, LC_CONTIGUOUS_STORAGE)               # Layout class
-        write(cio, h5offset(f, header_offset + fullsz)) # Offset
+        write(cio, h5offset(f, header_offset + fullsz)) # RelOffset
         write(cio, Length(sizeof(data)))                # Length
         write(io, end_checksum(cio))
         if datasz != 0
@@ -404,14 +404,14 @@ function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
 end
 
 @noinline function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
-    offset = get(wsession.h5offset, object_id(x), Offset(0))
-    offset != Offset(0) ? Reference(offset) : Reference(write_dataset(f, x, wsession)::Offset)
+    offset = get(wsession.h5offset, object_id(x), RelOffset(0))
+    offset != RelOffset(0) ? offset : write_dataset(f, x, wsession)::RelOffset
 end
 
 @inline function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
     if !typeof(x).mutable || isa(wsession, JLDWriteSession{None})
-        Reference(write_dataset(f, x, wsession)::Offset)
+        write_dataset(f, x, wsession)::RelOffset
     else
-        write_ref_mutable(f, x, wsession)::Reference
+        write_ref_mutable(f, x, wsession)::RelOffset
     end
 end

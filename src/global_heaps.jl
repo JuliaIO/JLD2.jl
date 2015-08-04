@@ -3,7 +3,7 @@
 #
 
 immutable GlobalHeapID
-    heap_offset::Offset
+    heap_offset::RelOffset
     index::UInt32
 end
 define_packed(GlobalHeapID)

@@ -7,13 +7,13 @@
 type Superblock
     file_consistency_flags::UInt8
     base_address::FileOffset
-    superblock_extension_address::Offset
+    superblock_extension_address::RelOffset
     end_of_file_address::FileOffset
-    root_group_object_header_address::Offset
+    root_group_object_header_address::RelOffset
 end
 
 Base.sizeof(::Union(Type{Superblock}, Superblock)) =
-    12+sizeof(Offset)*4+4
+    12+sizeof(RelOffset)*4+4
 
 function Base.read(io::IO, ::Type{Superblock})
     cio = begin_checksum(io)
@@ -36,9 +36,9 @@ function Base.read(io::IO, ::Type{Superblock})
 
     # Addresses
     base_address = read(cio, FileOffset)
-    superblock_extension_address = read(cio, Offset)
+    superblock_extension_address = read(cio, RelOffset)
     end_of_file_address = read(cio, FileOffset)
-    root_group_object_header_address = read(cio, Offset)
+    root_group_object_header_address = read(cio, RelOffset)
 
     # Checksum
     cs = end_checksum(cio)
@@ -56,8 +56,8 @@ function Base.write(io::IO, s::Superblock)
     write(cio, UInt8(8))                        # Size of lengths
     write(cio, s.file_consistency_flags::UInt8)
     write(cio, s.base_address::FileOffset)
-    write(cio, s.superblock_extension_address::Offset)
+    write(cio, s.superblock_extension_address::RelOffset)
     write(cio, s.end_of_file_address::FileOffset)
-    write(cio, s.root_group_object_header_address::Offset)
+    write(cio, s.root_group_object_header_address::RelOffset)
     write(io, end_checksum(cio))
 end
