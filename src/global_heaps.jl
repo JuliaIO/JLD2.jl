@@ -2,6 +2,8 @@
 # Global heap
 #
 
+const GLOBAL_HEAP_SIGNATURE = reinterpret(UInt32, UInt8['G', 'C', 'O', 'L'])[1]
+
 immutable GlobalHeapID
     heap_offset::RelOffset
     index::UInt32

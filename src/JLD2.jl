@@ -3,15 +3,15 @@ using ArrayViews, DataStructures
 import Base.sizeof
 export jldopen
 
-const SUPERBLOCK_SIGNATURE = reinterpret(UInt64, UInt8[0o211, 'H', 'D', 'F', '\r', '\n', 0o032, '\n'])[1]
 const OBJECT_HEADER_SIGNATURE = reinterpret(UInt32, UInt8['O', 'H', 'D', 'R'])[1]
-const GLOBAL_HEAP_SIGNATURE = reinterpret(UInt32, UInt8['G', 'C', 'O', 'L'])[1]
 
 # Currently we specify that all offsets and lengths are 8 bytes
 typealias Length UInt64
 
 # Currently we specify a 512 byte header
 const FILE_HEADER_LENGTH = 512
+const FILE_HEADER = "Julia data file (HDF5), version "
+const CURRENT_VERSION = v"0.2"
 
 immutable UnsupportedVersionException <: Exception end
 immutable UnsupportedFeatureException <: Exception end
@@ -95,9 +95,30 @@ h5offset(f::JLDFile, x::FileOffset) = RelOffset(x - FILE_HEADER_LENGTH)
 # File
 #
 
-function jldopen(fname::AbstractString, write::Bool, create::Bool, truncate::Bool)
-    io = MmapIO(fname, write, create, truncate)
-    f = JLDFile(io, write, truncate)
+function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool)
+    io = MmapIO(fname, wr, create, truncate)
+    f = JLDFile(io, wr, truncate)
+
+    if !truncate
+        if ASCIIString(read(io, UInt8, length(FILE_HEADER))) != FILE_HEADER
+            throw(ArgumentError('"', fname, "\" is not a JLD file"))
+        end
+
+        ver = convert(VersionNumber, read_bytestring(io))
+        if ver < v"0.2"
+            throw(ArgumentError("only JLD2 files are presently supported"))
+        elseif ver > CURRENT_VERSION
+            warn('"', fname, "\" was written in JLD file format version ", ver,
+                 ", but this version of JLD supports only JLD file format ", CURRENT_VERSION,
+                 ". Some or all data in the file may not be readable")
+        end
+    end
+
+    if wr
+        # Write JLD header
+        write(io, FILE_HEADER)
+        print(io, CURRENT_VERSION)
+    end
 
     if !truncate
         seek(io, FILE_HEADER_LENGTH)

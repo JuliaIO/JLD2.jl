@@ -2,6 +2,8 @@
 # Superblock
 #
 
+const SUPERBLOCK_SIGNATURE = reinterpret(UInt64, UInt8[0o211, 'H', 'D', 'F', '\r', '\n', 0o032, '\n'])[1]
+
 # https://www.hdfgroup.org/HDF5/doc/H5.format.html#FileMetaData
 # Superblock (Version 2)
 type Superblock
