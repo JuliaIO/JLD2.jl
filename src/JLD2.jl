@@ -70,6 +70,7 @@ type JLDFile{T<:IO}
     io::T
     writable::Bool
     written::Bool
+    created::Bool
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession
@@ -81,8 +82,8 @@ type JLDFile{T<:IO}
     global_heaps::Dict{RelOffset,GlobalHeap}
     global_heap::GlobalHeap
 end
-JLDFile(io::IO, writable::Bool, written::Bool) =
-    JLDFile(io, writable, written, OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
+JLDFile(io::IO, writable::Bool, written::Bool, created::Bool) =
+    JLDFile(io, writable, written, created, OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), OrderedDict{ByteString,RelOffset}(), Dict{Type,CommittedDatatype}(),
             ObjectIdDict(), Dict{RelOffset,WeakRef}(),
             FileOffset(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
@@ -96,8 +97,9 @@ h5offset(f::JLDFile, x::FileOffset) = RelOffset(x - FILE_HEADER_LENGTH)
 #
 
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool)
+    exists = isfile(fname)
     io = MmapIO(fname, wr, create, truncate)
-    f = JLDFile(io, wr, truncate)
+    f = JLDFile(io, wr, truncate, !exists || truncate)
 
     if !truncate
         if ASCIIString(read(io, UInt8, length(FILE_HEADER))) != FILE_HEADER
@@ -115,6 +117,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool)
     end
 
     if wr
+        seek(io, 0)
         # Write JLD header
         write(io, FILE_HEADER)
         print(io, CURRENT_VERSION)
@@ -124,14 +127,25 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool)
         seek(io, FILE_HEADER_LENGTH)
         superblock = read(io, Superblock)
         f.end_of_data = superblock.end_of_file_address
-        seek(io, fileoffset(f, superblock.root_group_object_header_address))
+
+        root_group_offset = fileoffset(f, superblock.root_group_object_header_address)
+        seek(io, root_group_offset)
         root_group = read(io, Group)
+        if position(io) == f.end_of_data
+            f.end_of_data = root_group_offset
+        end
+
         for i = 1:length(root_group.names)
             name = root_group.names[i]
             offset = root_group.offsets[i]
             if name == "_types"
-                seek(io, fileoffset(f, offset))
+                types_group_offset = fileoffset(f, offset)
+                seek(io, types_group_offset)
                 types_group = read(io, Group)
+                if position(io) == f.end_of_data
+                    f.end_of_data = types_group_offset
+                end
+
                 for i = 1:length(types_group.offsets)
                     f.datatype_locations[types_group.offsets[i]] = CommittedDatatype(types_group.offsets[i], i)
                 end
@@ -159,9 +173,24 @@ function Base.read(f::JLDFile, name::String)
     read_dataset(f, f.datasets[name])
 end
 
+# Populate f.datatypes and f.jlh5types with all of the committed datatypes from
+# a file. We need to do this before writing to make sure we reuse written
+# datatypes.
+function load_datatypes(f::JLDFile)
+    dts = f.datatypes
+    cdts = f.datatype_locations
+    @assert length(dts) == length(cdts)
+    i = 1
+    for cdt in values(cdts)
+        !isdefined(dts, i) && jltype(f, cdt)
+        i += 1
+    end
+end
+
 function Base.write(f::JLDFile, name::String, obj, wsession::JLDWriteSession=JLDWriteSession())
     f.end_of_data == 0 && throw(ArgumentError("file is closed"))
     !f.writable && throw(ArgumentError("file was opened read-only"))
+    !f.written && !f.created && load_datatypes(f)
     f.written = true
 
     io = f.io

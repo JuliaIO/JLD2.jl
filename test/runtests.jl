@@ -4,4 +4,5 @@ using Base.Test
 include("lookup3.jl")
 include("internal.jl")
 include("rw.jl")
+include("append.jl")
 include("recon.jl")
