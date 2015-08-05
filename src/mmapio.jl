@@ -30,7 +30,7 @@ if OS_NAME === :Linux
     grow(io::IOStream, sz::Integer) =
         systemerror("pwrite", ccall(:jl_pwrite, Cssize_t,
                                     (Cint, Ptr{UInt8}, Uint, FileOffset),
-                                    fd(io), &UInt8(0), 1, newsz - 1) < 1)
+                                    fd(io), &UInt8(0), 1, sz - 1) < 1)
 else
     grow(io::IOStream, sz::Integer) = truncate(io, sz)
 end
