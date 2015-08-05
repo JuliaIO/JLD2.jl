@@ -11,6 +11,15 @@ end
 UnknownType(name) = UnknownType{typeof(name)}(name)
 UnknownType(name, parameters) = UnknownType{typeof(name)}(name, parameters)
 
+const NULL_COMMITTED_DATATYPE = CommittedDatatype(RelOffset(0), 0)
+# Look up the corresponding committed datatype for a given type
+macro lookup_committed(f, T)
+    quote
+        cdt = get($(esc(f)).jlh5type, $(esc(T)), nothing)
+        cdt !== nothing && return cdt::CommittedDatatype
+    end
+end
+
 ## Generic machinery
 
 # Carries the type and on-disk representation of data to be read from
@@ -73,7 +82,7 @@ end
             return nothing
         elseif isbits(T) || (isa(initialized, Type{Type{Val{true}}}) && !T.mutable)
             return quote
-                haskey(f.jlh5type, T) && return f.jlh5type[T]
+                @lookup_committed f T
                 $(if isempty(T.types)
                     # bitstype
                     :(return commit(f, OpaqueDatatype(sizeof(T)), T))
@@ -123,7 +132,7 @@ objodr(x) = odr(typeof(x))
 #
 # Performance note: this should be inferrable.
 function h5type{T}(f::JLDFile, x::T)
-    haskey(f.jlh5type, T) && return f.jlh5type[T]
+    @lookup_committed f T
     if sizeof(T) == 0
         commit(f, OpaqueDatatype(1), T, WrittenAttribute(f, :empty, UInt8(1)))
     elseif isempty(T.types) # bitstype
@@ -676,9 +685,10 @@ end
 ## UTF16Strings
 
 const H5TYPE_VLEN_UINT16 = VariableLengthDatatype(FixedPointDatatype(2, true))
-h5fieldtype(f::JLDFile, ::Type{UTF16String}, ::Initialized) =
-    haskey(f.jlh5type, UTF16String) ? f.jlh5type[UTF16String] :
-                                      commit(f, H5TYPE_VLEN_UINT16, UTF16String)
+function h5fieldtype(f::JLDFile, ::Type{UTF16String}, ::Initialized)
+    @lookup_committed f UTF16String
+    commit(f, H5TYPE_VLEN_UINT16, UTF16String)
+end
 fieldodr(::Type{UTF16String}, ::Bool) = Vlen{UInt16}
 
 h5type(f::JLDFile, ::UTF16String) = h5fieldtype(f, UTF16String, Val{true})
@@ -709,8 +719,10 @@ constructrr(::JLDFile, ::Type{UTF16String}, dt::VariableLengthDatatype{FixedPoin
 
 ## Symbols
 
-h5fieldtype(f::JLDFile, ::Type{Symbol}, ::Initialized) =
-    haskey(f.jlh5type, Symbol) ? f.jlh5type[Symbol] : commit(f, H5TYPE_VLEN_UTF8, Symbol)
+function h5fieldtype(f::JLDFile, ::Type{Symbol}, ::Initialized)
+    @lookup_committed f Symbol
+    commit(f, H5TYPE_VLEN_UTF8, Symbol)
+end
 fieldodr(::Type{Symbol}, ::Bool) = Vlen{UTF8String}
 
 h5type(f::JLDFile, ::Symbol) = h5fieldtype(f, Symbol, Val{true})
@@ -728,8 +740,10 @@ jlconvert(::ReadRepresentation{Symbol,Vlen{UTF8String}}, f::JLDFile, ptr::Ptr) =
 
 ## BigInts and BigFloats
 
-h5fieldtype(f::JLDFile, T::Union{Type{BigInt},Type{BigFloat}}, ::Initialized) =
-    haskey(f.jlh5type, T) ? f.jlh5type[T] : commit(f, H5TYPE_VLEN_ASCII, T)
+function h5fieldtype(f::JLDFile, T::Union{Type{BigInt},Type{BigFloat}}, ::Initialized)
+    @lookup_committed f T
+    commit(f, H5TYPE_VLEN_ASCII, T)
+end
 fieldodr(::Union(Type{BigInt}, Type{BigFloat}), ::Bool) = Vlen{ASCIIString}
 
 # Stored as a variable-length string
@@ -761,7 +775,7 @@ const H5TYPE_DATATYPE = CompoundDatatype(
 typealias DataTypeODR OnDiskRepresentation{(0,sizeof(Vlen{UTF8String})),Tuple{UTF8String,Vector{Any}},Tuple{Vlen{UTF8String},Vlen{RelOffset}}}
 
 function h5fieldtype{T<:DataType}(f::JLDFile, ::Type{T}, ::Initialized)
-    haskey(f.jlh5type, DataType) && return f.jlh5type[DataType]
+    @lookup_committed f DataType
     io = f.io
     offset = f.end_of_data
 
@@ -872,8 +886,10 @@ end
 
 const H5TYPE_UNION = VariableLengthDatatype(H5TYPE_DATATYPE)
 
-h5fieldtype{T<:Union}(f::JLDFile, ::Type{T}, ::Initialized) =
-    haskey(f.jlh5type, Union) ? f.jlh5type[Union] : commit(f, H5TYPE_UNION, Union)
+function h5fieldtype{T<:Union}(f::JLDFile, ::Type{T}, ::Initialized)
+    @lookup_committed f Union
+    commit(f, H5TYPE_UNION, Union)
+end
 fieldodr{T<:Union}(::Type{T}, ::Bool) = Vlen{DataTypeODR()}
 h5fieldtype(f::JLDFile, ::Type{Union{}}, ::Initialized) = nothing
 fieldodr(::Type{Union{}}, initialized::Bool) = nothing
@@ -917,9 +933,10 @@ odr{T,N}(::Type{Array{T,N}}) = fieldodr(T, false)
 
 const H5TYPE_SIMPLEVECTOR = VariableLengthDatatype(ReferenceDatatype())
 
-h5type(f::JLDFile, ::SimpleVector) =
-    haskey(f.jlh5type, SimpleVector) ? f.jlh5type[SimpleVector] :
-                                       commit(f, H5TYPE_SIMPLEVECTOR, SimpleVector)
+function h5type(f::JLDFile, ::SimpleVector)
+    @lookup_committed f SimpleVector
+    commit(f, H5TYPE_SIMPLEVECTOR, SimpleVector)
+end
 odr(::Type{SimpleVector}) = Vlen{RelOffset}
 
 h5convert!(out::Ptr, ::Type{Vlen{RelOffset}}, f::JLDFile, x::SimpleVector, wsession::JLDWriteSession) =
@@ -935,7 +952,7 @@ jlconvert(::ReadRepresentation{SimpleVector,Vlen{RelOffset}}, f::JLDFile, ptr::P
 ## Dicts
 
 function h5type(f::JLDFile, x::Union(Dict,ObjectIdDict))
-    haskey(f.jlh5type, typeof(x)) && return f.jlh5type[typeof(x)]
+    @lookup_committed f typeof(x)
     pairtype = h5fieldtype(f, eltype(x), Val{true})
     eltype_attr = WrittenAttribute(f, :element_type, pairtype.header_offset)
     commit(f, VariableLengthDatatype(f.datatypes[pairtype.index]), typeof(x), eltype_attr)

@@ -78,7 +78,7 @@ type JLDFile{T<:IO}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession
     datasets::OrderedDict{ByteString,RelOffset}
-    jlh5type::Dict{Type,CommittedDatatype}
+    jlh5type::ObjectIdDict
     h5jltype::ObjectIdDict
     jloffset::Dict{RelOffset,WeakRef}
     end_of_data::FileOffset
@@ -87,7 +87,7 @@ type JLDFile{T<:IO}
 end
 JLDFile(io::IO, writable::Bool, written::Bool, created::Bool) =
     JLDFile(io, writable, written, created, OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
-            JLDWriteSession(), OrderedDict{ByteString,RelOffset}(), Dict{Type,CommittedDatatype}(),
+            JLDWriteSession(), OrderedDict{ByteString,RelOffset}(), ObjectIdDict(),
             ObjectIdDict(), Dict{RelOffset,WeakRef}(),
             FileOffset(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, FileOffset[]))
