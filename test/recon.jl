@@ -105,6 +105,8 @@ write(file, "x20", TestTypeContainer3(TestType4(3), 4))
 write(file, "x21", TestTypeContainer4(TestType4(3), 4))
 write(file, "x22", TestTypeContainer5(TestType4(3), 4))
 write(file, "x23", TestType17(5678910))
+write(file, "x24", Dict(TestType4(1) => TestType5(TestType4(2))))
+write(file, "x25", Dict(TestType17(1) => reinterpret(TestType9, 0x4567)))
 
 close(file)
 
@@ -263,5 +265,13 @@ x = read(file, "x22")
 
 x = read(file, "x23")
 @test x.x === 5678910
+
+x = read(file, "x24")
+@test first(x).first.x === 1
+@test first(x).second.x.x === 2
+
+x = read(file, "x25")
+@test first(x).first.x === 1
+@test reinterpret(UInt16, first(x).second) === 0x4567
 
 close(file)

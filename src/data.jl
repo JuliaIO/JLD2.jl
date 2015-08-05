@@ -197,6 +197,25 @@ function commit(f::JLDFile, dtype::H5Datatype, T::DataType, attributes::WrittenA
     cdt::CommittedDatatype
 end
 
+function read_field_datatypes(f::JLDFile, attrs::Vector{ReadAttribute})
+    for attr in attrs
+        if attr.name == :field_datatypes
+            return read_attr_data(f, attr, ReferenceDatatype(),
+                                  ReadRepresentation(RelOffset))
+        end
+    end
+    RelOffset[]
+end
+
+function check_empty(attrs::Vector{ReadAttribute})
+    for attr in attrs
+        if attr.name == :empty
+            return true
+        end
+    end
+    false
+end
+
 # jltype is the inverse of h5type, providing a ReadRepresentation for an
 # H5Datatype. We handle committed datatypes here, and other datatypes below.
 function jltype(f::JLDFile, cdt::CommittedDatatype)
@@ -204,15 +223,9 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     dt, attrs = read_committed_datatype(f, cdt)
 
     julia_type_attr = nothing
-    field_datatypes_attr = nothing
-    empty_attr = false
     for attr in attrs
         if attr.name == :julia_type
             julia_type_attr = attr
-        elseif attr.name == :field_datatypes
-            field_datatypes_attr = attr
-        elseif attr.name == :empty
-            empty_attr = true
         end
     end
 
@@ -238,13 +251,7 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
 
     # datatype = read_data(f, julia_type_attr, H5TYPE_DATATYPE, ReadRepresentation(DataType, DataTypeODR()))
     datatype = read_attr_data(f, julia_type_attr)
-    if isa(field_datatypes_attr, Void)
-        rr, canonical = constructrr(f, datatype, dt, nothing, empty_attr)
-    else
-        refs = read_attr_data(f, field_datatypes_attr::ReadAttribute,
-                              ReferenceDatatype(), ReadRepresentation(RelOffset))
-        rr, canonical = constructrr(f, datatype, dt, refs, empty_attr)
-    end
+    rr, canonical = constructrr(f, datatype, dt, attrs)
     rr = rr::ReadRepresentation
 
     canonical && (f.jlh5type[datatype] = cdt)
@@ -253,15 +260,18 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
 end
 
 # Constructs a ReadRepresentation for a given opaque (bitstype) type
-function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, ::Void, empty::Bool)
+function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{ReadAttribute})
     dt.class == DT_OPAQUE || throw(UnsupportedFeatureException())
     if sizeof(T) == dt.size
         (ReadRepresentation(T), true)
-    elseif sizeof(T) == 0 && empty
-        (ReadRepresentation(T, nothing), true)
     else
-        warn("bitstype $T has size $(sizeof(T)*8), but written type has size $(dt.size*8); reconstructing")
-        reconstruct_bitstype(T.name.name, dt.size, empty)
+        empty = check_empty(attrs)
+        if sizeof(T) == 0 && empty
+            (ReadRepresentation(T, nothing), true)
+        else
+            warn("bitstype $T has size $(sizeof(T)*8), but written type has size $(dt.size*8); reconstructing")
+            reconstruct_bitstype(T.name.name, dt.size, empty)
+        end
     end
 end
 
@@ -274,8 +284,10 @@ end
 # memory layout without first inspecting the memory layout.
 immutable TypeMappingException <: Exception; end
 function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
-                     field_datatypes::Union{Vector{RelOffset},Void}, ::Bool,
+                     attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
+    field_datatypes = read_field_datatypes(f, attrs)
+
     # If read type is not a leaf type, reconstruct
     if !isleaftype(T)
         warn("read type $T is not a leaf type in workspace; reconstructing")
@@ -310,7 +322,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
             end
 
             dtindex = dtnames[fn[i]]
-            if !isa(field_datatypes, Void) && (ref = field_datatypes[dtindex]) != NULL_REFERENCE
+            if !isempty(field_datatypes) && (ref = field_datatypes[dtindex]) != NULL_REFERENCE
                 dtrr = jltype(f, f.datatype_locations[ref])
             else
                 dtrr = jltype(f, dt.members[dtindex])
@@ -653,8 +665,8 @@ h5convert!(out::Ptr, ::FixedLengthString, f::JLDFile, x, ::JLDWriteSession) =
     (unsafe_copy!(convert(Ptr{UInt8}, out), pointer(x.data), length(x.data)); nothing)
 h5convert!{T<:ByteString}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) =
     store_vlen!(out, UInt8, f, x.data, wsession)
-jlconvert{T,S<:ByteString}(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr) =
-    convert(T, S(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr)))::T
+jlconvert{T<:ByteString,S<:ByteString}(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr) =
+    T(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr))
 function jlconvert{S<:ByteString}(rr::FixedLengthString{S}, ::JLDFile, ptr::Ptr)
     data = Array(UInt8, rr.length)
     unsafe_copy!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
@@ -691,7 +703,7 @@ function jlconvert(T::ReadRepresentation{UTF16String,Vlen{UInt16}}, f::JLDFile, 
     UTF16String(vl)
 end
 
-constructrr(::JLDFile, ::Type{UTF16String}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Void, ::Bool) =
+constructrr(::JLDFile, ::Type{UTF16String}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
     dt == H5TYPE_VLEN_UINT16 ? (ReadRepresentation(UTF16String, Vlen{UInt16}), true) :
                                throw(UnsupportedFeatureException())
 
@@ -707,7 +719,7 @@ odr(::Type{Symbol}) = Vlen{UTF8String}
 h5convert!(out::Ptr, ::Type{Vlen{UTF8String}}, f::JLDFile, x::Symbol, ::JLDWriteSession) =
     store_vlen!(out, UInt8, f, string(x).data, f.datatype_wsession)
 
-constructrr(::JLDFile, ::Type{Symbol}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Void, ::Bool) =
+constructrr(::JLDFile, ::Type{Symbol}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
     dt == H5TYPE_VLEN_UTF8 ? (ReadRepresentation(Symbol, Vlen{UTF8String}), true) :
                              throw(UnsupportedFeatureException())
 
@@ -729,7 +741,7 @@ h5convert!(out::Ptr, ::Type{Vlen{ASCIIString}}, f::JLDFile, x::BigInt, wsession:
 h5convert!(out::Ptr, ::Type{Vlen{ASCIIString}}, f::JLDFile, x::BigFloat, wsession::JLDWriteSession) =
     store_vlen!(out, UInt8, f, string(x).data, wsession)
 
-constructrr(::JLDFile, T::Union{Type{BigInt},Type{BigFloat}}, dt::VariableLengthDatatype, ::Void, ::Bool) =
+constructrr(::JLDFile, T::Union{Type{BigInt},Type{BigFloat}}, dt::VariableLengthDatatype, ::Vector{ReadAttribute}) =
     dt == H5TYPE_VLEN_ASCII ? (ReadRepresentation(T, Vlen{ASCIIString}), true) :
                               throw(UnsupportedFeatureException())
 
@@ -872,7 +884,7 @@ odr(::Type{Union}) = fieldodr(Union, true)
 h5convert!(out::Ptr, ::Type{Vlen{DataTypeODR()}}, f::JLDFile, x::Union, wsession::JLDWriteSession) =
     store_vlen!(out, DataTypeODR(), f, DataType[x for x in x.types], wsession)
 
-function constructrr(::JLDFile, ::Type{Union}, dt::VariableLengthDatatype, ::Void, ::Bool)
+function constructrr(::JLDFile, ::Type{Union}, dt::VariableLengthDatatype, ::Vector{ReadAttribute})
     dt == H5TYPE_UNION ? (ReadRepresentation(Union, Vlen{DataTypeODR()}), true) :
                          throw(UnsupportedFeatureException())
 end
@@ -913,14 +925,51 @@ odr(::Type{SimpleVector}) = Vlen{RelOffset}
 h5convert!(out::Ptr, ::Type{Vlen{RelOffset}}, f::JLDFile, x::SimpleVector, wsession::JLDWriteSession) =
     store_vlen!(out, RelOffset, f, collect(x), wsession)
 
-
-function constructrr(::JLDFile, ::Type{SimpleVector}, dt::VariableLengthDatatype, ::Void, ::Bool)
+constructrr(::JLDFile, ::Type{SimpleVector}, dt::VariableLengthDatatype, ::Vector{ReadAttribute}) =
     dt == H5TYPE_SIMPLEVECTOR ? (ReadRepresentation(SimpleVector, Vlen{RelOffset}), true) :
                                 throw(UnsupportedFeatureException())
-end
 
 jlconvert(::ReadRepresentation{SimpleVector,Vlen{RelOffset}}, f::JLDFile, ptr::Ptr) =
     Base.svec(jlconvert(ReadRepresentation(Any, Vlen{RelOffset}), f, ptr)...)
+
+## Dicts
+
+function h5type(f::JLDFile, x::Union(Dict,ObjectIdDict))
+    haskey(f.jlh5type, typeof(x)) && return f.jlh5type[typeof(x)]
+    pairtype = h5fieldtype(f, eltype(x), Val{true})
+    eltype_attr = WrittenAttribute(f, :element_type, pairtype.header_offset)
+    commit(f, VariableLengthDatatype(f.datatypes[pairtype.index]), typeof(x), eltype_attr)
+end
+
+odr{T<:Union(Dict,ObjectIdDict)}(::Type{T}) = Vlen{eltype(T)}
+
+h5convert!{K,V}(out::Ptr, ::Type{Vlen{Pair{K,V}}}, f::JLDFile, x::Associative{K,V}, wsession::JLDWriteSession) =
+    store_vlen!(out, odr(Pair{K,V}), f, collect(x), wsession)
+
+function constructrr{T<:Union(Dict,ObjectIdDict)}(f::JLDFile, ::Type{T}, dt::VariableLengthDatatype, attrs::Vector{ReadAttribute})
+    for attr in attrs
+        if attr.name == :element_type
+            ref = read_attr_data(f, attr, ReferenceDatatype(), ReadRepresentation(RelOffset))
+            return (ReadRepresentation(T, Vlen{typeof(jltype(f, f.datatype_locations[ref])).parameters[2]}), true)
+        end
+    end
+    throw(InvalidDataException())
+end
+
+function constructrr(f::JLDFile, T::UnknownType{DataType}, dt::VariableLengthDatatype, attrs::Vector{ReadAttribute})
+    T.name === Dict || throw(InvalidDataException())
+    for attr in attrs
+        if attr.name == :element_type
+            ref = read_attr_data(f, attr, ReferenceDatatype(), ReadRepresentation(RelOffset))
+            typ = typeof(jltype(f, f.datatype_locations[ref]))
+            return (ReadRepresentation(Dict{typ.parameters[1].parameters...}, Vlen{typ.parameters[2]}), false)
+        end
+    end
+    throw(InvalidDataException())
+end
+
+jlconvert{T<:Union(Dict,ObjectIdDict),P}(::ReadRepresentation{T,Vlen{P}}, f::JLDFile, ptr::Ptr) =
+    T(jlconvert(ReadRepresentation(eltype(T), Vlen{P}), f, ptr))
 
 ## Type reconstruction
 
@@ -933,9 +982,10 @@ function reconstruct_bitstype(name::Union(Symbol,ByteString), size::Integer, emp
     (ReadRepresentation(T, empty ? nothing : T), false)
 end
 
-function constructrr(f::JLDFile, unk::UnknownType, dt::BasicDatatype, ::Void, empty::Bool)
+function constructrr(f::JLDFile, unk::UnknownType, dt::BasicDatatype,
+                     attrs::Vector{ReadAttribute})
     warn("type ", typestring(unk), " does not exist in workspace; reconstructing")
-    reconstruct_bitstype(typestring(unk), dt.size, empty)
+    reconstruct_bitstype(typestring(unk), dt.size, check_empty(attrs))
 end
 
 # Convert an ordinary type or an UnknownType to a corresponding string. This is
@@ -967,7 +1017,8 @@ end
 # some of the parameters, by attempting to replace unknown parameters with the
 # UB on the type.
 function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatype,
-                     field_datatypes::Union{Vector{RelOffset},Void}, empty::Bool)
+                     attrs::Vector{ReadAttribute})
+    field_datatypes = read_field_datatypes(f, attrs)
     if unk.name === Tuple
         # For a tuple with unknown fields, we should reconstruct the fields
         rodr = reconstruct_odr(f, dt, field_datatypes)
@@ -998,7 +1049,7 @@ function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatyp
         end
 
         try
-            (rr,) = constructrr(f, T, dt, field_datatypes, empty, true)
+            (rr,) = constructrr(f, T, dt, attrs, true)
             warn("some parameters could not be resolved for type ", typestring(unk), "; reading as ", T)
             return (rr, false)
         catch err
@@ -1011,21 +1062,21 @@ end
 
 # An UnknownType for which we were not able to resolve the name.
 function constructrr(f::JLDFile, unk::UnknownType, dt::CompoundDatatype,
-                     field_datatypes::Union{Vector{RelOffset},Void}, ::Bool)
+                     attrs::Vector{ReadAttribute})
     ts = typestring(unk)
     warn("type ", ts, " does not exist in workspace; reconstructing")
-    reconstruct_compound(f, ts, dt, field_datatypes)
+    reconstruct_compound(f, ts, dt, read_field_datatypes(f, attrs))
 end
 
 # Reconstruct the ODR of a type from the CompoundDatatype and field_datatypes
 # attribute
 function reconstruct_odr(f::JLDFile, dt::CompoundDatatype,
-                         field_datatypes::Union{Vector{RelOffset},Void})
+                         field_datatypes::Vector{RelOffset})
     # Get the type and ODR information for each field
     types = Array(Any, length(dt.names))
     odrs = Array(Any, length(dt.names))
     for i = 1:length(dt.names)
-        if !isa(field_datatypes, Void) && (ref = field_datatypes[i]) != NULL_REFERENCE
+        if !isempty(field_datatypes) && (ref = field_datatypes[i]) != NULL_REFERENCE
             dtrr = jltype(f, f.datatype_locations[ref])
         else
             dtrr = jltype(f, dt.members[i])

@@ -59,6 +59,7 @@ msempty = MyStruct(5, Float64[])
 sym = :TestSymbol
 syms = [:a, :b]
 d = Dict([(syms[1],"aardvark"), (syms[2], "banana")])
+oidd = ObjectIdDict([(syms[1],"aardvark"), (syms[2], "banana")])
 ex = quote
     function incrementby1(x::Int)
         x+1
@@ -377,6 +378,7 @@ println(fn)
 @write fid sym
 @write fid syms
 @write fid d
+@write fid oidd
 @write fid ex
 @write fid T
 @write fid Tarr
@@ -491,6 +493,7 @@ fidr = jldopen(fn, "r")
 @check fidr sym
 @check fidr syms
 @check fidr d
+@check fidr oidd
 exr = read(fidr, "ex")   # line numbers are stripped, don't expect equality
 checkexpr(ex, exr)
 @check fidr T
