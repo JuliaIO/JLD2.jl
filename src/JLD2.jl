@@ -76,7 +76,7 @@ type JLDFile{T<:IO}
     created::Bool
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
-    datatype_wsession::JLDWriteSession
+    datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
     datasets::OrderedDict{ByteString,RelOffset}
     jlh5type::ObjectIdDict
     h5jltype::ObjectIdDict

@@ -252,10 +252,8 @@ end
 nonetypedfield = NoneTypedField{Union{}}(47)
 
 # SimpleVector
-if VERSION >= v"0.4.0-dev+4319"
-    simplevec = Base.svec(1, 2, Int64, "foo")
-    iseq(x::SimpleVector, y::SimpleVector) = collect(x) == collect(y)
-end
+simplevec = Base.svec(1, 2, Int64, "foo")
+iseq(x::SimpleVector, y::SimpleVector) = collect(x) == collect(y)
 
 # Issue #243
 # Type that overloads != so that it is not boolean
@@ -347,6 +345,7 @@ end
 
 fid = jldopen(fn, "w")
 println(fn)
+@time begin
 @write fid x
 @write fid A
 @write fid A3
@@ -458,10 +457,11 @@ println(fn)
 @write fid nonetypedfield
 @write fid simplevec
 @write fid natyperef
-
+end
 close(fid)
 
 fidr = jldopen(fn, "r")
+@time begin
 @check fidr x
 @check fidr A
 @check fidr A3
@@ -592,5 +592,5 @@ obj = read(fidr, "obj_ref")
 @check fidr nonetypedfield
 @check fidr simplevec
 @check fidr natyperef
-
+end
 close(fidr)

@@ -196,7 +196,7 @@ end
 
 # Construct array by reading ndims dimensions from io
 # Assumes io has already been seeked t oteh correct position
-function construct_array{T}(io::IO, ::Type{T}, ndims::Integer)
+function construct_array{T}(io::IO, ::Type{T}, ndims::Int)
     if ndims == 1
         n = read(io, Int)
         Array(T, n)
@@ -221,7 +221,7 @@ function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace
     io = f.io
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
     seek(io, offset)
-    v = construct_array(io, T, ndims)
+    v = construct_array(io, T, Int(ndims))
     n = length(v)
 
     if RR === T && isbits(T)

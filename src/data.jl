@@ -29,9 +29,12 @@ ReadRepresentation(T) = ReadRepresentation{T,T}()
 sizeof{T,S}(::ReadRepresentation{T,S}) = sizeof(S)
 
 # Determines whether a specific field type should be saved in the file
-hasfielddata(::Type{Union{}}) = false
-hasfielddata{T}(::Type{Type{T}}) = true
-hasfielddata{T}(::Type{T}) = !isleaftype(T) || !isbits(T) || sizeof(T) != 0
+@noinline function hasfielddata(T::ANY)
+    T === Union{} && return false
+    !isleaftype(T) && return true
+    T = T::DataType
+    T.size != 0 || T.mutable || T <: Type
+end
 
 # Gets the size of an on-disk representation
 @generated function sizeof{RelOffsets,Types,ODRs}(::OnDiskRepresentation{RelOffsets,Types,ODRs})
@@ -118,7 +121,7 @@ end
         offset += sizeof(fodr)
     end
 
-    OnDiskRepresentation{tuple(offsets...),Tuple{T.types...},Tuple{odrs...}}()
+    Expr(:new, OnDiskRepresentation{tuple(offsets...),Tuple{T.types...},Tuple{odrs...}})
 end
 
 # objodr gives the on-disk representation of a given object. This is
@@ -155,7 +158,7 @@ function commit_compound(f::JLDFile, names::AbstractVector{Symbol}, T::DataType)
     for i = 1:length(types)
         !hasfielddata(types[i]) && continue
         dtype = h5fieldtype(f, types[i], Val{i <= T.ninitialized})
-        dtype == nothing && continue
+        dtype === nothing && continue
         push!(h5names, names[i])
         if isa(dtype, CommittedDatatype)
             # HDF5 cannot store relationships among committed
@@ -269,7 +272,7 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
 end
 
 # Constructs a ReadRepresentation for a given opaque (bitstype) type
-function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{ReadAttribute})
+function constructrr(::JLDFile, T::ANY, dt::BasicDatatype, attrs::Vector{ReadAttribute})
     dt.class == DT_OPAQUE || throw(UnsupportedFeatureException())
     if sizeof(T) == dt.size
         (ReadRepresentation(T), true)
@@ -292,7 +295,7 @@ end
 # where we can't know if reconstructed parametric types will have a matching
 # memory layout without first inspecting the memory layout.
 immutable TypeMappingException <: Exception; end
-function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
+function constructrr(f::JLDFile, T::ANY, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
     field_datatypes = read_field_datatypes(f, attrs)
@@ -460,13 +463,13 @@ Base.showerror(io::IO, x::UndefinedFieldException) =
         fsym = symbol(string("field_", fn[i]))
         push!(fsyms, fsym)
 
-        rr = :(ReadRepresentation{$rtype,$odr}())
+        rr = ReadRepresentation{rtype,odr}()
 
         if odr === nothing
             # Type is not stored or single instance
             push!(args, :($fsym = $(Expr(:new, T.types[i]))))
         else
-            if jlconvert_canbeuninitialized(ReadRepresentation{rtype,odr}())
+            if jlconvert_canbeuninitialized(rr)
                 push!(args, quote
                     if !jlconvert_isinitialized($rr, ptr+$offset)
                         $(if T <: Tuple || i <= T.ninitialized
