@@ -138,7 +138,7 @@ function read_heap_object{T,RR}(f::JLDFile{MmapIO}, hid::GlobalHeapID, rr::ReadR
     else
         @simd for i = 1:n
             if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, inptr)
-                @inbounds v[i] = jlconvert(rr, f, inptr)
+                @inbounds v[i] = jlconvert(rr, f, inptr, NULL_REFERENCE)
             end
             inptr += sizeof(RR)
         end

@@ -67,16 +67,15 @@ function read_dataset(f::JLDFile, offset::RelOffset)
     end_checksum(cio) == read(io, UInt32) || throw(InvalidDataException())
 
     # TODO verify that data length matches
-    val = read_data(f, dataspace, datatype_class, datatype_offset, data_offset, attrs)
-    if !isbits(typeof(val))
-        f.jloffset[offset] = WeakRef(val)
-    end
+    val = read_data(f, dataspace, datatype_class, datatype_offset, data_offset,
+                    offset, attrs)
     val
 end
 
 # Read data from an attribute
 read_attr_data(f::JLDFile, attr::ReadAttribute) =
-    read_data(f, attr.dataspace, attr.datatype_class, attr.datatype_offset, attr.data_offset)
+    read_data(f, attr.dataspace, attr.datatype_class, attr.datatype_offset,
+              attr.data_offset)
 
 # Read data from an attribute, assuming a specific HDF5 datatype and
 # ReadRepresentation. If the HDF5 datatype does not match, throws an
@@ -89,7 +88,7 @@ function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Da
         dt = read(io, typeof(expected_datatype))
         if dt == expected_datatype
             seek(f.io, attr.data_offset)
-            BOXED_READ_DATASPACE[] = attr.dataspace
+            BOXED_READ_DATASPACE[] = (attr.dataspace, NULL_REFERENCE)
             return read_data(f, rr)
         end
     end
@@ -101,21 +100,22 @@ end
 # the offset of the committed datatype's header. Otherwise,
 # datatype_offset points to the offset of the datatype attribute.
 function read_data(f::JLDFile, dataspace::ReadDataspace,
-                   datatype_class::UInt8, datatype_offset::FileOffset, data_offset::FileOffset,
+                   datatype_class::UInt8, datatype_offset::FileOffset,
+                   data_offset::FileOffset, header_offset::RelOffset=NULL_REFERENCE,
                    attributes::Union(Vector{ReadAttribute}, Void)=nothing)
     # See if there is a julia type attribute
     io = f.io
     if datatype_class == typemax(UInt8) # Committed datatype
         rr = jltype(f, f.datatype_locations[h5offset(f, datatype_offset)])
         seek(io, data_offset)
-        BOXED_READ_DATASPACE[] = dataspace
+        BOXED_READ_DATASPACE[] = (dataspace, header_offset)
         read_data(f, rr, attributes)
     else
         seek(io, datatype_offset)
         @read_datatype io datatype_class dt begin
             rr = jltype(f, dt)
             seek(io, data_offset)
-            BOXED_READ_DATASPACE[] = dataspace
+            BOXED_READ_DATASPACE[] = (dataspace, header_offset)
             read_data(f, rr, attributes)
         end
     end
@@ -140,25 +140,24 @@ end
 # We can avoid a box by putting the dataspace here instead of passing
 # it to read_data.  That reduces the allocation footprint, but doesn't
 # really seem to help with performance.
-const BOXED_READ_DATASPACE = Ref{ReadDataspace}()
+const BOXED_READ_DATASPACE = Ref{Tuple{ReadDataspace,RelOffset}}()
 function read_data(f::JLDFile{MmapIO}, rr,
                    attributes::Union(Vector{ReadAttribute},Void)=nothing)
-    dataspace = BOXED_READ_DATASPACE[]
+    dataspace, header_offset = BOXED_READ_DATASPACE[]
     io = f.io
     inptr = io.curptr
     if dataspace.dataspace_type == DS_SCALAR
-        s = jlconvert(rr, f, inptr)
+        obj = jlconvert(rr, f, inptr, header_offset)
         io.curptr = inptr + sizeof(rr)
-        s
+        obj
     elseif dataspace.dataspace_type == DS_SIMPLE
-        v = read_array(f, inptr, dataspace, rr, attributes)
-        v
+        read_array(f, inptr, dataspace, rr, attributes, header_offset)
     elseif dataspace.dataspace_type == DS_NULL
         dimensions_attr_index = find_dimensions_attr(attributes)
 
         if dimensions_attr_index == 0
             isa(rrodr(rr), Void) || throw(UnsupportedFeatureException())
-            jlconvert(rr, f, inptr)
+            jlconvert(rr, f, inptr, header_offset)
         else
             # dimensions attribute => array of empty type
             dimensions_attr = attributes[dimensions_attr_index]
@@ -166,6 +165,7 @@ function read_data(f::JLDFile{MmapIO}, rr,
             ndims = read(io, Int)
             seek(io, dimensions_attr.data_offset)
             v = construct_array(io, empty_eltype(rr), ndims)
+            header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
             io.curptr = inptr
             v
         end
@@ -217,11 +217,13 @@ end
 
 function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace,
                           rr::ReadRepresentation{T,RR},
-                          attributes::Union(Vector{ReadAttribute},Void))
+                          attributes::Union(Vector{ReadAttribute},Void),
+                          header_offset::RelOffset)
     io = f.io
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
     seek(io, offset)
     v = construct_array(io, T, Int(ndims))
+    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
     n = length(v)
 
     if RR === T && isbits(T)
@@ -248,7 +250,7 @@ function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace
     else
         @simd for i = 1:n
             if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, inptr)
-                @inbounds v[i] = jlconvert(rr, f, inptr)
+                @inbounds v[i] = jlconvert(rr, f, inptr, NULL_REFERENCE)
             end
             inptr += sizeof(RR)
         end
@@ -260,7 +262,7 @@ end
 
 function read_array(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace,
                     rr::ReadRepresentation{Any,RelOffset},
-                    attributes::Vector{ReadAttribute})
+                    attributes::Vector{ReadAttribute}, header_offset::RelOffset)
     # Since this is an array of references, there should be an attribute informing us of the type
     for x in attributes
         if x.name == :julia_type
@@ -270,8 +272,11 @@ function read_array(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace,
                 warn("type $(str) does not exist in workspace; interpreting Array{$str} as Array{Any}")
                 T = Any
             end
-            return invoke(read_array, Tuple{JLDFile, Ptr{Void}, ReadDataspace, ReadRepresentation, Vector{ReadAttribute}},
-                          f, inptr, dataspace, ReadRepresentation{T,RelOffset}(), attributes)
+            return invoke(read_array, Tuple{JLDFile, Ptr{Void}, ReadDataspace,
+                                            ReadRepresentation,
+                                            Vector{ReadAttribute}, RelOffset},
+                          f, inptr, dataspace, ReadRepresentation{T,RelOffset}(),
+                          attributes, header_offset)
         end
     end
 
@@ -339,6 +344,11 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
     seek(io, header_offset)
     f.end_of_data = header_offset + fullsz + (layout_class == LC_CONTIGUOUS_STORAGE ? datasz : 0)
 
+    if typeof(data).mutable && !isa(wsession, JLDWriteSession{None})
+        wsession.h5offset[object_id(data)] = h5offset(f, header_offset)
+        push!(wsession.objects, data)
+    end
+
     cio = begin_checksum(io, fullsz - 4)
 
     write(cio, ObjectStart(size_flag(psz)))
@@ -384,11 +394,6 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
         if datasz != 0
             write_data(f, data, odr, wsession)
         end
-    end
-
-    if typeof(data).mutable && !isa(wsession, JLDWriteSession{None})
-        wsession.h5offset[object_id(data)] = h5offset(f, header_offset)
-        push!(wsession.objects, data)
     end
 
     h5offset(f, header_offset)

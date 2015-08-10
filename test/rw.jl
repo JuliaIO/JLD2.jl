@@ -251,6 +251,16 @@ immutable NoneTypedField{T}
 end
 nonetypedfield = NoneTypedField{Union{}}(47)
 
+# Cyclic object
+type CyclicObject
+    x::CyclicObject
+
+    CyclicObject() = new()
+    CyclicObject(x) = new(x)
+end
+cyclicobject = CyclicObject()
+cyclicobject.x = cyclicobject
+
 # SimpleVector
 simplevec = Base.svec(1, 2, Int64, "foo")
 iseq(x::SimpleVector, y::SimpleVector) = collect(x) == collect(y)
@@ -455,6 +465,7 @@ println(fn)
 @write fid zerod
 @write fid zerod_any
 @write fid nonetypedfield
+@write fid cyclicobject
 @write fid simplevec
 @write fid natyperef
 end
@@ -590,6 +601,10 @@ obj = read(fidr, "obj_ref")
 @check fidr zerod
 @check fidr zerod_any
 @check fidr nonetypedfield
+
+# obj = read(fidr, "cyclicobject")
+# @test obj.x === obj
+
 @check fidr simplevec
 @check fidr natyperef
 end

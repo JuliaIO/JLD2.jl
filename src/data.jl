@@ -20,6 +20,11 @@ macro lookup_committed(f, T)
     end
 end
 
+function track_weakref!(f::JLDFile, header_offset::RelOffset, v::ANY)
+    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
+    nothing
+end
+
 ## Generic machinery
 
 # Carries the type and on-disk representation of data to be read from
@@ -422,7 +427,8 @@ jlconvert_canbeuninitialized(::Any) = false
 
 # jlconvert converts data from a pointer into a Julia object. This method
 # handles types where this is just a simple load
-@inline jlconvert{T}(::ReadRepresentation{T,T}, ::JLDFile, ptr::Ptr) =
+@inline jlconvert{T}(::ReadRepresentation{T,T}, ::JLDFile, ptr::Ptr,
+                     ::RelOffset) =
     unsafe_load(convert(Ptr{T}, ptr))
 
 # When fields are undefined in the file but can't be in the workspace, we need
@@ -436,7 +442,8 @@ Base.showerror(io::IO, x::UndefinedFieldException) =
           " must be defined in the current workspace, but was undefined in the file")
 
 # This jlconvert method handles compound types with padding or references
-@generated function jlconvert{T,S}(::ReadRepresentation{T,S}, f::JLDFile, ptr::Ptr)
+@generated function jlconvert{T,S}(::ReadRepresentation{T,S}, f::JLDFile, ptr::Ptr,
+                                   header_offset::RelOffset)
     isa(S, DataType) && return :(convert(T, unsafe_load(convert(Ptr{S}, ptr))))
     S === nothing && return Expr(:new, T)
     @assert isa(S, OnDiskRepresentation)
@@ -451,16 +458,20 @@ Base.showerror(io::IO, x::UndefinedFieldException) =
         # For bits types, we should always inline, because otherwise we'll just
         # pass a lot of crap around in registers
         push!(args, Expr(:meta, :inline))
+    elseif T.mutable
+        push!(args, quote
+            obj = $(Expr(:new, T))
+            track_weakref!(f, header_offset, obj)
+        end)
     end
     fsyms = []
     fn = T === Tuple ? [symbol(i) for i = 1:length(types)] : fieldnames(T)
-    offset = 0
     for i = 1:length(types)
         offset = offsets[i]
         rtype = types[i]
         odr = odrs[i]
 
-        fsym = symbol(string("field_", fn[i]))
+        fsym = T.mutable ? Expr(:., :obj, QuoteNode(fn[i])) : symbol(string("field_", fn[i]))
         push!(fsyms, fsym)
 
         rr = ReadRepresentation{rtype,odr}()
@@ -475,9 +486,11 @@ Base.showerror(io::IO, x::UndefinedFieldException) =
                         $(if T <: Tuple || i <= T.ninitialized
                             # Reference must always be initialized
                             :(throw(UndefinedFieldException(T,$(QuoteNode(fn[i])))))
-                        else
+                        elseif T.mutable
                             # Reference could be uninitialized
-                            :(return $(Expr(:new, T, fsyms[1:i-1]...)))
+                            :(return obj)
+                        else
+                            Expr(:return, Expr(:new, T, fsyms[1:i-1]...))
                         end)
                     end
                 end)
@@ -486,15 +499,15 @@ Base.showerror(io::IO, x::UndefinedFieldException) =
             if T === Tuple
                 # Special case for reconstructed tuples, where we don't know the
                 # field types in advance
-                push!(args, :($fsym = jlconvert($rr, f, ptr+$offset)::$rtype))
+                push!(args, :($fsym = jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype))
             else
                 ttype = T.types[i]
-                push!(args, :($fsym = convert($ttype, jlconvert($rr, f, ptr+$offset)::$rtype)::$ttype))
+                push!(args, :($fsym = convert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype))
             end
         end
     end
 
-    push!(args, T <: Tuple ? Expr(:tuple, fsyms...) : Expr(:new, T, fsyms...))
+    push!(args, T.mutable ? (:obj) : T <: Tuple ? Expr(:tuple, fsyms...) : Expr(:new, T, fsyms...))
 
     blk
 end
@@ -580,12 +593,14 @@ h5convert_uninitialized!(out::Ptr, odr::Type{RelOffset}) =
 
 
 # Reading references as references
-jlconvert(::ReadRepresentation{RelOffset,RelOffset}, f::JLDFile, ptr::Ptr) =
+jlconvert(::ReadRepresentation{RelOffset,RelOffset}, f::JLDFile, ptr::Ptr,
+          ::RelOffset) =
     unsafe_load(convert(Ptr{RelOffset}, ptr))
 jlconvert_canbeuninitialized(::ReadRepresentation{RelOffset,RelOffset}) = false
 
 # Reading references as other types
-@inline function jlconvert{T}(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr)
+@inline function jlconvert{T}(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr,
+                              ::RelOffset)
     x = read_dataset(f, unsafe_load(convert(Ptr{RelOffset}, ptr)))
     (isa(x, T) ? x : convert(T, x))::T
 end
@@ -614,7 +629,7 @@ h5convert_uninitialized!{T<:Vlen}(out::Ptr, odr::Type{T}) =
     (unsafe_store!(convert(Ptr{Int128}, out), 0); nothing)
 
 # Read variable-length data given offset and length in ptr
-jlconvert{T,S}(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr) =
+jlconvert{T,S}(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
     read_heap_object(f, unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), ReadRepresentation(T, S))
 jlconvert_canbeuninitialized{T,S}(::ReadRepresentation{T,Vlen{S}}) = true
 jlconvert_isinitialized{T,S}(::ReadRepresentation{T,Vlen{S}}, ptr::Ptr) =
@@ -677,9 +692,11 @@ h5convert!(out::Ptr, ::FixedLengthString, f::JLDFile, x, ::JLDWriteSession) =
     (unsafe_copy!(convert(Ptr{UInt8}, out), pointer(x.data), length(x.data)); nothing)
 h5convert!{T<:ByteString}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) =
     store_vlen!(out, UInt8, f, x.data, wsession)
-jlconvert{T<:ByteString,S<:ByteString}(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr) =
-    T(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr))
-function jlconvert{S<:ByteString}(rr::FixedLengthString{S}, ::JLDFile, ptr::Ptr)
+jlconvert{T<:ByteString,S<:ByteString}(::ReadRepresentation{T,Vlen{S}},
+                                       f::JLDFile, ptr::Ptr, ::RelOffset) =
+    T(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr, NULL_REFERENCE))
+function jlconvert{S<:ByteString}(rr::FixedLengthString{S}, ::JLDFile,
+                                  ptr::Ptr, ::RelOffset)
     data = Array(UInt8, rr.length)
     unsafe_copy!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
     S(data)
@@ -710,8 +727,9 @@ h5convert!(out::Ptr, fl::FixedLengthString{UTF16String}, f::JLDFile, x::UTF16Str
     (unsafe_copy!(convert(Ptr{UInt16}, out), pointer(x.data), fl.length); nothing)
 
 # Add the embedded null back in when reading
-function jlconvert(T::ReadRepresentation{UTF16String,Vlen{UInt16}}, f::JLDFile, ptr::Ptr)
-    vl = jlconvert(ReadRepresentation(UInt16, Vlen{UInt16}), f, ptr)
+function jlconvert(T::ReadRepresentation{UTF16String,Vlen{UInt16}}, f::JLDFile,
+                   ptr::Ptr, ::RelOffset)
+    vl = jlconvert(ReadRepresentation(UInt16, Vlen{UInt16}), f, ptr, NULL_REFERENCE)
     push!(vl, 0)
     UTF16String(vl)
 end
@@ -738,8 +756,9 @@ constructrr(::JLDFile, ::Type{Symbol}, dt::VariableLengthDatatype{FixedPointData
     dt == H5TYPE_VLEN_UTF8 ? (ReadRepresentation(Symbol, Vlen{UTF8String}), true) :
                              throw(UnsupportedFeatureException())
 
-jlconvert(::ReadRepresentation{Symbol,Vlen{UTF8String}}, f::JLDFile, ptr::Ptr) =
-    symbol(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr))
+jlconvert(::ReadRepresentation{Symbol,Vlen{UTF8String}}, f::JLDFile, ptr::Ptr,
+          ::RelOffset) =
+    symbol(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr, NULL_REFERENCE))
 
 ## BigInts and BigFloats
 
@@ -762,10 +781,14 @@ constructrr(::JLDFile, T::Union{Type{BigInt},Type{BigFloat}}, dt::VariableLength
     dt == H5TYPE_VLEN_ASCII ? (ReadRepresentation(T, Vlen{ASCIIString}), true) :
                               throw(UnsupportedFeatureException())
 
-jlconvert(::ReadRepresentation{BigInt,Vlen{ASCIIString}}, f::JLDFile, ptr::Ptr) =
-    parse(BigInt, ASCIIString(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr)), 62)
-jlconvert(::ReadRepresentation{BigFloat,Vlen{ASCIIString}}, f::JLDFile, ptr::Ptr) =
-    parse(BigFloat, ASCIIString(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr)))
+jlconvert(::ReadRepresentation{BigInt,Vlen{ASCIIString}}, f::JLDFile, ptr::Ptr,
+          ::RelOffset) =
+    parse(BigInt, ASCIIString(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}),
+                                        f, ptr, NULL_REFERENCE)), 62)
+jlconvert(::ReadRepresentation{BigFloat,Vlen{ASCIIString}}, f::JLDFile, ptr::Ptr,
+          ::RelOffset) =
+    parse(BigFloat, ASCIIString(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}),
+                                          f, ptr, NULL_REFERENCE)))
 
 ## DataTypes
 
@@ -841,11 +864,13 @@ end
 
 # Read a type. Returns an instance of UnknownType if the type or parameters
 # could not be resolved.
-function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile, ptr::Ptr)
+function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
+                      ptr::Ptr, header_offset::RelOffset)
     hasparams = unsafe_load(convert(Ptr{UInt32}, ptr+sizeof(Vlen{UInt8}))) != 0
     unknown_params = false
     if hasparams
-        paramrefs = jlconvert(ReadRepresentation(RelOffset, Vlen{RelOffset}), f, ptr+sizeof(Vlen{UInt8}))
+        paramrefs = jlconvert(ReadRepresentation(RelOffset, Vlen{RelOffset}), f,
+                              ptr+sizeof(Vlen{UInt8}), NULL_REFERENCE)
         params = Any[begin
             # If the reference is to a committed datatype, read the datatype
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
@@ -856,7 +881,8 @@ function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile, ptr::Pt
         end for ref in paramrefs]
     end
 
-    path = bytestring(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr))
+    path = bytestring(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr,
+                                NULL_REFERENCE))
     parts = split(path, '.')
     m = Main
     for part in parts
@@ -882,6 +908,7 @@ function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile, ptr::Pt
         # Tuple{Vararg{Any}}
         return Tuple{}
     end
+    track_weakref!(f, header_offset, m)
     m
 end
 
@@ -908,8 +935,12 @@ function constructrr(::JLDFile, ::Type{Union}, dt::VariableLengthDatatype, ::Vec
                          throw(UnsupportedFeatureException())
 end
 
-jlconvert(::ReadRepresentation{Union, Vlen{DataTypeODR()}}, f::JLDFile, ptr::Ptr) =
-    Union{jlconvert(ReadRepresentation(DataType, Vlen{DataTypeODR()}), f, ptr)...}
+function jlconvert(::ReadRepresentation{Union, Vlen{DataTypeODR()}}, f::JLDFile,
+                   ptr::Ptr, header_offset::RelOffset)
+    v = Union{jlconvert(ReadRepresentation(DataType, Vlen{DataTypeODR()}), f, ptr, NULL_REFERENCE)...}
+    track_weakref!(f, header_offset, v)
+    v
+end
 
 ## Pointers
 
@@ -949,8 +980,12 @@ constructrr(::JLDFile, ::Type{SimpleVector}, dt::VariableLengthDatatype, ::Vecto
     dt == H5TYPE_SIMPLEVECTOR ? (ReadRepresentation(SimpleVector, Vlen{RelOffset}), true) :
                                 throw(UnsupportedFeatureException())
 
-jlconvert(::ReadRepresentation{SimpleVector,Vlen{RelOffset}}, f::JLDFile, ptr::Ptr) =
-    Base.svec(jlconvert(ReadRepresentation(Any, Vlen{RelOffset}), f, ptr)...)
+function jlconvert(::ReadRepresentation{SimpleVector,Vlen{RelOffset}}, f::JLDFile,
+                   ptr::Ptr, header_offset::RelOffset)
+    v = Base.svec(jlconvert(ReadRepresentation(Any, Vlen{RelOffset}), f, ptr, NULL_REFERENCE)...)
+    track_weakref!(f, header_offset, v)
+    v
+end
 
 ## Dicts
 
@@ -988,8 +1023,18 @@ function constructrr(f::JLDFile, T::UnknownType{DataType}, dt::VariableLengthDat
     throw(InvalidDataException())
 end
 
-jlconvert{T<:Union(Dict,ObjectIdDict),P}(::ReadRepresentation{T,Vlen{P}}, f::JLDFile, ptr::Ptr) =
-    T(jlconvert(ReadRepresentation(eltype(T), Vlen{P}), f, ptr))
+function jlconvert{T<:Union(Dict,ObjectIdDict),P}(::ReadRepresentation{T,Vlen{P}},
+                                                  f::JLDFile, ptr::Ptr,
+                                                  header_offset::RelOffset)
+    h = T()
+    track_weakref!(f, header_offset, h)
+    pairs = jlconvert(ReadRepresentation(eltype(T), Vlen{P}), f, ptr, NULL_REFERENCE)
+    isa(h, Dict) && sizehint!(h::Dict, length(pairs))
+    for (k,v) in pairs
+        h[k] = v
+    end
+    h
+end
 
 ## Type reconstruction
 
