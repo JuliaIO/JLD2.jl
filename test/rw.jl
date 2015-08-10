@@ -602,8 +602,8 @@ obj = read(fidr, "obj_ref")
 @check fidr zerod_any
 @check fidr nonetypedfield
 
-# obj = read(fidr, "cyclicobject")
-# @test obj.x === obj
+obj = read(fidr, "cyclicobject")
+@test obj.x === obj
 
 @check fidr simplevec
 @check fidr natyperef
