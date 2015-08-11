@@ -630,7 +630,7 @@ h5convert_uninitialized!{T<:Vlen}(out::Ptr, odr::Type{T}) =
 
 # Read variable-length data given offset and length in ptr
 jlconvert{T,S}(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
-    read_heap_object(f, unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), ReadRepresentation(T, S))
+    read_heap_object(f, unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), ReadRepresentation{T, S}())
 jlconvert_canbeuninitialized{T,S}(::ReadRepresentation{T,Vlen{S}}) = true
 jlconvert_isinitialized{T,S}(::ReadRepresentation{T,Vlen{S}}, ptr::Ptr) =
     unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)) != GlobalHeapID(RelOffset(0), 0)
@@ -899,14 +899,14 @@ function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
     if hasparams
         unknown_params && return UnknownType(m, params)
         try
-            return (m::DataType){params...}
+            m = (m::DataType){params...}
         catch e
             return UnknownType(m, params)
         end
     elseif m === Tuple
         # Need to instantiate with no parameters, since Tuple is really
         # Tuple{Vararg{Any}}
-        return Tuple{}
+        m = Tuple{}
     end
     track_weakref!(f, header_offset, m)
     m
