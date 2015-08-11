@@ -106,7 +106,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool)
 
     if !truncate
         if ASCIIString(read(io, UInt8, length(FILE_HEADER))) != FILE_HEADER
-            throw(ArgumentError('"', fname, "\" is not a JLD file"))
+            throw(ArgumentError(string('"', fname, "\" is not a JLD file")))
         end
 
         ver = convert(VersionNumber, read_bytestring(io))
