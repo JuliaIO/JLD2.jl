@@ -47,7 +47,7 @@ end
 end
 
 # Determines whether a type has padding and thus needs special handling
-@generated function haspadding{T}(::Type{T})
+function haspadding(T::DataType)
     isempty(T.types) && return false
     fo = fieldoffsets(T)
     offset = 0

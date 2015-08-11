@@ -121,9 +121,70 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
     end
 end
 
-rrodr{T,S}(::ReadRepresentation{T,S}) = S
-empty_eltype(::ReadRepresentation{Any,RelOffset}) = Union{}
-empty_eltype{T}(::ReadRepresentation{T}) = T
+# We can avoid a box by putting the dataspace here instead of passing
+# it to read_data.  That reduces the allocation footprint, but doesn't
+# really seem to help with performance.
+const BOXED_READ_DATASPACE = Ref{Tuple{ReadDataspace,RelOffset}}()
+
+# Most types can only be scalars or arrays
+function read_data(f::JLDFile{MmapIO}, rr,
+                   attributes::Union(Vector{ReadAttribute},Void)=nothing)
+    dataspace, header_offset = BOXED_READ_DATASPACE[]
+    if dataspace.dataspace_type == DS_SCALAR
+        io = f.io
+        inptr = io.curptr
+        obj = jlconvert(rr, f, inptr, header_offset)
+        io.curptr = inptr + sizeof(rr)
+        obj
+    elseif dataspace.dataspace_type == DS_SIMPLE
+        read_array(f, dataspace, rr, attributes, header_offset)
+    else
+        throw(UnsupportedFeatureException())
+    end
+end
+
+# Reference arrays can only be arrays or null dataspace (for Union{} case)
+function read_data(f::JLDFile{MmapIO}, rr::ReadRepresentation{Any,RelOffset},
+                   attributes::Vector{ReadAttribute})
+    dataspace, header_offset = BOXED_READ_DATASPACE[]
+    if dataspace.dataspace_type == DS_SIMPLE
+        # Since this is an array of references, there should be an attribute
+        # informing us of the type
+        io = f.io
+        startpos = position(io)
+        for x in attributes
+            if x.name == :julia_type
+                T = read_attr_data(f, x)
+                if isa(T, UnknownType)
+                    str = typestring(T)
+                    warn("type $(str) does not exist in workspace; interpreting Array{$str} as Array{Any}")
+                    T = Any
+                end
+                seek(io, startpos)
+                return read_array(f, dataspace, ReadRepresentation{T,RelOffset}(),
+                                  attributes, header_offset)
+            end
+        end
+    elseif dataspace.dataspace_type == DS_NULL
+        return read_empty(f, Union{}, attributes[find_dimensions_attr(attributes)], header_offset)
+    end
+    throw(UnsupportedFeatureException())
+end
+
+# Types with no payload can only be null dataspace
+function read_data{T}(f::JLDFile{MmapIO}, rr::ReadRepresentation{T,nothing},
+                      attributes::Vector{ReadAttribute})
+    dataspace, header_offset = BOXED_READ_DATASPACE[]
+    dataspace.dataspace_type == DS_NULL || throw(UnsupportedFeatureException())
+
+    dimensions_attr_index = find_dimensions_attr(attributes)
+    if dimensions_attr_index == 0
+        jlconvert(rr, f, f.io.curptr, header_offset)
+    else
+        # dimensions attribute => array of empty type
+        read_empty(f, T, attributes[dimensions_attr_index], header_offset)
+    end
+end
 
 function find_dimensions_attr(attributes::Vector{ReadAttribute})
     dimensions_attr_index = 0
@@ -137,41 +198,17 @@ function find_dimensions_attr(attributes::Vector{ReadAttribute})
     dimensions_attr_index
 end
 
-# We can avoid a box by putting the dataspace here instead of passing
-# it to read_data.  That reduces the allocation footprint, but doesn't
-# really seem to help with performance.
-const BOXED_READ_DATASPACE = Ref{Tuple{ReadDataspace,RelOffset}}()
-function read_data(f::JLDFile{MmapIO}, rr,
-                   attributes::Union(Vector{ReadAttribute},Void)=nothing)
-    dataspace, header_offset = BOXED_READ_DATASPACE[]
+function read_empty(f::JLDFile{MmapIO}, T::Type, dimensions_attr::ReadAttribute,
+                    header_offset::RelOffset)
     io = f.io
     inptr = io.curptr
-    if dataspace.dataspace_type == DS_SCALAR
-        obj = jlconvert(rr, f, inptr, header_offset)
-        io.curptr = inptr + sizeof(rr)
-        obj
-    elseif dataspace.dataspace_type == DS_SIMPLE
-        read_array(f, inptr, dataspace, rr, attributes, header_offset)
-    elseif dataspace.dataspace_type == DS_NULL
-        dimensions_attr_index = find_dimensions_attr(attributes)
-
-        if dimensions_attr_index == 0
-            isa(rrodr(rr), Void) || throw(UnsupportedFeatureException())
-            jlconvert(rr, f, inptr, header_offset)
-        else
-            # dimensions attribute => array of empty type
-            dimensions_attr = attributes[dimensions_attr_index]
-            seek(io, dimensions_attr.dataspace.dimensions_offset)
-            ndims = read(io, Int)
-            seek(io, dimensions_attr.data_offset)
-            v = construct_array(io, empty_eltype(rr), ndims)
-            header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
-            io.curptr = inptr
-            v
-        end
-    else
-        throw(UnsupportedFeatureException())
-    end
+    seek(io, dimensions_attr.dataspace.dimensions_offset)
+    ndims = read(io, Int)
+    seek(io, dimensions_attr.data_offset)
+    v = construct_array(io, T, ndims)
+    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
+    io.curptr = inptr
+    v
 end
 
 get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Void) =
@@ -215,11 +252,12 @@ function construct_array{T}(io::IO, ::Type{T}, ndims::Int)
     end
 end
 
-function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace,
+function read_array{T,RR}(f::JLDFile, dataspace::ReadDataspace,
                           rr::ReadRepresentation{T,RR},
                           attributes::Union(Vector{ReadAttribute},Void),
                           header_offset::RelOffset)
     io = f.io
+    inptr = io.curptr
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
     seek(io, offset)
     v = construct_array(io, T, Int(ndims))
@@ -258,30 +296,6 @@ function read_array{T,RR}(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace
 
     io.curptr = inptr + sizeof(RR) * n
     v
-end
-
-function read_array(f::JLDFile, inptr::Ptr{Void}, dataspace::ReadDataspace,
-                    rr::ReadRepresentation{Any,RelOffset},
-                    attributes::Vector{ReadAttribute}, header_offset::RelOffset)
-    # Since this is an array of references, there should be an attribute informing us of the type
-    for x in attributes
-        if x.name == :julia_type
-            T = read_attr_data(f, x)
-            if isa(T, UnknownType)
-                str = typestring(T)
-                warn("type $(str) does not exist in workspace; interpreting Array{$str} as Array{Any}")
-                T = Any
-            end
-            return invoke(read_array, Tuple{JLDFile, Ptr{Void}, ReadDataspace,
-                                            ReadRepresentation,
-                                            Vector{ReadAttribute}, RelOffset},
-                          f, inptr, dataspace, ReadRepresentation{T,RelOffset}(),
-                          attributes, header_offset)
-        end
-    end
-
-    # If not, something went wrong
-    throw(UnsupportedFeatureException())
 end
 
 function payload_size(dataspace::WriteDataspace, datatype::H5Datatype, datasz::Int, layout_class::UInt8)
