@@ -69,7 +69,7 @@ function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
     seek(io, objoffset)
     write(io, UInt16(index))           # Heap object index
     write(io, UInt16(1))               # Reference count
-    skip(io, 4)                        # Reserved
+    write(io, UInt32(0))               # Reserved
     write(io, Length(psz))             # Object size
 
     # Update global heap object
@@ -79,7 +79,7 @@ function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
     # Write free space object
     if gh.free >= 8 + sizeof(Length)
         seek(io, objoffset + objsz)
-        skip(io, 8)                # Object index, reference count, reserved
+        write(io, UInt64(0))           # Object index, reference count, reserved
         write(io, Length(gh.free - 8 - sizeof(Length))) # Object size
     end
 
