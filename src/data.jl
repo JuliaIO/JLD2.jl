@@ -1,6 +1,14 @@
 typealias TupleType{T<:Tuple} Type{T}
 typealias Initialized Union(Type{Val{true}}, Type{Val{false}})
 
+immutable OnDiskRepresentation
+    offsets::Tuple{Vararg{Int}}
+    types::Base.SimpleVector
+    odrs::Vector{Any}
+end
+
+immutable ODRIndex{N} end
+
 immutable UnknownType{T}
     name::T
     parameters::Vector{Any}
@@ -10,6 +18,17 @@ immutable UnknownType{T}
 end
 UnknownType(name) = UnknownType{typeof(name)}(name)
 UnknownType(name, parameters) = UnknownType{typeof(name)}(name, parameters)
+
+immutable Vlen{T}
+    size::UInt32
+    id::GlobalHeapID
+end
+sizeof{T<:Vlen}(::Type{T}) = 4 + sizeof(GlobalHeapID)
+
+const ODRS = OnDiskRepresentation[
+    OnDiskRepresentation((0,sizeof(Vlen{UTF8String})),Base.svec(UTF8String,Vector{Any}),Any[Vlen{UTF8String},Vlen{RelOffset}])
+]
+typealias DataTypeODR ODRIndex{1}
 
 const NULL_COMMITTED_DATATYPE = CommittedDatatype(RelOffset(0), 0)
 # Look up the corresponding committed datatype for a given type
@@ -42,8 +61,9 @@ sizeof{T,S}(::ReadRepresentation{T,S}) = sizeof(S)
 end
 
 # Gets the size of an on-disk representation
-@generated function sizeof{RelOffsets,Types,ODRs}(::OnDiskRepresentation{RelOffsets,Types,ODRs})
-    RelOffsets[end]+sizeof(ODRs.parameters[end])
+@generated function sizeof{N}(::ODRIndex{N})
+    odr = ODRS[N]
+    odr.offsets[end]+sizeof(odr.odrs[end])
 end
 
 # Determines whether a type has padding and thus needs special handling
@@ -126,7 +146,8 @@ end
         offset += sizeof(fodr)
     end
 
-    Expr(:new, OnDiskRepresentation{tuple(offsets...),Tuple{T.types...},Tuple{odrs...}})
+    push!(ODRS, OnDiskRepresentation((offsets...), T.types, odrs))
+    Expr(:new, ODRIndex{length(ODRS)})
 end
 
 # objodr gives the on-disk representation of a given object. This is
@@ -268,8 +289,8 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
 
     # datatype = read_data(f, julia_type_attr, H5TYPE_DATATYPE, ReadRepresentation(DataType, DataTypeODR()))
     datatype = read_attr_data(f, julia_type_attr)
-    rr, canonical = constructrr(f, datatype, dt, attrs)
-    rr = rr::ReadRepresentation
+    rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
+    rr = rr
 
     canonical && (f.jlh5type[datatype] = cdt)
     f.datatypes[cdt.index] = dt
@@ -277,7 +298,7 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
 end
 
 # Constructs a ReadRepresentation for a given opaque (bitstype) type
-function constructrr(::JLDFile, T::ANY, dt::BasicDatatype, attrs::Vector{ReadAttribute})
+function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{ReadAttribute})
     dt.class == DT_OPAQUE || throw(UnsupportedFeatureException())
     if sizeof(T) == dt.size
         (ReadRepresentation(T), true)
@@ -300,7 +321,7 @@ end
 # where we can't know if reconstructed parametric types will have a matching
 # memory layout without first inspecting the memory layout.
 immutable TypeMappingException <: Exception; end
-function constructrr(f::JLDFile, T::ANY, dt::CompoundDatatype,
+function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
     field_datatypes = read_field_datatypes(f, attrs)
@@ -377,8 +398,25 @@ function constructrr(f::JLDFile, T::ANY, dt::CompoundDatatype,
     if samelayout
         (ReadRepresentation(T), true)
     else
-        rodr = OnDiskRepresentation{tuple(offsets...),Tuple{types...},Tuple{odrs...}}()
-        (ReadRepresentation(T, rodr), rodr == odr(T))
+        wodrindex = odr(T)
+        offsets = (offsets...)
+        if isa(wodrindex, ODRIndex)
+            wodr = ODRS[typeof(wodrindex::ODRIndex).parameters[1]::Int]
+            tequal = length(wodr.types) == length(types)
+            if tequal
+                for i = 1:length(wodr.types)
+                    if !(wodr.types[i] <: types[i] || (wodr.types[i] === ByteString && types[i] === UTF8String))
+                        tequal = false
+                        break
+                    end
+                end
+                if tequal && wodr.offsets == offsets && wodr.odrs == odrs
+                    return (ReadRepresentation(T, wodrindex), true)
+                end
+            end
+        end
+        push!(ODRS, OnDiskRepresentation(offsets, Base.svec(types...), odrs))
+        return (ReadRepresentation(T, ODRIndex{length(ODRS)}()), false)
     end
 end
 
@@ -389,11 +427,12 @@ h5convert!{T}(out::Ptr, ::Type{T}, ::JLDFile, x::T, ::JLDWriteSession) =
     (unsafe_store!(convert(Ptr{typeof(x)}, out), x); nothing)
 
 # We pack types that have padding using a staged h5convert! method
-@generated function h5convert!(out::Ptr, odr::OnDiskRepresentation, file::JLDFile, x, wsession::JLDWriteSession)
+@generated function h5convert!{N}(out::Ptr, ::ODRIndex{N}, file::JLDFile, x, wsession::JLDWriteSession)
     T = x
-    offsets, types, members = odr.parameters
-    types = types.types
-    members = members.types
+    odr = ODRS[N]
+    offsets = odr.offsets
+    types = odr.types
+    members = odr.odrs
 
     getindex_fn = isa(T, TupleType) ? (:getindex) : (:getfield)
     ex = Expr(:block)
@@ -446,11 +485,12 @@ Base.showerror(io::IO, x::UndefinedFieldException) =
                                    header_offset::RelOffset)
     isa(S, DataType) && return :(convert(T, unsafe_load(convert(Ptr{S}, ptr))))
     S === nothing && return Expr(:new, T)
-    @assert isa(S, OnDiskRepresentation)
+    @assert isa(S, ODRIndex)
+    odr = ODRS[typeof(S).parameters[1]]
 
-    offsets, types, odrs = typeof(S).parameters
-    types = types.types
-    odrs = odrs.types
+    offsets = odr.offsets
+    types = odr.types
+    odrs = odr.odrs
 
     blk = Expr(:block)
     args = blk.args
@@ -575,7 +615,7 @@ h5type(::JLDFile, ::RelOffset) = ReferenceDatatype()
 odr(::Type{RelOffset}) = RelOffset
 
 const BOXED_PTR = Ref{Ptr{Void}}()
-@inline function h5convert!(out::Ptr, odr::Type{RelOffset}, f::JLDFile, x::ANY, wsession::JLDWriteSession)
+@inline function h5convert!(out::Ptr, odr::Type{RelOffset}, f::JLDFile, x::Any, wsession::JLDWriteSession)
     BOXED_PTR[] = out
     h5convert_with_boxed_ptr!(f, x, wsession)
 end
@@ -609,12 +649,6 @@ jlconvert_isinitialized{T}(::ReadRepresentation{T,RelOffset}, ptr::Ptr) =
     unsafe_load(convert(Ptr{RelOffset}, ptr)) != NULL_REFERENCE
 
 ## Routines for variable-length datatypes
-
-immutable Vlen{T}
-    size::UInt32
-    id::GlobalHeapID
-end
-sizeof{T<:Vlen}(::Type{T}) = 4 + sizeof(GlobalHeapID)
 
 # Write variable-length data and store the offset and length to out pointer
 @inline function store_vlen!(out::Ptr, odr, f::JLDFile, x::AbstractVector, wsession::JLDWriteSession)
@@ -692,6 +726,9 @@ h5convert!(out::Ptr, ::FixedLengthString, f::JLDFile, x, ::JLDWriteSession) =
     (unsafe_copy!(convert(Ptr{UInt8}, out), pointer(x.data), length(x.data)); nothing)
 h5convert!{T<:ByteString}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) =
     store_vlen!(out, UInt8, f, x.data, wsession)
+jlconvert{S<:ByteString}(::ReadRepresentation{ByteString,Vlen{S}},
+                                       f::JLDFile, ptr::Ptr, ::RelOffset) =
+    UTF8String(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr, NULL_REFERENCE))
 jlconvert{T<:ByteString,S<:ByteString}(::ReadRepresentation{T,Vlen{S}},
                                        f::JLDFile, ptr::Ptr, ::RelOffset) =
     T(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr, NULL_REFERENCE))
@@ -798,7 +835,6 @@ const H5TYPE_DATATYPE = CompoundDatatype(
     [0, sizeof(Vlen{UTF8String})],
     [H5TYPE_VLEN_UTF8, VariableLengthDatatype(ReferenceDatatype())]
 )
-typealias DataTypeODR OnDiskRepresentation{(0,sizeof(Vlen{UTF8String})),Tuple{UTF8String,Vector{Any}},Tuple{Vlen{UTF8String},Vlen{RelOffset}}}
 
 function h5fieldtype{T<:DataType}(f::JLDFile, ::Type{T}, ::Initialized)
     @lookup_committed f DataType
@@ -1086,7 +1122,7 @@ function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatyp
     field_datatypes = read_field_datatypes(f, attrs)
     if unk.name === Tuple
         # For a tuple with unknown fields, we should reconstruct the fields
-        rodr = reconstruct_odr(f, dt, field_datatypes)
+        rodr = reconstruct_odr(f, dt, field_datatypes)[1]
         # This is a "pseudo-RR" since the tuple is not fully parametrized, but
         # the parameters must depend on the types actually encoded in the file
         (ReadRepresentation(Tuple, rodr), false)
@@ -1148,7 +1184,9 @@ function reconstruct_odr(f::JLDFile, dt::CompoundDatatype,
         end
         types[i], odrs[i] = typeof(dtrr).parameters
     end
-    OnDiskRepresentation{tuple(dt.offsets...),Tuple{types...},Tuple{odrs...}}()
+    odr = OnDiskRepresentation((dt.offsets...), Base.svec(types...), odrs)
+    push!(ODRS, odr)
+    return (ODRIndex{length(ODRS)}(), odr)
 end
 
 # Reconstruct type that is a "lost cause": either we were not able to resolve
@@ -1156,14 +1194,14 @@ end
 # fields to workspace types
 function reconstruct_compound(f::JLDFile, T::ByteString, dt::H5Datatype,
                               field_datatypes::Union{Vector{RelOffset},Void})
-    rodr = reconstruct_odr(f, dt, field_datatypes)
+    rodrindex, rodr = reconstruct_odr(f, dt, field_datatypes)
 
     # Now reconstruct the type
     reconname = gensym(T)
     eval(ReconstructedTypes, Expr(:composite_type, reconname, Base.svec(),
                                   Base.svec(dt.names...), Any,
-                                  typeof(rodr).parameters[2].types, false, 0))
+                                  rodr.types, false, 0))
     T = getfield(ReconstructedTypes, reconname)
 
-    (ReadRepresentation(T, rodr), false)
+    (ReadRepresentation(T, rodrindex), false)
 end

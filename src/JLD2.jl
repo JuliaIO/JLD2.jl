@@ -64,7 +64,6 @@ immutable CommittedDatatype <: H5Datatype
     index::Int
 end
 
-immutable OnDiskRepresentation{RelOffsets,Types,ODRs} end
 immutable ReadRepresentation{T,ODR} end
 
 symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)
