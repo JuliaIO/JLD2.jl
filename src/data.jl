@@ -1,5 +1,5 @@
 typealias TupleType{T<:Tuple} Type{T}
-typealias Initialized Union(Type{Val{true}}, Type{Val{false}})
+typealias Initialized Union{Type{Val{true}}, Type{Val{false}}}
 
 immutable OnDiskRepresentation
     offsets::Tuple{Vararg{Int}}
@@ -29,6 +29,7 @@ const ODRS = OnDiskRepresentation[
     OnDiskRepresentation((0,sizeof(Vlen{UTF8String})),Base.svec(UTF8String,Vector{Any}),Any[Vlen{UTF8String},Vlen{RelOffset}])
 ]
 typealias DataTypeODR ODRIndex{1}
+immutable CustomSerialization{T,S} end
 
 const NULL_COMMITTED_DATATYPE = CommittedDatatype(RelOffset(0), 0)
 # Look up the corresponding committed datatype for a given type
@@ -43,6 +44,8 @@ function track_weakref!(f::JLDFile, header_offset::RelOffset, v::ANY)
     header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
     nothing
 end
+
+writeas(T::Type) = T
 
 ## Generic machinery
 
@@ -104,7 +107,8 @@ end
 
 # h5fieldtype is fieldodr's HDF5 companion. It should give the HDF5
 # datatype reflecting the on-disk representation.
-@generated function h5fieldtype{T}(f::JLDFile, ::Type{T}, initialized::Initialized)
+@generated function h5fieldtype{T}(f::JLDFile, writeas::Type{T}, readas::Type,
+                                   initialized::Initialized)
     if isleaftype(T)
         if !hasfielddata(T)
             return nothing
@@ -113,10 +117,10 @@ end
                 @lookup_committed f T
                 $(if isempty(T.types)
                     # bitstype
-                    :(return commit(f, OpaqueDatatype(sizeof(T)), T))
+                    :(return commit(f, OpaqueDatatype(sizeof(T)), T, readas))
                 else
                     # Compound type
-                    :(return commit_compound(f, fieldnames(T), T))
+                    :(return commit_compound(f, fieldnames(T), T, readas))
                 end)
             end
         end
@@ -154,26 +158,33 @@ end
 # almost always the on-disk representation of the type. The only
 # exception is strings, where the length is encoded in the datatype in
 # HDF5, but in the object in Julia.
-objodr(x) = odr(typeof(x))
+objodr(x) = _objodr(writeas(typeof(x)), typeof(x))
+_objodr{T}(::Type{T}, ::Type{T}) = odr(T)
+_objodr{T,S}(::Type{T}, ::Type{S}) = CustomSerialization{T,odr(T)}()
 
 # h5type is objodr's HDF5 companion. It should give the HDF5 datatype
 # reflecting the on-disk representation
 #
 # Performance note: this should be inferrable.
-function h5type{T}(f::JLDFile, x::T)
+function h5type(f::JLDFile, writeas::DataType, x)
+    T = typeof(x)
     @lookup_committed f T
     if sizeof(T) == 0
-        commit(f, OpaqueDatatype(1), T, WrittenAttribute(f, :empty, UInt8(1)))
+        commit(f, OpaqueDatatype(1), writeas, T, WrittenAttribute(f, :empty, UInt8(1)))
     elseif isempty(T.types) # bitstype
-        commit(f, OpaqueDatatype(sizeof(T)), T)
+        commit(f, OpaqueDatatype(sizeof(T)), writeas, T)
     else
-        commit_compound(f, fieldnames(T), T)
+        commit_compound(f, fieldnames(T), writeas, T)
     end
 end
+h5type(::JLDFile, writeas::Type, ::Any) =
+    throw(ArgumentError("writeas(leaftype) must return a leaf type"))
+h5type(f::JLDFile, x) = h5type(f, writeas(typeof(x)), x)
 
 # Make a compound datatype from a set of names and types
-function commit_compound(f::JLDFile, names::AbstractVector{Symbol}, T::DataType)
-    types = T.types
+function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
+                         writtenas::DataType, readas::Type)
+    types = writtenas.types
     offsets = Int[]
     h5names = Symbol[]
     members = H5Datatype[]
@@ -183,7 +194,7 @@ function commit_compound(f::JLDFile, names::AbstractVector{Symbol}, T::DataType)
     offset = 0
     for i = 1:length(types)
         !hasfielddata(types[i]) && continue
-        dtype = h5fieldtype(f, types[i], Val{i <= T.ninitialized})
+        dtype = h5fieldtype(f, writeas(types[i]), types[i], Val{i <= writtenas.ninitialized})
         dtype === nothing && continue
         push!(h5names, names[i])
         if isa(dtype, CommittedDatatype)
@@ -201,23 +212,29 @@ function commit_compound(f::JLDFile, names::AbstractVector{Symbol}, T::DataType)
     end
 
     @assert offset != 0
+    compound = CompoundDatatype(offset, h5names, offsets, members)
     if hasfieldtype
-        fieldtypeattr = WrittenAttribute(:field_datatypes, WriteDataspace(f, fieldtypes, DataType), ReferenceDatatype(),
+        fieldtypeattr = WrittenAttribute(:field_datatypes,
+                                         WriteDataspace(f, fieldtypes, DataType),
+                                         ReferenceDatatype(),
                                          fieldtypes)
-        commit(f, CompoundDatatype(offset, h5names, offsets, members), T, fieldtypeattr)::CommittedDatatype
+        commit(f, compound, writtenas, readas, fieldtypeattr)::CommittedDatatype
     else
-        commit(f, CompoundDatatype(offset, h5names, offsets, members), T)::CommittedDatatype
+        commit(f, compound, writtenas, readas)::CommittedDatatype
     end
 end
 
 # Write an HDF5 datatype to the file
-function commit(f::JLDFile, dtype::H5Datatype, T::DataType, attributes::WrittenAttribute...)
+function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::Type,
+                attributes::WrittenAttribute...)
     io = f.io
 
     # This needs to be written this way or type inference gets unhappy...
     # Also needs to happen here so that we write the DataType type
     # before we try to find where this type will be written
-    typeattr = WrittenAttribute(:julia_type, WriteDataspace(f, DataType, odr(DataType)), h5type(f, DataType), T)
+    typeattr = WrittenAttribute(:julia_type,
+                                WriteDataspace(f, DataType, odr(DataType)),
+                                h5type(f, DataType, DataType), readas)
 
     offset = f.end_of_data
 
@@ -226,11 +243,19 @@ function commit(f::JLDFile, dtype::H5Datatype, T::DataType, attributes::WrittenA
     h5o = h5offset(f, offset)
     cdt = CommittedDatatype(h5o, id)
     f.datatype_locations[h5o] = cdt
-    f.jlh5type[T] = cdt
-    f.h5jltype[cdt] = ReadRepresentation(T, odr(T))
+    f.jlh5type[readas] = cdt
     push!(f.datatypes, dtype)
 
-    commit(f, dtype, tuple(typeattr, attributes...))
+    if writeas !== readas
+        wrtypeattr = WrittenAttribute(:written_type,
+                                      WriteDataspace(f, DataType, odr(DataType)),
+                                      h5type(f, DataType, DataType), writeas)
+        f.h5jltype[cdt] = ReadRepresentation(readas, CustomSerialization{writeas, odr(writeas)}())
+        commit(f, dtype, tuple(typeattr, wrtypeattr, attributes...))
+    else
+        f.h5jltype[cdt] = ReadRepresentation(writeas, odr(writeas))
+        commit(f, dtype, tuple(typeattr, attributes...))
+    end
 
     cdt::CommittedDatatype
 end
@@ -261,9 +286,12 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     dt, attrs = read_committed_datatype(f, cdt)
 
     julia_type_attr = nothing
+    written_type_attr = nothing
     for attr in attrs
         if attr.name == :julia_type
             julia_type_attr = attr
+        elseif attr.name == :written_type
+            written_type_attr = attr
         end
     end
 
@@ -289,8 +317,16 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
 
     # datatype = read_data(f, julia_type_attr, H5TYPE_DATATYPE, ReadRepresentation(DataType, DataTypeODR()))
     datatype = read_attr_data(f, julia_type_attr)
-    rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
-    rr = rr
+    if written_type_attr !== nothing
+        readas = datatype
+        datatype = read_attr_data(f, written_type_attr)
+        rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
+        rrty = typeof(rr)
+        rr = ReadRepresentation{readas, CustomSerialization{rrty.parameters[1], rrty.parameters[2]}()}()
+        canonical = canonical && writeas(readas) === datatype
+    else
+        rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
+    end
 
     canonical && (f.jlh5type[datatype] = cdt)
     f.datatypes[cdt.index] = dt
@@ -483,8 +519,13 @@ Base.showerror(io::IO, x::UndefinedFieldException) =
 # This jlconvert method handles compound types with padding or references
 @generated function jlconvert{T,S}(::ReadRepresentation{T,S}, f::JLDFile, ptr::Ptr,
                                    header_offset::RelOffset)
-    isa(S, DataType) && return :(convert(T, unsafe_load(convert(Ptr{S}, ptr))))
-    S === nothing && return Expr(:new, T)
+    if isa(S, DataType)
+        return :(convert(T, unsafe_load(convert(Ptr{S}, ptr))))
+    elseif isa(S, CustomSerialization)
+        return :(rconvert(T, jlconvert($(Expr(:new, ReadRepresentation{typeof(S).parameters...})), f, ptr, header_offset))::T)
+    elseif S === nothing
+        return Expr(:new, T)
+    end
     @assert isa(S, ODRIndex)
     odr = ODRS[typeof(S).parameters[1]]
 
@@ -557,15 +598,21 @@ end
 # representations than ordinary opaque types
 
 # This construction prevents these methods from getting called on type unions
-typealias PrimitiveTypeTypes Union(Type{Int8}, Type{Int16}, Type{Int32}, Type{Int64}, Type{Int128},
-                                   Type{UInt8}, Type{UInt16}, Type{UInt32}, Type{UInt64}, Type{UInt128},
-                                   Type{Float16}, Type{Float32}, Type{Float64})
+typealias SignedTypes        Union{Type{Int8}, Type{Int16}, Type{Int32}, Type{Int64}, Type{Int128}}
+typealias UnsignedTypes      Union{Type{UInt8}, Type{UInt16}, Type{UInt32}, Type{UInt64}, Type{UInt128}}
+typealias FloatTypes         Union{Type{Float16}, Type{Float32}, Type{Float64}}
+typealias PrimitiveTypeTypes Union(SignedTypes, UnsignedTypes, FloatTypes)
 typealias PrimitiveTypes     Union(Int8, Int16, Int32, Int64, Int128, UInt8, UInt16, UInt32,
                                    UInt64, UInt128, Float16, Float32, Float64)
-h5fieldtype(::JLDFile, T::Union(Type{Int8}, Type{Int16}, Type{Int32}, Type{Int64}, Type{Int128}), ::Initialized) =
-    FixedPointDatatype(sizeof(T), true)
-h5fieldtype(::JLDFile, T::Union(Type{UInt8}, Type{UInt16}, Type{UInt32}, Type{UInt64}, Type{UInt128}), ::Initialized) =
-    FixedPointDatatype(sizeof(T), false)
+
+for T in SignedTypes.types
+    @eval h5fieldtype(::JLDFile, ::$T, ::$T, ::Initialized) =
+        FixedPointDatatype(sizeof($(T.parameters[1])), true)
+end
+for T in UnsignedTypes.types
+    @eval h5fieldtype(::JLDFile, ::$T, ::$T, ::Initialized) =
+        FixedPointDatatype(sizeof($(T.parameters[1])), false)
+end
 
 function jltype(f::JLDFile, dt::FixedPointDatatype)
     signed = dt.bitfield1 == 0x08 ? true : dt.bitfield1 == 0x00 ? false : throw(UnsupportedFeatureException())
@@ -586,34 +633,43 @@ function jltype(f::JLDFile, dt::FixedPointDatatype)
     end
 end
 
-h5fieldtype(::JLDFile, ::Type{Float16}, ::Initialized) =
+h5fieldtype(::JLDFile, ::Type{Float16}, ::Type{Float16}, ::Initialized) =
     FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x0f, 0x00, 2, 0, 16, 10, 5, 0, 10, 0x0000000f)
-h5fieldtype(::JLDFile, ::Type{Float32}, ::Initialized) =
+h5fieldtype(::JLDFile, ::Type{Float32}, ::Type{Float32}, ::Initialized) =
     FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x1f, 0x00, 4, 0, 32, 23, 8, 0, 23, 0x0000007f)
-h5fieldtype(::JLDFile, ::Type{Float64}, ::Initialized) =
+h5fieldtype(::JLDFile, ::Type{Float64}, ::Type{Float64}, ::Initialized) =
     FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x3f, 0x00, 8, 0, 64, 52, 11, 0, 52, 0x000003ff)
 
 function jltype(f::JLDFile, dt::FloatingPointDatatype)
-    if dt == h5fieldtype(f, Float64, Val{true})
+    if dt == h5fieldtype(f, Float64, Float64, Val{true})
         return ReadRepresentation(Float64)
-    elseif dt == h5fieldtype(f, Float32, Val{true})
+    elseif dt == h5fieldtype(f, Float32, Float32, Val{true})
         return ReadRepresentation(Float32)
-    elseif dt == h5fieldtype(f, Float16, Val{true})
+    elseif dt == h5fieldtype(f, Float16, Float16, Val{true})
         return ReadRepresentation(Float16)
     else
         throw(UnsupportedFeatureException())
     end
 end
 
-h5type(f::JLDFile, x::PrimitiveTypes) = h5fieldtype(f, typeof(x), Val{true})
+function h5fieldtype(f::JLDFile, writeas::PrimitiveTypeTypes, readas::Type, init::Initialized)
+    @lookup_committed f readas
+    commit(f, h5fieldtype(f, writeas, writeas, init), writeas, readas)
+end
+h5type(f::JLDFile, writeas::PrimitiveTypeTypes, x) =
+    h5fieldtype(f, writeas, typeof(x), Val{true})
+
+sizeof{T,ODR}(::CustomSerialization{T,ODR}) = sizeof(ODR)
+h5convert!{T,ODR}(out::Ptr, ::CustomSerialization{T,ODR}, f::JLDFile, x, wsession::JLDWriteSession) =
+    h5convert!(out, ODR, f, wconvert(T, x)::T, wsession)
 
 ## References
 
-# A hack to prevent us from needing to box the output pointer
-# XXX not thread-safe!
-h5type(::JLDFile, ::RelOffset) = ReferenceDatatype()
+h5type(::JLDFile, ::Type{RelOffset}, ::RelOffset) = ReferenceDatatype()
 odr(::Type{RelOffset}) = RelOffset
 
+# A hack to prevent us from needing to box the output pointer
+# XXX not thread-safe!
 const BOXED_PTR = Ref{Ptr{Void}}()
 @inline function h5convert!(out::Ptr, odr::Type{RelOffset}, f::JLDFile, x::Any, wsession::JLDWriteSession)
     BOXED_PTR[] = out
@@ -678,11 +734,20 @@ const H5TYPE_VLEN_UTF8 = VariableLengthDatatype(DT_VARIABLE_LENGTH, 0x11, 0x01, 
                                                sizeof(Vlen{UInt8}),
                                                FixedPointDatatype(1, false))
 
-h5fieldtype(::JLDFile, ::Type{ASCIIString}, ::Initialized) = H5TYPE_VLEN_ASCII
-h5fieldtype(::JLDFile, ::Type{UTF8String}, ::Initialized) = H5TYPE_VLEN_UTF8
-h5fieldtype(::JLDFile, ::Type{ByteString}, ::Initialized) = H5TYPE_VLEN_UTF8
+h5fieldtype(::JLDFile, ::Type{ASCIIString}, ::Type{ASCIIString}, ::Initialized) =
+    H5TYPE_VLEN_ASCII
+h5fieldtype(::JLDFile, ::Type{UTF8String}, ::Type{UTF8String}, ::Initialized) =
+    H5TYPE_VLEN_UTF8
+h5fieldtype(::JLDFile, ::Type{ByteString}, ::Type{ByteString}, ::Initialized) =
+    H5TYPE_VLEN_UTF8
+function h5fieldtype(f::JLDFile, writeas::Union{Type{ASCIIString},Type{UTF8String},Type{ByteString}},
+                     readas::Type, init::Initialized)
+    @lookup_committed f readas
+    commit(f, h5fieldtype(f, writeas, writeas, init), writeas, readas)
+end
+
 fieldodr(::Type{ASCIIString}, ::Bool) = Vlen{ASCIIString}
-fieldodr(::Union(Type{UTF8String}, Type{ByteString}), ::Bool) = Vlen{UTF8String}
+fieldodr(::Union{Type{UTF8String}, Type{ByteString}}, ::Bool) = Vlen{UTF8String}
 
 # Stored as variable-length strings
 immutable FixedLengthString{T<:AbstractString}
@@ -690,7 +755,12 @@ immutable FixedLengthString{T<:AbstractString}
 end
 sizeof{T<:ByteString}(x::FixedLengthString{T}) = x.length
 
-h5type(f::JLDFile, x::ByteString) = StringDatatype(typeof(x), sizeof(x))
+h5type(f::JLDFile, writeas::Type{ASCIIString}, x::ASCIIString) =
+    StringDatatype(typeof(x), sizeof(x))
+h5type(f::JLDFile, writeas::Type{UTF8String}, x::UTF8String) =
+    StringDatatype(typeof(x), sizeof(x))
+h5type(f::JLDFile, writeas::Union{Type{ASCIIString},Type{UTF8String},Type{ByteString}}, x) =
+    h5fieldtype(f, writeas, typeof(x), Val{true})
 odr{T<:ByteString}(::Type{T}) = fieldodr(T, true)
 objodr(x::ByteString) = FixedLengthString{typeof(x)}(sizeof(x))
 
@@ -726,6 +796,7 @@ h5convert!(out::Ptr, ::FixedLengthString, f::JLDFile, x, ::JLDWriteSession) =
     (unsafe_copy!(convert(Ptr{UInt8}, out), pointer(x.data), length(x.data)); nothing)
 h5convert!{T<:ByteString}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) =
     store_vlen!(out, UInt8, f, x.data, wsession)
+
 jlconvert{S<:ByteString}(::ReadRepresentation{ByteString,Vlen{S}},
                                        f::JLDFile, ptr::Ptr, ::RelOffset) =
     UTF8String(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr, NULL_REFERENCE))
@@ -739,16 +810,24 @@ function jlconvert{S<:ByteString}(rr::FixedLengthString{S}, ::JLDFile,
     S(data)
 end
 
+constructrr(::JLDFile, ::Type{ASCIIString}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
+    dt == H5TYPE_VLEN_ASCII ? (ReadRepresentation(ASCIIString, Vlen{ASCIIString}), true) :
+                              throw(UnsupportedFeatureException())
+constructrr(::JLDFile, ::Type{UTF8String}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
+    dt == H5TYPE_VLEN_UTF8 ? (ReadRepresentation(UTF8String, Vlen{UTF8String}), true) :
+                             throw(UnsupportedFeatureException())
+
 ## UTF16Strings
 
 const H5TYPE_VLEN_UINT16 = VariableLengthDatatype(FixedPointDatatype(2, true))
-function h5fieldtype(f::JLDFile, ::Type{UTF16String}, ::Initialized)
-    @lookup_committed f UTF16String
-    commit(f, H5TYPE_VLEN_UINT16, UTF16String)
+function h5fieldtype(f::JLDFile, ::Type{UTF16String}, readas::Type, ::Initialized)
+    @lookup_committed f readas
+    commit(f, H5TYPE_VLEN_UINT16, UTF16String, readas)
 end
 fieldodr(::Type{UTF16String}, ::Bool) = Vlen{UInt16}
 
-h5type(f::JLDFile, ::UTF16String) = h5fieldtype(f, UTF16String, Val{true})
+h5type(f::JLDFile, writeas::Type{UTF16String}, x) =
+    h5fieldtype(f, UTF16String, typeof(x), Val{true})
 odr(::Type{UTF16String}) = Vlen{UInt16}
 
 # The data field of a UTF16String has an embedded null, but we don't
@@ -777,13 +856,13 @@ constructrr(::JLDFile, ::Type{UTF16String}, dt::VariableLengthDatatype{FixedPoin
 
 ## Symbols
 
-function h5fieldtype(f::JLDFile, ::Type{Symbol}, ::Initialized)
-    @lookup_committed f Symbol
-    commit(f, H5TYPE_VLEN_UTF8, Symbol)
+function h5fieldtype(f::JLDFile, ::Type{Symbol}, readas::Type, ::Initialized)
+    @lookup_committed f readas
+    commit(f, H5TYPE_VLEN_UTF8, Symbol, readas)
 end
 fieldodr(::Type{Symbol}, ::Bool) = Vlen{UTF8String}
 
-h5type(f::JLDFile, ::Symbol) = h5fieldtype(f, Symbol, Val{true})
+h5type(f::JLDFile, ::Type{Symbol}, x) = h5fieldtype(f, Symbol, typeof(x), Val{true})
 odr(::Type{Symbol}) = Vlen{UTF8String}
 
 h5convert!(out::Ptr, ::Type{Vlen{UTF8String}}, f::JLDFile, x::Symbol, ::JLDWriteSession) =
@@ -799,33 +878,11 @@ jlconvert(::ReadRepresentation{Symbol,Vlen{UTF8String}}, f::JLDFile, ptr::Ptr,
 
 ## BigInts and BigFloats
 
-function h5fieldtype(f::JLDFile, T::Union{Type{BigInt},Type{BigFloat}}, ::Initialized)
-    @lookup_committed f T
-    commit(f, H5TYPE_VLEN_ASCII, T)
-end
-fieldodr(::Union(Type{BigInt}, Type{BigFloat}), ::Bool) = Vlen{ASCIIString}
-
-# Stored as a variable-length string
-h5type(f::JLDFile, x::Union{BigInt,BigFloat}) = h5fieldtype(f, typeof(x), Val{true})
-odr(::Union(Type{BigInt}, Type{BigFloat})) = Vlen{ASCIIString}
-
-h5convert!(out::Ptr, ::Type{Vlen{ASCIIString}}, f::JLDFile, x::BigInt, wsession::JLDWriteSession) =
-    store_vlen!(out, UInt8, f, base(62, x).data, wsession)
-h5convert!(out::Ptr, ::Type{Vlen{ASCIIString}}, f::JLDFile, x::BigFloat, wsession::JLDWriteSession) =
-    store_vlen!(out, UInt8, f, string(x).data, wsession)
-
-constructrr(::JLDFile, T::Union{Type{BigInt},Type{BigFloat}}, dt::VariableLengthDatatype, ::Vector{ReadAttribute}) =
-    dt == H5TYPE_VLEN_ASCII ? (ReadRepresentation(T, Vlen{ASCIIString}), true) :
-                              throw(UnsupportedFeatureException())
-
-jlconvert(::ReadRepresentation{BigInt,Vlen{ASCIIString}}, f::JLDFile, ptr::Ptr,
-          ::RelOffset) =
-    parse(BigInt, ASCIIString(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}),
-                                        f, ptr, NULL_REFERENCE)), 62)
-jlconvert(::ReadRepresentation{BigFloat,Vlen{ASCIIString}}, f::JLDFile, ptr::Ptr,
-          ::RelOffset) =
-    parse(BigFloat, ASCIIString(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}),
-                                          f, ptr, NULL_REFERENCE)))
+writeas(::Union{Type{BigInt},Type{BigFloat}}) = ASCIIString
+wconvert(::Type{ASCIIString}, x::BigInt) = base(62, x)
+wconvert(::Type{ASCIIString}, x::BigFloat) = string(x)
+rconvert(::Type{BigInt}, x::ASCIIString) = parse(BigInt, x, 62)
+rconvert(::Type{BigFloat}, x::ASCIIString) = parse(BigFloat, x)
 
 ## DataTypes
 
@@ -836,7 +893,12 @@ const H5TYPE_DATATYPE = CompoundDatatype(
     [H5TYPE_VLEN_UTF8, VariableLengthDatatype(ReferenceDatatype())]
 )
 
-function h5fieldtype{T<:DataType}(f::JLDFile, ::Type{T}, ::Initialized)
+function h5fieldtype{T<:DataType}(f::JLDFile, ::Type{T}, readas::Type, ::Initialized)
+    if !(readas <: DataType)
+        @lookup_committed f readas
+        return commit(f, H5TYPE_DATATYPE, DataType, readas)
+    end
+
     @lookup_committed f DataType
     io = f.io
     offset = f.end_of_data
@@ -856,7 +918,8 @@ function h5fieldtype{T<:DataType}(f::JLDFile, ::Type{T}, ::Initialized)
 end
 fieldodr{T<:DataType}(::Type{T}, ::Bool) = DataTypeODR()
 
-h5type(f::JLDFile, ::DataType) = h5fieldtype(f, DataType, Val{true})
+h5type{T<:DataType}(f::JLDFile, ::Type{T}, x) =
+    h5fieldtype(f, DataType, typeof(x), Val{true})
 odr{T<:DataType}(::Type{T}) = DataTypeODR()
 
 function typename(T::DataType)
@@ -883,7 +946,7 @@ function h5convert!(out::Ptr, ::DataTypeODR, f::JLDFile, T::DataType, wsession::
                 # structure of a type are written to the file, so that we can
                 # reconstruct the type when the layout depends on the
                 # parameters.
-                dt = h5fieldtype(f, x, Val{true})
+                dt = h5fieldtype(f, x, x, Val{true})
                 if isa(dt, CommittedDatatype)
                     (dt::CommittedDatatype).header_offset
                 else
@@ -952,15 +1015,20 @@ end
 
 const H5TYPE_UNION = VariableLengthDatatype(H5TYPE_DATATYPE)
 
-function h5fieldtype{T<:Union}(f::JLDFile, ::Type{T}, ::Initialized)
+function h5fieldtype{T<:Union,S<:Union}(f::JLDFile, ::Type{T}, readas::Type{S}, ::Initialized)
     @lookup_committed f Union
-    commit(f, H5TYPE_UNION, Union)
+    commit(f, H5TYPE_UNION, Union, Union)
+end
+function h5fieldtype{T<:Union}(f::JLDFile, ::Type{T}, readas::Type, ::Initialized)
+    @lookup_committed f readas
+    commit(f, H5TYPE_UNION, Union, readas)
 end
 fieldodr{T<:Union}(::Type{T}, ::Bool) = Vlen{DataTypeODR()}
 h5fieldtype(f::JLDFile, ::Type{Union{}}, ::Initialized) = nothing
 fieldodr(::Type{Union{}}, initialized::Bool) = nothing
 
-h5type(f::JLDFile, ::Union) = h5fieldtype(f, Union, Val{true})
+h5type{T<:Union}(f::JLDFile, ::Type{T}, x::Any) =
+    h5fieldtype(f, Union, typeof(x), Val{true})
 odr(::Type{Union}) = fieldodr(Union, true)
 
 h5convert!(out::Ptr, ::Type{Vlen{DataTypeODR()}}, f::JLDFile, x::Union, wsession::JLDWriteSession) =
@@ -982,8 +1050,8 @@ end
 
 immutable PointerException <: Exception; end
 Base.showerror(io::IO, ::PointerException) = print(io, "cannot write a pointer to JLD file")
-h5fieldtype{T<:Ptr}(::JLDFile, ::Type{T}, ::Initialized) = throw(PointerException())
-h5type(::JLDFile, ::Ptr) = throw(PointerException())
+h5fieldtype{T<:Ptr}(::JLDFile, ::Type{T}, ::Type, ::Initialized) = throw(PointerException())
+h5type{T<:Ptr}(::JLDFile, ::Type{T}, ::ANY) = throw(PointerException())
 
 ## Arrays
 
@@ -992,20 +1060,27 @@ h5type(::JLDFile, ::Ptr) = throw(PointerException())
 h5fieldtype{T<:Array}(::JLDFile, ::Type{T}, ::Initialized) = ReferenceDatatype()
 fieldodr{T<:Array}(::Type{T}, ::Bool) = RelOffset
 
-# Union{} is not a datatype, so write it as a reference
-h5type(f::JLDFile, ::Array{Union{}}) = ReferenceDatatype()
-@generated function h5type{T}(f::JLDFile, ::Array{T})
-    !hasfielddata(T) ? :(h5type(f, $(Expr(:new, T)))) : :(h5fieldtype(f, T, Val{false}))
+@generated function h5type{T<:Array}(f::JLDFile, ::Type{T}, ::T)
+    if !(T <: Array)
+        return :(throw(ArgumentError("cannot write a non-array as an array")))
+    elseif T <: Array{Union{}}
+        return :(ReferenceDatatype())
+    end
+    ty = T.parameters[1]
+    writtenas = writeas(ty)
+    !hasfielddata(writtenas) ? :(h5type(f, $writtenas, $(Expr(:new, ty)))) : :(h5fieldtype(f, $writtenas, $ty, Val{false}))
 end
-odr{T,N}(::Type{Array{T,N}}) = fieldodr(T, false)
+odr{T,N}(::Type{Array{T,N}}) = _arrayodr(writeas(T), T)
+_arrayodr{T}(::Type{T}, ::Type{T}) = fieldodr(T, false)
+_arrayodr{T,S}(::Type{T}, ::Type{S}) = CustomSerialization{T,fieldodr(T, false)}()
 
 ## SimpleVectors
 
 const H5TYPE_SIMPLEVECTOR = VariableLengthDatatype(ReferenceDatatype())
 
-function h5type(f::JLDFile, ::SimpleVector)
-    @lookup_committed f SimpleVector
-    commit(f, H5TYPE_SIMPLEVECTOR, SimpleVector)
+function h5type(f::JLDFile, ::Type{SimpleVector}, x)
+    @lookup_committed f typeof(x)
+    commit(f, H5TYPE_SIMPLEVECTOR, SimpleVector, typeof(x))
 end
 odr(::Type{SimpleVector}) = Vlen{RelOffset}
 
@@ -1025,11 +1100,18 @@ end
 
 ## Dicts
 
-function h5type(f::JLDFile, x::Union(Dict,ObjectIdDict))
+function h5type{K,V}(f::JLDFile, ::Type{Dict{K,V}}, x)
     @lookup_committed f typeof(x)
-    pairtype = h5fieldtype(f, eltype(x), Val{true})
+    pairtype = h5fieldtype(f, Pair{K,V}, Pair{K,V}, Val{true})
     eltype_attr = WrittenAttribute(f, :element_type, pairtype.header_offset)
-    commit(f, VariableLengthDatatype(f.datatypes[pairtype.index]), typeof(x), eltype_attr)
+    commit(f, VariableLengthDatatype(f.datatypes[pairtype.index]), Dict{K,V}, typeof(x), eltype_attr)
+end
+
+function h5type(f::JLDFile, ::Type{ObjectIdDict}, x)
+    @lookup_committed f typeof(x)
+    pairtype = h5fieldtype(f, Pair{Any,Any}, Pair{Any,Any}, Val{true})
+    eltype_attr = WrittenAttribute(f, :element_type, pairtype.header_offset)
+    commit(f, VariableLengthDatatype(f.datatypes[pairtype.index]), ObjectIdDict, typeof(x), eltype_attr)
 end
 
 odr{T<:Union(Dict,ObjectIdDict)}(::Type{T}) = Vlen{eltype(T)}
