@@ -95,6 +95,24 @@ function JLD2.rconvert(::Type{CSD}, x::CSDSerialization)
     CSD(x.x[1], x.x[2])
 end
 
+# This is a type that gets written as an array
+immutable CSE
+    a::Int
+    b::Int
+    c::Int
+end
+e = CSE(rand(Int), rand(Int), rand(Int))
+
+JLD2.writeas(::Type{CSE}) = Vector{Int}
+function JLD2.wconvert(::Type{Vector{Int}}, x::CSE)
+    global converted = true
+    [x.a, x.b, x.c]
+end
+function JLD2.rconvert(::Type{CSE}, x::Vector{Int})
+    global converted = true
+    CSE(x[1], x[2], x[3])
+end
+
 function write_tests(file, prefix, obj)
     write(file, prefix, obj)
     write(file, "$(prefix)_singlefieldwrapper", SingleFieldWrapper(obj))
@@ -123,6 +141,7 @@ write_tests(file, "a", a)
 write_tests(file, "b", b)
 write_tests(file, "c", c)
 write_tests(file, "d", d)
+write_tests(file, "e", e)
 close(file)
 
 file = jldopen(fn, "r")
@@ -130,4 +149,5 @@ read_tests(file, "a", a)
 read_tests(file, "b", b)
 read_tests(file, "c", c)
 read_tests(file, "d", d)
+read_tests(file, "e", e)
 close(file)

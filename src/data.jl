@@ -183,8 +183,10 @@ CustomSerialization{WrittenAs,ReadAs}(::Type{WrittenAs}, ::Type{ReadAs}, odr) =
 # HDF5, but in the object in Julia.
 @inline function objodr(x)
     writtenas = writeas(typeof(x))
-    CustomSerialization(writtenas, typeof(x), odr(writtenas))
+    _odr(writtenas, typeof(x), odr(writtenas))
 end
+_odr(writtenas::DataType, readas::DataType, odr) =
+    CustomSerialization(writtenas, readas, odr)
 
 # h5type is objodr's HDF5 companion. It should give the HDF5 datatype
 # reflecting the on-disk representation
@@ -667,6 +669,12 @@ sizeof{T,ODR}(::Type{CustomSerialization{T,ODR}}) = sizeof(ODR)
                       f::JLDFile, x, wsession::JLDWriteSession) =
     h5convert!(out, RelOffset, f, x, wsession)
 
+# When writing as a reference to something that's being custom-serialized as an
+# array, we have to convert the object first.
+@inline h5convert!{T<:Array}(out::Ptr, odr::Type{CustomSerialization{T,RelOffset}},
+                      f::JLDFile, x, wsession::JLDWriteSession) =
+    h5convert!(out, RelOffset, f, wconvert(T, x)::T, wsession)
+
 h5convert_uninitialized!{T,ODR}(out::Ptr, odr::Type{CustomSerialization{T,ODR}}) =
     h5convert_uninitialized!(out, ODR)
 
@@ -1142,15 +1150,12 @@ h5type{T<:Ptr}(::JLDFile, ::Type{T}, ::ANY) = throw(PointerException())
 
 ## Arrays
 
-# These show up as having T.size == 0, hence the need for
-# specialization.
-h5fieldtype{T<:Array}(::JLDFile, ::Type{T}, ::Initialized) = ReferenceDatatype()
+h5fieldtype{T<:Array}(::JLDFile, ::Type{T}, ::Type{T}, ::Initialized) =
+    ReferenceDatatype()
 fieldodr{T<:Array}(::Type{T}, ::Bool) = RelOffset
 
 @generated function h5type{T<:Array}(f::JLDFile, ::Type{T}, ::T)
-    if !(T <: Array)
-        return :(throw(ArgumentError("cannot write a non-array as an array")))
-    elseif T <: Array{Union{}}
+    if T <: Array{Union{}}
         return :(ReferenceDatatype())
     end
     ty = T.parameters[1]
@@ -1162,29 +1167,31 @@ end
     CustomSerialization(writtenas, T, fieldodr(writtenas, false))
 end
 
+# This is all so that when you define a writeas method to write something as an
+# array, it writes a reference to the actual array where the datatype is
+# committed and has a written_type attribute.
+function h5fieldtype{T<:Array}(f::JLDFile, ::Type{T}, readas::DataType,
+                               ::Initialized)
+    @lookup_committed f readas
+    commit(f, ReferenceDatatype(), T, readas)
+end
+h5type{T<:Array}(f::JLDFile, ::Type{T}, x) =
+    h5fieldtype(f, T, typeof(x), Val{true})
+_odr{T<:Array}(writtenas::Type{T}, readas::Type{T}, odr) = odr
+_odr{T<:Array}(writtenas::Type{T}, readas::DataType, odr) =
+    CustomSerialization{writtenas,RelOffset}
+
+function constructrr{T<:Array}(::JLDFile, ::Type{T}, dt::BasicDatatype,
+                               attrs::Vector{ReadAttribute})
+    dt.class == DT_REFERENCE || throw(UnsupportedFeatureException())
+    (ReadRepresentation{Array, RelOffset}(), true)
+end
+
 ## SimpleVectors
 
-const H5TYPE_SIMPLEVECTOR = VariableLengthDatatype(ReferenceDatatype())
-
-function h5type(f::JLDFile, ::Type{SimpleVector}, x)
-    @lookup_committed f typeof(x)
-    commit(f, H5TYPE_SIMPLEVECTOR, SimpleVector, typeof(x))
-end
-odr(::Type{SimpleVector}) = Vlen{RelOffset}
-
-h5convert!(out::Ptr, ::Type{Vlen{RelOffset}}, f::JLDFile, x::SimpleVector, wsession::JLDWriteSession) =
-    store_vlen!(out, RelOffset, f, collect(x), wsession)
-
-constructrr(::JLDFile, ::Type{SimpleVector}, dt::VariableLengthDatatype, ::Vector{ReadAttribute}) =
-    dt == H5TYPE_SIMPLEVECTOR ? (ReadRepresentation(SimpleVector, Vlen{RelOffset}), true) :
-                                throw(UnsupportedFeatureException())
-
-function jlconvert(::ReadRepresentation{SimpleVector,Vlen{RelOffset}}, f::JLDFile,
-                   ptr::Ptr, header_offset::RelOffset)
-    v = Base.svec(jlconvert(ReadRepresentation(Any, Vlen{RelOffset}), f, ptr, NULL_REFERENCE)...)
-    track_weakref!(f, header_offset, v)
-    v
-end
+writeas(::Type{SimpleVector}) = Vector{Any}
+wconvert(::Type{Vector{Any}}, x::SimpleVector) = Any[x for x in x]
+rconvert(::Type{SimpleVector}, x::Vector{Any}) = Base.svec(x...)
 
 ## Dicts
 
