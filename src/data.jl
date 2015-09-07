@@ -29,7 +29,6 @@ const ODRS = OnDiskRepresentation[
     OnDiskRepresentation((0,sizeof(Vlen{UTF8String})),Base.svec(UTF8String,Vector{Any}),Any[Vlen{UTF8String},Vlen{RelOffset}])
 ]
 typealias DataTypeODR ODRIndex{1}
-immutable CustomSerialization{T,S} end
 
 const NULL_COMMITTED_DATATYPE = CommittedDatatype(RelOffset(0), 0)
 # Look up the corresponding committed datatype for a given type
@@ -60,7 +59,17 @@ sizeof{T,S}(::ReadRepresentation{T,S}) = sizeof(S)
     T === Union{} && return false
     !isleaftype(T) && return true
     T = T::DataType
-    T.size != 0 || T.mutable || T <: Type
+    (T.mutable || T <: Type) && return true
+    hasdata(T)
+end
+
+# Determines whether a specific type has fields that should be saved in the file
+function hasdata(T::DataType)
+    isempty(T.types) && T.size != 0 && return true
+    for ty in T.types
+        hasfielddata(writeas(ty)) && return true
+    end
+    false
 end
 
 # Gets the size of an on-disk representation
@@ -69,18 +78,19 @@ end
     odr.offsets[end]+sizeof(odr.odrs[end])
 end
 
-# Determines whether a type has padding and thus needs special handling
-function haspadding(T::DataType)
-    isempty(T.types) && return false
+# Determines whether a type will have the same layout on disk as in memory
+function samelayout(T::DataType)
+    isempty(T.types) && return true
     fo = fieldoffsets(T)
     offset = 0
     for i = 1:length(T.types)
-        offset != fo[i] && return true
+        offset != fo[i] && return false
         ty = T.types[i]
-        haspadding(ty) && return true
-        offset += sizeof(ty)
+        ty !== writeas(ty) && return false
+        !samelayout(ty) && return false
+        offset += ty.size
     end
-    return offset != sizeof(T)
+    return offset == T.size
 end
 
 fieldnames{T<:Tuple}(x::Type{T}) = [symbol(x) for x = 1:length(x.types)]
@@ -132,10 +142,11 @@ end
 # fieldodr, but actually encoding the data for things that odr stores
 # as references
 @generated function odr{T}(::Type{T})
-    if sizeof(T) == 0
-        # A pointer singleton or ghost, so no need to store at all
+    if !hasdata(T)
+        # A pointer singleton or ghost. We need to write something, but we'll
+        # just write a single byte.
         return nothing
-    elseif isbits(T) && !haspadding(T)
+    elseif isbits(T) && samelayout(T)
         # Has a specialized convert method or is an unpadded type
         return T
     end
@@ -144,9 +155,15 @@ end
     odrs = Array(Any, length(T.types))
     offset = 0
     for i = 1:length(T.types)
-        fodr = fieldodr(T.types[i], i <= T.ninitialized)
+        ty = T.types[i]
+        writtenas = writeas(ty)
+        fodr = fieldodr(writtenas, i <= T.ninitialized)
+        if writtenas !== ty && fodr !== nothing
+            odrs[i] = CustomSerialization{writtenas,fodr}
+        else
+            odrs[i] = fodr
+        end
         offsets[i] = offset
-        odrs[i] = fodr
         offset += sizeof(fodr)
     end
 
@@ -154,27 +171,34 @@ end
     Expr(:new, ODRIndex{length(ODRS)})
 end
 
+# Select an ODR, incorporating custom serialization only if the types do not
+# match
+CustomSerialization{WrittenAs}(::Type{WrittenAs}, ::Type{WrittenAs}, odr) = odr
+CustomSerialization{WrittenAs,ReadAs}(::Type{WrittenAs}, ::Type{ReadAs}, odr) =
+    CustomSerialization{WrittenAs,odr}
+
 # objodr gives the on-disk representation of a given object. This is
 # almost always the on-disk representation of the type. The only
 # exception is strings, where the length is encoded in the datatype in
 # HDF5, but in the object in Julia.
-objodr(x) = _objodr(writeas(typeof(x)), typeof(x))
-_objodr{T}(::Type{T}, ::Type{T}) = odr(T)
-_objodr{T,S}(::Type{T}, ::Type{S}) = CustomSerialization{T,odr(T)}()
+@inline function objodr(x)
+    writtenas = writeas(typeof(x))
+    CustomSerialization(writtenas, typeof(x), odr(writtenas))
+end
 
 # h5type is objodr's HDF5 companion. It should give the HDF5 datatype
 # reflecting the on-disk representation
 #
 # Performance note: this should be inferrable.
-function h5type(f::JLDFile, writeas::DataType, x)
+function h5type(f::JLDFile, writtenas::DataType, x)
     T = typeof(x)
     @lookup_committed f T
-    if sizeof(T) == 0
-        commit(f, OpaqueDatatype(1), writeas, T, WrittenAttribute(f, :empty, UInt8(1)))
-    elseif isempty(T.types) # bitstype
-        commit(f, OpaqueDatatype(sizeof(T)), writeas, T)
+    if !hasdata(writtenas)
+        commit(f, OpaqueDatatype(1), writtenas, T, WrittenAttribute(f, :empty, UInt8(1)))
+    elseif isempty(writtenas.types) # bitstype
+        commit(f, OpaqueDatatype(writtenas.size), writtenas, T)
     else
-        commit_compound(f, fieldnames(T), writeas, T)
+        commit_compound(f, fieldnames(writtenas), writtenas, T)
     end
 end
 h5type(::JLDFile, writeas::Type, ::Any) =
@@ -193,8 +217,10 @@ function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
 
     offset = 0
     for i = 1:length(types)
-        !hasfielddata(types[i]) && continue
-        dtype = h5fieldtype(f, writeas(types[i]), types[i], Val{i <= writtenas.ninitialized})
+        fieldty = types[i]
+        fieldwrittenas = writeas(fieldty)
+        !hasfielddata(fieldwrittenas) && continue
+        dtype = h5fieldtype(f, fieldwrittenas, fieldty, Val{i <= writtenas.ninitialized})
         dtype === nothing && continue
         push!(h5names, names[i])
         if isa(dtype, CommittedDatatype)
@@ -250,7 +276,7 @@ function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::Type,
         wrtypeattr = WrittenAttribute(:written_type,
                                       WriteDataspace(f, DataType, odr(DataType)),
                                       h5type(f, DataType, DataType), writeas)
-        f.h5jltype[cdt] = ReadRepresentation(readas, CustomSerialization{writeas, odr(writeas)}())
+        f.h5jltype[cdt] = ReadRepresentation(readas, CustomSerialization{writeas, odr(writeas)})
         commit(f, dtype, tuple(typeattr, wrtypeattr, attributes...))
     else
         f.h5jltype[cdt] = ReadRepresentation(writeas, odr(writeas))
@@ -315,14 +341,14 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
         return (f.h5jltype[cdt] = ReadRepresentation(DataType, DataTypeODR()))
     end
 
-    # datatype = read_data(f, julia_type_attr, H5TYPE_DATATYPE, ReadRepresentation(DataType, DataTypeODR()))
     datatype = read_attr_data(f, julia_type_attr)
     if written_type_attr !== nothing
+        # Custom serialization
         readas = datatype
         datatype = read_attr_data(f, written_type_attr)
         rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
         rrty = typeof(rr)
-        rr = ReadRepresentation{readas, CustomSerialization{rrty.parameters[1], rrty.parameters[2]}()}()
+        rr = ReadRepresentation{readas, CustomSerialization{rrty.parameters[1], rrty.parameters[2]}}()
         canonical = canonical && writeas(readas) === datatype
     else
         rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
@@ -340,10 +366,19 @@ function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{Re
         (ReadRepresentation(T), true)
     else
         empty = check_empty(attrs)
-        if sizeof(T) == 0 && empty
-            (ReadRepresentation(T, nothing), true)
+        if empty
+            if !hasdata(T)
+                (ReadRepresentation(T, nothing), true)
+            else
+                warn("$T has $(sizeof(T)*8) bytes, but written type was empty; reconstructing")
+                reconstruct_bitstype(T.name.name, dt.size, empty)
+            end
         else
-            warn("bitstype $T has size $(sizeof(T)*8), but written type has size $(dt.size*8); reconstructing")
+            if isempty(T.types)
+                warn("bitstype $T has $(sizeof(T)*8) bits, but written type has $(dt.size*8) bits; reconstructing")
+            else
+                warn("$T is a non-bitstype, but written type is a bitstype with $(dt.size*8) bits; reconstructing")
+            end
             reconstruct_bitstype(T.name.name, dt.size, empty)
         end
     end
@@ -384,9 +419,14 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
     dtindex = 0
     for i = 1:length(T.types)
         wstype = T.types[i]
-        if !hasfielddata(wstype)
+        writtenas = writeas(wstype)
+        if !hasfielddata(writtenas)
             types[i] = wstype
-            odrs[i] = nothing
+            if wstype === writtenas
+                odrs[i] = nothing
+            else
+                odrs[i] = CustomSerialization{writtenas,nothing}
+            end
             offsets[i] = dtindex == 0 ? 0 : (dt.offsets[dtindex] + dt.members[dtindex].size::UInt32)
         else
             if !haskey(dtnames, fn[i])
@@ -516,16 +556,29 @@ Base.showerror(io::IO, x::UndefinedFieldException) =
     print(io, "field \"", x.fieldname, "\" of type ", x.ty,
           " must be defined in the current workspace, but was undefined in the file")
 
+# jlconvert for empty objects
+@generated function jlconvert{T}(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
+                                 header_offset::RelOffset)
+   T.size == 0 && return Expr(:new, T)
+
+   # In this case, T is a non-empty object, but the written data was empty
+   # because the custom serializers for the fields all resulted in empty
+   # objects
+   return Expr(:new, T, [begin
+       writtenas = writeas(ty)
+       @assert writtenas.size == 0
+       if writtenas === ty
+           Expr(:new, ty)
+       else
+           :(rconvert($ty, $(Expr(:new, writtenas))))
+       end
+   end for ty in T.types]...)
+end
+
 # This jlconvert method handles compound types with padding or references
 @generated function jlconvert{T,S}(::ReadRepresentation{T,S}, f::JLDFile, ptr::Ptr,
                                    header_offset::RelOffset)
-    if isa(S, DataType)
-        return :(convert(T, unsafe_load(convert(Ptr{S}, ptr))))
-    elseif isa(S, CustomSerialization)
-        return :(rconvert(T, jlconvert($(Expr(:new, ReadRepresentation{typeof(S).parameters...})), f, ptr, header_offset))::T)
-    elseif S === nothing
-        return Expr(:new, T)
-    end
+    isa(S, DataType) && return :(convert(T, unsafe_load(convert(Ptr{S}, ptr))))
     @assert isa(S, ODRIndex)
     odr = ODRS[typeof(S).parameters[1]]
 
@@ -593,6 +646,38 @@ Base.showerror(io::IO, x::UndefinedFieldException) =
     blk
 end
 
+## Custom serialization
+
+# wconvert and rconvert do type conversion before reading and writing,
+# respectively. These fall back to convert.
+wconvert(T, x) = convert(T, x)
+rconvert(T, x) = convert(T, x)
+
+sizeof{T,ODR}(::Type{CustomSerialization{T,ODR}}) = sizeof(ODR)
+
+# Usually we want to convert the object and then write it.
+@inline h5convert!{T,ODR}(out::Ptr, ::Type{CustomSerialization{T,ODR}}, f::JLDFile,
+                          x, wsession::JLDWriteSession) =
+    h5convert!(out, ODR, f, wconvert(T, x)::T, wsession)
+
+# When writing as a reference, we don't want to convert the object first. That
+# should happen automatically after write_dataset is called so that the written
+# object gets the right written_type attribute.
+@inline h5convert!{T}(out::Ptr, odr::Type{CustomSerialization{T,RelOffset}},
+                      f::JLDFile, x, wsession::JLDWriteSession) =
+    h5convert!(out, RelOffset, f, x, wsession)
+
+h5convert_uninitialized!{T,ODR}(out::Ptr, odr::Type{CustomSerialization{T,ODR}}) =
+    h5convert_uninitialized!(out, ODR)
+
+jlconvert_canbeuninitialized{T,S,ODR}(::ReadRepresentation{T,CustomSerialization{S,ODR}}) =
+    jlconvert_canbeuninitialized(ODR)
+jlconvert_isinitialized{T,S,ODR}(::ReadRepresentation{T,CustomSerialization{S,ODR}}, ptr::Ptr) =
+    jlconvert_isinitialized(ReadRepresentation{S,ODR}(), ptr)
+jlconvert{T,S,ODR}(::ReadRepresentation{T,CustomSerialization{S,ODR}},
+                   f::JLDFile, ptr::Ptr, header_offset::RelOffset) =
+    rconvert(T, jlconvert(ReadRepresentation{S,ODR}(), f, ptr, header_offset))::T
+
 ## Primitive datatypes
 # These get special handling only in that they have different HDF5 type
 # representations than ordinary opaque types
@@ -659,9 +744,11 @@ end
 h5type(f::JLDFile, writeas::PrimitiveTypeTypes, x) =
     h5fieldtype(f, writeas, typeof(x), Val{true})
 
-sizeof{T,ODR}(::CustomSerialization{T,ODR}) = sizeof(ODR)
-h5convert!{T,ODR}(out::Ptr, ::CustomSerialization{T,ODR}, f::JLDFile, x, wsession::JLDWriteSession) =
-    h5convert!(out, ODR, f, wconvert(T, x)::T, wsession)
+# Used only for custom serialization
+constructrr(::JLDFile, T::PrimitiveTypeTypes, dt::Union{FixedPointDatatype,FloatingPointDatatype},
+            ::Vector{ReadAttribute}) =
+    dt == h5fieldtype(f, T, T, Val{true}) ? (ReadRepresentation(T), true) :
+                                            throw(UnsupportedFeatureException())
 
 ## References
 
@@ -686,7 +773,6 @@ function h5convert_with_boxed_ptr!(f::JLDFile, x, wsession::JLDWriteSession)
 end
 h5convert_uninitialized!(out::Ptr, odr::Type{RelOffset}) =
     (unsafe_store!(convert(Ptr{RelOffset}, out), NULL_REFERENCE); nothing)
-
 
 # Reading references as references
 jlconvert(::ReadRepresentation{RelOffset,RelOffset}, f::JLDFile, ptr::Ptr,
@@ -810,6 +896,7 @@ function jlconvert{S<:ByteString}(rr::FixedLengthString{S}, ::JLDFile,
     S(data)
 end
 
+# Used only for custom serialization
 constructrr(::JLDFile, ::Type{ASCIIString}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
     dt == H5TYPE_VLEN_ASCII ? (ReadRepresentation(ASCIIString, Vlen{ASCIIString}), true) :
                               throw(UnsupportedFeatureException())
@@ -946,7 +1033,7 @@ function h5convert!(out::Ptr, ::DataTypeODR, f::JLDFile, T::DataType, wsession::
                 # structure of a type are written to the file, so that we can
                 # reconstruct the type when the layout depends on the
                 # parameters.
-                dt = h5fieldtype(f, x, x, Val{true})
+                dt = h5fieldtype(f, writeas(x), x, Val{true})
                 if isa(dt, CommittedDatatype)
                     (dt::CommittedDatatype).header_offset
                 else
@@ -1070,9 +1157,10 @@ fieldodr{T<:Array}(::Type{T}, ::Bool) = RelOffset
     writtenas = writeas(ty)
     !hasfielddata(writtenas) ? :(h5type(f, $writtenas, $(Expr(:new, ty)))) : :(h5fieldtype(f, $writtenas, $ty, Val{false}))
 end
-odr{T,N}(::Type{Array{T,N}}) = _arrayodr(writeas(T), T)
-_arrayodr{T}(::Type{T}, ::Type{T}) = fieldodr(T, false)
-_arrayodr{T,S}(::Type{T}, ::Type{S}) = CustomSerialization{T,fieldodr(T, false)}()
+@inline function odr{T,N}(::Type{Array{T,N}})
+    writtenas = writeas(T)
+    CustomSerialization(writtenas, T, fieldodr(writtenas, false))
+end
 
 ## SimpleVectors
 

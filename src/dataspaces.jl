@@ -30,6 +30,15 @@ define_packed(DataspaceStart)
 
 const EMPTY_DIMENSIONS = Int[]
 
+# Pass-through for custom serializations
+# Need a bunch of methods to avoid ambiguity
+WriteDataspace{S,ODR}(f::JLDFile, x, ::Type{CustomSerialization{S,ODR}}) =
+    WriteDataspace(f, x, ODR)
+WriteDataspace{S,ODR}(f::JLDFile, x::Array, ::Type{CustomSerialization{S,ODR}}) =
+    WriteDataspace(f, x, ODR)
+WriteDataspace{T,S,ODR}(f::JLDFile, x::Array{T,0}, ::Type{CustomSerialization{S,ODR}}) =
+    WriteDataspace(f, x, ODR)
+
 WriteDataspace() = WriteDataspace(DS_NULL, (), ())
 WriteDataspace(::JLDFile, ::Any, odr::Void) = WriteDataspace()
 WriteDataspace(::JLDFile, ::Any, ::Any) = WriteDataspace(DS_SCALAR, (), ())

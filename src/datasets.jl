@@ -166,7 +166,9 @@ function read_data(f::JLDFile{MmapIO}, rr::ReadRepresentation{Any,RelOffset},
             end
         end
     elseif dataspace.dataspace_type == DS_NULL
-        return read_empty(f, Union{}, attributes[find_dimensions_attr(attributes)], header_offset)
+        return read_empty(ReadRepresentation{Union{},nothing}(), f,
+                          attributes[find_dimensions_attr(attributes)],
+                          header_offset)
     end
     throw(UnsupportedFeatureException())
 end
@@ -179,10 +181,24 @@ function read_data{T}(f::JLDFile{MmapIO}, rr::ReadRepresentation{T,nothing},
 
     dimensions_attr_index = find_dimensions_attr(attributes)
     if dimensions_attr_index == 0
-        jlconvert(rr, f, f.io.curptr, header_offset)
+        jlconvert(rr, f, Ptr{Void}(0), header_offset)
     else
         # dimensions attribute => array of empty type
-        read_empty(f, T, attributes[dimensions_attr_index], header_offset)
+        read_empty(rr, f, attributes[dimensions_attr_index], header_offset)
+    end
+end
+
+function read_data{T,S}(f::JLDFile{MmapIO}, rr::ReadRepresentation{T,CustomSerialization{S,nothing}},
+                      attributes::Vector{ReadAttribute})
+    dataspace, header_offset = BOXED_READ_DATASPACE[]
+    dataspace.dataspace_type == DS_NULL || throw(UnsupportedFeatureException())
+
+    dimensions_attr_index = find_dimensions_attr(attributes)
+    if dimensions_attr_index == 0
+        jlconvert(rr, f, Ptr{Void}(0), header_offset)
+    else
+        # dimensions attribute => array of empty type
+        read_empty(rr, f, attributes[dimensions_attr_index], header_offset)
     end
 end
 
@@ -198,14 +214,19 @@ function find_dimensions_attr(attributes::Vector{ReadAttribute})
     dimensions_attr_index
 end
 
-function read_empty(f::JLDFile{MmapIO}, T::Type, dimensions_attr::ReadAttribute,
-                    header_offset::RelOffset)
+function read_empty{T}(rr::ReadRepresentation{T}, f::JLDFile{MmapIO},
+                    dimensions_attr::ReadAttribute, header_offset::RelOffset)
     io = f.io
     inptr = io.curptr
     seek(io, dimensions_attr.dataspace.dimensions_offset)
     ndims = read(io, Int)
     seek(io, dimensions_attr.data_offset)
     v = construct_array(io, T, ndims)
+    if isleaftype(T)
+        for i = 1:length(v)
+            @inbounds v[i] = jlconvert(rr, f, Ptr{Void}(0), header_offset)
+        end
+    end
     header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
     io.curptr = inptr
     v

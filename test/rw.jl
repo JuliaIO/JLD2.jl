@@ -212,6 +212,11 @@ bigint = big(3)
 bigfloat = big(3.2)
 bigints = big(3).^(1:100)
 bigfloats = big(3.2).^(1:100)
+immutable BigFloatIntObject
+    bigfloat::BigFloat
+    bigint::BigInt
+end
+bigfloatintobj = BigFloatIntObject(big(pi), big(typemax(UInt128))+1)
 # None
 none = Union()
 nonearr = Array(Union(), 5)
@@ -300,6 +305,7 @@ function iseq(c1::Base.Sys.CPUinfo, c2::Base.Sys.CPUinfo)
 end
 iseq(x::MyUnicodeStruct☺, y::MyUnicodeStruct☺) = (x.α == y.α && x.∂ₓα == y.∂ₓα)
 iseq(x::Array{None}, y::Array{None}) = size(x) == size(y)
+iseq(x::BigFloatIntObject, y::BigFloatIntObject) = (x.bigfloat == y.bigfloat && x.bigint == y.bigint)
 macro check(fid, sym)
     ex = quote
         let tmp
@@ -448,6 +454,7 @@ println(fn)
 @write fid bigint
 @write fid bigfloats
 @write fid bigints
+@write fid bigfloatintobj
 @write fid none
 @write fid nonearr
 @write fid scalar_nothing
@@ -585,6 +592,7 @@ obj = read(fidr, "obj_ref")
 @check fidr bigint
 @check fidr bigfloats
 @check fidr bigints
+@check fidr bigfloatintobj
 @check fidr none
 @check fidr nonearr
 @check fidr scalar_nothing

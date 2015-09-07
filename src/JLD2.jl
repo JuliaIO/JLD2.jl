@@ -65,6 +65,7 @@ immutable CommittedDatatype <: H5Datatype
 end
 
 immutable ReadRepresentation{T,ODR} end
+immutable CustomSerialization{T,S} end
 
 symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)
 
