@@ -348,10 +348,17 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
         # Custom serialization
         readas = datatype
         datatype = read_attr_data(f, written_type_attr)
-        rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
-        rrty = typeof(rr)
-        rr = ReadRepresentation{readas, CustomSerialization{rrty.parameters[1], rrty.parameters[2]}}()
-        canonical = canonical && writeas(readas) === datatype
+        if isa(readas, UnknownType)
+            warn("custom serialization of ", typestring(readas),
+                 " encountered, but the type does not exist in the workspace; the data will be read unconverted")
+            rr = (constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool})[1]
+            canonical = false
+        else
+            rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
+            rrty = typeof(rr)
+            rr = ReadRepresentation{readas, CustomSerialization{rrty.parameters[1], rrty.parameters[2]}}()
+            canonical = canonical && writeas(readas) === datatype
+        end
     else
         rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
     end
@@ -1195,58 +1202,16 @@ rconvert(::Type{SimpleVector}, x::Vector{Any}) = Base.svec(x...)
 
 ## Dicts
 
-function h5type{K,V}(f::JLDFile, ::Type{Dict{K,V}}, x)
-    @lookup_committed f typeof(x)
-    pairtype = h5fieldtype(f, Pair{K,V}, Pair{K,V}, Val{true})
-    eltype_attr = WrittenAttribute(f, :element_type, pairtype.header_offset)
-    commit(f, VariableLengthDatatype(f.datatypes[pairtype.index]), Dict{K,V}, typeof(x), eltype_attr)
-end
-
-function h5type(f::JLDFile, ::Type{ObjectIdDict}, x)
-    @lookup_committed f typeof(x)
-    pairtype = h5fieldtype(f, Pair{Any,Any}, Pair{Any,Any}, Val{true})
-    eltype_attr = WrittenAttribute(f, :element_type, pairtype.header_offset)
-    commit(f, VariableLengthDatatype(f.datatypes[pairtype.index]), ObjectIdDict, typeof(x), eltype_attr)
-end
-
-odr{T<:Union(Dict,ObjectIdDict)}(::Type{T}) = Vlen{eltype(T)}
-
-h5convert!{K,V}(out::Ptr, ::Type{Vlen{Pair{K,V}}}, f::JLDFile, x::Associative{K,V}, wsession::JLDWriteSession) =
-    store_vlen!(out, odr(Pair{K,V}), f, collect(x), wsession)
-
-function constructrr{T<:Union(Dict,ObjectIdDict)}(f::JLDFile, ::Type{T}, dt::VariableLengthDatatype, attrs::Vector{ReadAttribute})
-    for attr in attrs
-        if attr.name == :element_type
-            ref = read_attr_data(f, attr, ReferenceDatatype(), ReadRepresentation(RelOffset))
-            return (ReadRepresentation(T, Vlen{typeof(jltype(f, f.datatype_locations[ref])).parameters[2]}), true)
-        end
+writeas{K,V}(::Type{Dict{K,V}}) = Vector{Pair{K,V}}
+writeas(::Type{ObjectIdDict}) = Vector{Pair{Any,Any}}
+wconvert{K,V}(::Type{Vector{Pair{K,V}}}, x::Associative{K,V}) = collect(x)
+function rconvert{T<:Associative,K,V}(::Type{T}, x::Vector{Pair{K,V}})
+    d = T()
+    isa(d, Dict) && sizehint!(d::Dict, length(x))
+    for (k,v) in x
+        d[k] = v
     end
-    throw(InvalidDataException())
-end
-
-function constructrr(f::JLDFile, T::UnknownType{DataType}, dt::VariableLengthDatatype, attrs::Vector{ReadAttribute})
-    T.name === Dict || throw(InvalidDataException())
-    for attr in attrs
-        if attr.name == :element_type
-            ref = read_attr_data(f, attr, ReferenceDatatype(), ReadRepresentation(RelOffset))
-            typ = typeof(jltype(f, f.datatype_locations[ref]))
-            return (ReadRepresentation(Dict{typ.parameters[1].parameters...}, Vlen{typ.parameters[2]}), false)
-        end
-    end
-    throw(InvalidDataException())
-end
-
-function jlconvert{T<:Union(Dict,ObjectIdDict),P}(::ReadRepresentation{T,Vlen{P}},
-                                                  f::JLDFile, ptr::Ptr,
-                                                  header_offset::RelOffset)
-    h = T()
-    track_weakref!(f, header_offset, h)
-    pairs = jlconvert(ReadRepresentation(eltype(T), Vlen{P}), f, ptr, NULL_REFERENCE)
-    isa(h, Dict) && sizehint!(h::Dict, length(pairs))
-    for (k,v) in pairs
-        h[k] = v
-    end
-    h
+    d
 end
 
 ## Type reconstruction
