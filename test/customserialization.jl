@@ -113,6 +113,74 @@ function JLD2.rconvert(::Type{CSE}, x::Vector{Int})
     CSE(x[1], x[2], x[3])
 end
 
+# This is a type that is custom-serialized as an Int
+immutable CSF
+    x::Int
+end
+f = CSF(rand(Int))
+
+JLD2.writeas(::Type{CSF}) = Int
+function Base.convert(::Type{Int}, x::CSF)
+    global converted = true
+    x.x
+end
+function Base.convert(::Type{CSF}, x::Int)
+    global converted = true
+    CSF(x)
+end
+
+# This is a type that is custom-serialized as a UTF8String
+immutable CSG
+    x::Int
+end
+g = CSG(rand(Int))
+
+JLD2.writeas(::Type{CSG}) = UTF8String
+function Base.convert(::Type{UTF8String}, x::CSG)
+    global converted = true
+    convert(UTF8String, string(x.x))
+end
+function Base.convert(::Type{CSG}, x::UTF8String)
+    global converted = true
+    CSG(parse(Int, x))
+end
+
+# This is a type that is custom-serialized as a DataType
+immutable CSH
+    T::DataType
+    N::Int
+end
+h = CSH(Int, 2)
+
+JLD2.writeas(::Type{CSH}) = DataType
+function Base.convert(::Type{DataType}, x::CSH)
+    global converted = true
+    Array{x.T, x.N}
+end
+function Base.convert{T,N}(::Type{CSH}, x::Type{Array{T,N}})
+    global converted = true
+    CSH(T,N)
+end
+
+# This is a type that is custom-serialized as a Union
+immutable CSK
+    T::DataType
+    S::DataType
+end
+k = CSK(Int, Float64)
+Base.(:(==))(x::CSK, y::CSK) = (x.T == y.T && x.S == y.S) ||
+                               (x.T == y.S && x.S == y.T)
+
+JLD2.writeas(::Type{CSK}) = Union
+function Base.convert(::Type{Union}, x::CSK)
+    global converted = true
+    Union{x.T,x.S}
+end
+function Base.convert(::Type{CSK}, x::Union)
+    global converted = true
+    CSK(x.types...)
+end
+
 function write_tests(file, prefix, obj)
     write(file, prefix, obj)
     write(file, "$(prefix)_singlefieldwrapper", SingleFieldWrapper(obj))
@@ -142,6 +210,10 @@ write_tests(file, "b", b)
 write_tests(file, "c", c)
 write_tests(file, "d", d)
 write_tests(file, "e", e)
+write_tests(file, "f", f)
+write_tests(file, "g", g)
+write_tests(file, "h", h)
+write_tests(file, "k", k)
 close(file)
 
 file = jldopen(fn, "r")
@@ -150,4 +222,8 @@ read_tests(file, "b", b)
 read_tests(file, "c", c)
 read_tests(file, "d", d)
 read_tests(file, "e", e)
+read_tests(file, "f", f)
+read_tests(file, "g", g)
+read_tests(file, "h", h)
+read_tests(file, "k", k)
 close(file)

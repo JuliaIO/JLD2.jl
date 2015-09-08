@@ -760,7 +760,7 @@ h5type(f::JLDFile, writeas::PrimitiveTypeTypes, x) =
     h5fieldtype(f, writeas, typeof(x), Val{true})
 
 # Used only for custom serialization
-constructrr(::JLDFile, T::PrimitiveTypeTypes, dt::Union{FixedPointDatatype,FloatingPointDatatype},
+constructrr(f::JLDFile, T::PrimitiveTypeTypes, dt::Union{FixedPointDatatype,FloatingPointDatatype},
             ::Vector{ReadAttribute}) =
     dt == h5fieldtype(f, T, T, Val{true}) ? (ReadRepresentation(T), true) :
                                             throw(UnsupportedFeatureException())
@@ -1113,6 +1113,10 @@ function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
     m
 end
 
+constructrr{T<:DataType}(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute}) =
+    dt == H5TYPE_DATATYPE ? (ReadRepresentation(DataType, DataTypeODR()), true) :
+                            throw(UnsupportedFeatureException())
+
 ## Union Types
 
 const H5TYPE_UNION = VariableLengthDatatype(H5TYPE_DATATYPE)
@@ -1136,17 +1140,16 @@ odr(::Type{Union}) = fieldodr(Union, true)
 h5convert!(out::Ptr, ::Type{Vlen{DataTypeODR()}}, f::JLDFile, x::Union, wsession::JLDWriteSession) =
     store_vlen!(out, DataTypeODR(), f, DataType[x for x in x.types], wsession)
 
-function constructrr(::JLDFile, ::Type{Union}, dt::VariableLengthDatatype, ::Vector{ReadAttribute})
-    dt == H5TYPE_UNION ? (ReadRepresentation(Union, Vlen{DataTypeODR()}), true) :
-                         throw(UnsupportedFeatureException())
-end
-
 function jlconvert(::ReadRepresentation{Union, Vlen{DataTypeODR()}}, f::JLDFile,
                    ptr::Ptr, header_offset::RelOffset)
     v = Union{jlconvert(ReadRepresentation(DataType, Vlen{DataTypeODR()}), f, ptr, NULL_REFERENCE)...}
     track_weakref!(f, header_offset, v)
     v
 end
+
+constructrr{T<:Union}(::JLDFile, ::Type{T}, dt::VariableLengthDatatype, ::Vector{ReadAttribute}) =
+    dt == H5TYPE_UNION ? (ReadRepresentation(Union, Vlen{DataTypeODR()}), true) :
+                         throw(UnsupportedFeatureException())
 
 ## Pointers
 
