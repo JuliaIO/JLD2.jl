@@ -41,7 +41,7 @@ Base.hash(x::RelOffset) = hash(x.offset)
 const UNDEFINED_ADDRESS = RelOffset(0xffffffffffffffff)
 const NULL_REFERENCE = RelOffset(0)
 
-immutable JLDWriteSession{T<:Union(Dict{UInt,RelOffset},None)}
+immutable JLDWriteSession{T<:Union{Dict{UInt,RelOffset},Union{}}}
     h5offset::T
     objects::Vector{Any}
 

@@ -379,7 +379,7 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
     seek(io, header_offset)
     f.end_of_data = header_offset + fullsz + (layout_class == LC_CONTIGUOUS_STORAGE ? datasz : 0)
 
-    if typeof(data).mutable && !isa(wsession, JLDWriteSession{None})
+    if typeof(data).mutable && !isa(wsession, JLDWriteSession{Union{}})
         wsession.h5offset[object_id(data)] = h5offset(f, header_offset)
         push!(wsession.objects, data)
     end
@@ -448,8 +448,11 @@ end
     offset != RelOffset(0) ? offset : write_dataset(f, x, wsession)::RelOffset
 end
 
+write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession{Union{}}) =
+    write_dataset(f, x, wsession)
+
 @inline function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
-    if !typeof(x).mutable || isa(wsession, JLDWriteSession{None})
+    if !typeof(x).mutable
         write_dataset(f, x, wsession)::RelOffset
     else
         write_ref_mutable(f, x, wsession)::RelOffset
