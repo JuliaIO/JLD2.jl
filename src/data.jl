@@ -701,9 +701,9 @@ jlconvert{T,S,ODR}(::ReadRepresentation{T,CustomSerialization{S,ODR}},
 typealias SignedTypes        Union{Type{Int8}, Type{Int16}, Type{Int32}, Type{Int64}, Type{Int128}}
 typealias UnsignedTypes      Union{Type{UInt8}, Type{UInt16}, Type{UInt32}, Type{UInt64}, Type{UInt128}}
 typealias FloatTypes         Union{Type{Float16}, Type{Float32}, Type{Float64}}
-typealias PrimitiveTypeTypes Union(SignedTypes, UnsignedTypes, FloatTypes)
-typealias PrimitiveTypes     Union(Int8, Int16, Int32, Int64, Int128, UInt8, UInt16, UInt32,
-                                   UInt64, UInt128, Float16, Float32, Float64)
+typealias PrimitiveTypeTypes Union{SignedTypes, UnsignedTypes, FloatTypes}
+typealias PrimitiveTypes     Union{Int8, Int16, Int32, Int64, Int128, UInt8, UInt16, UInt32,
+                                   UInt64, UInt128, Float16, Float32, Float64}
 
 for T in SignedTypes.types
     @eval h5fieldtype(::JLDFile, ::$T, ::$T, ::Initialized) =
@@ -1221,7 +1221,7 @@ end
 
 module ReconstructedTypes end
 
-function reconstruct_bitstype(name::Union(Symbol,ByteString), size::Integer, empty::Bool)
+function reconstruct_bitstype(name::Union{Symbol,ByteString}, size::Integer, empty::Bool)
     sym = gensym(name)
     eval(ReconstructedTypes, empty ? :(immutable $(sym) end) : :(bitstype $(size*8) $(sym)))
     T = getfield(ReconstructedTypes, sym)

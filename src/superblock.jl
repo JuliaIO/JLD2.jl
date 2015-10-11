@@ -14,7 +14,7 @@ type Superblock
     root_group_object_header_address::RelOffset
 end
 
-Base.sizeof(::Union(Type{Superblock}, Superblock)) =
+Base.sizeof(::Union{Type{Superblock},Superblock}) =
     12+sizeof(RelOffset)*4+4
 
 function Base.read(io::IO, ::Type{Superblock})

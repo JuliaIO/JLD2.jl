@@ -115,7 +115,7 @@ immutable FloatingPointDatatype <: H5Datatype
 end
 define_packed(FloatingPointDatatype)
 
-class(dt::Union(BasicDatatype, FixedPointDatatype, FloatingPointDatatype)) = dt.class
+class(dt::Union{BasicDatatype,FixedPointDatatype,FloatingPointDatatype}) = dt.class
 
 immutable CompoundDatatype <: H5Datatype
     size::UInt32

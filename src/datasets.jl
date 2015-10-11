@@ -102,7 +102,7 @@ end
 function read_data(f::JLDFile, dataspace::ReadDataspace,
                    datatype_class::UInt8, datatype_offset::FileOffset,
                    data_offset::FileOffset, header_offset::RelOffset=NULL_REFERENCE,
-                   attributes::Union(Vector{ReadAttribute}, Void)=nothing)
+                   attributes::Union{Vector{ReadAttribute},Void}=nothing)
     # See if there is a julia type attribute
     io = f.io
     if datatype_class == typemax(UInt8) # Committed datatype
@@ -128,7 +128,7 @@ const BOXED_READ_DATASPACE = Ref{Tuple{ReadDataspace,RelOffset}}()
 
 # Most types can only be scalars or arrays
 function read_data(f::JLDFile{MmapIO}, rr,
-                   attributes::Union(Vector{ReadAttribute},Void)=nothing)
+                   attributes::Union{Vector{ReadAttribute},Void}=nothing)
     dataspace, header_offset = BOXED_READ_DATASPACE[]
     if dataspace.dataspace_type == DS_SCALAR
         io = f.io
@@ -275,7 +275,7 @@ end
 
 function read_array{T,RR}(f::JLDFile, dataspace::ReadDataspace,
                           rr::ReadRepresentation{T,RR},
-                          attributes::Union(Vector{ReadAttribute},Void),
+                          attributes::Union{Vector{ReadAttribute},Void},
                           header_offset::RelOffset)
     io = f.io
     inptr = io.curptr

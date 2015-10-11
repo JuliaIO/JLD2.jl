@@ -19,7 +19,7 @@ function define_packed(ty::DataType)
                 $(Expr(:new, ty, [:(unsafe_load(convert(Ptr{$(ty.types[i])}, p+$(packed_offsets[i]))))
                                    for i = 1:length(packed_offsets)]...))
             end
-            Base.sizeof(::Union($ty, Type{$ty})) = $sz
+            Base.sizeof(::Union{$ty,Type{$ty}}) = $sz
         end
     end
 

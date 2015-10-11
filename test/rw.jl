@@ -168,17 +168,17 @@ end
 vague = Vague("foo")
 # Immutable with a union of BitsTypes
 immutable BitsUnion
-    x::Union(Int64, Float64)
+    x::Union{Int64,Float64}
 end
 bitsunion = BitsUnion(5.0)
 # Immutable with a union of Types
 immutable TypeUnionField
-    x::Union(Type{Int64}, Type{Float64})
+    x::Union{Type{Int64},Type{Float64}}
 end
 typeunionfield = TypeUnionField(Int64)
 # Generic union type field
 immutable GenericUnionField
-    x::Union(Vector{Int},Int)
+    x::Union{Vector{Int},Int}
 end
 genericunionfield = GenericUnionField(1)
 # Array references
@@ -218,11 +218,11 @@ immutable BigFloatIntObject
 end
 bigfloatintobj = BigFloatIntObject(big(pi), big(typemax(UInt128))+1)
 # None
-none = Union()
-nonearr = Array(Union(), 5)
+none = Union{}
+nonearr = Array(Union{}, 5)
 # nothing/Void
 scalar_nothing = nothing
-vector_nothing = Union(Int,Nothing)[1,nothing]
+vector_nothing = Union{Int,Void}[1,nothing]
 
 # some data big enough to ensure that compression is used:
 Abig = kron(eye(10), rand(20,20))
@@ -274,8 +274,8 @@ iseq(x::SimpleVector, y::SimpleVector) = collect(x) == collect(y)
 # Type that overloads != so that it is not boolean
 type NALikeType; end
 Base.(:(!=))(::NALikeType, ::NALikeType) = NALikeType()
-Base.(:(!=))(::NALikeType, ::Nothing) = NALikeType()
-Base.(:(!=))(::Nothing, ::NALikeType) = NALikeType()
+Base.(:(!=))(::NALikeType, ::Void) = NALikeType()
+Base.(:(!=))(::Void, ::NALikeType) = NALikeType()
 natyperef = Any[NALikeType(), NALikeType()]
 
 iseq(x,y) = isequal(x,y)
@@ -292,7 +292,7 @@ function iseq(x::Array{EmptyType}, y::Array{EmptyType})
 end
 iseq(x::MyStruct, y::MyStruct) = (x.len == y.len && x.data == y.data)
 iseq(x::MyImmutable, y::MyImmutable) = (isequal(x.x, y.x) && isequal(x.y, y.y) && isequal(x.z, y.z))
-iseq(x::Union(EmptyTI, EmptyTT), y::Union(EmptyTI, EmptyTT)) = isequal(x.x, y.x)
+iseq(x::Union{EmptyTI,EmptyTT}, y::Union{EmptyTI,EmptyTT}) = isequal(x.x, y.x)
 iseq(x::NoneTypedField{Union{}}, y::NoneTypedField{Union{}}) = x.a === y.a
 iseq(c1::Array{Base.Sys.CPUinfo}, c2::Array{Base.Sys.CPUinfo}) = length(c1) == length(c2) && all([iseq(c1[i], c2[i]) for i = 1:length(c1)])
 function iseq(c1::Base.Sys.CPUinfo, c2::Base.Sys.CPUinfo)
@@ -304,7 +304,7 @@ function iseq(c1::Base.Sys.CPUinfo, c2::Base.Sys.CPUinfo)
     true
 end
 iseq(x::MyUnicodeStruct☺, y::MyUnicodeStruct☺) = (x.α == y.α && x.∂ₓα == y.∂ₓα)
-iseq(x::Array{None}, y::Array{None}) = size(x) == size(y)
+iseq(x::Array{Union{}}, y::Array{Union{}}) = size(x) == size(y)
 iseq(x::BigFloatIntObject, y::BigFloatIntObject) = (x.bigfloat == y.bigfloat && x.bigint == y.bigint)
 macro check(fid, sym)
     ex = quote

@@ -5,6 +5,12 @@
 const MMAP_GROW_SIZE = 2^24
 const FILE_GROW_SIZE = 2^18
 
+typealias Plain     Union{Int8,Int16,Int32,Int64,Int128,UInt8,UInt16,UInt32,UInt64,UInt128,
+                          Float16,Float32,Float64}
+typealias PlainType Union{Type{Int8},Type{Int16},Type{Int32},Type{Int64},Type{Int128},
+                          Type{UInt8},Type{UInt16},Type{UInt32},Type{UInt64},Type{UInt128},
+                          Type{Float16},Type{Float32},Type{Float64}}
+
 type MmapIO <: IO
     f::IOStream
     arr::Vector{UInt8}
@@ -12,7 +18,7 @@ type MmapIO <: IO
     endptr::Ptr{Void}
 end
 
-function MmapIO(fname::String, write::Bool, create::Bool, truncate::Bool)
+function MmapIO(fname::AbstractString, write::Bool, create::Bool, truncate::Bool)
     truncate && !write && throw(ArgumentError("cannot truncate file that is not writable"))
 
     f = open(fname, true, write, create, truncate, false)

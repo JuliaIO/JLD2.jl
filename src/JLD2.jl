@@ -17,12 +17,6 @@ immutable UnsupportedVersionException <: Exception end
 immutable UnsupportedFeatureException <: Exception end
 immutable InvalidDataException <: Exception end
 
-typealias Plain     Union(Int8,Int16,Int32,Int64,Int128,UInt8,UInt16,UInt32,UInt64,UInt128,
-                          Float16,Float32,Float64)
-typealias PlainType Union(Type{Int8},Type{Int16},Type{Int32},Type{Int64},Type{Int128},
-                          Type{UInt8},Type{UInt16},Type{UInt32},Type{UInt64},Type{UInt128},
-                          Type{Float16},Type{Float32},Type{Float64})
-
 include("Lookup3.jl")
 include("mmapio.jl")
 include("misc.jl")
@@ -170,7 +164,7 @@ function jldopen(fname::AbstractString, mode::AbstractString="r")
     throw(ArgumentError("invalid open mode: $mode"))
 end
 
-function Base.read(f::JLDFile, name::String)
+function Base.read(f::JLDFile, name::AbstractString)
     f.end_of_data == 0 && throw(ArgumentError("file is closed"))
     haskey(f.datasets, name) || throw(ArgumentError("file has no dataset $name"))
     read_dataset(f, f.datasets[name])
@@ -190,7 +184,7 @@ function load_datatypes(f::JLDFile)
     end
 end
 
-function Base.write(f::JLDFile, name::String, obj, wsession::JLDWriteSession=JLDWriteSession())
+function Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession())
     f.end_of_data == 0 && throw(ArgumentError("file is closed"))
     !f.writable && throw(ArgumentError("file was opened read-only"))
     !f.written && !f.created && load_datatypes(f)
