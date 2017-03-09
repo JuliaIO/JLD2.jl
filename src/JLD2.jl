@@ -1,69 +1,69 @@
 module JLD2
-using ArrayViews, DataStructures
+using DataStructures
 import Base.sizeof
 export jldopen
 
 const OBJECT_HEADER_SIGNATURE = reinterpret(UInt32, UInt8['O', 'H', 'D', 'R'])[1]
 
 # Currently we specify that all offsets and lengths are 8 bytes
-typealias Length UInt64
+const Length = UInt64
 
 # Currently we specify a 512 byte header
 const FILE_HEADER_LENGTH = 512
 const FILE_HEADER = "Julia data file (HDF5), version "
 const CURRENT_VERSION = v"0.2"
 
-immutable UnsupportedVersionException <: Exception end
-immutable UnsupportedFeatureException <: Exception end
-immutable InvalidDataException <: Exception end
+struct UnsupportedVersionException <: Exception end
+struct UnsupportedFeatureException <: Exception end
+struct InvalidDataException <: Exception end
 
 include("Lookup3.jl")
 include("mmapio.jl")
 include("misc.jl")
 
-# RelOffset represents an HDF5 relative offset. It differs from FileOffset (used
+# RelOffset represents an HDF5 relative offset. It differs from a file offset (used
 # elsewhere) in that it is relative to the superblock base address. In practice,
 # this means that FILE_HEADER_LENGTH has been subtracted. `fileoffset` and
-# `h5offset` convert between RelOffsets and FileOffsets
-immutable RelOffset
+# `h5offset` convert between RelOffsets and file offsets
+struct RelOffset
     offset::UInt64
 end
 define_packed(RelOffset)
-Base.(:(==))(x::RelOffset, y::RelOffset) = x === y
+Base.:(==)(x::RelOffset, y::RelOffset) = x === y
 Base.hash(x::RelOffset) = hash(x.offset)
 
 const UNDEFINED_ADDRESS = RelOffset(0xffffffffffffffff)
 const NULL_REFERENCE = RelOffset(0)
 
-immutable JLDWriteSession{T<:Union{Dict{UInt,RelOffset},Union{}}}
+struct JLDWriteSession{T<:Union{Dict{UInt,RelOffset},Union{}}}
     h5offset::T
     objects::Vector{Any}
 
-    JLDWriteSession() = new()
-    JLDWriteSession(h5offset, objects) = new(h5offset, objects)
+    JLDWriteSession{T}() where T = new()
+    JLDWriteSession{T}(h5offset, objects) where T = new(h5offset, objects)
 end
 JLDWriteSession() = JLDWriteSession{Dict{UInt,RelOffset}}(Dict{UInt,RelOffset}(), Any[])
 
-type GlobalHeap
-    offset::FileOffset
+mutable struct GlobalHeap
+    offset::Int64
     length::Length
     free::Length
-    objects::Vector{FileOffset}
+    objects::Vector{Int64}
 end
 
-abstract H5Datatype
+abstract type H5Datatype end
 
-immutable CommittedDatatype <: H5Datatype
+struct CommittedDatatype <: H5Datatype
     header_offset::RelOffset
     index::Int
 end
 
-immutable ReadRepresentation{T,ODR} end
-immutable CustomSerialization{T,S} end
+struct ReadRepresentation{T,ODR} end
+struct CustomSerialization{T,S} end
 
 symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)
 
-type JLDFile{T<:IO}
+mutable struct JLDFile{T<:IO}
     io::T
     writable::Bool
     written::Bool
@@ -71,23 +71,23 @@ type JLDFile{T<:IO}
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
-    datasets::OrderedDict{ByteString,RelOffset}
+    datasets::OrderedDict{String,RelOffset}
     jlh5type::ObjectIdDict
     h5jltype::ObjectIdDict
     jloffset::Dict{RelOffset,WeakRef}
-    end_of_data::FileOffset
+    end_of_data::Int64
     global_heaps::Dict{RelOffset,GlobalHeap}
     global_heap::GlobalHeap
 end
 JLDFile(io::IO, writable::Bool, written::Bool, created::Bool) =
     JLDFile(io, writable, written, created, OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
-            JLDWriteSession(), OrderedDict{ByteString,RelOffset}(), ObjectIdDict(),
+            JLDWriteSession(), OrderedDict{String,RelOffset}(), ObjectIdDict(),
             ObjectIdDict(), Dict{RelOffset,WeakRef}(),
-            FileOffset(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
-            GlobalHeap(0, 0, 0, FileOffset[]))
+            Int64(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
+            GlobalHeap(0, 0, 0, Int64[]))
 
-fileoffset(f::JLDFile, x::RelOffset) = FileOffset(x.offset + FILE_HEADER_LENGTH)
-h5offset(f::JLDFile, x::FileOffset) = RelOffset(x - FILE_HEADER_LENGTH)
+fileoffset(f::JLDFile, x::RelOffset) = Int64(x.offset + FILE_HEADER_LENGTH)
+h5offset(f::JLDFile, x::Int64) = RelOffset(x - FILE_HEADER_LENGTH)
 
 #
 # File
@@ -99,7 +99,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool)
     f = JLDFile(io, wr, truncate, !exists || truncate)
 
     if !truncate
-        if ASCIIString(read(io, UInt8, length(FILE_HEADER))) != FILE_HEADER
+        if String(read(io, UInt8, length(FILE_HEADER))) != FILE_HEADER
             throw(ArgumentError(string('"', fname, "\" is not a JLD file")))
         end
 
@@ -202,7 +202,7 @@ function Base.close(f::JLDFile)
     if f.written
         seek(io, f.end_of_data)
 
-        names = ByteString[]
+        names = String[]
         sizehint!(names, length(f.datasets)+1)
         offsets = RelOffset[]
         sizehint!(offsets, length(f.datasets)+1)
@@ -211,7 +211,7 @@ function Base.close(f::JLDFile)
         if !isempty(f.datatypes)
             push!(names, "_types")
             push!(offsets, h5offset(f, position(io)))
-            write(io, Group(ASCIIString[@sprintf("%08d", i) for i = 1:length(f.datatypes)],
+            write(io, Group(String[@sprintf("%08d", i) for i = 1:length(f.datatypes)],
                             collect(keys(f.datatype_locations))))
         end
 

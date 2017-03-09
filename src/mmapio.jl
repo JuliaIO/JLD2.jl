@@ -5,13 +5,13 @@
 const MMAP_GROW_SIZE = 2^24
 const FILE_GROW_SIZE = 2^18
 
-typealias Plain     Union{Int8,Int16,Int32,Int64,Int128,UInt8,UInt16,UInt32,UInt64,UInt128,
-                          Float16,Float32,Float64}
-typealias PlainType Union{Type{Int8},Type{Int16},Type{Int32},Type{Int64},Type{Int128},
-                          Type{UInt8},Type{UInt16},Type{UInt32},Type{UInt64},Type{UInt128},
-                          Type{Float16},Type{Float32},Type{Float64}}
+const Plain = Union{Int16,Int32,Int64,Int128,UInt16,UInt32,UInt64,UInt128,Float16,Float32,
+                    Float64}
+const PlainType = Union{Type{Int16},Type{Int32},Type{Int64},Type{Int128},Type{UInt16},
+                        Type{UInt32},Type{UInt64},Type{UInt128},Type{Float16},
+                        Type{Float32},Type{Float64}}
 
-type MmapIO <: IO
+mutable struct MmapIO <: IO
     f::IOStream
     arr::Vector{UInt8}
     curptr::Ptr{Void}
@@ -30,12 +30,12 @@ end
 
 Base.show(io::IO, ::MmapIO) = print(io, "MmapIO")
 
-if OS_NAME === :Linux
+if is_linux()
     # This is substantially faster than truncate on Linux, but slower on OS X.
     # TODO: Benchmark on Windows
     grow(io::IOStream, sz::Integer) =
         systemerror("pwrite", ccall(:jl_pwrite, Cssize_t,
-                                    (Cint, Ptr{UInt8}, Uint, FileOffset),
+                                    (Cint, Ptr{UInt8}, UInt, Int64),
                                     fd(io), &UInt8(0), 1, sz - 1) < 1)
 else
     grow(io::IOStream, sz::Integer) = truncate(io, sz)
@@ -85,27 +85,24 @@ end
     end
     unsafe_store!(Ptr{typeof(x)}(cp), x)
     io.curptr = ep
-    nothing
+    return sizeof(x)
 end
 @inline Base.write(io::MmapIO, x::UInt8) = _write(io, x)
+@inline Base.write(io::MmapIO, x::Int8) = _write(io, x)
 @inline Base.write(io::MmapIO, x::Plain)  = _write(io, x)
 
-function Base.write{T}(io::MmapIO, x::Ptr{T}, n::Integer)
+function Base.unsafe_write(io::MmapIO, x::Ptr{UInt8}, n::UInt64)
     cp = io.curptr
-    ep = cp + sizeof(T)*n
+    ep = cp + n
     if ep > io.endptr
         resize!(io, ep)
         cp = io.curptr
-        ep = cp + sizeof(T)*n
+        ep = cp + n
     end
-    unsafe_copy!(Ptr{T}(cp), x, n)
+    unsafe_copy!(Ptr{UInt8}(cp), x, n)
     io.curptr = ep
-    nothing
+    return n
 end
-
-Base.write(io::MmapIO, x::ASCIIString) = write(io, pointer(x), sizeof(x))
-Base.write(io::MmapIO, x::UTF8String) = write(io, pointer(x), sizeof(x))
-Base.write(io::MmapIO, x::Array) = write(io, pointer(x), sizeof(x))
 
 @inline function _read(io::MmapIO, T::DataType)
     cp = io.curptr
@@ -123,7 +120,7 @@ function Base.read{T}(io::MmapIO, ::Type{T}, n::Int)
     cp = io.curptr
     ep = cp + sizeof(T)*n
     ep > io.endptr && throw(EOFError())
-    arr = Array(T, n)
+    arr = Vector{T}(n)
     unsafe_copy!(pointer(arr), Ptr{T}(cp), n)
     io.curptr = ep
     arr
@@ -133,8 +130,9 @@ Base.read{T}(io::MmapIO, ::Type{T}, n::Integer) =
 
 # Read a null-terminated string
 function read_bytestring(io::MmapIO)
+    # TODO do not try to read outside the buffer
     cp = io.curptr
-    str = bytestring(convert(Ptr{UInt8}, cp))
+    str = unsafe_string(convert(Ptr{UInt8}, cp))
     io.curptr = cp + sizeof(str) + 1
     str
 end
@@ -149,7 +147,7 @@ function Base.skip(io::MmapIO, offset::Integer)
     nothing
 end
 
-Base.position(io::MmapIO) = FileOffset(io.curptr - pointer(io.arr))
+Base.position(io::MmapIO) = Int64(io.curptr - pointer(io.arr))
 
 # We sometimes need to compute checksums. We do this by first calling
 # begin_checksum when starting to handle whatever needs checksumming,
@@ -157,7 +155,7 @@ Base.position(io::MmapIO) = FileOffset(io.curptr - pointer(io.arr))
 # nested checksums.
 # XXX not thread-safe!
 
-const CHECKSUM_POS = FileOffset[]
+const CHECKSUM_POS = Int64[]
 const NCHECKSUM = Ref{Int}(0)
 function begin_checksum(io::MmapIO)
     idx = NCHECKSUM[] += 1
@@ -175,5 +173,5 @@ end
 function end_checksum(io::MmapIO)
     @inbounds v = CHECKSUM_POS[NCHECKSUM[]]
     NCHECKSUM[] -= 1
-    Lookup3.hash(UnsafeContiguousView(pointer(io.arr) + v, (position(io) - v,)))
+    Lookup3.hash(io.arr, v+1, position(io) - v)
 end

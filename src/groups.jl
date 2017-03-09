@@ -52,31 +52,23 @@ function read_link(io::IO)
     name = read(io, UInt8, sz) # Link name
     target = read(io, RelOffset)  # Link information
 
-    if cset == CSET_ASCII
-        (ASCIIString(name), target)
-    else
-        (UTF8String(name), target)
-    end
+    (String(name), target)
 end
 
-sizeof_link(name::ByteString) =
-    2 + size_size(sizeof(name)) + sizeof(name) + sizeof(RelOffset) + isa(name, UTF8String)
+sizeof_link(name::String) =
+    3 + size_size(sizeof(name)) + sizeof(name) + sizeof(RelOffset)
 
-function write_link(io::IO, name::ByteString, target::RelOffset)
+function write_link(io::IO, name::String, target::RelOffset)
     # Version
     write(io, UInt8(1))
 
     # Flags
     flags = size_flag(sizeof(name))
-    if isa(name, UTF8String)
-        flags |= LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT
-    end
+    flags |= LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT
     write(io, flags::UInt8)
 
     # Link name character set
-    if isa(name, UTF8String)
-        write(io, UInt8(CSET_UTF8))
-    end
+    write(io, UInt8(CSET_UTF8))
 
     # Length of link name
     write_size(io, sizeof(name))
@@ -109,7 +101,7 @@ function Base.read(io::IO, ::Type{Group})
     pmax = position(cio) + sz
 
     # Messages
-    names = ByteString[]
+    names = String[]
     offsets = RelOffset[]
     while position(cio) < pmax
         msg = read(cio, HeaderMessage)

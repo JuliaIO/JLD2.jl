@@ -26,9 +26,7 @@ immutable BasicDatatype <: H5Datatype
     size::UInt32
 end
 define_packed(BasicDatatype)
-StringDatatype(::Type{ASCIIString}, size::Integer) =
-    BasicDatatype(DT_STRING, 0x01, 0x00, 0x00, size)
-StringDatatype(::Type{UTF8String}, size::Integer) =
+StringDatatype(::Type{String}, size::Integer) =
     BasicDatatype(DT_STRING, 0x11, 0x00, 0x00, size)
 OpaqueDatatype(size::Integer) =
     BasicDatatype(DT_OPAQUE, 0x00, 0x00, 0x00, size) # XXX make sure ignoring the tag is OK
@@ -45,10 +43,10 @@ function read_datatype_message(io::IO, f::JLDFile, committed)
         # Shared datatype
         read(io, UInt8) == 3 || throw(UnsupportedVersionException())
         read(io, UInt8) == 2 || throw(UnsupportedFeatureException())
-        (typemax(UInt8), FileOffset(fileoffset(f, read(io, RelOffset))))
+        (typemax(UInt8), Int64(fileoffset(f, read(io, RelOffset))))
     else
         # Datatype stored here
-        (read(io, UInt8), FileOffset(position(io)-1))
+        (read(io, UInt8), Int64(position(io)-1))
     end
 end
 
@@ -130,17 +128,17 @@ immutable CompoundDatatype <: H5Datatype
     end
 end
 
-Base.(:(==))(x::CompoundDatatype, y::CompoundDatatype) = x.size == y.size && x.names == y.names &&
-                                               x.offsets == y.offsets && x.members == y.members
+Base.:(==)(x::CompoundDatatype, y::CompoundDatatype) =
+    x.size == y.size && x.names == y.names && x.offsets == y.offsets &&
+    x.members == y.members
 Base.hash(::CompoundDatatype) = throw(ArgumentError("hash not defined for CompoundDatatype"))
 
 class(dt::CompoundDatatype) = DT_COMPOUND
-strlen(x) = Int(ccall(:strlen, Csize_t, (Ptr{UInt8},), x))
 function Base.sizeof(dt::CompoundDatatype)
     sz = sizeof(BasicDatatype) + size_size(dt.size)*length(dt.names)
     for i = 1:length(dt.names)
         # Extra byte for null padding of name
-        sz += strlen(dt.names[i]) + 1 + sizeof(dt.members[i])
+        sz += symbol_length(dt.names[i]) + 1 + sizeof(dt.members[i])
     end
     sz
 end
@@ -150,8 +148,9 @@ function Base.write(io::IO, dt::CompoundDatatype)
     write(io, BasicDatatype(DT_COMPOUND, n % UInt8, (n >> 8) % UInt8, 0x00, dt.size))
     for i = 1:length(dt.names)
         # Name
-        name_ptr = Base.unsafe_convert(Ptr{UInt8}, dt.names[i])
-        write(io, name_ptr, strlen(name_ptr)+1)
+        name = dt.names[i]
+        name_ptr = Base.unsafe_convert(Ptr{UInt8}, name)
+        unsafe_write(io, name_ptr, symbol_length(name)+1)
 
         # Byte offset of member
         if dt.size <= typemax(UInt8)
@@ -172,12 +171,12 @@ function Base.read(io::IO, ::Type{CompoundDatatype})
     nfields = UInt16(dt.bitfield1) | UInt16(dt.bitfield2 << 8)
     dt.bitfield3 == 0 || throw(UnsupportedFeatureException())
 
-    names = Array(Symbol, nfields)
-    offsets = Array(Int, nfields)
-    members = Array(H5Datatype, nfields)
+    names = Vector{Symbol}(nfields)
+    offsets = Vector{Int}(nfields)
+    members = Vector{H5Datatype}(nfields)
     for i = 1:nfields
         # Name
-        names[i] = symbol(read_bytestring(io))
+        names[i] = Symbol(read_bytestring(io))
 
         # Byte offset of member
         if dt.size <= typemax(UInt8)
@@ -212,9 +211,10 @@ VariableLengthDatatype(basetype::H5Datatype) =
 VariableLengthDatatype(class, bitfield1, bitfield2, bitfield3, size, basetype::H5Datatype) =
     VariableLengthDatatype{typeof(basetype)}(class, bitfield1, bitfield2, bitfield3, size, basetype)
 
-Base.(:(==))(x::VariableLengthDatatype, y::VariableLengthDatatype) = x.class == y.class && x.bitfield1 == y.bitfield1 &&
-                                                           x.bitfield2 == y.bitfield2 && x.size == y.size &&
-                                                           x.basetype == y.basetype
+Base.:(==)(x::VariableLengthDatatype, y::VariableLengthDatatype) =
+    x.class == y.class && x.bitfield1 == y.bitfield1 &&
+    x.bitfield2 == y.bitfield2 && x.size == y.size &&
+    x.basetype == y.basetype
 Base.hash(::VariableLengthDatatype) = throw(ArgumentError("hash not defined for CompoundDatatype"))
 
 class(dt::VariableLengthDatatype) = dt.class

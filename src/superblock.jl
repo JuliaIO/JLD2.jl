@@ -8,9 +8,9 @@ const SUPERBLOCK_SIGNATURE = reinterpret(UInt64, UInt8[0o211, 'H', 'D', 'F', '\r
 # Superblock (Version 2)
 type Superblock
     file_consistency_flags::UInt8
-    base_address::FileOffset
+    base_address::Int64
     superblock_extension_address::RelOffset
-    end_of_file_address::FileOffset
+    end_of_file_address::Int64
     root_group_object_header_address::RelOffset
 end
 
@@ -37,9 +37,9 @@ function Base.read(io::IO, ::Type{Superblock})
     file_consistency_flags = read(cio, UInt8)
 
     # Addresses
-    base_address = read(cio, FileOffset)
+    base_address = read(cio, Int64)
     superblock_extension_address = read(cio, RelOffset)
-    end_of_file_address = read(cio, FileOffset)
+    end_of_file_address = read(cio, Int64)
     root_group_object_header_address = read(cio, RelOffset)
 
     # Checksum
@@ -57,9 +57,9 @@ function Base.write(io::IO, s::Superblock)
     write(cio, UInt8(8))                        # Size of offsets
     write(cio, UInt8(8))                        # Size of lengths
     write(cio, s.file_consistency_flags::UInt8)
-    write(cio, s.base_address::FileOffset)
+    write(cio, s.base_address::Int64)
     write(cio, s.superblock_extension_address::RelOffset)
-    write(cio, s.end_of_file_address::FileOffset)
+    write(cio, s.end_of_file_address::Int64)
     write(cio, s.root_group_object_header_address::RelOffset)
     write(io, end_checksum(cio))
 end

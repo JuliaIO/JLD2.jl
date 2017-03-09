@@ -16,7 +16,7 @@ end
 immutable ReadDataspace
     dataspace_type::UInt8
     dimensionality::UInt8
-    dimensions_offset::FileOffset
+    dimensions_offset::Int64
 end
 ReadDataspace() = ReadDataspace(DS_SCALAR, 0, -1)
 

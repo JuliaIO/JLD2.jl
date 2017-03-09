@@ -2,7 +2,7 @@ module Lookup3
 
 # Original source at http://www.burtleburtle.net/bob/c/lookup3.c
 
-rot(x::UInt32, k) = (((x)<<(k)) $ ((x)>>(32-(k))))
+rot(x::UInt32, k) = xor(((x)<<(k)), ((x)>>(32-(k))))
 
 # -------------------------------------------------------------------------------
 # mix -- mix 3 32-bit values reversibly.
@@ -47,12 +47,12 @@ rot(x::UInt32, k) = (((x)<<(k)) $ ((x)>>(32-(k))))
 # rotates.
 # -------------------------------------------------------------------------------
 @inline function mix(a, b, c)
-  a -= c;  a $= rot(c, 4);  c += b
-  b -= a;  b $= rot(a, 6);  a += c
-  c -= b;  c $= rot(b, 8);  b += a
-  a -= c;  a $= rot(c,16);  c += b
-  b -= a;  b $= rot(a,19);  a += c
-  c -= b;  c $= rot(b, 4);  b += a
+  a -= c;  a = xor(a, rot(c, 4));  c += b
+  b -= a;  b = xor(b, rot(a, 6));  a += c
+  c -= b;  c = xor(c, rot(b, 8));  b += a
+  a -= c;  a = xor(a, rot(c,16));  c += b
+  b -= a;  b = xor(b, rot(a,19));  a += c
+  c -= b;  c = xor(c, rot(b, 4));  b += a
   (a, b, c)
 end
 
@@ -80,13 +80,13 @@ end
 #  11  8 15 26 3 22 24
 # -------------------------------------------------------------------------------
 @inline function final(a, b, c)
-  c $= b; c -= rot(b,14)
-  a $= c; a -= rot(c,11)
-  b $= a; b -= rot(a,25)
-  c $= b; c -= rot(b,16)
-  a $= c; a -= rot(c,4)
-  b $= a; b -= rot(a,14)
-  c $= b; c -= rot(b,24)
+  c = xor(c, b); c -= rot(b,14)
+  a = xor(a, c); a -= rot(c,11)
+  b = xor(b, a); b -= rot(a,25)
+  c = xor(c, b); c -= rot(b,16)
+  a = xor(a, c); a -= rot(c,4)
+  b = xor(b, a); b -= rot(a,14)
+  c = xor(c, b); c -= rot(b,24)
   c
 end
 
@@ -114,13 +114,13 @@ end
 # Use for hash table lookup, or anything where one collision in 2^^32 is
 # acceptable.  Do NOT use for cryptographic purposes.
 # -------------------------------------------------------------------------------
-function hash(k::AbstractVector{UInt8}, initval::UInt32=UInt32(0), n::Integer=length(k))
+function hash(k::AbstractVector{UInt8}, istart::Integer=1, n::Integer=length(k), initval::UInt32=UInt32(0))
     n <= length(k) || throw(BoundsError())
     # Set up the internal state
     a = b = c = 0xdeadbeef + convert(UInt32, n) + initval
 
     # --------------- all but the last block: affect some 32 bits of (a,b,c)
-    offset = 1
+    offset = istart
     # @inbounds while n > 12
     #     a += k[offset]
     #     a += convert(UInt32, k[offset+1])<<8

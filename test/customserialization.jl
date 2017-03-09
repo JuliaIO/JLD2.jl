@@ -3,18 +3,18 @@ using JLD2, Base.Test
 immutable SingleFieldWrapper{T}
     x::T
 end
-Base.(:(==))(a::SingleFieldWrapper, b::SingleFieldWrapper) = a.x == b.x
+Base.:(==)(a::SingleFieldWrapper, b::SingleFieldWrapper) = a.x == b.x
 
 immutable MultiFieldWrapper{T}
     x::T
     y::Int
 end
-Base.(:(==))(a::MultiFieldWrapper, b::MultiFieldWrapper) = (a.x == b.x && a.y == b.y)
+Base.:(==)(a::MultiFieldWrapper, b::MultiFieldWrapper) = (a.x == b.x && a.y == b.y)
 
 immutable UntypedWrapper
     x
 end
-Base.(:(==))(a::UntypedWrapper, b::UntypedWrapper) = a.x == b.x
+Base.:(==)(a::UntypedWrapper, b::UntypedWrapper) = a.x == b.x
 
 # This is a type with a custom serialization, where the original type has data
 # but the custom serialization is empty
@@ -57,7 +57,7 @@ end
 type CSC
     x::Vector{Int}
 end
-Base.(:(==))(a::CSC, b::CSC) = a.x == b.x
+Base.:(==)(a::CSC, b::CSC) = a.x == b.x
 c = CSC(rand(Int, 2))
 
 immutable CSCSerialization
@@ -129,18 +129,18 @@ function Base.convert(::Type{CSF}, x::Int)
     CSF(x)
 end
 
-# This is a type that is custom-serialized as a UTF8String
+# This is a type that is custom-serialized as a String
 immutable CSG
     x::Int
 end
 g = CSG(rand(Int))
 
-JLD2.writeas(::Type{CSG}) = UTF8String
-function Base.convert(::Type{UTF8String}, x::CSG)
+JLD2.writeas(::Type{CSG}) = String
+function Base.convert(::Type{String}, x::CSG)
     global converted = true
-    convert(UTF8String, string(x.x))
+    convert(String, string(x.x))
 end
-function Base.convert(::Type{CSG}, x::UTF8String)
+function Base.convert(::Type{CSG}, x::String)
     global converted = true
     CSG(parse(Int, x))
 end
@@ -168,8 +168,8 @@ immutable CSK
     S::DataType
 end
 k = CSK(Int, Float64)
-Base.(:(==))(x::CSK, y::CSK) = (x.T == y.T && x.S == y.S) ||
-                               (x.T == y.S && x.S == y.T)
+Base.:(==)(x::CSK, y::CSK) = (x.T == y.T && x.S == y.S) ||
+                             (x.T == y.S && x.S == y.T)
 
 JLD2.writeas(::Type{CSK}) = Union
 function Base.convert(::Type{Union}, x::CSK)
@@ -204,6 +204,7 @@ function read_tests(file, prefix, obj)
 end
 
 fn = joinpath(tempdir(),"test.jld")
+println(fn)
 file = jldopen(fn, "w")
 write_tests(file, "a", a)
 write_tests(file, "b", b)

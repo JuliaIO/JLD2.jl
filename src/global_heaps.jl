@@ -60,7 +60,7 @@ function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
         write(io, Length(heapsz)) # Collection size
         f.end_of_data = position(io) + heapsz
         gh = f.global_heap = f.global_heaps[h5offset(f, offset)] =
-            GlobalHeap(offset, heapsz, heapsz, FileOffset[])
+            GlobalHeap(offset, heapsz, heapsz, Int64[])
     end
 
     # Write data
@@ -100,7 +100,7 @@ function Base.read(io::IO, ::Type{GlobalHeap})
     read(io, UInt32) == 1 || throw(UnsupportedVersionException())
     heapsz = read(io, Length)
     index = 1
-    objects = FileOffset[]
+    objects = Int64[]
     startpos = position(io)
     free = heapsz
     while free > 8 + sizeof(Length)
@@ -132,7 +132,7 @@ function read_heap_object{T,RR}(f::JLDFile{MmapIO}, hid::GlobalHeapID, rr::ReadR
     len == n * sizeof(RR) || throw(InvalidDataException())
 
     inptr = f.io.curptr
-    v = Array(T, n)
+    v = Vector{T}(n)
     if isa(RR, DataType) && RR <: T && isbits(T)
         unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(n))
     else

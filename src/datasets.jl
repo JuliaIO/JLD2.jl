@@ -24,8 +24,8 @@ function read_dataset(f::JLDFile, offset::RelOffset)
     dataspace = ReadDataspace()
     attrs = EMPTY_READ_ATTRIBUTES
     datatype_class::UInt8 = 0
-    datatype_offset::FileOffset = 0
-    data_offset::FileOffset = 0
+    datatype_offset::Int64 = 0
+    data_offset::Int64 = 0
     data_length::Int = 0
     while position(cio) < pmax
         msg = read(cio, HeaderMessage)
@@ -100,8 +100,8 @@ end
 # the offset of the committed datatype's header. Otherwise,
 # datatype_offset points to the offset of the datatype attribute.
 function read_data(f::JLDFile, dataspace::ReadDataspace,
-                   datatype_class::UInt8, datatype_offset::FileOffset,
-                   data_offset::FileOffset, header_offset::RelOffset=NULL_REFERENCE,
+                   datatype_class::UInt8, datatype_offset::Int64,
+                   data_offset::Int64, header_offset::RelOffset=NULL_REFERENCE,
                    attributes::Union{Vector{ReadAttribute},Void}=nothing)
     # See if there is a julia type attribute
     io = f.io
@@ -257,19 +257,19 @@ end
 function construct_array{T}(io::IO, ::Type{T}, ndims::Int)
     if ndims == 1
         n = read(io, Int)
-        Array(T, n)
+        Vector{T}(n)
     elseif ndims == 2
         d2 = read(io, Int)
         d1 = read(io, Int)
-        Array(T, d1, d2)
+        Matrix{T}(d1, d2)
     elseif ndims == 3
         d3 = read(io, Int)
         d2 = read(io, Int)
         d1 = read(io, Int)
-        Array(T, d1, d2, d3)
+        Array{T,3}(d1, d2, d3)
     else
         ds = reverse!(read(io, Int, ndims))
-        Array(T, tuple(ds...))
+        Array{T}(tuple(ds...))
     end
 end
 

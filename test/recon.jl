@@ -38,7 +38,7 @@ immutable TestType11
     b::UInt8
 end
 immutable TestType12
-    x::ASCIIString
+    x::String
 end
 type TestType13
     a
@@ -154,7 +154,7 @@ immutable TestType16{T<:Integer}
 end
 immutable TestTypeContainer2{T}
     a::T
-    b::ASCIIString
+    b::String
 end
 immutable TestTypeContainer3{T,S}
     a::T

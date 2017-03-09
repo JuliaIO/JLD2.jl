@@ -18,8 +18,8 @@ immutable ReadAttribute
     name::Symbol
     dataspace::ReadDataspace
     datatype_class::UInt8
-    datatype_offset::FileOffset
-    data_offset::FileOffset
+    datatype_offset::Int64
+    data_offset::Int64
 end
 
 const EMPTY_READ_ATTRIBUTES = ReadAttribute[]
@@ -40,7 +40,7 @@ function write_attribute(io::IO, f::JLDFile, attr::WrittenAttribute, wsession::J
     namelen = symbol_length(attr.name)
     write(io, AttributeHeader(0x02, isa(attr.datatype, CommittedDatatype), namelen+1,
                               sizeof(attr.datatype), sizeof(attr.dataspace)))
-    write(io, Base.unsafe_convert(Ptr{Cchar}, attr.name), namelen)
+    unsafe_write(io, Base.unsafe_convert(Ptr{Cchar}, attr.name), namelen)
     write(io, UInt8(0))
     write(io, attr.datatype)
     write(io, attr.dataspace)
@@ -53,7 +53,7 @@ function read_attribute(io::IO, f::JLDFile)
     committed = ah.flags == 1
     !committed && ah.flags != 0 && throw(UnsupportedFeatureException())
 
-    name = symbol(read(io, UInt8, ah.name_size-1))
+    name = Symbol(read(io, UInt8, ah.name_size-1))
     read(io, UInt8) == 0 || throw(InvalidDataException())
 
     datatype_end = position(io) + ah.datatype_size
