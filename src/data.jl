@@ -1,12 +1,6 @@
 const Initialized = Union{Type{Val{true}}, Type{Val{false}}}
 
-struct OnDiskRepresentation
-    offsets::Tuple{Vararg{Int}}
-    types::Base.SimpleVector
-    odrs::Vector{Any}
-end
-
-struct ODRIndex{N} end
+struct OnDiskRepresentation{Offsets,JLTypes,H5Types} end
 
 struct UnknownType{T}
     name::T
@@ -25,12 +19,7 @@ end
 sizeof{T<:Vlen}(::Type{T}) = 4 + sizeof(GlobalHeapID)
 
 # Initial ODR for DataType
-const ODRS = OnDiskRepresentation[
-    OnDiskRepresentation((0, sizeof(Vlen{String})),
-                         Core.svec(String, Vector{Any}),
-                         Any[Vlen{String}, Vlen{RelOffset}])
-]
-const DataTypeODR = ODRIndex{1}
+const DataTypeODR = OnDiskRepresentation{(0, sizeof(Vlen{String})),Tuple{String,Vector{Any}},Tuple{Vlen{String},Vlen{RelOffset}}}
 
 const NULL_COMMITTED_DATATYPE = CommittedDatatype(RelOffset(0), 0)
 # Look up the corresponding committed datatype for a given type
@@ -75,9 +64,8 @@ function hasdata(T::DataType)
 end
 
 # Gets the size of an on-disk representation
-Base.@pure function sizeof{N}(::ODRIndex{N})
-    odr = ODRS[N]
-    odr.offsets[end]+sizeof(odr.odrs[end])
+Base.@pure function sizeof{Offsets,JLTypes,H5Types}(::OnDiskRepresentation{Offsets,JLTypes,H5Types})
+    Offsets[end]+sizeof(H5Types.parameters[end])
 end
 
 # Determines whether a type will have the same layout on disk as in memory
@@ -451,25 +439,26 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
     if samelayout
         (ReadRepresentation(T), true)
     else
-        wodrindex = odr(T)
+        wodr = odr(T)
         offsets = (offsets...)
-        if isa(wodrindex, ODRIndex)
-            wodr = ODRS[typeof(wodrindex::ODRIndex).parameters[1]::Int]
-            tequal = length(wodr.types) == length(types)
+        if isa(wodr, OnDiskRepresentation)
+            odr_offsets = typeof(wodr).parameters[1]
+            odr_types = typeof(wodr).parameters[2].parameters
+            odr_h5types = typeof(wodr).parameters[3].parameters
+            tequal = length(odr_types) == length(types)
             if tequal
-                for i = 1:length(wodr.types)
-                    if !(wodr.types[i] <: types[i])
+                for i = 1:length(types)
+                    if !(odr_types[i] <: types[i]) || odr_h5types[i] != odrs[i]
                         tequal = false
                         break
                     end
                 end
-                if tequal && wodr.offsets == offsets && wodr.odrs == odrs
-                    return (ReadRepresentation(T, wodrindex), true)
+                if tequal && odr_types == offsets
+                    return (ReadRepresentation(T, wodr), true)
                 end
             end
         end
-        push!(ODRS, OnDiskRepresentation(offsets, Core.svec(types...), odrs))
-        return (ReadRepresentation(T, ODRIndex{length(ODRS)}()), false)
+        return (ReadRepresentation(T, OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}}()), false)
     end
 end
 
@@ -480,21 +469,19 @@ h5convert!{T}(out::Ptr, ::Type{T}, ::JLDFile, x::T, ::JLDWriteSession) =
     (unsafe_store!(convert(Ptr{typeof(x)}, out), x); nothing)
 
 # We pack types that have padding using a staged h5convert! method
-@generated function h5convert!{N}(out::Ptr, ::ODRIndex{N}, file::JLDFile, x, wsession::JLDWriteSession)
+@generated function h5convert!{Offsets,Types,H5Types}(out::Ptr, ::OnDiskRepresentation{Offsets,Types,H5Types}, file::JLDFile, x, wsession::JLDWriteSession)
     T = x
-    odr = ODRS[N]
-    offsets = odr.offsets
-    types = odr.types
-    members = odr.odrs
+    types = Types.parameters
+    members = H5Types.parameters
 
     getindex_fn = isa(T, Type{T} where T<:Tuple) ? (:getindex) : (:getfield)
     ex = Expr(:block)
     args = ex.args
-    for i = 1:length(offsets)
+    for i = 1:length(Offsets)
         member = members[i]
         isa(member, Void) && continue
 
-        offset = offsets[i]
+        offset = Offsets[i]
         conv = :(h5convert!(out+$offset, $(member), file, convert($(types[i]), $getindex_fn(x, $i)), wsession))
         if i > T.ninitialized && (!isleaftype(x.types[i]) || !isbits(x.types[i]))
             push!(args, quote
@@ -966,7 +953,8 @@ constructrr{T<:Union}(::JLDFile, ::Type{T}, dt::VariableLengthDatatype, ::Vector
 # This needs its own h5convert! method, since otherwise we will attempt to specialize the
 # generic h5convert! method for the specific UnionAll type rather than for UnionAll
 # more generally.
-function h5convert!(out::Ptr, ::ODRIndex, f::JLDFile, x::UnionAll, wsession::JLDWriteSession)
+function h5convert!(out::Ptr, odr::OnDiskRepresentation{(0, 8),Tuple{TypeVar,Any},Tuple{JLD2.RelOffset,JLD2.RelOffset}},
+                    f::JLDFile, x::UnionAll, wsession::JLDWriteSession)
     h5convert!(out, RelOffset, f, x.var, f.datatype_wsession)
     h5convert!(out+sizeof(RelOffset), RelOffset, f, x.body, f.datatype_wsession)
 end
@@ -1079,7 +1067,7 @@ function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatyp
     field_datatypes = read_field_datatypes(f, attrs)
     if unk.name === Tuple
         # For a tuple with unknown fields, we should reconstruct the fields
-        rodr = reconstruct_odr(f, dt, field_datatypes)[1]
+        rodr = reconstruct_odr(f, dt, field_datatypes)
         # This is a "pseudo-RR" since the tuple is not fully parametrized, but
         # the parameters must depend on the types actually encoded in the file
         (ReadRepresentation(Tuple, rodr), false)
@@ -1132,18 +1120,16 @@ function reconstruct_odr(f::JLDFile, dt::CompoundDatatype,
                          field_datatypes::Vector{RelOffset})
     # Get the type and ODR information for each field
     types = Vector{Any}(length(dt.names))
-    odrs = Vector{Any}(length(dt.names))
+    h5types = Vector{Any}(length(dt.names))
     for i = 1:length(dt.names)
         if !isempty(field_datatypes) && (ref = field_datatypes[i]) != NULL_REFERENCE
             dtrr = jltype(f, f.datatype_locations[ref])
         else
             dtrr = jltype(f, dt.members[i])
         end
-        types[i], odrs[i] = typeof(dtrr).parameters
+        types[i], h5types[i] = typeof(dtrr).parameters
     end
-    odr = OnDiskRepresentation((dt.offsets...), Core.svec(types...), odrs)
-    push!(ODRS, odr)
-    return (ODRIndex{length(ODRS)}(), odr)
+    return OnDiskRepresentation{(dt.offsets...), Tuple{types...}, Tuple{h5types...}}()
 end
 
 # Reconstruct type that is a "lost cause": either we were not able to resolve
@@ -1151,16 +1137,17 @@ end
 # fields to workspace types
 function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
                               field_datatypes::Union{Vector{RelOffset},Void})
-    rodrindex, rodr = reconstruct_odr(f, dt, field_datatypes)
+    rodr = reconstruct_odr(f, dt, field_datatypes)
+    types = typeof(rodr).parameters[2].parameters
 
     # Now reconstruct the type
     reconname = gensym(T)
     eval(ReconstructedTypes, Expr(:composite_type, reconname, Core.svec(),
                                   Core.svec(dt.names...), Any,
-                                  rodr.types, false, 0))
+                                  types, false, 0))
     T = getfield(ReconstructedTypes, reconname)
 
-    (ReadRepresentation(T, rodrindex), false)
+    (ReadRepresentation(T, rodr), false)
 end
 
 # These need to go at the bottom. Also, JLD2 doesn't support custom serialization because
@@ -1198,12 +1185,11 @@ end
 @generated function jlconvert{T,S}(::ReadRepresentation{T,S}, f::JLDFile, ptr::Ptr,
                                    header_offset::RelOffset)
     isa(S, DataType) && return :(convert(T, unsafe_load(convert(Ptr{S}, ptr))))
-    @assert isa(S, ODRIndex)
-    odr = ODRS[typeof(S).parameters[1]]
+    @assert isa(S, OnDiskRepresentation)
 
-    offsets = odr.offsets
-    types = odr.types
-    odrs = odr.odrs
+    offsets = typeof(S).parameters[1]
+    types = typeof(S).parameters[2].parameters
+    odrs = typeof(S).parameters[3].parameters
 
     blk = Expr(:block)
     args = blk.args
@@ -1300,6 +1286,5 @@ end
         offset += sizeof(fodr)
     end
 
-    push!(ODRS, OnDiskRepresentation((offsets...), T.types, odrs))
-    Expr(:new, ODRIndex{length(ODRS)})
+    OnDiskRepresentation{(offsets...), Tuple{T.types...}, Tuple{odrs...}}()
 end
