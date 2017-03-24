@@ -1,4 +1,4 @@
-using Benchmarks, JLD2
+using BenchmarkTools, JLD2
 
 const TEMPFILE = begin
     tmp, io = mktemp()
@@ -30,82 +30,49 @@ function serialize_benchmark_read()
     close(f)
 end
 
-macro benchmark(title, data)
-    jldwrite = symbol(string(title, "_jld_write"))
-    jldread = symbol(string(title, "_jld_read"))
-    serializewrite = symbol(string(title, "_serialize_write"))
-    serializeread = symbol(string(title, "_serialize_read"))
-    quote
-        let data = $(data)
-            Benchmarks.@benchmarkable(
-                $jldwrite,
-                nothing,
-                jld_benchmark_write(data),
-                nothing
-            )
-            Benchmarks.@benchmarkable(
-                $jldread,
-                nothing,
-                jld_benchmark_read(),
-                nothing
-            )
-            Benchmarks.@benchmarkable(
-                $serializewrite,
-                nothing,
-                serialize_benchmark_write(data),
-                nothing
-            )
-            Benchmarks.@benchmarkable(
-                $serializeread,
-                nothing,
-                serialize_benchmark_read(),
-                nothing
-            )
-            gc()
-            println($(string(title, " JLD write")))
-            println(Benchmarks.execute($jldwrite))
-            println()
-            gc()
-            println($(string(title, " JLD read")))
-            println(Benchmarks.execute($jldread))
-            println()
-            gc()
-            println($(string(title, " Base.serialize")))
-            println(Benchmarks.execute($serializewrite))
-            println()
-            gc()
-            println($(string(title, " Base.deserialize")))
-            println(Benchmarks.execute($serializeread))
-            println()
-            println()
-            isa(data, Array) && empty!(data)
-        end
-    end
+function bench(title, data)
+    gc()
+    println(title, " JLD write")
+    show(STDOUT, MIME("text/plain"), @benchmark jld_benchmark_write($data))
+    println("\n")
+    gc()
+    println(title, " JLD read")
+    show(STDOUT, MIME("text/plain"), @benchmark jld_benchmark_read())
+    println("\n")
+    gc()
+    println(title, " Base.serialize")
+    show(STDOUT, MIME("text/plain"), @benchmark serialize_benchmark_write($data))
+    println("\n")
+    gc()
+    println(title, " Base.deserialize")
+    show(STDOUT, MIME("text/plain"), @benchmark serialize_benchmark_read())
+    println("\n\n")
+    isa(data, Array) && empty!(data)
 end
 
 # Vector{Int}
-@benchmark int_vector rand(typemin(Int):typemax(Int), 100000000)
+bench("int_vector", rand(typemin(Int):typemax(Int), 100000000))
 
 # Vector{Any} of Ints
-@benchmark any_int_vector convert(Vector{Any}, rand(typemin(Int):typemax(Int), 1000000))
+bench("any_int_vector", convert(Vector{Any}, rand(typemin(Int):typemax(Int), 1000000)))
 
 # Vector{Integer} of Ints
-@benchmark integer_int_vector convert(Vector{Integer}, rand(typemin(Int):typemax(Int), 1000000))
+bench("integer_int_vector", convert(Vector{Integer}, rand(typemin(Int):typemax(Int), 1000000)))
 
 # Vector of non-builtin immutable
-@benchmark complex128_vector [complex(rand(), rand()) for i = 1:10000000]
+bench("complex128_vector", [complex(rand(), rand()) for i = 1:10000000])
 
 # Vector{Any} of non-builtin immutable
 immutable IntWrapper
     x::Int
 end
-@benchmark any_complex128_vector Any[complex(rand(), rand()) for i = 1:1000000]
+bench("any_complex128_vector", Any[complex(rand(), rand()) for i = 1:1000000])
 
 # Many empty arrays
-@benchmark empty_arrays Any[Int[] for i = 1:1000000]
+bench("empty_arrays", Any[Int[] for i = 1:1000000])
 
 # Many one-eleemnt arrays
-@benchmark one_element_arrays [[rand(typemin(Int):typemax(Int))] for i = 1:1000000]
+bench("one_element_arrays", [[rand(typemin(Int):typemax(Int))] for i = 1:1000000])
 
 # Equivalent benchmark from https://github.com/timholy/HDF5.jl/issues/170
 # This is 1/10 of the amount of data, but we don't have a problem with
@@ -117,4 +84,4 @@ type Cell
     d::Float64
     e::Array{Float64,1}
 end
-@benchmark cell [Cell(rand(3), rand(3), rand(8, 3), rand(), rand(3)) for i = 1:118138]
+bench("cell", [Cell(rand(3), rand(3), rand(8, 3), rand(), rand(3)) for i = 1:118138])

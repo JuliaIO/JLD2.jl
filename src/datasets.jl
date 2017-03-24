@@ -346,7 +346,7 @@ end
 unsafe_isdefined(arr::Array, i::Int) =
     unsafe_load(Ptr{Ptr{Void}}(pointer(arr)+(i-1)*sizeof(Ptr{Void}))) != Ptr{Void}(0)
 
-function write_data{T}(f::JLDFile, data::Array{T}, odr, wsession::JLDWriteSession)
+function write_data{T,S}(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSession)
     io = f.io
     ensureroom(io, sizeof(odr) * length(data))
     arr = io.arr
@@ -365,10 +365,7 @@ function write_data{T}(f::JLDFile, data::Array{T}, odr, wsession::JLDWriteSessio
     arr # Keep old array rooted until the end
 end
 
-# Force specialization on DataType
-write_data(f::JLDFile, data::Array, odr::Type{Union{}}, wsession::JLDWriteSession) = error("ODR is invalid")
-
-function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr, data, wsession::JLDWriteSession)
+function write_dataset{S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data, wsession::JLDWriteSession)
     io = f.io
     datasz = sizeof(odr) * numel(dataspace)
     layout_class = datasz < 8192 ? LC_COMPACT_STORAGE : LC_CONTIGUOUS_STORAGE
@@ -433,10 +430,6 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
 
     h5offset(f, header_offset)
 end
-
-# Force specialization on DataType
-write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::Type{Union{}}, data, wsession::JLDWriteSession) =
-    error("ODR is invalid")
 
 function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
     odr = objodr(x)
