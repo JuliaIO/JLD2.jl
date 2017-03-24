@@ -210,16 +210,15 @@ function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
 end
 
 # Write an HDF5 datatype to the file
-function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::Type,
+function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::DataType,
                 attributes::WrittenAttribute...)
     io = f.io
 
     # This needs to be written this way or type inference gets unhappy...
     # Also needs to happen here so that we write the DataType type
     # before we try to find where this type will be written
-    typeattr = WrittenAttribute(:julia_type,
-                                WriteDataspace(f, DataType, odr(DataType)),
-                                h5type(f, DataType, DataType), readas)
+    typeattr = WrittenAttribute(
+        :julia_type, WriteDataspace(f, DataType, odr(DataType)), h5type(f, DataType, DataType), readas)
 
     offset = f.end_of_data
 
@@ -341,22 +340,34 @@ function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{Re
             end
         else
             if isempty(T.types)
-                warn("bitstype $T has $(sizeof(T)*8) bits, but written type has $(dt.size*8) bits; reconstructing")
+                warn("primitive type $T has $(sizeof(T)*8) bits, but written type has $(dt.size*8) bits; reconstructing")
             else
-                warn("$T is a non-bitstype, but written type is a bitstype with $(dt.size*8) bits; reconstructing")
+                warn("$T is a non-primitive type, but written type is a primitive type with $(dt.size*8) bits; reconstructing")
             end
             reconstruct_bitstype(T.name.name, dt.size, empty)
         end
     end
 end
 
-# constructrr constructs a ReadRepresentation for a given type. This is the
-# generic method for all types not specially handled below.
-#
-# For this method, if hard_failure is true, then we will throw a
-# TypeMappingException instead of attempting reconstruction. This helps in cases
-# where we can't know if reconstructed parametric types will have a matching
-# memory layout without first inspecting the memory layout.
+
+function constructrr(f::JLDFile, T::UnionAll, dt::CompoundDatatype,
+                     attrs::Vector{ReadAttribute},
+                     hard_failure::Bool=false)
+    warn("read type $T is not a leaf type in workspace; reconstructing")
+    return reconstruct_compound(f, string(T), dt, read_field_datatypes(f, attrs))
+end
+
+"""
+constructrr(f::JLDFile, T::DataType, dt::CompoundType, attrs::Vector{ReadAttribute},
+            hard_failure::Bool=false)
+
+Constructs a ReadRepresentation for a given type. This is the generic method for all
+types not specially handled below.
+
+If hard_failure is true, then throw a TypeMappingException instead of attempting
+reconstruction. This helps in cases where we can't know if reconstructed parametric types
+will have a matching memory layout without first inspecting the memory layout.
+"""
 struct TypeMappingException <: Exception; end
 function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
@@ -387,11 +398,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
         writtenas = writeas(wstype)
         if !hasfielddata(writtenas)
             types[i] = wstype
-            if wstype === writtenas
-                odrs[i] = nothing
-            else
-                odrs[i] = CustomSerialization{writtenas,nothing}
-            end
+            odrs[i] = wstype === writtenas ? nothing : CustomSerialization{writtenas,nothing}
             offsets[i] = dtindex == 0 ? 0 : (dt.offsets[dtindex] + dt.members[dtindex].size::UInt32)
         else
             if !haskey(dtnames, fn[i])
@@ -432,7 +439,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
     if !all(mapped)
         warn("the following fields are present in type ", T,
              " saved in the file but not present in the type the workspace:\n\n",
-             join(dt.names[!mapped], "\n"),
+             join(dt.names[.!mapped], "\n"),
              "\n\nData in these fields will not be accessible")
     end
 
@@ -1059,19 +1066,44 @@ function typestring(T::UnknownType)
     String(take!(tn))
 end
 
-# Reconstruct an UnknownType for which we were able to resolve the name, but not
-# some of the parameters, by attempting to replace unknown parameters with the
-# UB on the type.
-function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatype,
-                     attrs::Vector{ReadAttribute})
-    field_datatypes = read_field_datatypes(f, attrs)
-    if unk.name === Tuple
+# If we managed to resolve the name, but not the parameters, then try calling the
+# constructor.
+function constructrr(f::JLDFile, unk::UnknownType{T} where T<:Union{UnionAll,DataType},
+                     dt::CompoundDatatype, attrs::Vector{ReadAttribute})
+    if unk.name == Tuple
+        field_datatypes = read_field_datatypes(f, attrs)
         # For a tuple with unknown fields, we should reconstruct the fields
         rodr = reconstruct_odr(f, dt, field_datatypes)
         # This is a "pseudo-RR" since the tuple is not fully parametrized, but
         # the parameters must depend on the types actually encoded in the file
         (ReadRepresentation(Tuple, rodr), false)
-    elseif length(unk.name.parameters) != length(unk.parameters)
+    else
+    end
+end
+
+"""
+    behead(T)
+
+Given a UnionAll type, recursively eliminates the `where` clauses
+"""
+behead(T::UnionAll) = behead(T.body)
+behead(T::ANY) = T
+
+function getfieldtypes(f::JLDFile, dt::CompoundDatatype, attrs::Vector{ReadAttribute})
+    datatypes = read_field_datatypes(f, attrs)
+    jltypes = Vector{Any}(length(datatypes))
+    for i = 1:length(datatypes)
+        ref = datatypes[i]
+        jltypes[i] = jltype(f, ref == NULL_REFERENCE ? dt.members[i] : f.datatype_locations[ref])
+    end
+    jltypes
+end
+
+function constructrr(f::JLDFile, unk::UnknownType{UnionAll}, dt::CompoundDatatype,
+                     attrs::Vector{ReadAttribute})
+    field_datatypes = read_field_datatypes(f, attrs)
+    body = behead(unk.name)
+    if length(body.parameters) != length(unk.parameters)
         warn("read type ", typestring(unk), " has a different number of parameters from type ",
              unk.name, " in workspace; reconstructing")
         reconstruct_compound(f, typestring(unk), dt, field_datatypes)
@@ -1079,7 +1111,7 @@ function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatyp
         params = copy(unk.parameters)
         for i = 1:length(params)
             if isa(params[i], UnknownType)
-                param = unk.name.parameters[i]::TypeVar
+                param = body.parameters[i]::TypeVar
                 params[i] = param.ub
             end
         end
@@ -1090,7 +1122,7 @@ function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatyp
         try
             T = unk.name{params...}
         catch err
-            warn("type parameters for ", typestring(unk)" do not match type ", unk.name, " in workspace; reconstructing")
+            warn("type parameters for ", typestring(unk), " do not match type ", unk.name, " in workspace; reconstructing")
             return reconstruct_compound(f, typestring(unk), dt, field_datatypes)
         end
 
@@ -1107,7 +1139,7 @@ function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatyp
 end
 
 # An UnknownType for which we were not able to resolve the name.
-function constructrr(f::JLDFile, unk::UnknownType, dt::CompoundDatatype,
+function constructrr(f::JLDFile, unk::UnknownType{String}, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute})
     ts = typestring(unk)
     warn("type ", ts, " does not exist in workspace; reconstructing")

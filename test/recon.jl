@@ -1,78 +1,78 @@
 using JLD2
 
-type TestType1
+mutable struct TestType1
     x::Int
 end
-type TestType2
+mutable struct TestType2
     x::Int
 end
-immutable TestType3
+struct TestType3
     x::TestType2
 end
 
-type TestType4
+mutable struct TestType4
     x::Int
 end
-type TestType5
+mutable struct TestType5
     x::TestType4
 end
-type TestType6 end
-bitstype 8 TestType7
-immutable TestType8
+mutable struct TestType6 end
+primitive type TestType7 8 end
+struct TestType8
     a::TestType4
     b::TestType5
     c::TestType6
     d::TestType7
 end
-immutable TestTypeContainer{T}
+struct TestTypeContainer{T}
     a::T
     b::Int
 end
-bitstype 16 TestType9
-immutable TestType10
+primitive type TestType9 16 end
+struct TestType10
     a::Int
     b::UInt8
 end
-immutable TestType11
+struct TestType11
     a::Int
     b::UInt8
 end
-immutable TestType12
+struct TestType12
     x::String
 end
-type TestType13
+mutable struct TestType13
     a
     TestType13() = new()
 end
-immutable TestType14{T}
+struct TestType14{T}
     x::T
     y::Int
 end
-immutable TestType15{T,S}
+struct TestType15{T,S}
     x::T
     y::S
 end
-immutable TestType16{T}
+struct TestType16{T}
     x::T
     y::Int
 end
-immutable TestTypeContainer2{T}
+struct TestTypeContainer2{T}
     a::T
     b::Int
 end
-immutable TestTypeContainer3{T,S}
+struct TestTypeContainer3{T,S}
     a::T
     b::S
 end
-immutable TestTypeContainer4{T}
+struct TestTypeContainer4{T}
     a::T
     b::Int
 end
-immutable TestTypeContainer5{T,S}
+struct TestTypeContainer5{T,S}
     a::T
     b::S
 end
-immutable TestType17
+struct TestType17
     x::Int
 end
 
@@ -112,59 +112,59 @@ close(file)
 
 workspace()
 using LastMain.JLD2, Base.Test
-type TestType1
+mutable struct TestType1
     x::Float64
 end
-type TestType2
+mutable struct TestType2
     x::Int
 end
-immutable TestType3
+struct TestType3
     x::TestType1
 end
-immutable TestTypeContainer{T}
+struct TestTypeContainer{T}
     a::T
     b::Int
 end
-bitstype 8 TestType9
-immutable TestType10
+primitive type TestType9 8 end
+struct TestType10
     a::Int
     b::UInt8
     c::UInt8
 end
-immutable TestType11
+struct TestType11
     b::UInt8
 end
-immutable TestType12
+struct TestType12
     x::Int
 end
-type TestType13
+mutable struct TestType13
     a
 end
-immutable TestType14{T,S}
+struct TestType14{T,S}
     x::T
     y::S
 end
-immutable TestType15{T}
+struct TestType15{T}
     x::T
     y::Float64
 end
-immutable TestType16{T<:Integer}
+struct TestType16{T<:Integer}
     x::T
     y::Int
 end
-immutable TestTypeContainer2{T}
+struct TestTypeContainer2{T}
     a::T
     b::String
 end
-immutable TestTypeContainer3{T,S}
+struct TestTypeContainer3{T,S}
     a::T
     b::S
 end
-immutable TestTypeContainer4{T,S}
+struct TestTypeContainer4{T,S}
     a::T
     b::S
 end
-immutable TestTypeContainer5{T}
+struct TestTypeContainer5{T}
     a::T
     b::Int
 end

@@ -179,7 +179,7 @@ function load_datatypes(f::JLDFile)
     @assert length(dts) == length(cdts)
     i = 1
     for cdt in values(cdts)
-        !isdefined(dts, i) && jltype(f, cdt)
+        !isassigned(dts, i) && jltype(f, cdt)
         i += 1
     end
 end
