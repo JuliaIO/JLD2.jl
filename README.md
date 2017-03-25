@@ -11,6 +11,5 @@ The code here should work on Julia 0.4. (It is untested and currently likely bro
 
 TODO:
 
-- Julia 0.5 support
 - Compression
 - Integrate reading older JLD files
