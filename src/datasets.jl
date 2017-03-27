@@ -332,7 +332,7 @@ function payload_size(dataspace::WriteDataspace, datatype::H5Datatype, datasz::I
 end
 
 # Might need to do something else someday for non-mmapped IO
-function write_data(f::JLDFile, data, odr, wsession::JLDWriteSession)
+function write_data{S}(f::JLDFile, data, odr::S, wsession::JLDWriteSession)
     io = f.io
     ensureroom(io, sizeof(odr))
     arr = io.arr
@@ -431,23 +431,26 @@ function write_dataset{S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dat
     h5offset(f, header_offset)
 end
 
-function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
+@Base.pure ismutabletype(x::DataType) = x.mutable
+
+@inline function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
     odr = objodr(x)
     write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
 end
 
-@noinline function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
+@inline function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
     offset = get(wsession.h5offset, object_id(x), RelOffset(0))
     offset != RelOffset(0) ? offset : write_dataset(f, x, wsession)::RelOffset
 end
 
-write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession{Union{}}) =
+@inline write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession{Union{}}) =
     write_dataset(f, x, wsession)
 
-@inline function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
-    if !typeof(x).mutable
-        write_dataset(f, x, wsession)::RelOffset
-    else
+function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
+    if !ismutabletype(typeof(x))
         write_ref_mutable(f, x, wsession)::RelOffset
+    else
+        write_dataset(f, x, wsession)::RelOffset
     end
 end
+write_ref(f::JLDFile, x::RelOffset, wsession::JLDWriteSession) = x

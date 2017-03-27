@@ -472,8 +472,8 @@ end
 # h5convert! stores the HDF5 representation of Julia data to a pointer. This
 # method handles types with no padding or references where this is just a simple
 # store
-h5convert!{T}(out::Ptr, ::Type{T}, ::JLDFile, x::T, ::JLDWriteSession) =
-    (unsafe_store!(convert(Ptr{typeof(x)}, out), x); nothing)
+h5convert!{T}(out::Ptr, ::Type{T}, ::JLDFile, x, ::JLDWriteSession) =
+    (unsafe_store!(convert(Ptr{T}, out), x); nothing)
 
 # We pack types that have padding using a staged h5convert! method
 @generated function h5convert!{Offsets,Types,H5Types}(out::Ptr, ::OnDiskRepresentation{Offsets,Types,H5Types}, file::JLDFile, x, wsession::JLDWriteSession)
@@ -644,10 +644,6 @@ odr(::Type{RelOffset}) = RelOffset
 
 function h5convert!(out::Ptr, odr::Type{RelOffset}, f::JLDFile, x::Any, wsession::JLDWriteSession)
     unsafe_store!(convert(Ptr{RelOffset}, out), write_ref(f, x, wsession))
-    nothing
-end
-function h5convert!(out::Ptr, odr::Type{RelOffset}, f::JLDFile, x::RelOffset, wsession::JLDWriteSession)
-    unsafe_store!(convert(Ptr{RelOffset}, out), x)
     nothing
 end
 h5convert_uninitialized!(out::Ptr, odr::Type{RelOffset}) =
