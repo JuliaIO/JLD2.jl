@@ -41,8 +41,6 @@ writeas(T::Type) = T
 
 # Carries the type and on-disk representation of data to be read from
 # the disk
-ReadRepresentation(T, S) = ReadRepresentation{T,S}()
-ReadRepresentation(T) = ReadRepresentation{T,T}()
 sizeof{T,S}(::ReadRepresentation{T,S}) = sizeof(S)
 
 # Determines whether a specific field type should be saved in the file
@@ -234,10 +232,10 @@ function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::DataTy
         wrtypeattr = WrittenAttribute(:written_type,
                                       WriteDataspace(f, DataType, odr(DataType)),
                                       h5type(f, DataType, DataType), writeas)
-        f.h5jltype[cdt] = ReadRepresentation(readas, CustomSerialization{writeas, odr(writeas)})
+        f.h5jltype[cdt] = ReadRepresentation{readas,CustomSerialization{writeas, odr(writeas)}}()
         commit(f, dtype, tuple(typeattr, wrtypeattr, attributes...))
     else
-        f.h5jltype[cdt] = ReadRepresentation(writeas, odr(writeas))
+        f.h5jltype[cdt] = ReadRepresentation{writeas,odr(writeas)}()
         commit(f, dtype, tuple(typeattr, attributes...))
     end
 
@@ -248,7 +246,7 @@ function read_field_datatypes(f::JLDFile, attrs::Vector{ReadAttribute})
     for attr in attrs
         if attr.name == :field_datatypes
             return read_attr_data(f, attr, ReferenceDatatype(),
-                                  ReadRepresentation(RelOffset))
+                                  ReadRepresentation{RelOffset,RelOffset}())
         end
     end
     RelOffset[]
@@ -296,7 +294,7 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
         end
         f.jlh5type[DataType] = cdt
         f.datatypes[cdt.index] = dt
-        return (f.h5jltype[cdt] = ReadRepresentation(DataType, DataTypeODR()))
+        return (f.h5jltype[cdt] = ReadRepresentation{DataType, DataTypeODR()}())
     end
 
     datatype = read_attr_data(f, julia_type_attr)
@@ -328,12 +326,12 @@ end
 function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{ReadAttribute})
     dt.class == DT_OPAQUE || throw(UnsupportedFeatureException())
     if sizeof(T) == dt.size
-        (ReadRepresentation(T), true)
+        (ReadRepresentation{T,T}(), true)
     else
         empty = check_empty(attrs)
         if empty
             if !hasdata(T)
-                (ReadRepresentation(T, nothing), true)
+                (ReadRepresentation{T,nothing}(), true)
             else
                 warn("$T has $(sizeof(T)*8) bytes, but written type was empty; reconstructing")
                 reconstruct_bitstype(T.name.name, dt.size, empty)
@@ -444,7 +442,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
     end
 
     if samelayout
-        (ReadRepresentation(T), true)
+        (ReadRepresentation{T,T}(), true)
     else
         wodr = odr(T)
         offsets = (offsets...)
@@ -461,11 +459,11 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
                     end
                 end
                 if tequal && odr_types == offsets
-                    return (ReadRepresentation(T, wodr), true)
+                    return (ReadRepresentation{T,wodr}(), true)
                 end
             end
         end
-        return (ReadRepresentation(T, OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}}()), false)
+        return (ReadRepresentation{T,OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}}()}(), false)
     end
 end
 
@@ -591,15 +589,15 @@ function jltype(f::JLDFile, dt::FixedPointDatatype)
     ((dt.bitfield2 == 0x00) & (dt.bitfield3 == 0x00) & (dt.bitoffset == 0) & (dt.bitprecision == dt.size*8)) ||
         throw(UnsupportedFeatureException())
     if dt.size == 8
-        return signed ? ReadRepresentation(Int64) : ReadRepresentation(UInt64)
+        return signed ? ReadRepresentation{Int64,Int64}() : ReadRepresentation{UInt64,UInt64}()
     elseif dt.size == 1
-        return signed ? ReadRepresentation(Int8) : ReadRepresentation(UInt8)
+        return signed ? ReadRepresentation{Int8,Int8}() : ReadRepresentation{UInt8,UInt8}()
     elseif dt.size == 4
-        return signed ? ReadRepresentation(Int32) : ReadRepresentation(UInt32)
+        return signed ? ReadRepresentation{Int32,Int32}() : ReadRepresentation{UInt32,UInt32}()
     elseif dt.size == 2
-        return signed ? ReadRepresentation(Int16) : ReadRepresentation(UInt16)
+        return signed ? ReadRepresentation{Int16,Int16}() : ReadRepresentation{UInt16,UInt16}()
     elseif dt.size == 16
-        return signed ? ReadRepresentation(Int128) : ReadRepresentation(UInt128)
+        return signed ? ReadRepresentation{Int128,Int128}() : ReadRepresentation{UInt128,UInt128}()
     else
         throw(UnsupportedFeatureException())
     end
@@ -614,11 +612,11 @@ h5fieldtype(::JLDFile, ::Type{Float64}, ::Type{Float64}, ::Initialized) =
 
 function jltype(f::JLDFile, dt::FloatingPointDatatype)
     if dt == h5fieldtype(f, Float64, Float64, Val{true})
-        return ReadRepresentation(Float64)
+        return ReadRepresentation{Float64,Float64}()
     elseif dt == h5fieldtype(f, Float32, Float32, Val{true})
-        return ReadRepresentation(Float32)
+        return ReadRepresentation{Float32,Float32}()
     elseif dt == h5fieldtype(f, Float16, Float16, Val{true})
-        return ReadRepresentation(Float16)
+        return ReadRepresentation{Float16,Float16}()
     else
         throw(UnsupportedFeatureException())
     end
@@ -634,7 +632,7 @@ h5type(f::JLDFile, writeas::PrimitiveTypeTypes, x) =
 # Used only for custom serialization
 constructrr(f::JLDFile, T::PrimitiveTypeTypes, dt::Union{FixedPointDatatype,FloatingPointDatatype},
             ::Vector{ReadAttribute}) =
-    dt == h5fieldtype(f, T, T, Val{true}) ? (ReadRepresentation(T), true) :
+    dt == h5fieldtype(f, T, T, Val{true}) ? (ReadRepresentation{T,T}(), true) :
                                             throw(UnsupportedFeatureException())
 
 ## References
@@ -725,7 +723,7 @@ function jltype(f::JLDFile, dt::BasicDatatype)
     elseif dt.class == DT_OPAQUE
         error("attempted to read a bare (non-committed) opaque datatype")
     elseif dt.class == DT_REFERENCE
-        return ReadRepresentation(Any, RelOffset)
+        return ReadRepresentation{Any,RelOffset}()
     else
         throw(UnsupportedFeatureException())
     end
@@ -733,7 +731,7 @@ end
 
 function jltype(f::JLDFile, dt::VariableLengthDatatype)
     if dt == H5TYPE_VLEN_UTF8
-        return ReadRepresentation(String, Vlen{String})
+        return ReadRepresentation{String,Vlen{String}}()
     else
         throw(UnsupportedFeatureException())
     end
@@ -745,7 +743,7 @@ h5convert!(out::Ptr, ::Type{Vlen{String}}, f::JLDFile, x, wsession::JLDWriteSess
     store_vlen!(out, UInt8, f, Vector{UInt8}(x), wsession)
 
 jlconvert(::ReadRepresentation{String,Vlen{String}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
-    String(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr, NULL_REFERENCE))
+    String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
 function jlconvert(rr::FixedLengthString{String}, ::JLDFile, ptr::Ptr, ::RelOffset)
     data = Vector{UInt8}(rr.length)
     unsafe_copy!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
@@ -755,7 +753,7 @@ end
 # Used only for custom serialization
 constructrr(::JLDFile, ::Type{String}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
     dt == H5TYPE_VLEN_UTF8 ?
-        (ReadRepresentation(String, Vlen{String}), true) :
+        (ReadRepresentation{String,Vlen{String}}(), true) :
         throw(UnsupportedFeatureException())
 
 ## Symbols
@@ -773,11 +771,11 @@ h5convert!(out::Ptr, ::Type{Vlen{String}}, f::JLDFile, x::Symbol, ::JLDWriteSess
     store_vlen!(out, UInt8, f, Vector{UInt8}(String(x)), f.datatype_wsession)
 
 constructrr(::JLDFile, ::Type{Symbol}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
-    dt == H5TYPE_VLEN_UTF8 ? (ReadRepresentation(Symbol, Vlen{String}), true) :
+    dt == H5TYPE_VLEN_UTF8 ? (ReadRepresentation{Symbol,Vlen{String}}(), true) :
                              throw(UnsupportedFeatureException())
 
 jlconvert(::ReadRepresentation{Symbol,Vlen{String}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
-    Symbol(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr, NULL_REFERENCE))
+    Symbol(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
 
 ## BigInts and BigFloats
 
@@ -812,7 +810,7 @@ function h5fieldtype{T<:DataType}(f::JLDFile, ::Type{T}, readas::Type, ::Initial
     cdt = CommittedDatatype(h5o, id)
     f.datatype_locations[h5o] = cdt
     f.jlh5type[DataType] = cdt
-    f.h5jltype[cdt] = ReadRepresentation(DataType, DataTypeODR())
+    f.h5jltype[cdt] = ReadRepresentation{DataType,DataTypeODR()}()
     push!(f.datatypes, H5TYPE_DATATYPE)
 
     commit(f, H5TYPE_DATATYPE, (WrittenAttribute(:julia_type, WriteDataspace(f, DataType, odr(DataType)), cdt, DataType),))
@@ -871,7 +869,7 @@ function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
     hasparams = unsafe_load(convert(Ptr{UInt32}, ptr+sizeof(Vlen{UInt8}))) != 0
     unknown_params = false
     if hasparams
-        paramrefs = jlconvert(ReadRepresentation(RelOffset, Vlen{RelOffset}), f,
+        paramrefs = jlconvert(ReadRepresentation{RelOffset,Vlen{RelOffset}}(), f,
                               ptr+sizeof(Vlen{UInt8}), NULL_REFERENCE)
         params = Any[begin
             # If the reference is to a committed datatype, read the datatype
@@ -883,7 +881,7 @@ function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
         end for ref in paramrefs]
     end
 
-    path = String(jlconvert(ReadRepresentation(UInt8, Vlen{UInt8}), f, ptr, NULL_REFERENCE))
+    path = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
     parts = split(path, '.')
     m = Main
     for part in parts
@@ -914,7 +912,7 @@ function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
 end
 
 constructrr{T<:DataType}(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute}) =
-    dt == H5TYPE_DATATYPE ? (ReadRepresentation(DataType, DataTypeODR()), true) :
+    dt == H5TYPE_DATATYPE ? (ReadRepresentation{DataType,DataTypeODR()}(), true) :
                             throw(UnsupportedFeatureException())
 
 ## Union Types
@@ -942,13 +940,13 @@ h5convert!(out::Ptr, ::Type{Vlen{DataTypeODR()}}, f::JLDFile, x::Union, wsession
 
 function jlconvert(::ReadRepresentation{Union, Vlen{DataTypeODR()}}, f::JLDFile,
                    ptr::Ptr, header_offset::RelOffset)
-    v = Union{jlconvert(ReadRepresentation(DataType, Vlen{DataTypeODR()}), f, ptr, NULL_REFERENCE)...}
+    v = Union{jlconvert(ReadRepresentation{DataType,Vlen{DataTypeODR()}}(), f, ptr, NULL_REFERENCE)...}
     track_weakref!(f, header_offset, v)
     v
 end
 
 constructrr{T<:Union}(::JLDFile, ::Type{T}, dt::VariableLengthDatatype, ::Vector{ReadAttribute}) =
-    dt == H5TYPE_UNION ? (ReadRepresentation(Union, Vlen{DataTypeODR()}), true) :
+    dt == H5TYPE_UNION ? (ReadRepresentation{Union,Vlen{DataTypeODR()}}(), true) :
                          throw(UnsupportedFeatureException())
 
 ## UnionAll
@@ -1028,7 +1026,7 @@ function reconstruct_bitstype(name::Union{Symbol,String}, size::Integer, empty::
     sym = gensym(name)
     eval(ReconstructedTypes, empty ? :(struct $(sym) end) : :(primitive type $(sym) $(size*8) end))
     T = getfield(ReconstructedTypes, sym)
-    (ReadRepresentation(T, empty ? nothing : T), false)
+    (ReadRepresentation{T, empty ? nothing : T}(), false)
 end
 
 function constructrr(f::JLDFile, unk::UnknownType, dt::BasicDatatype,
@@ -1072,7 +1070,7 @@ function constructrr(f::JLDFile, unk::UnknownType{T} where T<:Union{UnionAll,Dat
         rodr = reconstruct_odr(f, dt, field_datatypes)
         # This is a "pseudo-RR" since the tuple is not fully parametrized, but
         # the parameters must depend on the types actually encoded in the file
-        (ReadRepresentation(Tuple, rodr), false)
+        (ReadRepresentation{Tuple,rodr}(), false)
     else
     end
 end
@@ -1175,7 +1173,7 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
                                   types, false, 0))
     T = getfield(ReconstructedTypes, reconname)
 
-    (ReadRepresentation(T, rodr), false)
+    (ReadRepresentation{T,rodr}(), false)
 end
 
 # These need to go at the bottom. Also, JLD2 doesn't support custom serialization because

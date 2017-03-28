@@ -37,7 +37,7 @@ function read_dataset(f::JLDFile, offset::RelOffset)
         elseif msg.msg_type == HM_FILL_VALUE
             (read(cio, UInt8) == 3 && read(cio, UInt8) == 0x09) || throw(UnsupportedFeatureException())
         elseif msg.msg_type == HM_DATA_LAYOUT
-            read(cio, UInt8) == 3 || throw(UnsupportedVersionException())
+            read(cio, UInt8) == 4 || throw(UnsupportedVersionException())
             storage_type = read(cio, UInt8)
             if storage_type == LC_COMPACT_STORAGE
                 data_length = read(cio, UInt16)
@@ -374,7 +374,7 @@ function write_dataset{S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dat
 
     header_offset = f.end_of_data
     seek(io, header_offset)
-    f.end_of_data = header_offset + fullsz + (layout_class == LC_CONTIGUOUS_STORAGE ? datasz : 0)
+    f.end_of_data = header_offset + fullsz + (layout_class != LC_COMPACT_STORAGE ? datasz : 0)
 
     if typeof(data).mutable && !isa(wsession, JLDWriteSession{Union{}})
         wsession.h5offset[object_id(data)] = h5offset(f, header_offset)
@@ -382,33 +382,13 @@ function write_dataset{S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dat
     end
 
     cio = begin_checksum(io, fullsz - 4)
-
-    write(cio, ObjectStart(size_flag(psz)))
-    write_size(cio, psz)
-
-    # Dataspace
-    write(cio, HeaderMessage(HM_DATASPACE, sizeof(dataspace), 0))
-    write(cio, dataspace)
-
-    # Datatype
-    write(cio, HeaderMessage(HM_DATATYPE, sizeof(datatype), 1+2*isa(datatype, CommittedDatatype)))
-    write(cio, datatype)
-
-    # Fill value
-    write(cio, HeaderMessage(HM_FILL_VALUE, 2, 0))
-    write(cio, UInt8(3)) # Version
-    write(cio, 0x09)     # Flags
-
-    # Attributes
-    for attr in dataspace.attributes
-        write(cio, HeaderMessage(HM_ATTRIBUTE, sizeof(attr), 0))
-        write_attribute(cio, f, attr, f.datatype_wsession)
-    end
+    write_object_header_and_dataspace(cio, f, psz, dataspace)
+    write_datatype(cio, datatype)
 
     # Data storage layout
     if layout_class == LC_COMPACT_STORAGE
         write(cio, HeaderMessage(HM_DATA_LAYOUT, 4+datasz, 0))
-        write(cio, UInt8(3))                  # Version
+        write(cio, UInt8(4))                  # Version
         write(cio, LC_COMPACT_STORAGE)        # Layout class
         write(cio, UInt16(datasz))            # Size
         if datasz != 0
@@ -418,7 +398,7 @@ function write_dataset{S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dat
         write(io, end_checksum(cio))
     else
         write(cio, HeaderMessage(HM_DATA_LAYOUT, 2+sizeof(RelOffset)+sizeof(Length), 0))
-        write(cio, UInt8(3))                            # Version
+        write(cio, UInt8(4))                            # Version
         write(cio, LC_CONTIGUOUS_STORAGE)               # Layout class
         write(cio, h5offset(f, header_offset + fullsz)) # RelOffset
         write(cio, Length(sizeof(data)))                # Length
@@ -429,6 +409,31 @@ function write_dataset{S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dat
     end
 
     h5offset(f, header_offset)
+end
+
+function write_object_header_and_dataspace(cio::IO, f::JLDFile, psz::Int, dataspace::WriteDataspace)
+    write(cio, ObjectStart(size_flag(psz)))
+    write_size(cio, psz)
+
+    # Fill value
+    write(cio, HeaderMessage(HM_FILL_VALUE, 2, 0))
+    write(cio, UInt8(3)) # Version
+    write(cio, 0x09)     # Flags
+
+    # Dataspace
+    write(cio, HeaderMessage(HM_DATASPACE, sizeof(dataspace), 0))
+    write(cio, dataspace)
+
+    # Attributes
+    for attr in dataspace.attributes
+        write(cio, HeaderMessage(HM_ATTRIBUTE, sizeof(attr), 0))
+        write_attribute(cio, f, attr, f.datatype_wsession)
+    end
+end
+
+function write_datatype(cio::IO, datatype::H5Datatype)
+    write(cio, HeaderMessage(HM_DATATYPE, sizeof(datatype), 1+2*isa(datatype, CommittedDatatype)))
+    write(cio, datatype)
 end
 
 @Base.pure ismutabletype(x::DataType) = x.mutable
