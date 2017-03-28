@@ -447,7 +447,7 @@ end
     write_dataset(f, x, wsession)
 
 function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
-    if !ismutabletype(typeof(x))
+    if ismutabletype(typeof(x))
         write_ref_mutable(f, x, wsession)::RelOffset
     else
         write_dataset(f, x, wsession)::RelOffset
