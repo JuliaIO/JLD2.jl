@@ -112,67 +112,67 @@ close(file)
 
 workspace()
 
-# workspace doesn't work anymore unless we call @eval afterwards. Unfortunately, we can't
+# workspace doesn't work anymore unless we call @eval Core.Main afterwards. Unfortunately, we can't
 # just put all this code in a block, because then it won't be evaluated at top-level. So
-# we need a bunch of @evals here.
-@eval using LastMain.JLD2, Base.Test
-@eval mutable struct TestType1
+# we need a bunch of @eval Core.Mains here.
+@eval Core.Main using LastMain.JLD2, Base.Test
+@eval Core.Main mutable struct TestType1
     x::Float64
 end
-@eval mutable struct TestType2
+@eval Core.Main mutable struct TestType2
     x::Int
 end
-@eval struct TestType3
+@eval Core.Main struct TestType3
     x::TestType1
 end
-@eval struct TestTypeContainer{T}
+@eval Core.Main struct TestTypeContainer{T}
     a::T
     b::Int
 end
-@eval primitive type TestType9 8 end
-@eval struct TestType10
+@eval Core.Main primitive type TestType9 8 end
+@eval Core.Main struct TestType10
     a::Int
     b::UInt8
     c::UInt8
 end
-@eval struct TestType11
+@eval Core.Main struct TestType11
     b::UInt8
 end
-@eval struct TestType12
+@eval Core.Main struct TestType12
     x::Int
 end
-@eval mutable struct TestType13
+@eval Core.Main mutable struct TestType13
     a
 end
-@eval struct TestType14{T,S}
+@eval Core.Main struct TestType14{T,S}
     x::T
     y::S
 end
-@eval struct TestType15{T}
+@eval Core.Main struct TestType15{T}
     x::T
     y::Float64
 end
-@eval struct TestType16{T<:Integer}
+@eval Core.Main struct TestType16{T<:Integer}
     x::T
     y::Int
 end
-@eval struct TestTypeContainer2{T}
+@eval Core.Main struct TestTypeContainer2{T}
     a::T
     b::String
 end
-@eval struct TestTypeContainer3{T,S}
+@eval Core.Main struct TestTypeContainer3{T,S}
     a::T
     b::S
 end
-@eval struct TestTypeContainer4{T,S}
+@eval Core.Main struct TestTypeContainer4{T,S}
     a::T
     b::S
 end
-@eval struct TestTypeContainer5{T}
+@eval Core.Main struct TestTypeContainer5{T}
     a::T
     b::Int
 end
-@eval begin
+@eval Core.Main begin
 const TestType17 = 5
 
 file = jldopen(LastMain.fn, "r")
