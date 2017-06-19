@@ -111,63 +111,68 @@ write(file, "x25", Dict(TestType17(1) => reinterpret(TestType9, 0x4567)))
 close(file)
 
 workspace()
-using LastMain.JLD2, Base.Test
-mutable struct TestType1
+
+# workspace doesn't work anymore unless we call @eval afterwards. Unfortunately, we can't
+# just put all this code in a block, because then it won't be evaluated at top-level. So
+# we need a bunch of @evals here.
+@eval using LastMain.JLD2, Base.Test
+@eval mutable struct TestType1
     x::Float64
 end
-mutable struct TestType2
+@eval mutable struct TestType2
     x::Int
 end
-struct TestType3
+@eval struct TestType3
     x::TestType1
 end
-struct TestTypeContainer{T}
+@eval struct TestTypeContainer{T}
     a::T
     b::Int
 end
-primitive type TestType9 8 end
-struct TestType10
+@eval primitive type TestType9 8 end
+@eval struct TestType10
     a::Int
     b::UInt8
     c::UInt8
 end
-struct TestType11
+@eval struct TestType11
     b::UInt8
 end
-struct TestType12
+@eval struct TestType12
     x::Int
 end
-mutable struct TestType13
+@eval mutable struct TestType13
     a
 end
-struct TestType14{T,S}
+@eval struct TestType14{T,S}
     x::T
     y::S
 end
-struct TestType15{T}
+@eval struct TestType15{T}
     x::T
     y::Float64
 end
-struct TestType16{T<:Integer}
+@eval struct TestType16{T<:Integer}
     x::T
     y::Int
 end
-struct TestTypeContainer2{T}
+@eval struct TestTypeContainer2{T}
     a::T
     b::String
 end
-struct TestTypeContainer3{T,S}
+@eval struct TestTypeContainer3{T,S}
     a::T
     b::S
 end
-struct TestTypeContainer4{T,S}
+@eval struct TestTypeContainer4{T,S}
     a::T
     b::S
 end
-struct TestTypeContainer5{T}
+@eval struct TestTypeContainer5{T}
     a::T
     b::Int
 end
+@eval begin
 const TestType17 = 5
 
 file = jldopen(LastMain.fn, "r")
@@ -275,3 +280,4 @@ x = read(file, "x25")
 @test reinterpret(UInt16, first(x).second) === 0x4567
 
 close(file)
+end

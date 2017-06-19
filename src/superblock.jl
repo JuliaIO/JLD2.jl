@@ -2,11 +2,11 @@
 # Superblock
 #
 
-const SUPERBLOCK_SIGNATURE = reinterpret(UInt64, UInt8[0o211, 'H', 'D', 'F', '\r', '\n', 0o032, '\n'])[1]
+const SUPERBLOCK_SIGNATURE = htol(0x0a1a0a0d46444889) # UInt8[0o211, 'H', 'D', 'F', '\r', '\n', 0o032, '\n']
 
 # https://www.hdfgroup.org/HDF5/doc/H5.format.html#FileMetaData
 # Superblock (Version 2)
-type Superblock
+mutable struct Superblock
     file_consistency_flags::UInt8
     base_address::Int64
     superblock_extension_address::RelOffset

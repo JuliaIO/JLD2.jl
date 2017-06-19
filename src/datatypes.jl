@@ -18,7 +18,7 @@ const DT_ARRAY = UInt8(10) | (UInt8(3) << 4)
 #    Strings
 #    Opaque datatypes
 #    References
-immutable BasicDatatype <: H5Datatype
+struct BasicDatatype <: H5Datatype
     class::UInt8
     bitfield1::UInt8
     bitfield2::UInt8
@@ -84,7 +84,7 @@ macro read_datatype(io, datatype_class, datatype, then)
     end)
 end
 
-immutable FixedPointDatatype <: H5Datatype
+struct FixedPointDatatype <: H5Datatype
     class::UInt8
     bitfield1::UInt8
     bitfield2::UInt8
@@ -97,7 +97,7 @@ define_packed(FixedPointDatatype)
 FixedPointDatatype(size::Integer, signed::Bool) =
     FixedPointDatatype(DT_FIXED_POINT, ifelse(signed, 0x08, 0x00), 0x00, 0x00, size, 0, 8*size)
 
-immutable FloatingPointDatatype <: H5Datatype
+struct FloatingPointDatatype <: H5Datatype
     class::UInt8
     bitfield1::UInt8
     bitfield2::UInt8
@@ -115,7 +115,7 @@ define_packed(FloatingPointDatatype)
 
 class(dt::Union{BasicDatatype,FixedPointDatatype,FloatingPointDatatype}) = dt.class
 
-immutable CompoundDatatype <: H5Datatype
+struct CompoundDatatype <: H5Datatype
     size::UInt32
     names::Vector{Symbol}
     offsets::Vector{Int}
@@ -198,7 +198,7 @@ function Base.read(io::IO, ::Type{CompoundDatatype})
     CompoundDatatype(dt.size, names, offsets, members)
 end
 
-immutable VariableLengthDatatype{T<:H5Datatype} <: H5Datatype
+struct VariableLengthDatatype{T<:H5Datatype} <: H5Datatype
     class::UInt8
     bitfield1::UInt8
     bitfield2::UInt8

@@ -25,7 +25,7 @@ const HM_DRIVER_INFO = 0x13
 const HM_ATTRIBUTE_INFO = 0x14
 const HM_REFERENCE_COUNT = 0x15
 
-immutable ObjectStart
+struct ObjectStart
     signature::UInt32
     version::UInt8
     flags::UInt8
@@ -52,7 +52,7 @@ function read_obj_start(io::IO)
     read_size(io, os.flags)
 end
 
-immutable HeaderMessage
+struct HeaderMessage
     msg_type::UInt8
     size::UInt16
     flags::UInt8

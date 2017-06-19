@@ -116,7 +116,7 @@ mutable struct EmptyTI
     x::EmptyImmutable
 end
 emptyti = EmptyTI(EmptyImmutable())
-type EmptyTT
+mutable struct EmptyTT
     x::EmptyType
 end
 emptytt = EmptyTT(EmptyType())

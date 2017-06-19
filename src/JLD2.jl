@@ -3,7 +3,7 @@ using DataStructures
 import Base.sizeof
 export jldopen
 
-const OBJECT_HEADER_SIGNATURE = reinterpret(UInt32, UInt8['O', 'H', 'D', 'R'])[1]
+const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 
 # Currently we specify that all offsets and lengths are 8 bytes
 const Length = UInt64

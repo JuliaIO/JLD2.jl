@@ -3,7 +3,7 @@
 #
 
 # TODO: fix inference when there are attributes
-immutable WrittenAttribute{DS<:WriteDataspace,H5T<:H5Datatype,T}
+struct WrittenAttribute{DS<:WriteDataspace,H5T<:H5Datatype,T}
     name::Symbol
     dataspace::DS
     datatype::H5T
@@ -14,7 +14,7 @@ function WrittenAttribute{T}(f::JLDFile, name::Symbol, data::T)
     WrittenAttribute(name, WriteDataspace(f, data, objodr(data)), h5type(f, data), data)
 end
 
-immutable ReadAttribute
+struct ReadAttribute
     name::Symbol
     dataspace::ReadDataspace
     datatype_class::UInt8
@@ -24,7 +24,7 @@ end
 
 const EMPTY_READ_ATTRIBUTES = ReadAttribute[]
 
-immutable AttributeHeader
+struct AttributeHeader
     version::UInt8
     flags::UInt8
     name_size::UInt16

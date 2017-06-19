@@ -7,20 +7,20 @@ const DS_SCALAR = 0x00
 const DS_SIMPLE = 0x01
 const DS_NULL = 0x02
 
-immutable WriteDataspace{N,A<:Tuple}
+struct WriteDataspace{N,A<:Tuple}
     dataspace_type::UInt8
     size::NTuple{N,Length}
     attributes::A
 end
 
-immutable ReadDataspace
+struct ReadDataspace
     dataspace_type::UInt8
     dimensionality::UInt8
     dimensions_offset::Int64
 end
 ReadDataspace() = ReadDataspace(DS_SCALAR, 0, -1)
 
-immutable DataspaceStart
+struct DataspaceStart
     version::UInt8
     dimensionality::UInt8
     flags::UInt8

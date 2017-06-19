@@ -2,9 +2,9 @@
 # Global heap
 #
 
-const GLOBAL_HEAP_SIGNATURE = reinterpret(UInt32, UInt8['G', 'C', 'O', 'L'])[1]
+const GLOBAL_HEAP_SIGNATURE = htol(0x4c4f4347) # "GCOL"
 
-immutable GlobalHeapID
+struct GlobalHeapID
     heap_offset::RelOffset
     index::UInt32
 end

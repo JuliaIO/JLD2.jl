@@ -2,12 +2,12 @@
 # Groups
 #
 
-immutable Group{T}
+struct Group{T}
     names::T
     offsets::Vector{RelOffset}
 end
 
-immutable LinkInfo
+struct LinkInfo
     version::UInt8
     flags::UInt8
     fractal_heap_address::RelOffset
