@@ -21,10 +21,14 @@ include("Lookup3.jl")
 include("mmapio.jl")
 include("misc.jl")
 
-# RelOffset represents an HDF5 relative offset. It differs from a file offset (used
-# elsewhere) in that it is relative to the superblock base address. In practice,
-# this means that FILE_HEADER_LENGTH has been subtracted. `fileoffset` and
-# `h5offset` convert between RelOffsets and file offsets
+"""
+    RelOffset
+
+Represents an HDF5 relative offset. This differs from a file offset (used elsewhere) in
+that it is relative to the superblock base address. In practice, this means that
+`FILE_HEADER_LENGTH `has been subtracted. `fileoffset` and `h5offset` convert between
+`RelOffsets` and file offsets.
+"""
 struct RelOffset
     offset::UInt64
 end
@@ -35,6 +39,14 @@ Base.hash(x::RelOffset) = hash(x.offset)
 const UNDEFINED_ADDRESS = RelOffset(0xffffffffffffffff)
 const NULL_REFERENCE = RelOffset(0)
 
+"""
+    JLDWriteSession{T}
+
+A JLDWriteSession keeps track of references to serialized objects. If `T` is a Dict,
+`h5offset` maps an object ID (returned by calling `object_id`) to th `RelOffset` of the
+written dataset. If it is `Union{}`, then references are not tracked, and objects
+referenced multiple times are written multiple times.
+"""
 struct JLDWriteSession{T<:Union{Dict{UInt,RelOffset},Union{}}}
     h5offset::T
     objects::Vector{Any}
@@ -44,6 +56,12 @@ struct JLDWriteSession{T<:Union{Dict{UInt,RelOffset},Union{}}}
 end
 JLDWriteSession() = JLDWriteSession{Dict{UInt,RelOffset}}(Dict{UInt,RelOffset}(), Any[])
 
+
+"""
+    GlobalHeap
+
+Represents an HDF5 global heap structure.
+"""
 mutable struct GlobalHeap
     offset::Int64
     length::Length
@@ -51,6 +69,11 @@ mutable struct GlobalHeap
     objects::Vector{Int64}
 end
 
+"""
+    H5Datatype
+
+Supertype of all HDF5 datatypes.
+"""
 abstract type H5Datatype end
 
 struct CommittedDatatype <: H5Datatype
@@ -58,11 +81,26 @@ struct CommittedDatatype <: H5Datatype
     index::Int
 end
 
+"""
+    ReadRepresentation{T,ODR}
+
+A type encoding both the Julia type `T` and the on-disk (HDF5) representation `ODR`.
+"""
 struct ReadRepresentation{T,ODR} end
+
+"""
+    CustomSerialization{T,S}
+
+On-disk representation for data that is written as if it were of Julia type `T`, but is
+read as type `S`.
+"""
 struct CustomSerialization{T,S} end
 
-symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)
+"""
+    JLDFile{T<:IO}
 
+JLD file object.
+"""
 mutable struct JLDFile{T<:IO}
     io::T
     writable::Bool
@@ -86,7 +124,18 @@ JLDFile(io::IO, writable::Bool, written::Bool, created::Bool) =
             Int64(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]))
 
+"""
+    fileoffset(f::JLDFile, x::RelOffset)
+
+Converts an offset `x` relative to the superblock of file `f` to an absolute offset.
+"""
 fileoffset(f::JLDFile, x::RelOffset) = Int64(x.offset + FILE_HEADER_LENGTH)
+
+"""
+    h5offset(f::JLDFile, x::RelOffset)
+
+Converts an absolute file offset `x` to an offset relative to the superblock of file `f`.
+"""
 h5offset(f::JLDFile, x::Int64) = RelOffset(x - FILE_HEADER_LENGTH)
 
 #
@@ -156,6 +205,17 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool)
     f
 end
 
+"""
+    jldopen(fname::AbstractString, mode::AbstractString)
+
+Opens a JLD file at path `fname`.
+
+`"r"`: Open for reading only, failing if no file exists
+`"r+"`: Open for reading and writing, failing if no file exists
+`"w"`/`"w+"`: Open for reading and writing, overwriting the file if it already exists
+`"a"`/`"a+"`: Open for reading and writing, creating a new file if none exists, but
+              preserving the existing file if one is present
+"""
 function jldopen(fname::AbstractString, mode::AbstractString="r")
     mode == "r"  ? jldopen(fname, false, false, false) :
     mode == "r+" ? jldopen(fname, true, false, false) :
@@ -170,9 +230,13 @@ function Base.read(f::JLDFile, name::AbstractString)
     read_dataset(f, f.datasets[name])
 end
 
-# Populate f.datatypes and f.jlh5types with all of the committed datatypes from
-# a file. We need to do this before writing to make sure we reuse written
-# datatypes.
+"""
+    load_datatypes(f::JLDFile)
+
+Populate f.datatypes and f.jlh5types with all of the committed datatypes from
+a file. We need to do this before writing to make sure we reuse written
+datatypes.
+"""
 function load_datatypes(f::JLDFile)
     dts = f.datatypes
     cdts = f.datatype_locations
@@ -233,6 +297,14 @@ function Base.close(f::JLDFile)
     close(io)
     nothing
 end
+
+
+"""
+    symbol_length(x::Symbol)
+
+Returns the length of the string represented by `x`.
+"""
+symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)
 
 include("superblock.jl")
 include("object_headers.jl")
