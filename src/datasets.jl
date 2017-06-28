@@ -26,7 +26,9 @@ function read_dataset(f::JLDFile, offset::RelOffset)
     datatype_class::UInt8 = 0
     datatype_offset::Int64 = 0
     data_offset::Int64 = 0
-    data_length::Int = 0
+    data_length::Int = -1
+    chunked_storage::Bool = false
+    filter_id::UInt16 = 0
     while position(cio) < pmax
         msg = read(cio, HeaderMessage)
         endpos = position(cio) + msg.size
@@ -45,9 +47,29 @@ function read_dataset(f::JLDFile, offset::RelOffset)
             elseif storage_type == LC_CONTIGUOUS_STORAGE
                 data_offset = fileoffset(f, read(cio, RelOffset))
                 data_length = read(cio, Length)
+            elseif storage_type == LC_CHUNKED_STORAGE
+                # TODO: validate this
+                flags = read(cio, UInt8)
+                dimensionality = read(cio, UInt8)
+                dimensionality_size = read(cio, UInt8)
+                skip(cio, Int(dimensionality)*Int(dimensionality_size))
+
+                chunk_indexing_type = read(cio, UInt8)
+                chunk_indexing_type == 1 || throw(UnsupportedFeatureException())
+                data_length = read(cio, Length)
+                read(cio, UInt32)
+                data_offset = fileoffset(f, read(cio, RelOffset))
+                chunked_storage = true
             else
                 throw(UnsupportedFeatureException())
             end
+        elseif msg.msg_type == HM_FILTER_PIPELINE
+            version = read(cio, UInt8)
+            version == 2 || throw(UnsupportedVersionException())
+            nfilters = read(cio, UInt8)
+            nfilters == 1 || throw(UnsupportedFeatureException())
+            filter_id = read(cio, UInt16)
+            filter_id == 1 || throw(UnsupportedFeatureException())
         elseif msg.msg_type == HM_ATTRIBUTE
             if attrs === EMPTY_READ_ATTRIBUTES
                 attrs = ReadAttribute[read_attribute(cio, f)]
@@ -63,59 +85,76 @@ function read_dataset(f::JLDFile, offset::RelOffset)
     end
     seek(cio, pmax)
 
+    filter_id != 0 && !chunked_storage && throw(InvalidDataException())
+
     # Checksum
     end_checksum(cio) == read(io, UInt32) || throw(InvalidDataException())
 
     # TODO verify that data length matches
-    val = read_data(f, dataspace, datatype_class, datatype_offset, data_offset,
-                    offset, attrs)
+    val = read_data(f, dataspace, datatype_class, datatype_offset, data_offset, data_length,
+                    filter_id, offset, attrs)
     val
 end
 
-# Read data from an attribute
+"""
+    read_attr_data(f::JLDFile, attr::ReadAttribute)
+
+Read data from an attribute.
+"""
 read_attr_data(f::JLDFile, attr::ReadAttribute) =
     read_data(f, attr.dataspace, attr.datatype_class, attr.datatype_offset,
               attr.data_offset)
 
-# Read data from an attribute, assuming a specific HDF5 datatype and
-# ReadRepresentation. If the HDF5 datatype does not match, throws an
-# UnsupportedFeatureException. This allows better type stability while
-# simultaneously validating the data.
-function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype, rr::ReadRepresentation)
+"""
+    read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
+                   rr::ReadRepresentation)
+
+Read data from an attribute, assuming a specific HDF5 datatype and ReadRepresentation. If
+the HDF5 datatype does not match, throws an `UnsupportedFeatureException`. This allows
+better type stability while simultaneously validating the data.
+"""
+function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
+                        rr::ReadRepresentation)
     io = f.io
     if attr.datatype_class == class(expected_datatype)
         seek(io, attr.datatype_offset)
         dt = read(io, typeof(expected_datatype))
         if dt == expected_datatype
             seek(f.io, attr.data_offset)
-            BOXED_READ_DATASPACE[] = (attr.dataspace, NULL_REFERENCE)
+            BOXED_READ_DATASPACE[] = (attr.dataspace, NULL_REFERENCE, -1, 0)
             return read_data(f, rr)
         end
     end
     throw(UnsupportedFeatureException())
 end
 
-# Read data from a file. If datatype_class is typemax(UInt8), the
-# datatype is assumed to be committed, and datatype_offset points to
-# the offset of the committed datatype's header. Otherwise,
-# datatype_offset points to the offset of the datatype attribute.
+"""
+    read_data(f::JLDFile, dataspace::ReadDataspace, datatype_class::UInt8,
+              datatype_offset::Int64, data_offset::Int64[, filter_id::UInt16,
+              header_offset::RelOffset, attributes::Vector{ReadAttribute}])
+
+Read data from a file. If `datatype_class` is typemax(UInt8), the datatype is assumed to be
+committed, and `datatype_offset` points to the offset of the committed datatype's header.
+Otherwise, datatype_offset points to the offset of the datatype attribute.
+"""
 function read_data(f::JLDFile, dataspace::ReadDataspace,
                    datatype_class::UInt8, datatype_offset::Int64,
-                   data_offset::Int64, header_offset::RelOffset=NULL_REFERENCE,
+                   data_offset::Int64, data_length::Int=-1, filter_id::UInt16=UInt16(0),
+                   header_offset::RelOffset=NULL_REFERENCE,
                    attributes::Union{Vector{ReadAttribute},Void}=nothing)
     # See if there is a julia type attribute
     io = f.io
     if datatype_class == typemax(UInt8) # Committed datatype
         rr = jltype(f, f.datatype_locations[h5offset(f, datatype_offset)])
         seek(io, data_offset)
-        BOXED_READ_DATASPACE[] = (dataspace, header_offset)
+        BOXED_READ_DATASPACE[] = (dataspace, header_offset, data_length, filter_id)
         read_data(f, rr, attributes)
     else
         seek(io, datatype_offset)
         @read_datatype io datatype_class dt begin
             rr = jltype(f, dt)
             seek(io, data_offset)
-            BOXED_READ_DATASPACE[] = (dataspace, header_offset)
+            BOXED_READ_DATASPACE[] = (dataspace, header_offset, data_length, filter_id)
             read_data(f, rr, attributes)
         end
     end
@@ -124,20 +163,21 @@ end
 # We can avoid a box by putting the dataspace here instead of passing
 # it to read_data.  That reduces the allocation footprint, but doesn't
 # really seem to help with performance.
-const BOXED_READ_DATASPACE = Ref{Tuple{ReadDataspace,RelOffset}}()
+const BOXED_READ_DATASPACE = Ref{Tuple{ReadDataspace,RelOffset,Int,UInt16}}()
 
 # Most types can only be scalars or arrays
 function read_data(f::JLDFile{MmapIO}, rr,
                    attributes::Union{Vector{ReadAttribute},Void}=nothing)
-    dataspace, header_offset = BOXED_READ_DATASPACE[]
+    dataspace, header_offset, data_length, filter_id = BOXED_READ_DATASPACE[]
     if dataspace.dataspace_type == DS_SCALAR
+        filter_id != 0 && throw(UnsupportedFeatureException())
         io = f.io
         inptr = io.curptr
         obj = jlconvert(rr, f, inptr, header_offset)
         io.curptr = inptr + sizeof(rr)
         obj
     elseif dataspace.dataspace_type == DS_SIMPLE
-        read_array(f, dataspace, rr, attributes, header_offset)
+        read_array(f, dataspace, rr, data_length, filter_id, header_offset, attributes)
     else
         throw(UnsupportedFeatureException())
     end
@@ -146,7 +186,8 @@ end
 # Reference arrays can only be arrays or null dataspace (for Union{} case)
 function read_data(f::JLDFile{MmapIO}, rr::ReadRepresentation{Any,RelOffset},
                    attributes::Vector{ReadAttribute})
-    dataspace, header_offset = BOXED_READ_DATASPACE[]
+    dataspace, header_offset, data_length, filter_id = BOXED_READ_DATASPACE[]
+    filter_id != 0 && throw(UnsupportedFeatureException())
     if dataspace.dataspace_type == DS_SIMPLE
         # Since this is an array of references, there should be an attribute
         # informing us of the type
@@ -162,7 +203,7 @@ function read_data(f::JLDFile{MmapIO}, rr::ReadRepresentation{Any,RelOffset},
                 end
                 seek(io, startpos)
                 return read_array(f, dataspace, ReadRepresentation{T,RelOffset}(),
-                                  attributes, header_offset)
+                                  -1, UInt16(0), header_offset, attributes)
             end
         end
     elseif dataspace.dataspace_type == DS_NULL
@@ -176,7 +217,8 @@ end
 # Types with no payload can only be null dataspace
 function read_data{T}(f::JLDFile{MmapIO}, rr::ReadRepresentation{T,nothing},
                       attributes::Vector{ReadAttribute})
-    dataspace, header_offset = BOXED_READ_DATASPACE[]
+    dataspace, header_offset, data_length, filter_id = BOXED_READ_DATASPACE[]
+    filter_id != 0 && throw(UnsupportedFeatureException())
     dataspace.dataspace_type == DS_NULL || throw(UnsupportedFeatureException())
 
     dimensions_attr_index = find_dimensions_attr(attributes)
@@ -190,7 +232,8 @@ end
 
 function read_data{T,S}(f::JLDFile{MmapIO}, rr::ReadRepresentation{T,CustomSerialization{S,nothing}},
                       attributes::Vector{ReadAttribute})
-    dataspace, header_offset = BOXED_READ_DATASPACE[]
+    dataspace, header_offset, data_length, filter_id = BOXED_READ_DATASPACE[]
+    filter_id != 0 && throw(UnsupportedFeatureException())
     dataspace.dataspace_type == DS_NULL || throw(UnsupportedFeatureException())
 
     dimensions_attr_index = find_dimensions_attr(attributes)
@@ -252,31 +295,35 @@ function get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Vect
     (ndims, offset)
 end
 
-# Construct array by reading ndims dimensions from io
-# Assumes io has already been seeked t oteh correct position
+"""
+    construct_array{T}(io::IO, ::Type{T}, ndims::Int)
+
+Construct array by reading `ndims` dimensions from `io`. Assumes `io` has already been
+seeked to the correct position.
+"""
 function construct_array{T}(io::IO, ::Type{T}, ndims::Int)
     if ndims == 1
-        n = read(io, Int)
+        n = read(io, Int64)
         Vector{T}(n)
     elseif ndims == 2
-        d2 = read(io, Int)
-        d1 = read(io, Int)
+        d2 = read(io, Int64)
+        d1 = read(io, Int64)
         Matrix{T}(d1, d2)
     elseif ndims == 3
-        d3 = read(io, Int)
-        d2 = read(io, Int)
-        d1 = read(io, Int)
+        d3 = read(io, Int64)
+        d2 = read(io, Int64)
+        d1 = read(io, Int64)
         Array{T,3}(d1, d2, d3)
     else
-        ds = reverse!(read(io, Int, ndims))
+        ds = reverse!(read(io, Int64, ndims))
         Array{T}(tuple(ds...))
     end
 end
 
 function read_array{T,RR}(f::JLDFile, dataspace::ReadDataspace,
-                          rr::ReadRepresentation{T,RR},
-                          attributes::Union{Vector{ReadAttribute},Void},
-                          header_offset::RelOffset)
+                          rr::ReadRepresentation{T,RR}, data_length::Int,
+                          filter_id::UInt16, header_offset::RelOffset, 
+                          attributes::Union{Vector{ReadAttribute},Void})
     io = f.io
     inptr = io.curptr
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
@@ -285,7 +332,17 @@ function read_array{T,RR}(f::JLDFile, dataspace::ReadDataspace,
     header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
     n = length(v)
 
-    if RR === T && isbits(T)
+    if filter_id == 1
+        data = read(ZlibInflateInputStream(unsafe_wrap(Array, Ptr{UInt8}(inptr), data_length); gzip=false))
+        @simd for i = 1:n
+            dataptr = Ptr{Void}(pointer(data, sizeof(RR)*(i-1)+1))
+            if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
+                @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
+            end
+        end
+        io.curptr = inptr + data_length
+        return v
+    elseif RR === T && isbits(T)
         nb = n*sizeof(RR)
         if nb > 1048576 # TODO tweak
             # It turns out that regular IO is faster here (at least on OS X)
@@ -314,21 +371,16 @@ function read_array{T,RR}(f::JLDFile, dataspace::ReadDataspace,
             inptr += sizeof(RR)
         end
     end
-
     io.curptr = inptr + sizeof(RR) * n
     v
 end
 
-function payload_size(dataspace::WriteDataspace, datatype::H5Datatype, datasz::Int, layout_class::UInt8)
-    sz = sizeof(dataspace) + sizeof(datatype) + 2 + (4 + length(dataspace.attributes))*sizeof(HeaderMessage) + 2
+function payload_size_without_storage_message(dataspace::WriteDataspace, datatype::H5Datatype)
+    sz = 6 + 4 + sizeof(dataspace) + 4 + sizeof(datatype) + length(dataspace.attributes)*sizeof(HeaderMessage)
     for attr in dataspace.attributes
         sz += sizeof(attr)
     end
-    if layout_class == LC_COMPACT_STORAGE
-        sz + 2 + datasz
-    else
-        sz + sizeof(RelOffset) + sizeof(Length)
-    end
+    sz
 end
 
 # Might need to do something else someday for non-mmapped IO
@@ -337,8 +389,9 @@ function write_data{S}(f::JLDFile, data, odr::S, wsession::JLDWriteSession)
     ensureroom(io, sizeof(odr))
     arr = io.arr
     cp = io.curptr
+    p = position(io)
     h5convert!(cp, odr, f, data, wsession)
-    io.curptr = cp + sizeof(odr)
+    seek(io, p + sizeof(odr))
     arr # Keep old array rooted until the end
 end
 
@@ -352,6 +405,7 @@ function write_data{T,S}(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteS
     arr = io.arr
     cp = io.curptr
     ep = io.endptr
+    p = position(io)
     @simd for i = 1:length(data)
         if (isleaftype(T) && isbits(T)) || unsafe_isdefined(data, i)
             # For now, just don't write anything unless the field is defined
@@ -361,57 +415,105 @@ function write_data{T,S}(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteS
         end
         cp += sizeof(odr)
     end
-    io.curptr = cp
+    seek(io, p + sizeof(odr) * length(data))
     arr # Keep old array rooted until the end
 end
 
-function write_dataset{S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data, wsession::JLDWriteSession)
+function deflate_data{T,S}(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSession)
+    buf = Vector{UInt8}(sizeof(odr) * length(data))
+    cp = pointer(buf)
+    @simd for i = 1:length(data)
+        @inbounds h5convert!(cp, odr, f, data[i], wsession)
+        cp += sizeof(odr)
+    end
+    read(ZlibDeflateInputStream(buf; gzip=false))
+end
+
+function write_dataset{T,S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data::Array{T}, wsession::JLDWriteSession)
     io = f.io
     datasz = sizeof(odr) * numel(dataspace)
-    layout_class = datasz < 8192 ? LC_COMPACT_STORAGE : LC_CONTIGUOUS_STORAGE
-    psz = payload_size(dataspace, datatype, datasz, layout_class)
+    layout_class = datasz < 8192 ? LC_COMPACT_STORAGE :
+                   f.compress ? LC_CHUNKED_STORAGE : LC_CONTIGUOUS_STORAGE
+    psz = payload_size_without_storage_message(dataspace, datatype)
+    if datasz < 8192
+        layout_class = LC_COMPACT_STORAGE
+        psz += sizeof(CompactStorageMessage) + datasz
+    elseif f.compress && isleaftype(T) && isbits(T)
+        layout_class = LC_CHUNKED_STORAGE
+        psz += chunked_storage_message_size(ndims(data)) + length(DEFLATE_PIPELINE_MESSAGE)
+    else
+        layout_class = LC_CONTIGUOUS_STORAGE
+        psz += sizeof(ContiguousStorageMessage)
+    end
     fullsz = sizeof(ObjectStart) + size_size(psz) + psz + 4
 
     header_offset = f.end_of_data
     seek(io, header_offset)
-    f.end_of_data = header_offset + fullsz + (layout_class != LC_COMPACT_STORAGE ? datasz : 0)
+    f.end_of_data = header_offset + fullsz
 
-    if typeof(data).mutable && !isa(wsession, JLDWriteSession{Union{}})
+    if !isa(wsession, JLDWriteSession{Union{}})
         wsession.h5offset[object_id(data)] = h5offset(f, header_offset)
         push!(wsession.objects, data)
     end
 
     cio = begin_checksum(io, fullsz - 4)
-    write_object_header_and_dataspace(cio, f, psz, dataspace)
-    write_datatype(cio, datatype)
+    write_object_header_and_dataspace_message(cio, f, psz, dataspace)
+    write_datatype_message(cio, datatype)
 
     # Data storage layout
     if layout_class == LC_COMPACT_STORAGE
-        write(cio, HeaderMessage(HM_DATA_LAYOUT, 4+datasz, 0))
-        write(cio, UInt8(4))                  # Version
-        write(cio, LC_COMPACT_STORAGE)        # Layout class
-        write(cio, UInt16(datasz))            # Size
+        write(cio, CompactStorageMessage(datasz))
         if datasz != 0
             write_data(f, data, odr, wsession)
-            seek(io, header_offset + fullsz - 4)
         end
         write(io, end_checksum(cio))
+    elseif layout_class == LC_CHUNKED_STORAGE
+        write(cio, DEFLATE_PIPELINE_MESSAGE)
+        deflated = deflate_data(f, data, odr, wsession)
+        write_chunked_storage_message(cio, sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
+        write(io, end_checksum(cio))
+
+        f.end_of_data += length(deflated)
+        write(io, deflated)
     else
-        write(cio, HeaderMessage(HM_DATA_LAYOUT, 2+sizeof(RelOffset)+sizeof(Length), 0))
-        write(cio, UInt8(4))                            # Version
-        write(cio, LC_CONTIGUOUS_STORAGE)               # Layout class
-        write(cio, h5offset(f, header_offset + fullsz)) # RelOffset
-        write(cio, Length(sizeof(data)))                # Length
+        write(cio, ContiguousStorageMessage(datasz, h5offset(f, f.end_of_data)))
         write(io, end_checksum(cio))
-        if datasz != 0
-            write_data(f, data, odr, wsession)
-        end
+
+        f.end_of_data += datasz
+        write_data(f, data, odr, wsession)
     end
 
     h5offset(f, header_offset)
 end
 
-function write_object_header_and_dataspace(cio::IO, f::JLDFile, psz::Int, dataspace::WriteDataspace)
+function write_dataset{S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data, wsession::JLDWriteSession)
+    io = f.io
+    datasz = sizeof(odr) * numel(dataspace)
+    psz = payload_size_without_storage_message(dataspace, datatype) + sizeof(CompactStorageMessage) + datasz
+    fullsz = sizeof(ObjectStart) + size_size(psz) + psz + 4
+
+    header_offset = f.end_of_data
+    seek(io, header_offset)
+    f.end_of_data = header_offset + fullsz
+
+    if ismutabletype(typeof(data)) && !isa(wsession, JLDWriteSession{Union{}})
+        wsession.h5offset[object_id(data)] = h5offset(f, header_offset)
+        push!(wsession.objects, data)
+    end
+
+    cio = begin_checksum(io, fullsz - 4)
+    write_object_header_and_dataspace_message(cio, f, psz, dataspace)
+    write_datatype_message(cio, datatype)
+    write(cio, CompactStorageMessage(datasz))
+    if datasz != 0
+        write_data(f, data, odr, wsession)
+    end
+    write(io, end_checksum(cio))
+
+    h5offset(f, header_offset)
+end
+
+function write_object_header_and_dataspace_message(cio::IO, f::JLDFile, psz::Int, dataspace::WriteDataspace)
     write(cio, ObjectStart(size_flag(psz)))
     write_size(cio, psz)
 
@@ -431,9 +533,67 @@ function write_object_header_and_dataspace(cio::IO, f::JLDFile, psz::Int, datasp
     end
 end
 
-function write_datatype(cio::IO, datatype::H5Datatype)
+function write_datatype_message(cio::IO, datatype::H5Datatype)
     write(cio, HeaderMessage(HM_DATATYPE, sizeof(datatype), 1+2*isa(datatype, CommittedDatatype)))
     write(cio, datatype)
+end
+
+struct CompactStorageMessage
+    hm::HeaderMessage
+    version::UInt8
+    layout_class::UInt8
+    data_size::UInt16
+end
+define_packed(CompactStorageMessage)
+@inline CompactStorageMessage(datasz::Int) =
+    CompactStorageMessage(
+            HeaderMessage(HM_DATA_LAYOUT, sizeof(CompactStorageMessage) - sizeof(HeaderMessage) + datasz, 0),
+            4, LC_COMPACT_STORAGE, datasz
+    )
+
+struct ContiguousStorageMessage
+    hm::HeaderMessage
+    version::UInt8
+    layout_class::UInt8
+    address::RelOffset
+    data_size::Length
+end
+define_packed(ContiguousStorageMessage)
+@inline ContiguousStorageMessage(datasz::Int, offset::RelOffset) =
+    ContiguousStorageMessage(
+        HeaderMessage(HM_DATA_LAYOUT, sizeof(ContiguousStorageMessage) - sizeof(HeaderMessage), 0),
+        4, LC_CONTIGUOUS_STORAGE, offset, datasz
+    )
+
+@inline chunked_storage_message_size(ndims::Int) =
+    sizeof(HeaderMessage) + 5 + (ndims+1)*sizeof(Int) + 1 + sizeof(Length) + 4 + sizeof(RelOffset)
+function write_chunked_storage_message{N}(io::IO, elsize::Int, dims::NTuple{N,Int}, filtered_size::Int, offset::RelOffset)
+    write(io, HeaderMessage(HM_DATA_LAYOUT, chunked_storage_message_size(N) - sizeof(HeaderMessage), 0))
+    write(io, UInt8(4))                     # Version
+    write(io, UInt8(LC_CHUNKED_STORAGE))    # Layout Class
+    write(io, UInt8(2))                     # Flags (= SINGLE_INDEX_WITH_FILTER)
+    write(io, UInt8(N+1))                   # Dimensionality
+    write(io, UInt8(sizeof(Int)))           # Dimensionality Size
+    for i = N:-1:1
+        write(io, dims[i])                  # Dimensions 1...N
+    end
+    write(io, elsize)                       # Element size (last dimension)
+    write(io, UInt8(1))                     # Chunk Indexing Type (= Single Chunk)
+    write(io, Length(filtered_size))        # Size of filtered chunk
+    write(io, UInt32(0))                    # Filters for chunk
+    write(io, offset)                       # Address
+end
+
+const DEFLATE_PIPELINE_MESSAGE = let
+    io = IOBuffer()
+    write(io, HeaderMessage(HM_FILTER_PIPELINE, 12, 0))
+    write(io, UInt8(2))                 # Version
+    write(io, UInt8(1))                 # Number of Filters
+    write(io, UInt16(1))                # Filter Identification Value (= deflate)
+    write(io, UInt16(0))                # Flags
+    write(io, UInt16(1))                # Number of Client Data Values
+    write(io, UInt32(5))                # Client Data (Compression Level)
+    take!(io)
 end
 
 @Base.pure ismutabletype(x::DataType) = x.mutable
