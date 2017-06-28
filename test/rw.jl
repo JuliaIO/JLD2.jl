@@ -307,6 +307,7 @@ macro check(fid, sym)
             try
                 tmp = read($fid, $(string(sym)))
             catch e
+                @show e
                 Base.show_backtrace(STDOUT, catch_backtrace())
                 error("error reading ", $(string(sym)))
             end
@@ -354,253 +355,255 @@ typ{T}(x::Int64, ::Type{T}) = Base.box(Typ{T}, Base.unbox(Int64,x))
 abstract type UnexportedT end
 end
 
-fid = jldopen(fn, "w")
 println(fn)
-@time begin
-@write fid x
-@write fid A
-@write fid A3
-@write fid A4
-@write fid Aarray
-@write fid basic_types
-@write fid str
-@write fid str_unicode
-@write fid str_embedded_null
-@write fid strings
-@write fid empty_string
-@write fid empty_string_array
-@write fid empty_array_of_strings
-@write fid tf
-@write fid TF
-@write fid AB
-@write fid t
-@write fid c
-@write fid cint
-@write fid C
-@write fid emptyA
-@write fid emptyB
-@write fid ms
-@write fid msempty
-@write fid sym
-@write fid syms
-@write fid d
-@write fid oidd
-@write fid ex
-@write fid T
-@write fid Tarr
-@write fid char
-@write fid unicode_char
-@write fid α
-@write fid β
-@write fid vv
-@write fid cpus
-@write fid rng
-@write fid typevar
-@write fid typevar_lb
-@write fid typevar_ub
-@write fid typevar_lb_ub
-@write fid undef
-@write fid undefs
-@write fid ms_undef
-@test_throws JLD2.PointerException @write fid objwithpointer
-@write fid bt
-@write fid btarray
-@write fid sa_asc
-@write fid sa_utf8
-@write fid subarray
-@write fid arr_empty_tuple
-@write fid emptyimmutable
-@write fid arr_emptyimmutable
-@write fid empty_arr_emptyimmutable
-@write fid emptytype
-@write fid arr_emptytype
-@write fid empty_arr_emptytype
-@write fid uninitialized_arr_emptytype
-@write fid emptyii
-@write fid emptyit
-@write fid emptyti
-@write fid emptytt
-@write fid emptyiiotherfield
-@write fid emptyiitype
-@write fid unicodestruct☺
-@write fid array_of_matrices
-@write fid tup
-@write fid empty_tup
-@write fid nonpointerfree_immutable_1
-@write fid nonpointerfree_immutable_2
-@write fid nonpointerfree_immutable_3
-@write fid vague
-@write fid bitsunion
-@write fid typeunionfield
-@write fid genericunionfield
-@write fid arr_ref
-@write fid obj_ref
-@write fid padding_test
-@write fid empty_arr_1
-@write fid empty_arr_2
-@write fid empty_arr_3
-@write fid empty_arr_4
-@write fid bigdata
-@write fid bigfloat
-@write fid bigint
-@write fid bigfloats
-@write fid bigints
-@write fid bigfloatintobj
-@write fid none
-@write fid nonearr
-@write fid scalar_nothing
-@write fid vector_nothing
-@write fid Abig
-@write fid Bbig
-@write fid Sbig
-@write fid bitsparamint16
-@write fid bitsparamfloat
-@write fid bitsparambool
-@write fid bitsparamsymbol
-@write fid bitsparamint
-@write fid bitsparamuint
-@write fid tuple_of_tuples
-@write fid zerod
-@write fid zerod_any
-@write fid nonetypedfield
-@write fid cyclicobject
-@write fid simplevec
-@write fid natyperef
+for compress in [false, true]
+    fid = jldopen(fn, "w", compress=compress)
+    @time begin
+    @write fid x
+    @write fid A
+    @write fid A3
+    @write fid A4
+    @write fid Aarray
+    @write fid basic_types
+    @write fid str
+    @write fid str_unicode
+    @write fid str_embedded_null
+    @write fid strings
+    @write fid empty_string
+    @write fid empty_string_array
+    @write fid empty_array_of_strings
+    @write fid tf
+    @write fid TF
+    @write fid AB
+    @write fid t
+    @write fid c
+    @write fid cint
+    @write fid C
+    @write fid emptyA
+    @write fid emptyB
+    @write fid ms
+    @write fid msempty
+    @write fid sym
+    @write fid syms
+    @write fid d
+    @write fid oidd
+    @write fid ex
+    @write fid T
+    @write fid Tarr
+    @write fid char
+    @write fid unicode_char
+    @write fid α
+    @write fid β
+    @write fid vv
+    @write fid cpus
+    @write fid rng
+    @write fid typevar
+    @write fid typevar_lb
+    @write fid typevar_ub
+    @write fid typevar_lb_ub
+    @write fid undef
+    @write fid undefs
+    @write fid ms_undef
+    @test_throws JLD2.PointerException @write fid objwithpointer
+    @write fid bt
+    @write fid btarray
+    @write fid sa_asc
+    @write fid sa_utf8
+    @write fid subarray
+    @write fid arr_empty_tuple
+    @write fid emptyimmutable
+    @write fid arr_emptyimmutable
+    @write fid empty_arr_emptyimmutable
+    @write fid emptytype
+    @write fid arr_emptytype
+    @write fid empty_arr_emptytype
+    @write fid uninitialized_arr_emptytype
+    @write fid emptyii
+    @write fid emptyit
+    @write fid emptyti
+    @write fid emptytt
+    @write fid emptyiiotherfield
+    @write fid emptyiitype
+    @write fid unicodestruct☺
+    @write fid array_of_matrices
+    @write fid tup
+    @write fid empty_tup
+    @write fid nonpointerfree_immutable_1
+    @write fid nonpointerfree_immutable_2
+    @write fid nonpointerfree_immutable_3
+    @write fid vague
+    @write fid bitsunion
+    @write fid typeunionfield
+    @write fid genericunionfield
+    @write fid arr_ref
+    @write fid obj_ref
+    @write fid padding_test
+    @write fid empty_arr_1
+    @write fid empty_arr_2
+    @write fid empty_arr_3
+    @write fid empty_arr_4
+    @write fid bigdata
+    @write fid bigfloat
+    @write fid bigint
+    @write fid bigfloats
+    @write fid bigints
+    @write fid bigfloatintobj
+    @write fid none
+    @write fid nonearr
+    @write fid scalar_nothing
+    @write fid vector_nothing
+    @write fid Abig
+    @write fid Bbig
+    @write fid Sbig
+    @write fid bitsparamint16
+    @write fid bitsparamfloat
+    @write fid bitsparambool
+    @write fid bitsparamsymbol
+    @write fid bitsparamint
+    @write fid bitsparamuint
+    @write fid tuple_of_tuples
+    @write fid zerod
+    @write fid zerod_any
+    @write fid nonetypedfield
+    @write fid cyclicobject
+    @write fid simplevec
+    @write fid natyperef
+    end
+    close(fid)
+
+    fidr = jldopen(fn, "r")
+    @time begin
+    @check fidr x
+    @check fidr A
+    @check fidr A3
+    @check fidr A4
+    @check fidr Aarray
+    @check fidr basic_types
+    @check fidr str
+    @check fidr str_unicode
+    @check fidr str_embedded_null
+    @check fidr strings
+    @check fidr empty_string
+    @check fidr empty_string_array
+    @check fidr empty_array_of_strings
+    @check fidr tf
+    @check fidr TF
+    @check fidr AB
+    @check fidr t
+    @check fidr c
+    @check fidr cint
+    @check fidr C
+    @check fidr emptyA
+    @check fidr emptyB
+    @check fidr ms
+    @check fidr msempty
+    @check fidr sym
+    @check fidr syms
+    @check fidr d
+    @check fidr oidd
+    exr = read(fidr, "ex")   # line numbers are stripped, don't expect equality
+    checkexpr(ex, exr)
+    @check fidr T
+    @check fidr Tarr
+    @check fidr char
+    @check fidr unicode_char
+    @check fidr α
+    @check fidr β
+    @check fidr vv
+    @check fidr cpus
+    @check fidr rng
+    @check fidr typevar
+    @check fidr typevar_lb
+    @check fidr typevar_ub
+    @check fidr typevar_lb_ub
+
+    # Special cases for reading undefs
+    undef = read(fidr, "undef")
+    if !isa(undef, Array{Any, 1}) || length(undef) != 1 || isassigned(undef, 1)
+        error("For undef, read value does not agree with written value")
+    end
+    undefs = read(fidr, "undefs")
+    if !isa(undefs, Array{Any, 2}) || length(undefs) != 4 || any(map(i->isassigned(undefs, i), 1:4))
+        error("For undefs, read value does not agree with written value")
+    end
+    ms_undef = read(fidr, "ms_undef")
+    if !isa(ms_undef, MyStruct) || ms_undef.len != 0 || isdefined(ms_undef, :data)
+        error("For ms_undef, read value does not agree with written value")
+    end
+
+    @check fidr bt
+    @check fidr btarray
+    @check fidr sa_asc
+    @check fidr sa_utf8
+    @check fidr subarray
+    @check fidr arr_empty_tuple
+    @check fidr emptyimmutable
+    @check fidr arr_emptyimmutable
+    @check fidr empty_arr_emptyimmutable
+    @check fidr emptytype
+    @check fidr arr_emptytype
+    @check fidr empty_arr_emptytype
+    @check fidr uninitialized_arr_emptytype
+    @check fidr emptyii
+    @check fidr emptyit
+    @check fidr emptyti
+    @check fidr emptytt
+    @check fidr emptyiiotherfield
+    @check fidr emptyiitype
+    @check fidr unicodestruct☺
+    @check fidr array_of_matrices
+    @check fidr tup
+    @check fidr empty_tup
+    @check fidr nonpointerfree_immutable_1
+    @check fidr nonpointerfree_immutable_2
+    @check fidr nonpointerfree_immutable_3
+    vaguer = read(fidr, "vague")
+    @test typeof(vaguer) == typeof(vague) && vaguer.name == vague.name
+    @check fidr bitsunion
+    @check fidr typeunionfield
+    @check fidr genericunionfield
+
+    arr = read(fidr, "arr_ref")
+    @test arr == arr_ref
+    @test arr[1] === arr[2]
+
+    obj = read(fidr, "obj_ref")
+    @test obj.x.x === obj.x.y == obj.y.x === obj.y.y
+    @test obj.x !== obj.y
+
+    @check fidr padding_test
+    @check fidr empty_arr_1
+    @check fidr empty_arr_2
+    @check fidr empty_arr_3
+    @check fidr empty_arr_4
+    @check fidr bigdata
+    @check fidr bigfloat
+    @check fidr bigint
+    @check fidr bigfloats
+    @check fidr bigints
+    @check fidr bigfloatintobj
+    @check fidr none
+    @check fidr nonearr
+    @check fidr scalar_nothing
+    @check fidr vector_nothing
+    @check fidr Abig
+    @check fidr Bbig
+    @check fidr Sbig
+    @check fidr bitsparamfloat
+    @check fidr bitsparambool
+    @check fidr bitsparamsymbol
+    @check fidr bitsparamint
+    @check fidr bitsparamuint
+    @check fidr tuple_of_tuples
+    @check fidr zerod
+    @check fidr zerod_any
+    @check fidr nonetypedfield
+
+    obj = read(fidr, "cyclicobject")
+    @test obj.x === obj
+
+    @check fidr simplevec
+    @check fidr natyperef
+    end
+    close(fidr)
 end
-close(fid)
-
-fidr = jldopen(fn, "r")
-@time begin
-@check fidr x
-@check fidr A
-@check fidr A3
-@check fidr A4
-@check fidr Aarray
-@check fidr basic_types
-@check fidr str
-@check fidr str_unicode
-@check fidr str_embedded_null
-@check fidr strings
-@check fidr empty_string
-@check fidr empty_string_array
-@check fidr empty_array_of_strings
-@check fidr tf
-@check fidr TF
-@check fidr AB
-@check fidr t
-@check fidr c
-@check fidr cint
-@check fidr C
-@check fidr emptyA
-@check fidr emptyB
-@check fidr ms
-@check fidr msempty
-@check fidr sym
-@check fidr syms
-@check fidr d
-@check fidr oidd
-exr = read(fidr, "ex")   # line numbers are stripped, don't expect equality
-checkexpr(ex, exr)
-@check fidr T
-@check fidr Tarr
-@check fidr char
-@check fidr unicode_char
-@check fidr α
-@check fidr β
-@check fidr vv
-@check fidr cpus
-@check fidr rng
-@check fidr typevar
-@check fidr typevar_lb
-@check fidr typevar_ub
-@check fidr typevar_lb_ub
-
-# Special cases for reading undefs
-undef = read(fidr, "undef")
-if !isa(undef, Array{Any, 1}) || length(undef) != 1 || isassigned(undef, 1)
-    error("For undef, read value does not agree with written value")
-end
-undefs = read(fidr, "undefs")
-if !isa(undefs, Array{Any, 2}) || length(undefs) != 4 || any(map(i->isassigned(undefs, i), 1:4))
-    error("For undefs, read value does not agree with written value")
-end
-ms_undef = read(fidr, "ms_undef")
-if !isa(ms_undef, MyStruct) || ms_undef.len != 0 || isdefined(ms_undef, :data)
-    error("For ms_undef, read value does not agree with written value")
-end
-
-@check fidr bt
-@check fidr btarray
-@check fidr sa_asc
-@check fidr sa_utf8
-@check fidr subarray
-@check fidr arr_empty_tuple
-@check fidr emptyimmutable
-@check fidr arr_emptyimmutable
-@check fidr empty_arr_emptyimmutable
-@check fidr emptytype
-@check fidr arr_emptytype
-@check fidr empty_arr_emptytype
-@check fidr uninitialized_arr_emptytype
-@check fidr emptyii
-@check fidr emptyit
-@check fidr emptyti
-@check fidr emptytt
-@check fidr emptyiiotherfield
-@check fidr emptyiitype
-@check fidr unicodestruct☺
-@check fidr array_of_matrices
-@check fidr tup
-@check fidr empty_tup
-@check fidr nonpointerfree_immutable_1
-@check fidr nonpointerfree_immutable_2
-@check fidr nonpointerfree_immutable_3
-vaguer = read(fidr, "vague")
-@test typeof(vaguer) == typeof(vague) && vaguer.name == vague.name
-@check fidr bitsunion
-@check fidr typeunionfield
-@check fidr genericunionfield
-
-arr = read(fidr, "arr_ref")
-@test arr == arr_ref
-@test arr[1] === arr[2]
-
-obj = read(fidr, "obj_ref")
-@test obj.x.x === obj.x.y == obj.y.x === obj.y.y
-@test obj.x !== obj.y
-
-@check fidr padding_test
-@check fidr empty_arr_1
-@check fidr empty_arr_2
-@check fidr empty_arr_3
-@check fidr empty_arr_4
-@check fidr bigdata
-@check fidr bigfloat
-@check fidr bigint
-@check fidr bigfloats
-@check fidr bigints
-@check fidr bigfloatintobj
-@check fidr none
-@check fidr nonearr
-@check fidr scalar_nothing
-@check fidr vector_nothing
-@check fidr Abig
-@check fidr Bbig
-@check fidr Sbig
-@check fidr bitsparamfloat
-@check fidr bitsparambool
-@check fidr bitsparamsymbol
-@check fidr bitsparamint
-@check fidr bitsparamuint
-@check fidr tuple_of_tuples
-@check fidr zerod
-@check fidr zerod_any
-@check fidr nonetypedfield
-
-obj = read(fidr, "cyclicobject")
-@test obj.x === obj
-
-@check fidr simplevec
-@check fidr natyperef
-end
-close(fidr)

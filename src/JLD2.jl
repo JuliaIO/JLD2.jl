@@ -1,5 +1,5 @@
 module JLD2
-using DataStructures
+using DataStructures, Libz
 import Base.sizeof
 export jldopen
 
@@ -106,6 +106,8 @@ mutable struct JLDFile{T<:IO}
     writable::Bool
     written::Bool
     created::Bool
+    compress::Bool
+    mmaparrays::Bool
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
@@ -117,8 +119,10 @@ mutable struct JLDFile{T<:IO}
     global_heaps::Dict{RelOffset,GlobalHeap}
     global_heap::GlobalHeap
 end
-JLDFile(io::IO, writable::Bool, written::Bool, created::Bool) =
-    JLDFile(io, writable, written, created, OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
+JLDFile(io::IO, writable::Bool, written::Bool, created::Bool, compress::Bool,
+        mmaparrays::Bool) =
+    JLDFile(io, writable, written, created, compress, mmaparrays,
+            OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), OrderedDict{String,RelOffset}(), ObjectIdDict(),
             ObjectIdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
@@ -142,10 +146,11 @@ h5offset(f::JLDFile, x::Int64) = RelOffset(x - FILE_HEADER_LENGTH)
 # File
 #
 
-function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool)
+function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool;
+                 compress::Bool=false, mmaparrays::Bool=false)
     exists = isfile(fname)
     io = MmapIO(fname, wr, create, truncate)
-    f = JLDFile(io, wr, truncate, !exists || truncate)
+    f = JLDFile(io, wr, truncate, !exists || truncate, compress, mmaparrays)
 
     if !truncate
         if String(read(io, UInt8, length(FILE_HEADER))) != FILE_HEADER
@@ -216,12 +221,13 @@ Opens a JLD file at path `fname`.
 `"a"`/`"a+"`: Open for reading and writing, creating a new file if none exists, but
               preserving the existing file if one is present
 """
-function jldopen(fname::AbstractString, mode::AbstractString="r")
-    mode == "r"  ? jldopen(fname, false, false, false) :
-    mode == "r+" ? jldopen(fname, true, false, false) :
-    mode == "a" || mode == "a+" ? jldopen(fname, true, true, false) :
-    mode == "w" || mode == "w+" ? jldopen(fname, true, true, true) :
-    throw(ArgumentError("invalid open mode: $mode"))
+function jldopen(fname::AbstractString, mode::AbstractString="r"; kwargs...)
+    (wr, create, truncate) = mode == "r"  ? (false, false, false) :
+                             mode == "r+" ? (true, false, false) :
+                             mode == "a" || mode == "a+" ? (true, true, false) :
+                             mode == "w" || mode == "w+" ? (true, true, true) :
+                             throw(ArgumentError("invalid open mode: $mode"))
+    jldopen(fname, wr, create, truncate; kwargs...)
 end
 
 function Base.read(f::JLDFile, name::AbstractString)
