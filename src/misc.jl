@@ -96,3 +96,10 @@ function size_size(sz::Integer)
         8
     end
 end
+
+"""
+    symbol_length(x::Symbol)
+
+Returns the length of the string represented by `x`.
+"""
+symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)

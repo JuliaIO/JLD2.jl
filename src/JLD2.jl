@@ -97,6 +97,31 @@ read as type `S`.
 struct CustomSerialization{T,S} end
 
 """
+    Group{T}
+
+JLD group object.
+"""
+mutable struct Group{T}
+    f::T
+    last_chunk_start_offset::Int64
+    continuation_message_goes_here::Int64
+    last_chunk_checksum_offset::Int64
+    unwritten_links::OrderedDict{String,RelOffset}
+    unwritten_child_groups::OrderedDict{String,Group}
+    written_links::OrderedDict{String,RelOffset}
+
+    Group{T}(f) where T =
+        new(f, -1, -1, -1, OrderedDict{String,RelOffset}(), OrderedDict{String,RelOffset}())
+
+    Group{T}(f, last_chunk_start_offset, continuation_message_goes_here,
+             last_chunk_checksum_offset, unwritten_links, unwritten_child_groups,
+             written_links) where T =
+        new(f, last_chunk_start_offset, continuation_message_goes_here,
+            last_chunk_checksum_offset, unwritten_links, unwritten_child_groups,
+            written_links)
+end
+
+"""
     JLDFile{T<:IO}
 
 JLD file object.
@@ -111,22 +136,27 @@ mutable struct JLDFile{T<:IO}
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
-    datasets::OrderedDict{String,RelOffset}
     jlh5type::ObjectIdDict
     h5jltype::ObjectIdDict
     jloffset::Dict{RelOffset,WeakRef}
     end_of_data::Int64
     global_heaps::Dict{RelOffset,GlobalHeap}
     global_heap::GlobalHeap
-end
-JLDFile(io::IO, writable::Bool, written::Bool, created::Bool, compress::Bool,
-        mmaparrays::Bool) =
-    JLDFile(io, writable, written, created, compress, mmaparrays,
+    loaded_groups::Dict{RelOffset,Group}
+    root_group_offset::RelOffset
+    root_group::Group
+    types_group::Group
+
+    JLDFile{T}(io::IO, writable::Bool, written::Bool, created::Bool, compress::Bool,
+            mmaparrays::Bool) where T =
+        new(io, writable, written, created, compress, mmaparrays,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
-            JLDWriteSession(), OrderedDict{String,RelOffset}(), ObjectIdDict(),
-            ObjectIdDict(), Dict{RelOffset,WeakRef}(),
+            JLDWriteSession(), ObjectIdDict(), ObjectIdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
-            GlobalHeap(0, 0, 0, Int64[]))
+            GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS)
+end
+JLDFile(io::IO, writable::Bool, written::Bool, created::Bool, compress::Bool, mmaparrays::Bool) =
+    JLDFile{typeof(io)}(io, writable, written, created, compress, mmaparrays)
 
 """
     fileoffset(f::JLDFile, x::RelOffset)
@@ -150,7 +180,8 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool;
                  compress::Bool=false, mmaparrays::Bool=false)
     exists = isfile(fname)
     io = MmapIO(fname, wr, create, truncate)
-    f = JLDFile(io, wr, truncate, !exists || truncate, compress, mmaparrays)
+    created = !exists || truncate
+    f = JLDFile(io, wr, truncate, created, compress, mmaparrays)
 
     if !truncate
         if String(read(io, UInt8, length(FILE_HEADER))) != FILE_HEADER
@@ -174,36 +205,26 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool;
         print(io, CURRENT_VERSION)
     end
 
-    if !truncate
+    if created
+        f.root_group = Group(f)
+        f.types_group = Group(f)
+    else
         seek(io, FILE_HEADER_LENGTH)
         superblock = read(io, Superblock)
         f.end_of_data = superblock.end_of_file_address
+        f.root_group_offset = superblock.root_group_object_header_address
+        f.root_group = load_group(f, superblock.root_group_object_header_address)
 
-        root_group_offset = fileoffset(f, superblock.root_group_object_header_address)
-        seek(io, root_group_offset)
-        root_group = read(io, Group)
-        if position(io) == f.end_of_data
-            f.end_of_data = root_group_offset
-        end
-
-        for i = 1:length(root_group.names)
-            name = root_group.names[i]
-            offset = root_group.offsets[i]
-            if name == "_types"
-                types_group_offset = fileoffset(f, offset)
-                seek(io, types_group_offset)
-                types_group = read(io, Group)
-                if position(io) == f.end_of_data
-                    f.end_of_data = types_group_offset
-                end
-
-                for i = 1:length(types_group.offsets)
-                    f.datatype_locations[types_group.offsets[i]] = CommittedDatatype(types_group.offsets[i], i)
-                end
-                resize!(f.datatypes, length(types_group.offsets))
-            else
-                f.datasets[name] = offset
+        if haskey(f.root_group.written_links, "_types")
+            types_group_offset = f.root_group.written_links["_types"]
+            f.types_group = f.loaded_groups[types_group_offset] = load_group(f, types_group_offset)
+            i = 0
+            for offset in values(f.types_group.written_links)
+                f.datatype_locations[offset] = CommittedDatatype(offset, i += 1)
             end
+            resize!(f.datatypes, length(f.datatype_locations))
+        else
+            f.types_group = Group(f)
         end
     end
 
@@ -230,18 +251,11 @@ function jldopen(fname::AbstractString, mode::AbstractString="r"; kwargs...)
     jldopen(fname, wr, create, truncate; kwargs...)
 end
 
-function Base.read(f::JLDFile, name::AbstractString)
-    f.end_of_data == 0 && throw(ArgumentError("file is closed"))
-    haskey(f.datasets, name) || throw(ArgumentError("file has no dataset $name"))
-    read_dataset(f, f.datasets[name])
-end
-
 """
     load_datatypes(f::JLDFile)
 
-Populate f.datatypes and f.jlh5types with all of the committed datatypes from
-a file. We need to do this before writing to make sure we reuse written
-datatypes.
+Populate f.datatypes and f.jlh5types with all of the committed datatypes from a file. We
+need to do this before writing to make sure we reuse written datatypes.
 """
 function load_datatypes(f::JLDFile)
     dts = f.datatypes
@@ -254,63 +268,48 @@ function load_datatypes(f::JLDFile)
     end
 end
 
-function Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession())
+"""
+    prewrite(f::JLDFile)
+
+Check that a JLD file is actually writable, and throw an error if not. Sets the `written`
+flag on the file.
+"""
+function prewrite(f::JLDFile)
     f.end_of_data == 0 && throw(ArgumentError("file is closed"))
     !f.writable && throw(ArgumentError("file was opened read-only"))
     !f.written && !f.created && load_datatypes(f)
     f.written = true
-
-    io = f.io
-    seek(io, f.end_of_data)
-    header_offset = write_dataset(f, obj, wsession)
-    f.datasets[name] = header_offset
-    nothing
 end
+
+Base.read(f::JLDFile, name::AbstractString) = f.root_group[name]
+Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession()) =
+    write(f.root_group, name, obj, wsession)
 
 function Base.close(f::JLDFile)
     io = f.io
     if f.written
-        seek(io, f.end_of_data)
-
-        names = String[]
-        sizehint!(names, length(f.datasets)+1)
-        offsets = RelOffset[]
-        sizehint!(offsets, length(f.datasets)+1)
-
-        # Write types group
-        if !isempty(f.datatypes)
-            push!(names, "_types")
-            push!(offsets, h5offset(f, position(io)))
-            write(io, Group(String[@sprintf("%08d", i) for i = 1:length(f.datatypes)],
-                            collect(keys(f.datatype_locations))))
+        # Save any groups we know of that have been modified
+        for group in values(f.loaded_groups)
+            save_group(group)
+        end
+        if !isempty(f.types_group) && !haskey(f.root_group, "_types")
+            f.root_group["_types"] = f.types_group
+        end
+        res = save_group(f.root_group)
+        if f.root_group_offset == UNDEFINED_ADDRESS
+            f.root_group_offset = res
         end
 
-        # Write root group
-        root_group_object_header_address = h5offset(f, position(io))
-        for (k, v) in f.datasets
-            push!(names, k)
-            push!(offsets, v)
-        end
-        write(io, Group(names, offsets))
-
-        eof_position = position(io)
+        eof_position = f.end_of_data
         truncate(io, eof_position)
         seek(io, FILE_HEADER_LENGTH)
         write(io, Superblock(0, FILE_HEADER_LENGTH, UNDEFINED_ADDRESS,
-              eof_position, root_group_object_header_address))
+              eof_position, f.root_group_offset))
     end
     f.end_of_data = 0
     close(io)
     nothing
 end
-
-
-"""
-    symbol_length(x::Symbol)
-
-Returns the length of the string represented by `x`.
-"""
-symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)
 
 include("superblock.jl")
 include("object_headers.jl")

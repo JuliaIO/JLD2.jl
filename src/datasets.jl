@@ -7,7 +7,7 @@ const LC_COMPACT_STORAGE = 0x00
 const LC_CONTIGUOUS_STORAGE = 0x01
 const LC_CHUNKED_STORAGE = 0x02
 
-function read_dataset(f::JLDFile, offset::RelOffset)
+function load_dataset(f::JLDFile, offset::RelOffset)
     if haskey(f.jloffset, offset)
         # Stored as WeakRefs and may no longer exist
         val = f.jloffset[offset].value
@@ -29,7 +29,7 @@ function read_dataset(f::JLDFile, offset::RelOffset)
     data_length::Int = -1
     chunked_storage::Bool = false
     filter_id::UInt16 = 0
-    while position(cio) < pmax
+    while position(cio) <= pmax-4
         msg = read(cio, HeaderMessage)
         endpos = position(cio) + msg.size
         if msg.msg_type == HM_DATASPACE
@@ -78,8 +78,6 @@ function read_dataset(f::JLDFile, offset::RelOffset)
             end
         elseif (msg.flags & 2^3) != 0
             throw(UnsupportedFeatureException())
-        elseif msg.msg_type == HM_NIL
-            break
         end
         seek(cio, endpos)
     end

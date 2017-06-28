@@ -227,6 +227,7 @@ function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::DataTy
     f.datatype_locations[h5o] = cdt
     f.jlh5type[readas] = cdt
     push!(f.datatypes, dtype)
+    f.types_group[@sprintf("%08d", id)] = h5o
 
     if writeas !== readas
         wrtypeattr = WrittenAttribute(:written_type,
@@ -656,7 +657,7 @@ jlconvert_canbeuninitialized(::ReadRepresentation{RelOffset,RelOffset}) = false
 # Reading references as other types
 @inline function jlconvert{T}(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr,
                               ::RelOffset)
-    x = read_dataset(f, unsafe_load(convert(Ptr{RelOffset}, ptr)))
+    x = load_dataset(f, unsafe_load(convert(Ptr{RelOffset}, ptr)))
     (isa(x, T) ? x : convert(T, x))::T
 end
 jlconvert_canbeuninitialized{T}(::ReadRepresentation{T,RelOffset}) = true
@@ -812,6 +813,7 @@ function h5fieldtype{T<:DataType}(f::JLDFile, ::Type{T}, readas::Type, ::Initial
     f.jlh5type[DataType] = cdt
     f.h5jltype[cdt] = ReadRepresentation{DataType,DataTypeODR()}()
     push!(f.datatypes, H5TYPE_DATATYPE)
+    f.types_group[@sprintf("%08d", id)] = h5o
 
     commit(f, H5TYPE_DATATYPE, (WrittenAttribute(:julia_type, WriteDataspace(f, DataType, odr(DataType)), cdt, DataType),))
 
@@ -875,7 +877,7 @@ function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
             # If the reference is to a committed datatype, read the datatype
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
-            res = cdt !== nulldt ? (typeof(jltype(f, cdt)::ReadRepresentation)::DataType).parameters[1] : read_dataset(f, ref)
+            res = cdt !== nulldt ? (typeof(jltype(f, cdt)::ReadRepresentation)::DataType).parameters[1] : load_dataset(f, ref)
             unknown_params = unknown_params || isa(res, UnknownType)
             res
         end for ref in paramrefs]

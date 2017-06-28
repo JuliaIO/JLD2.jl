@@ -16,14 +16,21 @@ const HM_GROUP_INFO = 0x0a
 const HM_FILTER_PIPELINE = 0x0b
 const HM_ATTRIBUTE = 0x0c
 const HM_OBJECT_COMMENT = 0x0d
-const HM_SHARED_MESSAGE_TABLE = 0x0e
-const HM_OBJECT_HEADER_CONTINUATION = 0x0f
-const HM_SYMBOL_TABLE = 0x10
-const HM_MODIFICATION_TIME = 0x11
-const HM_BTREE_K_VALUES = 0x12
-const HM_DRIVER_INFO = 0x13
-const HM_ATTRIBUTE_INFO = 0x14
-const HM_REFERENCE_COUNT = 0x15
+const HM_SHARED_MESSAGE_TABLE = 0x0f
+const HM_OBJECT_HEADER_CONTINUATION = 0x10
+const HM_SYMBOL_TABLE = 0x11
+const HM_MODIFICATION_TIME = 0x12
+const HM_BTREE_K_VALUES = 0x13
+const HM_DRIVER_INFO = 0x14
+const HM_ATTRIBUTE_INFO = 0x15
+const HM_REFERENCE_COUNT = 0x16
+
+const OH_ATTRIBUTE_CREATION_ORDER_TRACKED = 2^2
+const OH_ATTRIBUTE_CREATION_ORDER_INDEXED = 2^3
+const OH_ATTRIBUTE_PHASE_CHANGE_VALUES_STORED = 2^4
+const OH_TIMES_STORED = 2^5
+
+const OBJECT_HEADER_CONTINUATION_SIGNATURE = htol(0x4b48434f) # "OCHK"
 
 struct ObjectStart
     signature::UInt32
@@ -58,3 +65,23 @@ struct HeaderMessage
     flags::UInt8
 end
 define_packed(HeaderMessage)
+
+
+function isgroup(f::JLDFile, roffset::RelOffset)
+    io = f.io
+    seek(io, fileoffset(f, roffset))
+
+    sz = read_obj_start(io)
+    pmax::Int64 = position(io) + sz
+    while position(io) <= pmax-4
+        msg = read(io, HeaderMessage)
+        endpos = position(io) + msg.size
+        if msg.msg_type == HM_LINK_INFO || msg.msg_type == HM_GROUP_INFO || msg.msg_type == HM_LINK_MESSAGE
+            return true
+        elseif msg.msg_type == HM_DATASPACE || msg.msg_type == HM_DATATYPE || msg.msg_type == HM_FILL_VALUE || msg.msg_type == HM_DATA_LAYOUT
+            return false
+        end
+        seek(io, endpos)
+    end
+    return false
+end
