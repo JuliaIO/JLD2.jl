@@ -128,6 +128,7 @@ JLD file object.
 """
 mutable struct JLDFile{T<:IO}
     io::T
+    path::String
     writable::Bool
     written::Bool
     created::Bool
@@ -147,19 +148,20 @@ mutable struct JLDFile{T<:IO}
     root_group::Group
     types_group::Group
 
-    function JLDFile{T}(io::IO, writable::Bool, written::Bool, created::Bool, compress::Bool,
-                        mmaparrays::Bool) where T
-        f = new(io, writable, written, created, compress, mmaparrays,
+    function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
+                        created::Bool, compress::Bool, mmaparrays::Bool) where T
+        f = new(io, path, writable, written, created, compress, mmaparrays,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), ObjectIdDict(), ObjectIdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS)
-        finalizer(f, close)
+        finalizer(f, safe_close)
         f
     end
 end
-JLDFile(io::IO, writable::Bool, written::Bool, created::Bool, compress::Bool, mmaparrays::Bool) =
-    JLDFile{typeof(io)}(io, writable, written, created, compress, mmaparrays)
+JLDFile(io::IO, path::AbstractString, writable::Bool, written::Bool, created::Bool,
+        compress::Bool, mmaparrays::Bool) =
+    JLDFile{typeof(io)}(io, path, writable, written, created, compress, mmaparrays)
 
 """
     fileoffset(f::JLDFile, x::RelOffset)
@@ -181,10 +183,11 @@ h5offset(f::JLDFile, x::Int64) = RelOffset(x - FILE_HEADER_LENGTH)
 
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool;
                  compress::Bool=false, mmaparrays::Bool=false)
-    exists = isfile(fname)
-    io = MmapIO(fname, wr, create, truncate)
+    path = realpath(fname)
+    exists = isfile(path)
+    io = MmapIO(path, wr, create, truncate)
     created = !exists || truncate
-    f = JLDFile(io, wr, truncate, created, compress, mmaparrays)
+    f = JLDFile(io, path, wr, truncate, created, compress, mmaparrays)
 
     if !truncate
         if String(read(io, UInt8, length(FILE_HEADER))) != FILE_HEADER
@@ -313,6 +316,24 @@ function Base.close(f::JLDFile)
     f.end_of_data = 0
     close(io)
     nothing
+end
+
+"""
+    safe_close(f::JLDFile)
+
+When a JLDFile is finalized, it is possible that the `MmapIO` has been munmapped, since
+Julia does not guarantee finalizer order. This means that we can't write to the `MmapIO` or
+Julia will segfault. We avoid the segfault by first finalizing the underlying parts of the
+`MmapIO`, and then constructing a new mapping and writing to it.
+"""
+function safe_close(f::JLDFile{MmapIO})
+    f.end_of_data == 0 && return
+    if f.written
+        finalize(f.io.f)
+        finalize(f.io.arr)
+        f.io = MmapIO(f.path, true, false, false)
+    end
+    close(f)
 end
 
 include("superblock.jl")

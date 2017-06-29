@@ -13,6 +13,7 @@ const PlainType = Union{Type{Int16},Type{Int32},Type{Int64},Type{Int128},Type{UI
 
 mutable struct MmapIO <: IO
     f::IOStream
+    write::Bool
     arr::Vector{UInt8}
     curptr::Ptr{Void}
     endptr::Ptr{Void}
@@ -25,7 +26,7 @@ function MmapIO(fname::AbstractString, write::Bool, create::Bool, truncate::Bool
     initialsz = truncate ? 0 : filesize(fname)
     arr = Mmap.mmap(f, Vector{UInt8}, (initialsz + MMAP_GROW_SIZE,); grow=false)
     ptr = Ptr{Void}(pointer(arr))
-    io = MmapIO(f, arr, ptr, ptr + initialsz)
+    io = MmapIO(f, write, arr, ptr, ptr + initialsz)
 end
 
 Base.show(io::IO, ::MmapIO) = print(io, "MmapIO")
@@ -71,7 +72,8 @@ end
 Base.truncate(io::MmapIO, pos) = truncate(io.f, pos)
 
 function Base.close(io::MmapIO)
-    Mmap.sync!(io.arr)
+    io.write && Mmap.sync!(io.arr)
+    finalize(io.arr)
     close(io.f)
 end
 
