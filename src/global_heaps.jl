@@ -117,7 +117,6 @@ function Base.read(io::IO, ::Type{GlobalHeap})
     GlobalHeap(offset, heapsz, free, objects)
 end
 
-# TODO make this take an ODR
 function read_heap_object{T,RR}(f::JLDFile{MmapIO}, hid::GlobalHeapID, rr::ReadRepresentation{T,RR})
     io = f.io
     if haskey(f.global_heaps, hid.heap_offset)

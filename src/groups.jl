@@ -2,10 +2,151 @@
 # Groups
 #
 
-struct Group{T}
-    names::T
-    offsets::Vector{RelOffset}
+Group(f::JLDFile, last_chunk_start_offset::Int64, continuation_message_goes_here::Int64,
+      last_chunk_checksum_offset::Int64, links::OrderedDict{String,RelOffset}) =
+    Group{typeof(f)}(f, last_chunk_start_offset, continuation_message_goes_here,
+                     last_chunk_checksum_offset, OrderedDict{String,RelOffset}(),
+                     OrderedDict{String,RelOffset}(), links)
+
+Group(f::JLDFile) = Group{typeof(f)}(f)
+
+"""
+    lookup_offset(g::Group, name::AbstractString) -> RelOffset
+
+Lookup the offset of a dataset in a group. Returns `UNDEFINED_ADDRESS` if the dataset is
+not present. Does not inspect `unwritten_child_groups`.
+"""
+function lookup_offset(g::Group, name::AbstractString)
+    if g.last_chunk_start_offset != -1
+        # Has been saved to file, so written_links exists
+        roffset = get(g.written_links, name, UNDEFINED_ADDRESS)
+        roffset != UNDEFINED_ADDRESS && return roffset
+    end
+    roffset = get(g.unwritten_links, name, UNDEFINED_ADDRESS)
 end
+
+"""
+    pathize(g::Group, name::AbstractString, create::Bool) -> Tuple{Group,String}
+
+Converts a path to a group and name object. If `create` is true, any intermediate groups
+will be created, and the dataset name will be checked for uniqueness with existing names.
+"""
+function pathize(g::Group, name::AbstractString, create::Bool)
+    if '/' in name
+        f = g.f
+        dirs = split(name, '/')
+
+        # Handles the absolute path case where the name starts with /
+        if isempty(first(dirs))
+            g = g.f.root_group
+            start = 2
+        else
+            start = 1
+        end
+
+        for i = start:length(dirs)-1
+            dir = dirs[i]
+            isempty(dir) && continue
+
+            # See if a group already exists
+            offset = lookup_offset(g, dir)
+            if offset == UNDEFINED_ADDRESS
+                if haskey(g.unwritten_child_groups, dir)
+                    # It's possible that lookup_offset fails because the group has not yet
+                    # been written to the file
+                    g = g.unwritten_child_groups[dir]
+                elseif create
+                    # No group exists, so create a new group
+                    newg = Group(f)
+                    g.unwritten_child_groups[dir] = newg
+                    g = newg
+                else
+                    throw(KeyError(join(dirs[1:i], '/')))
+                end
+            elseif haskey(f.loaded_groups, offset)
+                g = f.loaded_groups[offset]
+            elseif !isgroup(f, offset)
+                throw(ArgumentError("path $(join(dirs[1:i], '/')) points to a dataset, not a group"))
+            else
+                g = f.loaded_groups[offset] = load_group(f, offset)
+            end
+        end
+
+        name = String(dirs[end])
+    end
+
+    if create && haskey(g, name)
+        throw(ArgumentError("a group or dataset named $name is already present within this group"))
+    end
+
+    return (g, name)
+end
+
+function Base.getindex(g::Group, name::AbstractString)
+    f = g.f
+    f.end_of_data == 0 && throw(ArgumentError("file is closed"))
+
+    (g, name) = pathize(g, name, false)
+
+    roffset = lookup_offset(g, name)
+    if roffset == UNDEFINED_ADDRESS
+        haskey(g.unwritten_child_groups, name) && return g.unwritten_child_groups[name]
+        throw(KeyError(name))
+    end
+
+    if isgroup(f, roffset)
+        let loaded_groups = f.loaded_groups
+            get!(()->load_group(f, roffset), loaded_groups, roffset)
+        end
+    else
+        load_dataset(f, roffset)
+    end
+end
+
+function Base.write(g::Group, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession())
+    if g.last_chunk_start_offset != -1 && g.continuation_message_goes_here == -1
+        error("objects cannot be added to this group because it was created with a previous version of JLD2")
+    end
+    f = g.f
+    prewrite(f)
+    (g, name) = pathize(g, name, true)
+    g[name] = write_dataset(f, obj, wsession)
+    nothing
+end
+
+function Base.setindex!(g::Group, obj, name::AbstractString)
+    write(g, name, obj)
+    g
+end
+
+function Base.setindex!(g::Group, child::Group, name::AbstractString)
+    if child.last_chunk_start_offset != -1
+        throw(ArgumentError("cannot re-link a group that has already been written"))
+    end
+    prewrite(g.f)
+    (g, name) = pathize(g, name, true)
+    g.unwritten_child_groups[name] = child
+    g
+end
+
+# Internal use only
+function Base.setindex!(g::Group, offset::RelOffset, name::AbstractString)
+    if g.last_chunk_start_offset != -1 && g.continuation_message_goes_here == -1
+        error("objects cannot be added to this group because it was created with a previous version of JLD2")
+    end
+    g.unwritten_links[name] = offset
+    g
+end
+
+function Base.haskey(g::Group, name::AbstractString)
+    (g, name) = pathize(g, name, false)
+    (g.last_chunk_start_offset != -1 && haskey(g.written_links, name)) ||
+        haskey(g.unwritten_links, name) || haskey(g.unwritten_child_groups, name)
+end
+
+Base.isempty(g::Group) =
+    (g.last_chunk_start_offset != -1 && isempty(g.written_links)) &&
+    isempty(g.unwritten_links) && isempty(g.unwritten_child_groups)
 
 struct LinkInfo
     version::UInt8
@@ -55,106 +196,201 @@ function read_link(io::IO)
     (String(name), target)
 end
 
-sizeof_link(name::String) =
-    3 + size_size(sizeof(name)) + sizeof(name) + sizeof(RelOffset)
+function load_group(f::JLDFile, roffset::RelOffset)
+    io = f.io
+    chunk_start_offset::Int64 = fileoffset(f, roffset)
+    seek(io, chunk_start_offset)
 
-function write_link(io::IO, name::String, target::RelOffset)
-    # Version
-    write(io, UInt8(1))
+    cio = begin_checksum(io)
+    sz = read_obj_start(cio)
+    chunk_checksum_offset::Int64 = position(cio) + sz
 
-    # Flags
-    flags = size_flag(sizeof(name))
-    flags |= LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT
-    write(io, flags::UInt8)
+    # Messages
+    continuation_message_goes_here::Int64 = -1
+    links = OrderedDict{String,RelOffset}()
 
-    # Link name character set
-    write(io, UInt8(CSET_UTF8))
+    continuation_offset::Int64 = -1
+    continuation_length::Length = 0
 
-    # Length of link name
-    write_size(io, sizeof(name))
+    while true
+        if continuation_offset != -1
+            seek(io, continuation_offset)
+            chunk_checksum_offset = continuation_offset + continuation_length - 4
+            continuation_offset = -1
 
-    # Link name
-    write(io, name)
+            cio = begin_checksum(io)
+            read(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
+        end
 
-    # Link target
-    write(io, target::RelOffset)
+        while (curpos = position(cio)) <= chunk_checksum_offset - 4
+            msg = read(cio, HeaderMessage)
+            endpos = curpos + sizeof(HeaderMessage) + msg.size
+            if msg.msg_type == HM_NIL
+                if continuation_message_goes_here == -1 &&
+                   chunk_checksum_offset - curpos >= sizeof(HeaderMessage) + sizeof(RelOffset) + sizeof(Length)
+                    continuation_message_goes_here = curpos
+                end
+            else
+                continuation_message_goes_here = -1
+                if msg.msg_type == HM_LINK_INFO
+                    link_info = read(cio, LinkInfo)
+                    link_info.fractal_heap_address == UNDEFINED_ADDRESS || throw(UnsupportedFeatureException())
+                elseif msg.msg_type == HM_GROUP_INFO
+                    # This message doesn't help us much, so we ignore it for now
+                elseif msg.msg_type == HM_LINK_MESSAGE
+                    name, loffset = read_link(cio)
+                    links[name] = loffset
+                elseif msg.msg_type == HM_OBJECT_HEADER_CONTINUATION
+                    continuation_offset = chunk_start_offset = fileoffset(f, read(cio, RelOffset))
+                    continuation_length = read(cio, Length)
+                elseif (msg.flags & 2^3) != 0
+                    throw(UnsupportedFeatureException())
+                end
+            end
+            seek(cio, endpos)
+        end
+
+        # Checksum
+        seek(cio, chunk_checksum_offset)
+        end_checksum(cio) == read(io, UInt32) || throw(InvalidDataException())
+
+        continuation_offset == -1 && break
+    end
+
+    Group(f, chunk_start_offset, continuation_message_goes_here, chunk_checksum_offset, links)
 end
 
-const OH_ATTRIBUTE_CREATION_ORDER_TRACKED = 2^2
-const OH_ATTRIBUTE_CREATION_ORDER_INDEXED = 2^3
-const OH_ATTRIBUTE_PHASE_CHANGE_VALUES_STORED = 2^4
-const OH_TIMES_STORED = 2^5
+"""
+    link_size(name::String)
 
-function payload_size(group::Group)
-    # 2 extra headers for link info and group info
-    nheaders = length(group.names) + 2
-    sz = sizeof(LinkInfo) + 2 + nheaders * sizeof(HeaderMessage)
-    for name in group.names
-        sz += sizeof_link(name)
+Returns the size of a link message, including message header.
+"""
+link_size(name::String) =
+    3 + size_size(sizeof(name)) + sizeof(name) + sizeof(RelOffset)
+
+"""
+    links_size(pairs)
+
+Returns the size of several link messages. `pairs` is an iterator of
+`String => RelOffset` pairs.
+"""
+function links_size(pairs)
+    sz = 0
+    for (name::String,) in pairs
+        sz += link_size(name) + sizeof(HeaderMessage)
     end
     sz
 end
 
-function Base.read(io::IO, ::Type{Group})
-    cio = begin_checksum(io)
-    sz = read_obj_start(cio)
-    pmax = position(cio) + sz
+"""
+    group_payload_size(pairs)
 
-    # Messages
-    names = String[]
-    offsets = RelOffset[]
-    while position(cio) < pmax
-        msg = read(cio, HeaderMessage)
-        endpos = position(cio) + msg.size
-        if msg.msg_type == HM_LINK_INFO
-            link_info = read(cio, LinkInfo)
-            link_info.fractal_heap_address == UNDEFINED_ADDRESS || throw(UnsupportedFeatureException())
-        elseif msg.msg_type == HM_GROUP_INFO
-            # This message doesn't help us much, so we ignore it for now
-        elseif msg.msg_type == HM_LINK_MESSAGE
-            name, offset = read_link(cio)
-            push!(names, name)
-            push!(offsets, offset)
-        elseif (msg.flags & 2^3) != 0
-            throw(UnsupportedFeatureException())
-        elseif msg.msg_type == HM_NIL
-            break
+Returns the size of a group payload, including link info, group info, and link messages,
+but not the object header. `pairs` is an iterator of `String => RelOffset` pairs. Provides
+space after the last object message for a continuation message.
+"""
+group_payload_size(pairs) =
+    sizeof(HeaderMessage) + sizeof(LinkInfo) + sizeof(HeaderMessage) + 2 + links_size(pairs) +
+    sizeof(HeaderMessage) + sizeof(RelOffset) + sizeof(Length)
+
+group_continuation_size(pairs) =
+    sizeof(OBJECT_HEADER_CONTINUATION_SIGNATURE) + links_size(pairs) +
+    sizeof(HeaderMessage) + sizeof(RelOffset) + sizeof(Length) + 4 # Checksum is included
+
+"""
+    save_group(g::Group) -> RelOffset
+
+Stores a group to a file, updating it if it has already been saved. Returns
+UNDEFINED_ADDRESS if the group was already stored, or the offset of the new group
+otherwise.
+"""
+function save_group(g::Group)
+    # Save unwritten child groups
+    if !isempty(g.unwritten_child_groups)
+        for (name, child_group) in g.unwritten_child_groups
+            retval = save_group(child_group)
+            g.unwritten_links[name] = retval
         end
-        seek(cio, endpos)
+        empty!(g.unwritten_child_groups)
     end
-    seek(cio, pmax)
 
-    # Checksum
-    end_checksum(cio) == read(io, UInt32) || throw(InvalidDataException())
+    # Save links
+    f = g.f
+    io = f.io
+    if g.last_chunk_start_offset == -1
+        psz = group_payload_size(g.unwritten_links)
+        sz = sizeof(ObjectStart) + size_size(psz) + psz + 4
 
-    Group(names, offsets)
-end
+        g.last_chunk_start_offset = f.end_of_data
+        retval = h5offset(f, f.end_of_data)
+        seek(io, f.end_of_data)
+        cio = begin_checksum(io, sz - 4)
 
-function Base.write(io::IO, group::Group)
-    psz = payload_size(group)
-    sz = sizeof(ObjectStart) + size_size(psz) + psz + 4
+        # Object header
+        write(cio, ObjectStart(size_flag(psz)))
+        write_size(cio, psz)
+        x = position(cio)
 
-    cio = begin_checksum(io, sz - 4)
+        # Link info message
+        write(cio, HeaderMessage(HM_LINK_INFO, sizeof(LinkInfo), 0))
+        write(cio, LinkInfo())
 
-    # Object header
-    write(cio, ObjectStart(size_flag(psz)))
-    write_size(cio, psz)
-    x = position(cio)
+        # Group info message
+        write(cio, HeaderMessage(HM_GROUP_INFO, 2, 0))
+        write(cio, UInt16(0))
+    else
+        # If no changes, no need to save
+        isempty(g.unwritten_links) && return UNDEFINED_ADDRESS
 
-    # Link info message
-    write(cio, HeaderMessage(HM_LINK_INFO, sizeof(LinkInfo), 0))
-    write(cio, LinkInfo())
+        retval = UNDEFINED_ADDRESS
+        continuation_start = f.end_of_data
+        csz = group_continuation_size(g.unwritten_links)
 
-    # Group info message
-    write(cio, HeaderMessage(HM_GROUP_INFO, 2, 0))
-    write(cio, UInt16(0))
+        seek(io, g.last_chunk_start_offset)
+        cio = begin_checksum(io)
 
-    # Datatypes
-    for i = 1:length(group.names)
-        write(cio, HeaderMessage(HM_LINK_MESSAGE, sizeof_link(group.names[i]), 0))
-        write_link(io, group.names[i], group.offsets[i])
+        # Object continuation message
+        seek(cio, g.continuation_message_goes_here)
+        write(cio, HeaderMessage(HM_OBJECT_HEADER_CONTINUATION, sizeof(RelOffset) + sizeof(Length), 0))
+        write(cio, h5offset(f, continuation_start))
+        write(cio, Length(csz))
+
+        seek(cio, g.last_chunk_checksum_offset)
+        write(io, end_checksum(cio))
+
+        # Object continuation
+        seek(io, continuation_start)
+        g.last_chunk_start_offset = continuation_start
+        cio = begin_checksum(io, csz)
+        write(cio, OBJECT_HEADER_CONTINUATION_SIGNATURE)
     end
+
+    # Links
+    for (name, offset) in g.unwritten_links
+        write(cio, HeaderMessage(HM_LINK_MESSAGE, link_size(name), 0))
+        write(io, UInt8(1))             # Version
+
+        # Flags
+        flags = size_flag(sizeof(name)) | LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT
+        write(io, flags::UInt8)
+
+        write(io, UInt8(CSET_UTF8))     # Link name character set
+        write_size(io, sizeof(name))    # Length of link name
+        write(io, name)                 # Link name
+        write(io, offset)               # Link target
+    end
+    empty!(g.unwritten_links)
+
+    # Extra space for object continuation
+    g.continuation_message_goes_here = position(cio)
+    write(cio, HeaderMessage(HM_NIL, sizeof(RelOffset)+sizeof(Length), 0))
+    write(cio, RelOffset(0))
+    write(cio, Length(0))
 
     # Checksum
     write(io, end_checksum(cio))
+    f.end_of_data = position(io)
+    g.last_chunk_checksum_offset = f.end_of_data - 4
+
+    return retval
 end
