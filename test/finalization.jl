@@ -21,7 +21,7 @@ using JLD2
 f = jldopen($(repr(fn)), "w")
 write(f, "x", 1:10)
 """
-run(`julia -e $cmd`)
+run(`$(Base.julia_cmd()) -e $cmd`)
 
 f = jldopen(fn, "r")
 @test read(f, "x") == 1:10
