@@ -336,6 +336,11 @@ function safe_close(f::JLDFile{MmapIO})
     close(f)
 end
 
+function Base.show(io::IO, f::JLDFile)
+    println(io, "JLDFile $(f.path) ", f.writable ? "(read/write)" : "(read-only)")
+    show_group(io, f.root_group)
+end
+
 include("superblock.jl")
 include("object_headers.jl")
 include("groups.jl")

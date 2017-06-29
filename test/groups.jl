@@ -46,4 +46,7 @@ f = jldopen(fn, "r")
 @test !isempty(read(f, "test_group_1"))
 @test isempty(read(f, "empty_group"))
 @test isempty(read(f, "group_with_one_group_child/empty_group"))
+
+# Make sure printing doesn't error
+show(IOBuffer(), f)
 close(f)

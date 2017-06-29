@@ -154,6 +154,16 @@ Base.isempty(g::Group) =
     (g.last_chunk_start_offset == -1 || isempty(g.written_links)) &&
     isempty(g.unwritten_links) && isempty(g.unwritten_child_groups)
 
+function Base.keys(g::Group)
+    ks = String[]
+    if g.last_chunk_start_offset != -1
+        append!(ks, keys(g.written_links))
+    end
+    append!(ks, keys(g.unwritten_links))
+    append!(ks, keys(g.unwritten_child_groups))
+    ks
+end
+
 struct LinkInfo
     version::UInt8
     flags::UInt8
@@ -401,4 +411,27 @@ function save_group(g::Group)
     g.last_chunk_checksum_offset = f.end_of_data - 4
 
     return retval
+end
+
+function show_group(io::IO, g::Group, prefix::String=" ")
+    ks = collect(keys(g))
+    for i = 1:length(ks)
+        k = ks[i]
+        islast = i == length(ks)
+        isagroup = haskey(g.unwritten_child_groups, k) || isgroup(g.f, lookup_offset(g, k))
+        print(io, prefix, islast ? "└─" : "├─", isagroup ? "📂 " : "🔢 ", k)
+        if isagroup
+            newg = g[k]
+            if !isempty(newg)
+                print(io, '\n')
+                show_group(io, newg, prefix*(islast ? "   " : "│  "))
+            end
+        end
+        !islast && print(io, '\n')
+    end
+end
+
+function Base.show(io::IO, g::Group)
+    println(io, "JLD2.Group")
+    show_group(io, g)
 end
