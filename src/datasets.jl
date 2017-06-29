@@ -382,14 +382,19 @@ function payload_size_without_storage_message(dataspace::WriteDataspace, datatyp
 end
 
 # Might need to do something else someday for non-mmapped IO
-function write_data{S}(f::JLDFile, data, odr::S, wsession::JLDWriteSession)
+function write_data{S}(f::JLDFile{MmapIO}, data, odr::S, wsession::JLDWriteSession)
     io = f.io
     ensureroom(io, sizeof(odr))
     arr = io.arr
     cp = io.curptr
     p = position(io)
     h5convert!(cp, odr, f, data, wsession)
+
+    # This needs to be a seek call, since writing some of the references may have caused us
+    # to enlarge our memory mapping, and thus `io.curptr` may be a pointer into a different
+    # array
     seek(io, p + sizeof(odr))
+
     arr # Keep old array rooted until the end
 end
 
@@ -397,7 +402,8 @@ end
 unsafe_isdefined(arr::Array, i::Int) =
     unsafe_load(Ptr{Ptr{Void}}(pointer(arr)+(i-1)*sizeof(Ptr{Void}))) != Ptr{Void}(0)
 
-function write_data{T,S}(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSession)
+function write_data{T,S}(f::JLDFile{MmapIO}, data::Array{T}, odr::S,
+                         wsession::JLDWriteSession)
     io = f.io
     ensureroom(io, sizeof(odr) * length(data))
     arr = io.arr
@@ -413,7 +419,12 @@ function write_data{T,S}(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteS
         end
         cp += sizeof(odr)
     end
+
+    # This needs to be a seek call, since writing some of the references may have caused us
+    # to enlarge our memory mapping, and thus `io.curptr` may be a pointer into a different
+    # array
     seek(io, p + sizeof(odr) * length(data))
+
     arr # Keep old array rooted until the end
 end
 
