@@ -25,3 +25,4 @@ run(`julia -e $cmd`)
 
 f = jldopen(fn, "r")
 @test read(f, "x") == 1:10
+close(f)
