@@ -2,13 +2,19 @@
 # Groups
 #
 
-Group(f::JLDFile, last_chunk_start_offset::Int64, continuation_message_goes_here::Int64,
-      last_chunk_checksum_offset::Int64, links::OrderedDict{String,RelOffset}) =
-    Group{typeof(f)}(f, last_chunk_start_offset, continuation_message_goes_here,
-                     last_chunk_checksum_offset, OrderedDict{String,RelOffset}(),
-                     OrderedDict{String,RelOffset}(), links)
+"""
+    Group(f::JLDFile, name::AbstractString)
 
-Group(f::JLDFile) = Group{typeof(f)}(f)
+Construct an empty group named `name` at the top level of `JLDFile` `f`.
+"""
+Group(f::JLDFile, name::AbstractString) = Group(f.root_group, name)
+
+"""
+    Group(g::Group, name::AbstractString)
+
+Construct a group named `name` as a child of group `g`.
+"""
+Group{T}(g::Group{T}, name::AbstractString) = (g[name] = Group{T}(g.f))
 
 """
     lookup_offset(g::Group, name::AbstractString) -> RelOffset
@@ -57,7 +63,7 @@ function pathize(g::Group, name::AbstractString, create::Bool)
                     g = g.unwritten_child_groups[dir]
                 elseif create
                     # No group exists, so create a new group
-                    newg = Group(f)
+                    newg = Group{typeof(f)}(f)
                     g.unwritten_child_groups[dir] = newg
                     g = newg
                 else
@@ -257,7 +263,9 @@ function load_group(f::JLDFile, roffset::RelOffset)
         continuation_offset == -1 && break
     end
 
-    Group(f, chunk_start_offset, continuation_message_goes_here, chunk_checksum_offset, links)
+    Group{typeof(f)}(f, chunk_start_offset, continuation_message_goes_here,
+                     chunk_checksum_offset, OrderedDict{String,RelOffset}(),
+                     OrderedDict{String,Group}(), links)
 end
 
 """

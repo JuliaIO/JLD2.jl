@@ -111,7 +111,7 @@ mutable struct Group{T}
     written_links::OrderedDict{String,RelOffset}
 
     Group{T}(f) where T =
-        new(f, -1, -1, -1, OrderedDict{String,RelOffset}(), OrderedDict{String,RelOffset}())
+        new(f, -1, -1, -1, OrderedDict{String,RelOffset}(), OrderedDict{String,Group}())
 
     Group{T}(f, last_chunk_start_offset, continuation_message_goes_here,
              last_chunk_checksum_offset, unwritten_links, unwritten_child_groups,
@@ -147,13 +147,16 @@ mutable struct JLDFile{T<:IO}
     root_group::Group
     types_group::Group
 
-    JLDFile{T}(io::IO, writable::Bool, written::Bool, created::Bool, compress::Bool,
-            mmaparrays::Bool) where T =
-        new(io, writable, written, created, compress, mmaparrays,
+    function JLDFile{T}(io::IO, writable::Bool, written::Bool, created::Bool, compress::Bool,
+                        mmaparrays::Bool) where T
+        f = new(io, writable, written, created, compress, mmaparrays,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), ObjectIdDict(), ObjectIdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS)
+        finalizer(f, close)
+        f
+    end
 end
 JLDFile(io::IO, writable::Bool, written::Bool, created::Bool, compress::Bool, mmaparrays::Bool) =
     JLDFile{typeof(io)}(io, writable, written, created, compress, mmaparrays)
@@ -206,8 +209,8 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool;
     end
 
     if created
-        f.root_group = Group(f)
-        f.types_group = Group(f)
+        f.root_group = Group{typeof(f)}(f)
+        f.types_group = Group{typeof(f)}(f)
     else
         seek(io, FILE_HEADER_LENGTH)
         superblock = read(io, Superblock)
@@ -224,7 +227,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool;
             end
             resize!(f.datatypes, length(f.datatype_locations))
         else
-            f.types_group = Group(f)
+            f.types_group = Group{typeof(f)}(f)
         end
     end
 
@@ -286,6 +289,7 @@ Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDW
     write(f.root_group, name, obj, wsession)
 
 function Base.close(f::JLDFile)
+    f.end_of_data == 0 && return
     io = f.io
     if f.written
         # Save any groups we know of that have been modified
