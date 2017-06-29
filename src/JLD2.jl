@@ -183,11 +183,10 @@ h5offset(f::JLDFile, x::Int64) = RelOffset(x - FILE_HEADER_LENGTH)
 
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool;
                  compress::Bool=false, mmaparrays::Bool=false)
-    path = realpath(fname)
-    exists = isfile(path)
-    io = MmapIO(path, wr, create, truncate)
+    exists = isfile(fname)
+    io = MmapIO(fname, wr, create, truncate)
     created = !exists || truncate
-    f = JLDFile(io, path, wr, truncate, created, compress, mmaparrays)
+    f = JLDFile(io, realpath(fname), wr, truncate, created, compress, mmaparrays)
 
     if !truncate
         if String(read(io, UInt8, length(FILE_HEADER))) != FILE_HEADER
