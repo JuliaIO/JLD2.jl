@@ -151,7 +151,7 @@ function Base.haskey(g::Group, name::AbstractString)
 end
 
 Base.isempty(g::Group) =
-    (g.last_chunk_start_offset != -1 && isempty(g.written_links)) &&
+    (g.last_chunk_start_offset == -1 || isempty(g.written_links)) &&
     isempty(g.unwritten_links) && isempty(g.unwritten_child_groups)
 
 struct LinkInfo
