@@ -116,11 +116,15 @@ end
 # -------------------------------------------------------------------------------
 function hash(k::AbstractVector{UInt8}, istart::Integer=1, n::Integer=length(k), initval::UInt32=UInt32(0))
     n <= length(k) || throw(BoundsError())
+    hash(pointer(k, istart), n, initval)
+end
+
+function hash(k::Ptr{UInt8}, n::Integer=length(k), initval::UInt32=UInt32(0))
     # Set up the internal state
     a = b = c = 0xdeadbeef + convert(UInt32, n) + initval
 
     # --------------- all but the last block: affect some 32 bits of (a,b,c)
-    offset = istart
+    ptr = k
     # @inbounds while n > 12
     #     a += k[offset]
     #     a += convert(UInt32, k[offset+1])<<8
@@ -142,13 +146,13 @@ function hash(k::AbstractVector{UInt8}, istart::Integer=1, n::Integer=length(k),
     #     offset += 12
     # end
     @inbounds while n > 12
-        a += unsafe_load(convert(Ptr{UInt32}, pointer(k, offset)))
-        offset += 4
-        b += unsafe_load(convert(Ptr{UInt32}, pointer(k, offset)))
-        offset += 4
-        c += unsafe_load(convert(Ptr{UInt32}, pointer(k, offset)))
+        a += unsafe_load(convert(Ptr{UInt32}, ptr))
+        ptr += 4
+        b += unsafe_load(convert(Ptr{UInt32}, ptr))
+        ptr += 4
+        c += unsafe_load(convert(Ptr{UInt32}, ptr))
         (a, b, c) = mix(a, b, c)
-        offset += 4
+        ptr += 4
         n -= 12
     end
 
@@ -170,49 +174,49 @@ function hash(k::AbstractVector{UInt8}, istart::Integer=1, n::Integer=length(k),
     # end
     @inbounds if n > 0
         if n == 12
-            c += unsafe_load(convert(Ptr{UInt32}, pointer(k, offset+8)))
+            c += unsafe_load(convert(Ptr{UInt32}, ptr+8))
             @goto n8
         elseif n == 11
-            c += convert(UInt32, k[offset+10])<<16
+            c += UInt32(unsafe_load(Ptr{UInt8}(ptr+10)))<<16
             @goto n10
         elseif n == 10
             @label n10
-            c += convert(UInt32, k[offset+9])<<8
+            c += UInt32(unsafe_load(Ptr{UInt8}(ptr+9)))<<8
             @goto n9
         elseif n == 9
             @label n9
-            c += k[offset+8]
+            c += unsafe_load(ptr+8)
             @goto n8
         elseif n == 8
             @label n8
-            b += unsafe_load(convert(Ptr{UInt32}, pointer(k, offset+4)))
+            b += unsafe_load(convert(Ptr{UInt32}, ptr+4))
             @goto n4
         elseif n == 7
             @label n7
-            b += convert(UInt32, k[offset+6])<<16
+            b += UInt32(unsafe_load(Ptr{UInt8}(ptr+6)))<<16
             @goto n6
         elseif n == 6
             @label n6
-            b += convert(UInt32, k[offset+5])<<8
+            b += UInt32(unsafe_load(Ptr{UInt8}(ptr+5)))<<8
             @goto n5
         elseif n == 5
             @label n5
-            b += k[offset+4]
+            b += unsafe_load(ptr+4)
             @goto n4
         elseif n == 4
             @label n4
-            a += unsafe_load(convert(Ptr{UInt32}, pointer(k, offset)))
+            a += unsafe_load(convert(Ptr{UInt32}, ptr))
         elseif n == 3
             @label n3
-            a += convert(UInt32, k[offset+2])<<16
+            a += UInt32(unsafe_load(Ptr{UInt8}(ptr+2)))<<16
             @goto n2
         elseif n == 2
             @label n2
-            a += convert(UInt32, k[offset+1])<<8
+            a += UInt32(unsafe_load(Ptr{UInt8}(ptr+1)))<<8
             @goto n1
         elseif n == 1
             @label n1
-            a += k[offset]
+            a += unsafe_load(ptr)
         end
         c = final(a, b, c)
     end

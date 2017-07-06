@@ -2,8 +2,13 @@
 # MmapIO
 #
 # An IO built on top of mmap to avoid the overhead of ordinary disk IO
-const MMAP_GROW_SIZE = 2^24
-const FILE_GROW_SIZE = 2^18
+if is_windows()
+    const MMAP_GROW_SIZE = 2^19
+    const FILE_GROW_SIZE = 2^19
+else
+    const MMAP_GROW_SIZE = 2^24
+    const FILE_GROW_SIZE = 2^18
+end
 
 const Plain = Union{Int16,Int32,Int64,Int128,UInt16,UInt32,UInt64,UInt128,Float16,Float32,
                     Float64}
@@ -14,9 +19,79 @@ const PlainType = Union{Type{Int16},Type{Int32},Type{Int64},Type{Int128},Type{UI
 mutable struct MmapIO <: IO
     f::IOStream
     write::Bool
-    arr::Vector{UInt8}
+    n::Int
+    startptr::Ptr{Void}
     curptr::Ptr{Void}
     endptr::Ptr{Void}
+    @static if is_windows()
+        mapping::Ptr{Void}
+    end
+end
+
+if is_unix()
+    function mmap!(io::MmapIO, n::Int)
+        oldptr = io.startptr
+        newptr = ccall(:jl_mmap, Ptr{Void}, (Ptr{Void}, Csize_t, Cint, Cint, Cint, Int64),
+                       C_NULL, n, Mmap.PROT_READ | (io.write*Mmap.PROT_WRITE),
+                       Mmap.MAP_SHARED, fd(io.f), 0)
+        io.n = n
+        io.curptr += newptr - oldptr
+        io.startptr = newptr
+    end
+
+    munmap(io::MmapIO) =
+        systemerror("munmap",
+                    ccall(:munmap, Cint, (Ptr{Void}, Int), io.startptr, io.n) != 0)
+
+    function msync(io::MmapIO, offset::Integer=0, len::Integer=UInt(io.endptr - io.startptr),
+                   invalidate::Bool=false)
+        # shift `offset` to start of page boundary
+        offset_page::Int64 = div(offset, Mmap.PAGESIZE) * Mmap.PAGESIZE
+        # add (offset - offset_page) to `len` to get total length of memory-mapped region
+        mmaplen::Int64 = (offset - offset_page) + len
+        systemerror("msync",
+                    ccall(:msync, Cint, (Ptr{Void}, Csize_t, Cint),
+                          io.startptr + offset_page, mmaplen,
+                          invalidate ? Mmap.MS_INVALIDATE : Mmap.MS_SYNC) != 0)
+    end
+elseif is_windows()
+    const DWORD = Culong
+    function mmap!(io::MmapIO, n::Int)
+        oldptr = io.startptr
+        mapping = ccall(:CreateFileMappingW, stdcall, Ptr{Void},
+                        (Cptrdiff_t, Ptr{Void}, DWORD, DWORD, DWORD, Ptr{Void}),
+                        Mmap.gethandle(io.f), C_NULL,
+                        io.write ? Mmap.PAGE_READWRITE : Mmap.PAGE_READONLY, n >> 32,
+                        n % UInt32, C_NULL)
+        systemerror("CreateFileMappingW", mapping == C_NULL)
+        newptr = ccall(:MapViewOfFile, stdcall, Ptr{Void},
+                       (Ptr{Void}, DWORD, DWORD, DWORD, Csize_t),
+                        mapping, io.write ? Mmap.FILE_MAP_WRITE : Mmap.FILE_MAP_READ, 0, 0,
+                        n)
+        systemerror("MapViewOfFile", newptr == C_NULL)
+        io.n = n
+        io.curptr += newptr - oldptr
+        io.mapping = mapping
+        io.startptr = newptr
+    end
+
+    function munmap(io::MmapIO)
+        systemerror("UnmapViewOfFile",
+                    ccall(:UnmapViewOfFile, stdcall, Cint, (Ptr{Void},), io.startptr) == 0)
+        systemerror("CloseHandle",
+                    ccall(:CloseHandle, stdcall, Cint, (Ptr{Void},), io.mapping) == 0)
+    end
+
+    function msync(io::MmapIO, offset::Integer=0, len::Integer=UInt(io.endptr - io.startptr),
+                   invalidate::Bool=false)
+        # shift `offset` to start of page boundary
+        offset_page::Int64 = div(offset, Mmap.PAGESIZE) * Mmap.PAGESIZE
+        # add (offset - offset_page) to `len` to get total length of memory-mapped region
+        mmaplen::Int64 = (offset - offset_page) + len
+        systemerror("FlushViewOfFile",
+                    ccall(:FlushViewOfFile, stdcall, Cint,
+                          (Ptr{Void}, Csize_t), io.startptr + offset_page, mmaplen) == 0)
+    end
 end
 
 function MmapIO(fname::AbstractString, write::Bool, create::Bool, truncate::Bool)
@@ -24,9 +99,17 @@ function MmapIO(fname::AbstractString, write::Bool, create::Bool, truncate::Bool
 
     f = open(fname, true, write, create, truncate, false)
     initialsz = truncate ? 0 : filesize(fname)
-    arr = Mmap.mmap(f, Vector{UInt8}, (initialsz + MMAP_GROW_SIZE,); grow=false)
-    ptr = Ptr{Void}(pointer(arr))
-    io = MmapIO(f, write, arr, ptr, ptr + initialsz)
+    n = initialsz + (write ? MMAP_GROW_SIZE : 0)
+
+    @static if is_windows()
+        io = MmapIO(f, write, 0, C_NULL, C_NULL, C_NULL, C_NULL)
+    else
+        io = MmapIO(f, write, 0, C_NULL, C_NULL, C_NULL)
+    end
+    mmap!(io, n)
+    io.endptr = io.startptr + initialsz
+
+    io
 end
 
 Base.show(io::IO, ::MmapIO) = print(io, "MmapIO")
@@ -43,17 +126,19 @@ else
 end
 
 function Base.resize!(io::MmapIO, newend::Ptr{Void})
-    # Resize file
-    ptr = pointer(io.arr)
-    newsz = Int(max(newend - ptr, io.curptr - ptr + FILE_GROW_SIZE))
-    grow(io.f, newsz)
+    io.write || throw(EOFError())
 
-    if newsz > length(io.arr)
+    # Resize file
+    ptr = io.startptr
+    newsz = Int(max(newend - ptr, io.curptr - ptr + FILE_GROW_SIZE))
+    @static if !is_windows()
+        grow(io.f, newsz)
+    end
+
+    if newsz > io.n
         # If we have not mapped enough memory, map more
-        io.arr = Mmap.mmap(io.f, Vector{UInt8}, (newsz + MMAP_GROW_SIZE,); grow=false)
-        newptr = pointer(io.arr)
-        io.curptr += newptr - ptr
-        ptr = newptr
+        munmap(io)
+        ptr = mmap!(io, max(newsz, io.n + MMAP_GROW_SIZE))
     end
 
     # Set new end
@@ -69,11 +154,16 @@ end
     nothing
 end
 
-Base.truncate(io::MmapIO, pos) = truncate(io.f, pos)
+function truncate_and_close(io::MmapIO, endpos::Integer)
+    io.write && msync(io)
+    munmap(io)
+    truncate(io.f, endpos)
+    close(io.f)
+end
 
 function Base.close(io::MmapIO)
-    io.write && Mmap.sync!(io.arr)
-    finalize(io.arr)
+    io.write && msync(io)
+    munmap(io)
     close(io.f)
 end
 
@@ -139,27 +229,52 @@ function read_bytestring(io::MmapIO)
     str
 end
 
-function Base.seek(io::MmapIO, offset::Integer)
-    io.curptr = pointer(io.arr) + offset
+@inline function Base.seek(io::MmapIO, offset::Integer)
+    if io.startptr + offset > io.endptr
+        resize!(io, io.startptr + offset)
+    end
+    io.curptr = io.startptr + offset
     nothing
 end
 
-function Base.skip(io::MmapIO, offset::Integer)
+@inline function Base.skip(io::MmapIO, offset::Integer)
+    if io.curptr + offset > io.endptr
+        resize!(io, io.curptr + offset)
+    end
     io.curptr += offset
     nothing
 end
 
-Base.position(io::MmapIO) = Int64(io.curptr - pointer(io.arr))
+Base.position(io::MmapIO) = Int64(io.curptr - io.startptr)
 
-# We sometimes need to compute checksums. We do this by first calling
-# begin_checksum when starting to handle whatever needs checksumming,
-# and calling end_checksum afterwards. Note that we never compute
-# nested checksums.
-# XXX not thread-safe!
+"""
+    IndirectPointer
+
+When writing data, we may need to enlarge the memory mapping, which would invalidate any
+memory addresses arising from the old `mmap` pointer. `IndirectPointer` holds a pointer to
+the `startptr` field of an MmapIO, and the offset relative to that pointer. It defers
+computing a memory address until converted to a Ptr{T}, so the memory mapping can be
+enlarged and addresses will remain valid.
+"""
+struct IndirectPointer
+    ptr::Ptr{Ptr{Void}}
+    offset::Int
+end
+
+function IndirectPointer(io::MmapIO, offset::Integer=position(io))
+    IndirectPointer(pointer_from_objref(io) + fieldoffset(MmapIO, 4), offset)
+end
+Base.:+(x::IndirectPointer, y::Integer) = IndirectPointer(x.ptr, x.offset+y)
+Base.convert{T}(::Type{Ptr{T}}, x::IndirectPointer) = Ptr{T}(unsafe_load(x.ptr) + x.offset)
+
+# We sometimes need to compute checksums. We do this by first calling begin_checksum when
+# starting to handle whatever needs checksumming, and calling end_checksum afterwards. Note
+# that we never compute nested checksums, but we may compute multiple checksums
+# simultaneously. This strategy is not thread-safe.
 
 const CHECKSUM_POS = Int64[]
 const NCHECKSUM = Ref{Int}(0)
-function begin_checksum(io::MmapIO)
+function begin_checksum_read(io::MmapIO)
     idx = NCHECKSUM[] += 1
     if idx > length(CHECKSUM_POS)
         push!(CHECKSUM_POS, position(io))
@@ -168,12 +283,12 @@ function begin_checksum(io::MmapIO)
     end
     io
 end
-function begin_checksum(io::MmapIO, sz::Integer)
+function begin_checksum_write(io::MmapIO, sz::Integer)
     ensureroom(io, sz)
-    begin_checksum(io)
+    begin_checksum_read(io)
 end
 function end_checksum(io::MmapIO)
     @inbounds v = CHECKSUM_POS[NCHECKSUM[]]
     NCHECKSUM[] -= 1
-    Lookup3.hash(io.arr, v+1, position(io) - v)
+    Lookup3.hash(Ptr{UInt8}(io.startptr + v), position(io) - v)
 end

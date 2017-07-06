@@ -311,13 +311,13 @@ macro check(fid, sym)
                 Base.show_backtrace(STDOUT, catch_backtrace())
                 error("error reading ", $(string(sym)))
             end
-            if !iseq(tmp, $sym)
-                written = $sym
-                error("For ", $(string(sym)), ", read value $tmp does not agree with written value $written")
-            end
             written_type = typeof($sym)
             if typeof(tmp) != written_type
                 error("For ", $(string(sym)), ", read type $(typeof(tmp)) does not agree with written type $(written_type)")
+            end
+            if !iseq(tmp, $sym)
+                written = $sym
+                error("For ", $(string(sym)), ", read value $tmp does not agree with written value $written")
             end
         end
     end
@@ -356,8 +356,8 @@ abstract type UnexportedT end
 end
 
 println(fn)
-for compress in [false, true]
-    fid = jldopen(fn, "w", compress=compress)
+for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
+    fid = jldopen(fn, true, true, true, ioty, compress=compress)
     @time begin
     @write fid x
     @write fid A
@@ -471,7 +471,7 @@ for compress in [false, true]
     end
     close(fid)
 
-    fidr = jldopen(fn, "r")
+    fidr = jldopen(fn, false, false, false, ioty)
     @time begin
     @check fidr x
     @check fidr A

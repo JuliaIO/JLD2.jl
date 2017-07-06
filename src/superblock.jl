@@ -18,14 +18,14 @@ Base.sizeof(::Union{Type{Superblock},Superblock}) =
     12+sizeof(RelOffset)*4+4
 
 function Base.read(io::IO, ::Type{Superblock})
-    cio = begin_checksum(io)
+    cio = begin_checksum_read(io)
 
     # Signature
     signature = read(cio, UInt64)
     signature == SUPERBLOCK_SIGNATURE || throw(InvalidDataException())
 
     # Version
-    version  = read(cio, UInt8)
+    version = read(cio, UInt8)
     version == 2 || throw(UnsupportedVersionException())
 
     # Size of offsets and size of lengths
@@ -51,7 +51,7 @@ function Base.read(io::IO, ::Type{Superblock})
 end
 
 function Base.write(io::IO, s::Superblock)
-    cio = begin_checksum(io, sizeof(s))
+    cio = begin_checksum_write(io, 8+4+4*sizeof(RelOffset))
     write(cio, SUPERBLOCK_SIGNATURE::UInt64)    # Signature
     write(cio, UInt8(2))                        # Version
     write(cio, UInt8(8))                        # Size of offsets

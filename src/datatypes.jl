@@ -255,7 +255,7 @@ function commit(f::JLDFile, dt::H5Datatype, attrs::Tuple{Vararg{WrittenAttribute
     seek(io, offset)
     f.end_of_data = offset + sz + 4
 
-    cio = begin_checksum(io, sz)
+    cio = begin_checksum_write(io, sz)
     write(cio, ObjectStart(size_flag(psz)))
     write_size(cio, psz)
     write(cio, HeaderMessage(HM_DATATYPE, sizeof(dt), 64))
@@ -264,7 +264,6 @@ function commit(f::JLDFile, dt::H5Datatype, attrs::Tuple{Vararg{WrittenAttribute
         write(cio, HeaderMessage(HM_ATTRIBUTE, sizeof(attr), 0))
         write_attribute(cio, f, attr, f.datatype_wsession)
     end
-    seek(io, offset + sz)
     write(io, end_checksum(cio))
 end
 
@@ -272,7 +271,7 @@ end
 function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
     io = f.io
     seek(io, fileoffset(f, cdt.header_offset))
-    cio = begin_checksum(io)
+    cio = begin_checksum_read(io)
     sz = read_obj_start(cio)
     pmax = position(cio) + sz
 

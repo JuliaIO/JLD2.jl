@@ -12,8 +12,7 @@ f = JLD2.MmapIO(name, true, true, true)
 close(io)
 sz = JLD2.MMAP_GROW_SIZE+5
 writeloop(f, sz)
-truncate(f.f, position(f))
-close(f)
+JLD2.truncate_and_close(f, position(f))
 
 @test filesize(name) == sz
 f = open(name)
@@ -23,8 +22,7 @@ close(f)
 
 f = JLD2.MmapIO(name, true, true, true)
 write(f, rd)
-truncate(f.f, position(f))
-close(f)
+JLD2.truncate_and_close(f, position(f))
 
 @test filesize(name) == sz
 f = open(name)
@@ -70,4 +68,3 @@ seek(buf, 0)
 @test JLD2.size_size(256) === 2
 @test JLD2.size_size(65536) === 4
 @test JLD2.size_size(UInt64(4294967296)) === 8
-

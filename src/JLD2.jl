@@ -19,6 +19,7 @@ struct InvalidDataException <: Exception end
 
 include("Lookup3.jl")
 include("mmapio.jl")
+include("bufferedio.jl")
 include("misc.jl")
 
 """
@@ -181,19 +182,26 @@ h5offset(f::JLDFile, x::Int64) = RelOffset(x - FILE_HEADER_LENGTH)
 # File
 #
 
-function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool;
-                 compress::Bool=false, mmaparrays::Bool=false)
+openfile(::Type{IOStream}, fname, wr, create, truncate) =
+    open(fname, true, wr, create, truncate, false)
+openfile(::Type{MmapIO}, fname, wr, create, truncate) =
+    MmapIO(fname, wr, create, truncate)
+
+read_bytestring(io::IOStream) = chop(String(readuntil(io, 0x00)))
+function jldopen{T<:Union{Type{IOStream},Type{MmapIO}}}(
+                fname::AbstractString, wr::Bool,create::Bool, truncate::Bool,
+                iotype::T=MmapIO; compress::Bool=false, mmaparrays::Bool=false)
     exists = isfile(fname)
-    io = MmapIO(fname, wr, create, truncate)
+    io = openfile(iotype, fname, wr, create, truncate)
     created = !exists || truncate
     f = JLDFile(io, realpath(fname), wr, truncate, created, compress, mmaparrays)
 
-    if !truncate
+    if !created
         if String(read(io, UInt8, length(FILE_HEADER))) != FILE_HEADER
             throw(ArgumentError(string('"', fname, "\" is not a JLD file")))
         end
 
-        ver = convert(VersionNumber, read_bytestring(io))
+        ver = VersionNumber(read_bytestring(io))
         if ver < v"0.2"
             throw(ArgumentError("only JLD2 files are presently supported"))
         elseif ver > CURRENT_VERSION
@@ -307,13 +315,14 @@ function Base.close(f::JLDFile)
         end
 
         eof_position = f.end_of_data
-        truncate(io, eof_position)
         seek(io, FILE_HEADER_LENGTH)
         write(io, Superblock(0, FILE_HEADER_LENGTH, UNDEFINED_ADDRESS,
               eof_position, f.root_group_offset))
+        truncate_and_close(io, eof_position)
+    else
+        close(io)
     end
     f.end_of_data = 0
-    close(io)
     nothing
 end
 
@@ -321,16 +330,21 @@ end
     safe_close(f::JLDFile)
 
 When a JLDFile is finalized, it is possible that the `MmapIO` has been munmapped, since
-Julia does not guarantee finalizer order. This means that we can't write to the `MmapIO` or
-Julia will segfault. We avoid the segfault by first finalizing the underlying parts of the
-`MmapIO`, and then constructing a new mapping and writing to it.
+Julia does not guarantee finalizer order. This means that the underlying file may be closed
+before we get a chance to write to it.
 """
 function safe_close(f::JLDFile{MmapIO})
     f.end_of_data == 0 && return
-    if f.written
-        finalize(f.io.f)
-        finalize(f.io.arr)
-        f.io = MmapIO(f.path, true, false, false)
+    if f.written && !isopen(f.io.f)
+        f.io.f = open(f.path, "r+")
+    end
+    close(f)
+end
+
+function safe_close(f::JLDFile{IOStream})
+    f.end_of_data == 0 && return
+    if f.written && !isopen(f.io)
+        f.io = openfile(IOStream, f.path, true, false, false)
     end
     close(f)
 end
@@ -349,5 +363,6 @@ include("datatypes.jl")
 include("datasets.jl")
 include("global_heaps.jl")
 include("data.jl")
+include("dataio.jl")
 
 end # module
