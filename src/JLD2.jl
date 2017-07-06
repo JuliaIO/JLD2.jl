@@ -19,6 +19,7 @@ struct InvalidDataException <: Exception end
 
 include("Lookup3.jl")
 include("mmapio.jl")
+include("bufferedio.jl")
 include("misc.jl")
 
 """
@@ -181,19 +182,27 @@ h5offset(f::JLDFile, x::Int64) = RelOffset(x - FILE_HEADER_LENGTH)
 # File
 #
 
-function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool;
-                 compress::Bool=false, mmaparrays::Bool=false)
+openfile(::Type{IOStream}, fname, wr, create, truncate) =
+    open(fname, true, wr, create, truncate, false)
+openfile(::Type{MmapIO}, fname, wr, create, truncate) =
+    MmapIO(fname, wr, create, truncate)
+
+read_bytestring(io::IOStream) = chop(String(readuntil(io, 0x00)))
+function jldopen{T<:Union{Type{IOStream},Type{MmapIO}}}(
+                fname::AbstractString, wr::Bool,create::Bool, truncate::Bool,
+                iotype::T=@static(is_windows() ? IOStream : MmapIO);
+                compress::Bool=false, mmaparrays::Bool=false)
     exists = isfile(fname)
-    io = MmapIO(fname, wr, create, truncate)
+    io = openfile(iotype, fname, wr, create, truncate)
     created = !exists || truncate
     f = JLDFile(io, realpath(fname), wr, truncate, created, compress, mmaparrays)
 
-    if !truncate
+    if !created
         if String(read(io, UInt8, length(FILE_HEADER))) != FILE_HEADER
             throw(ArgumentError(string('"', fname, "\" is not a JLD file")))
         end
 
-        ver = convert(VersionNumber, read_bytestring(io))
+        ver = VersionNumber(read_bytestring(io))
         if ver < v"0.2"
             throw(ArgumentError("only JLD2 files are presently supported"))
         elseif ver > CURRENT_VERSION
@@ -330,7 +339,15 @@ function safe_close(f::JLDFile{MmapIO})
     if f.written
         finalize(f.io.f)
         finalize(f.io.arr)
-        f.io = MmapIO(f.path, true, false, false)
+        f.io = openfile(MmapIO, f.path, true, false, false)
+    end
+    close(f)
+end
+
+function safe_close(f::JLDFile{IOStream})
+    f.end_of_data == 0 && return
+    if f.written && !isopen(f.io)
+        f.io = openfile(IOStream, f.path, true, false, false)
     end
     close(f)
 end

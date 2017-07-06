@@ -24,8 +24,8 @@ function define_packed(ty::DataType)
     end
 
     @eval begin
-        @inline Base.write(io::MmapIO, x::$ty) = _write(io, x)
-        @inline Base.read(io::MmapIO, x::Type{$ty}) = _read(io, x)
+        @inline Base.write(io::Union{MmapIO,BufferedWriter}, x::$ty) = _write(io, x)
+        @inline Base.read(io::Union{MmapIO,BufferedReader}, x::Type{$ty}) = _read(io, x)
         function Base.read(io::IO, ::Type{$ty})
             $(Expr(:new, ty, [:(read(io, $(ty.types[i]))) for i = 1:length(packed_offsets)]...))
         end

@@ -217,7 +217,7 @@ function load_group(f::JLDFile, roffset::RelOffset)
     chunk_start_offset::Int64 = fileoffset(f, roffset)
     seek(io, chunk_start_offset)
 
-    cio = begin_checksum(io)
+    cio = begin_checksum_read(io)
     sz = read_obj_start(cio)
     chunk_checksum_offset::Int64 = position(cio) + sz
 
@@ -234,7 +234,7 @@ function load_group(f::JLDFile, roffset::RelOffset)
             chunk_checksum_offset = continuation_offset + continuation_length - 4
             continuation_offset = -1
 
-            cio = begin_checksum(io)
+            cio = begin_checksum_read(io)
             read(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
         end
 
@@ -337,12 +337,12 @@ function save_group(g::Group)
     io = f.io
     if g.last_chunk_start_offset == -1
         psz = group_payload_size(g.unwritten_links)
-        sz = sizeof(ObjectStart) + size_size(psz) + psz + 4
+        sz = sizeof(ObjectStart) + size_size(psz) + psz
 
         g.last_chunk_start_offset = f.end_of_data
         retval = h5offset(f, f.end_of_data)
         seek(io, f.end_of_data)
-        cio = begin_checksum(io, sz - 4)
+        cio = begin_checksum_write(io, sz)
 
         # Object header
         write(cio, ObjectStart(size_flag(psz)))
@@ -364,38 +364,39 @@ function save_group(g::Group)
         continuation_start = f.end_of_data
         csz = group_continuation_size(g.unwritten_links)
 
-        seek(io, g.last_chunk_start_offset)
-        cio = begin_checksum(io)
-
         # Object continuation message
-        seek(cio, g.continuation_message_goes_here)
-        write(cio, HeaderMessage(HM_OBJECT_HEADER_CONTINUATION, sizeof(RelOffset) + sizeof(Length), 0))
-        write(cio, h5offset(f, continuation_start))
-        write(cio, Length(csz))
+        seek(io, g.continuation_message_goes_here)
+        write(io, HeaderMessage(HM_OBJECT_HEADER_CONTINUATION, sizeof(RelOffset) + sizeof(Length), 0))
+        write(io, h5offset(f, continuation_start))
+        write(io, Length(csz))
 
+        # Re-calculate checksum
+        seek(io, g.last_chunk_start_offset)
+        cio = begin_checksum_read(io)
         seek(cio, g.last_chunk_checksum_offset)
+        seek(io, g.last_chunk_checksum_offset)
         write(io, end_checksum(cio))
 
         # Object continuation
         seek(io, continuation_start)
         g.last_chunk_start_offset = continuation_start
-        cio = begin_checksum(io, csz)
+        cio = begin_checksum_write(io, csz - 4)
         write(cio, OBJECT_HEADER_CONTINUATION_SIGNATURE)
     end
 
     # Links
     for (name, offset) in g.unwritten_links
         write(cio, HeaderMessage(HM_LINK_MESSAGE, link_size(name), 0))
-        write(io, UInt8(1))             # Version
+        write(cio, UInt8(1))             # Version
 
         # Flags
         flags = size_flag(sizeof(name)) | LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT
-        write(io, flags::UInt8)
+        write(cio, flags::UInt8)
 
-        write(io, UInt8(CSET_UTF8))     # Link name character set
-        write_size(io, sizeof(name))    # Length of link name
-        write(io, name)                 # Link name
-        write(io, offset)               # Link target
+        write(cio, UInt8(CSET_UTF8))     # Link name character set
+        write_size(cio, sizeof(name))    # Length of link name
+        write(cio, name)                 # Link name
+        write(cio, offset)               # Link target
     end
     empty!(g.unwritten_links)
 

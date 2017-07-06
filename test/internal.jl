@@ -6,31 +6,33 @@ function writeloop(f, sz)
     end
 end
 
-# Force growing an MmapIO
-name, io = mktemp()
-f = JLD2.MmapIO(name, true, true, true)
-close(io)
-sz = JLD2.MMAP_GROW_SIZE+5
-writeloop(f, sz)
-truncate(f.f, position(f))
-close(f)
+if !is_windows()
+    # Force growing an MmapIO
+    name, io = mktemp()
+    f = JLD2.MmapIO(name, true, true, true)
+    close(io)
+    sz = JLD2.MMAP_GROW_SIZE+5
+    writeloop(f, sz)
+    truncate(f.f, position(f))
+    close(f)
 
-@test filesize(name) == sz
-f = open(name)
-rd = read(f, UInt8, sz)
-@test all(rd .== UInt8(6))
-close(f)
+    @test filesize(name) == sz
+    f = open(name)
+    rd = read(f, UInt8, sz)
+    @test all(rd .== UInt8(6))
+    close(f)
 
-f = JLD2.MmapIO(name, true, true, true)
-write(f, rd)
-truncate(f.f, position(f))
-close(f)
+    f = JLD2.MmapIO(name, true, true, true)
+    write(f, rd)
+    truncate(f.f, position(f))
+    close(f)
 
-@test filesize(name) == sz
-f = open(name)
-rd = read(f, UInt8, sz)
-@test all(rd .== UInt8(6))
-close(f)
+    @test filesize(name) == sz
+    f = open(name)
+    rd = read(f, UInt8, sz)
+    @test all(rd .== UInt8(6))
+    close(f)
+end
 
 @test JLD2.size_flag(1) === UInt8(0)
 @test JLD2.size_flag(256) === UInt8(1)

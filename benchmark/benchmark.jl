@@ -1,5 +1,6 @@
 using BenchmarkTools, JLD2
 
+const BACKEND = IOStream
 const TEMPFILE = begin
     tmp, io = mktemp()
     close(io)
@@ -7,13 +8,13 @@ const TEMPFILE = begin
 end
 
 function jld_benchmark_write(x)
-    f = jldopen(TEMPFILE, "w")
+    f = jldopen(TEMPFILE, true, true, true, BACKEND)
     write(f, "x", x)
     close(f)
 end
 
 function jld_benchmark_read()
-    f = jldopen(TEMPFILE)
+    f = jldopen(TEMPFILE, false, false, false, BACKEND)
     read(f, "x")
     close(f)
 end

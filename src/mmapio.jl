@@ -151,15 +151,14 @@ end
 
 Base.position(io::MmapIO) = Int64(io.curptr - pointer(io.arr))
 
-# We sometimes need to compute checksums. We do this by first calling
-# begin_checksum when starting to handle whatever needs checksumming,
-# and calling end_checksum afterwards. Note that we never compute
-# nested checksums.
-# XXX not thread-safe!
+# We sometimes need to compute checksums. We do this by first calling begin_checksum when
+# starting to handle whatever needs checksumming, and calling end_checksum afterwards. Note
+# that we never compute nested checksums, but we may compute multiple checksums
+# simultaneously. This strategy is not thread-safe.
 
 const CHECKSUM_POS = Int64[]
 const NCHECKSUM = Ref{Int}(0)
-function begin_checksum(io::MmapIO)
+function begin_checksum_read(io::MmapIO)
     idx = NCHECKSUM[] += 1
     if idx > length(CHECKSUM_POS)
         push!(CHECKSUM_POS, position(io))
@@ -168,9 +167,9 @@ function begin_checksum(io::MmapIO)
     end
     io
 end
-function begin_checksum(io::MmapIO, sz::Integer)
+function begin_checksum_write(io::MmapIO, sz::Integer)
     ensureroom(io, sz)
-    begin_checksum(io)
+    begin_checksum_read(io)
 end
 function end_checksum(io::MmapIO)
     @inbounds v = CHECKSUM_POS[NCHECKSUM[]]

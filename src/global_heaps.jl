@@ -85,7 +85,7 @@ function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
 
     # Write data
     seek(io, objoffset + 8+sizeof(Length))
-    write_data(f, data, odr, wsession) # Object data
+    write_data(io, f, data, odr, wsession) # Object data
 
     GlobalHeapID(h5offset(f, gh.offset), index)
 end
@@ -117,7 +117,7 @@ function Base.read(io::IO, ::Type{GlobalHeap})
     GlobalHeap(offset, heapsz, free, objects)
 end
 
-function read_heap_object{T,RR}(f::JLDFile{MmapIO}, hid::GlobalHeapID, rr::ReadRepresentation{T,RR})
+function read_heap_object{T,RR}(f::JLDFile, hid::GlobalHeapID, rr::ReadRepresentation{T,RR})
     io = f.io
     if haskey(f.global_heaps, hid.heap_offset)
         gh = f.global_heaps[hid.heap_offset]
@@ -130,17 +130,5 @@ function read_heap_object{T,RR}(f::JLDFile{MmapIO}, hid::GlobalHeapID, rr::ReadR
     n = div(len, sizeof(RR))
     len == n * sizeof(RR) || throw(InvalidDataException())
 
-    inptr = f.io.curptr
-    v = Vector{T}(n)
-    if isa(RR, DataType) && RR <: T && isbits(T)
-        unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(n))
-    else
-        @simd for i = 1:n
-            if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, inptr)
-                @inbounds v[i] = jlconvert(rr, f, inptr, NULL_REFERENCE)
-            end
-            inptr += sizeof(RR)
-        end
-    end
-    v
+    read_array!(Vector{T}(n), f, rr)
 end

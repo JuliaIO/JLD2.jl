@@ -641,7 +641,7 @@ constructrr(f::JLDFile, T::PrimitiveTypeTypes, dt::Union{FixedPointDatatype,Floa
 h5type(::JLDFile, ::Type{RelOffset}, ::RelOffset) = ReferenceDatatype()
 odr(::Type{RelOffset}) = RelOffset
 
-function h5convert!(out::Ptr, odr::Type{RelOffset}, f::JLDFile, x::Any, wsession::JLDWriteSession)
+@inline function h5convert!(out::Ptr, odr::Type{RelOffset}, f::JLDFile, x::Any, wsession::JLDWriteSession)
     unsafe_store!(convert(Ptr{RelOffset}, out), write_ref(f, x, wsession))
     nothing
 end
@@ -672,6 +672,9 @@ jlconvert_isinitialized{T}(::ReadRepresentation{T,RelOffset}, ptr::Ptr) =
     unsafe_store!(convert(Ptr{GlobalHeapID}, out)+4, write_heap_object(f, odr, x, wsession))
     nothing
 end
+@assert sizeof(UInt32) + sizeof(GlobalHeapID) == sizeof(UInt128)
+store_null_vlen!(out::Ptr) = unsafe_store!(convert(Ptr{UInt128}, out), UInt128(0))
+
 h5convert!{T}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) =
     store_vlen!(out, T, f, x, wsession)
 
@@ -839,15 +842,16 @@ end
 
 function h5convert!(out::Ptr, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     store_vlen!(out, UInt8, f, Vector{UInt8}(typename(T)), f.datatype_wsession)
-    if !isempty(T.parameters)
+    if isempty(T.parameters)
+        store_null_vlen!(out+sizeof(Vlen{UInt8}))
+    else
         refs = RelOffset[begin
             if isa(x, DataType)
-                # The heuristic here is that, if the field type is a committed
-                # data type, then we commit the datatype and write it as a
-                # reference to the committed datatype. Otherwise we write it
-                # as a name. This ensures that type parameters that affect the
-                # structure of a type are written to the file, so that we can
-                # reconstruct the type when the layout depends on the
+                # The heuristic here is that, if the field type is a committed data type,
+                # then we commit the datatype and write it as a reference to the committed
+                # datatype. Otherwise we write it as a name. This ensures that type
+                # parameters that affect the structure of a type are written to the file,
+                # so that we can reconstruct the type when the layout depends on the
                 # parameters.
                 dt = h5fieldtype(f, writeas(x), x, Val{true})
                 if isa(dt, CommittedDatatype)

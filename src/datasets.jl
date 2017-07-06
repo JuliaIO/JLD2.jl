@@ -16,7 +16,7 @@ function load_dataset(f::JLDFile, offset::RelOffset)
 
     io = f.io
     seek(io, fileoffset(f, offset))
-    cio = begin_checksum(io)
+    cio = begin_checksum_read(io)
     sz = read_obj_start(cio)
     pmax = position(cio) + sz
 
@@ -33,9 +33,9 @@ function load_dataset(f::JLDFile, offset::RelOffset)
         msg = read(cio, HeaderMessage)
         endpos = position(cio) + msg.size
         if msg.msg_type == HM_DATASPACE
-            dataspace = read_dataspace_message(io)
+            dataspace = read_dataspace_message(cio)
         elseif msg.msg_type == HM_DATATYPE
-            datatype_class, datatype_offset = read_datatype_message(io, f, (msg.flags & 2) == 2)
+            datatype_class, datatype_offset = read_datatype_message(cio, f, (msg.flags & 2) == 2)
         elseif msg.msg_type == HM_FILL_VALUE
             (read(cio, UInt8) == 3 && read(cio, UInt8) == 0x09) || throw(UnsupportedFeatureException())
         elseif msg.msg_type == HM_DATA_LAYOUT
@@ -164,16 +164,11 @@ end
 const BOXED_READ_DATASPACE = Ref{Tuple{ReadDataspace,RelOffset,Int,UInt16}}()
 
 # Most types can only be scalars or arrays
-function read_data(f::JLDFile{MmapIO}, rr,
-                   attributes::Union{Vector{ReadAttribute},Void}=nothing)
+function read_data(f::JLDFile, rr, attributes::Union{Vector{ReadAttribute},Void}=nothing)
     dataspace, header_offset, data_length, filter_id = BOXED_READ_DATASPACE[]
     if dataspace.dataspace_type == DS_SCALAR
         filter_id != 0 && throw(UnsupportedFeatureException())
-        io = f.io
-        inptr = io.curptr
-        obj = jlconvert(rr, f, inptr, header_offset)
-        io.curptr = inptr + sizeof(rr)
-        obj
+        read_scalar(f, rr, header_offset)
     elseif dataspace.dataspace_type == DS_SIMPLE
         read_array(f, dataspace, rr, data_length, filter_id, header_offset, attributes)
     else
@@ -182,7 +177,7 @@ function read_data(f::JLDFile{MmapIO}, rr,
 end
 
 # Reference arrays can only be arrays or null dataspace (for Union{} case)
-function read_data(f::JLDFile{MmapIO}, rr::ReadRepresentation{Any,RelOffset},
+function read_data(f::JLDFile, rr::ReadRepresentation{Any,RelOffset},
                    attributes::Vector{ReadAttribute})
     dataspace, header_offset, data_length, filter_id = BOXED_READ_DATASPACE[]
     filter_id != 0 && throw(UnsupportedFeatureException())
@@ -213,23 +208,10 @@ function read_data(f::JLDFile{MmapIO}, rr::ReadRepresentation{Any,RelOffset},
 end
 
 # Types with no payload can only be null dataspace
-function read_data{T}(f::JLDFile{MmapIO}, rr::ReadRepresentation{T,nothing},
-                      attributes::Vector{ReadAttribute})
-    dataspace, header_offset, data_length, filter_id = BOXED_READ_DATASPACE[]
-    filter_id != 0 && throw(UnsupportedFeatureException())
-    dataspace.dataspace_type == DS_NULL || throw(UnsupportedFeatureException())
-
-    dimensions_attr_index = find_dimensions_attr(attributes)
-    if dimensions_attr_index == 0
-        jlconvert(rr, f, Ptr{Void}(0), header_offset)
-    else
-        # dimensions attribute => array of empty type
-        read_empty(rr, f, attributes[dimensions_attr_index], header_offset)
-    end
-end
-
-function read_data{T,S}(f::JLDFile{MmapIO}, rr::ReadRepresentation{T,CustomSerialization{S,nothing}},
-                      attributes::Vector{ReadAttribute})
+function read_data(f::JLDFile,
+                   rr::Union{ReadRepresentation{T,nothing} where T,
+                             ReadRepresentation{T,CustomSerialization{S,nothing}} where {S,T}},
+                   attributes::Vector{ReadAttribute})
     dataspace, header_offset, data_length, filter_id = BOXED_READ_DATASPACE[]
     filter_id != 0 && throw(UnsupportedFeatureException())
     dataspace.dataspace_type == DS_NULL || throw(UnsupportedFeatureException())
@@ -255,10 +237,9 @@ function find_dimensions_attr(attributes::Vector{ReadAttribute})
     dimensions_attr_index
 end
 
-function read_empty{T}(rr::ReadRepresentation{T}, f::JLDFile{MmapIO},
+function read_empty{T}(rr::ReadRepresentation{T}, f::JLDFile,
                     dimensions_attr::ReadAttribute, header_offset::RelOffset)
     io = f.io
-    inptr = io.curptr
     seek(io, dimensions_attr.dataspace.dimensions_offset)
     ndims = read(io, Int)
     seek(io, dimensions_attr.data_offset)
@@ -269,7 +250,6 @@ function read_empty{T}(rr::ReadRepresentation{T}, f::JLDFile{MmapIO},
         end
     end
     header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
-    io.curptr = inptr
     v
 end
 
@@ -291,6 +271,20 @@ function get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Vect
         end
     end
     (ndims, offset)
+end
+
+@inline function read_scalar(f::JLDFile{MmapIO}, rr, header_offset)
+    io = f.io
+    inptr = io.curptr
+    obj = jlconvert(rr, f, inptr, header_offset)
+    io.curptr = inptr + sizeof(rr)
+    obj
+end
+
+@inline function read_scalar(f::JLDFile{IOStream}, rr, header_offset)
+    r = Vector{UInt8}(sizeof(rr))
+    unsafe_read(f.io, pointer(r), sizeof(rr))
+    jlconvert(rr, f, pointer(r), header_offset)
 end
 
 """
@@ -323,44 +317,70 @@ function read_array{T,RR}(f::JLDFile, dataspace::ReadDataspace,
                           filter_id::UInt16, header_offset::RelOffset, 
                           attributes::Union{Vector{ReadAttribute},Void})
     io = f.io
-    inptr = io.curptr
+    data_offset = position(io)
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
     seek(io, offset)
     v = construct_array(io, T, Int(ndims))
     header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
     n = length(v)
-
+    seek(io, data_offset)
     if filter_id == 1
-        data = read(ZlibInflateInputStream(unsafe_wrap(Array, Ptr{UInt8}(inptr), data_length); gzip=false))
-        @simd for i = 1:n
-            dataptr = Ptr{Void}(pointer(data, sizeof(RR)*(i-1)+1))
-            if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
-                @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
-            end
+        read_compressed_array!(v, f, rr, data_length)
+    else
+        read_array!(v, f, rr)
+    end
+    v
+end
+
+@inline function read_compressed_array!{T,RR}(v::Array{T}, f::JLDFile{MmapIO},
+                                              rr::ReadRepresentation{T,RR},
+                                              data_length::Int)
+    io = f.io
+    inptr = io.curptr
+    data = read(ZlibInflateInputStream(unsafe_wrap(Array, Ptr{UInt8}(inptr), data_length); gzip=false))
+    @simd for i = 1:length(v)
+        dataptr = Ptr{Void}(pointer(data, sizeof(RR)*(i-1)+1))
+        if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
+            @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
         end
-        io.curptr = inptr + data_length
-        return v
-    elseif RR === T && isbits(T)
-        nb = n*sizeof(RR)
+    end
+    io.curptr = inptr + data_length
+    v
+end
+
+@inline function read_compressed_array!{T,RR}(v::Array{T}, f::JLDFile{IOStream},
+                                              rr::ReadRepresentation{T,RR},
+                                              data_length::Int)
+    io = f.io
+    data_offset = position(io)
+    n = length(v)
+    data = read(ZlibInflateInputStream(io; gzip=false), UInt8, sizeof(RR)*n)
+    @simd for i = 1:n
+        dataptr = Ptr{Void}(pointer(data, sizeof(RR)*(i-1)+1))
+        if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
+            @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
+        end
+    end
+    seek(io, data_offset + data_length)
+    v
+end
+
+@inline function read_array!{T,RR}(v::Array{T}, f::JLDFile{MmapIO},
+                                   rr::ReadRepresentation{T,RR})
+    io = f.io
+    inptr = io.curptr
+    n = length(v)
+    if RR === T && isbits(T)
+        nb = sizeof(RR)*n
         if nb > 1048576 # TODO tweak
             # It turns out that regular IO is faster here (at least on OS X)
             mmapio = f.io
             regulario = mmapio.f
             seek(regulario, inptr - pointer(f.io.arr))
-            if ccall(:ios_readall, UInt,
-                     (Ptr{Void}, Ptr{Void}, UInt), regulario.ios, v, nb) < nb
-                throw(EOFError())
-            end
+            unsafe_read(regulario, pointer(v), nb)
         else
-            unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), Int(n))
+            unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), n)
         end
-    # Would this actually help with performance?
-    # elseif isbits(T)
-    #     @simd for i = 1:n
-    #         jlconvert!(outptr, rr, f, inptr)
-    #         inptr += sizeof(RR)
-    #         outptr += sizeof(T)
-    #     end
     else
         @simd for i = 1:n
             if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, inptr)
@@ -373,6 +393,25 @@ function read_array{T,RR}(f::JLDFile, dataspace::ReadDataspace,
     v
 end
 
+@inline function read_array!{T,RR}(v::Array{T}, f::JLDFile{IOStream},
+                                   rr::ReadRepresentation{T,RR})
+    n = length(v)
+    nb = sizeof(RR)*n
+    io = f.io
+    if RR === T && isbits(T)
+        unsafe_read(io, pointer(v), nb)
+    else
+        data = read(io, UInt8, sizeof(RR)*length(v))
+        @simd for i = 1:n
+            dataptr = Ptr{Void}(pointer(data, sizeof(RR)*(i-1)+1))
+            if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
+                @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
+            end
+        end
+    end
+    v
+end
+
 function payload_size_without_storage_message(dataspace::WriteDataspace, datatype::H5Datatype)
     sz = 6 + 4 + sizeof(dataspace) + 4 + sizeof(datatype) + length(dataspace.attributes)*sizeof(HeaderMessage)
     for attr in dataspace.attributes
@@ -381,8 +420,7 @@ function payload_size_without_storage_message(dataspace::WriteDataspace, datatyp
     sz
 end
 
-# Might need to do something else someday for non-mmapped IO
-function write_data{S}(f::JLDFile{MmapIO}, data, odr::S, wsession::JLDWriteSession)
+function write_data{S}(io::MmapIO, f::JLDFile, data, odr::S, wsession::JLDWriteSession)
     io = f.io
     ensureroom(io, sizeof(odr))
     arr = io.arr
@@ -398,11 +436,18 @@ function write_data{S}(f::JLDFile{MmapIO}, data, odr::S, wsession::JLDWriteSessi
     arr # Keep old array rooted until the end
 end
 
+function write_data{S}(io::BufferedWriter, f::JLDFile, data, odr::S, wsession::JLDWriteSession)
+    position = io.position[]
+    h5convert!(Ptr{Void}(pointer(io.buffer, position+1)), odr, f, data, wsession)
+    io.position[] = position + sizeof(odr)
+    nothing
+end
+
 # Like isdefined, but assumes arr is a pointer array, and can be inlined
 unsafe_isdefined(arr::Array, i::Int) =
     unsafe_load(Ptr{Ptr{Void}}(pointer(arr)+(i-1)*sizeof(Ptr{Void}))) != Ptr{Void}(0)
 
-function write_data{T,S}(f::JLDFile{MmapIO}, data::Array{T}, odr::S,
+function write_data{T,S}(io::MmapIO, f::JLDFile, data::Array{T}, odr::S,
                          wsession::JLDWriteSession)
     io = f.io
     ensureroom(io, sizeof(odr) * length(data))
@@ -426,6 +471,47 @@ function write_data{T,S}(f::JLDFile{MmapIO}, data::Array{T}, odr::S,
     seek(io, p + sizeof(odr) * length(data))
 
     arr # Keep old array rooted until the end
+end
+
+function write_data{T,S}(io::BufferedWriter, f::JLDFile, data::Array{T}, odr::S,
+                         wsession::JLDWriteSession)
+    position = io.position[]
+    cp = pointer(io.buffer, position+1)
+    @simd for i = 1:length(data)
+        if (isleaftype(T) && isbits(T)) || unsafe_isdefined(data, i)
+            @inbounds h5convert!(cp, odr, f, data[i], wsession)
+        else
+            @inbounds h5convert_uninitialized!(cp, odr)
+        end
+        cp += sizeof(odr)
+    end
+    io.position[] = position + sizeof(odr) * length(data)
+    nothing
+end
+
+function write_data{T,S}(io::IOStream, f::JLDFile, data::Array{T}, odr::S,
+                         wsession::JLDWriteSession)
+    nb = sizeof(odr) * length(data)
+    if odr === T && isbits(T)
+        unsafe_write(io, pointer(data), nb)
+    else
+        buf = Vector{UInt8}(nb)
+        pos = position(io)
+        cp = pointer(buf)
+        @simd for i = 1:length(data)
+            if (isleaftype(T) && isbits(T)) || unsafe_isdefined(data, i)
+                @inbounds h5convert!(cp, odr, f, data[i], wsession)
+            else
+                @inbounds h5convert_uninitialized!(cp, odr)
+            end
+            cp += sizeof(odr)
+        end
+        # We might seek around in the file as a consequence of writing stuff, so seek back. We
+        # don't need to worry about this for a BufferedWriter, since it will seek back before
+        # writing.
+        seek(io, pos)
+        write(io, buf)
+    end
 end
 
 function deflate_data{T,S}(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSession)
@@ -465,7 +551,7 @@ function write_dataset{T,S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5D
         push!(wsession.objects, data)
     end
 
-    cio = begin_checksum(io, fullsz - 4)
+    cio = begin_checksum_write(io, fullsz - 4)
     write_object_header_and_dataspace_message(cio, f, psz, dataspace)
     write_datatype_message(cio, datatype)
 
@@ -473,7 +559,7 @@ function write_dataset{T,S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5D
     if layout_class == LC_COMPACT_STORAGE
         write(cio, CompactStorageMessage(datasz))
         if datasz != 0
-            write_data(f, data, odr, wsession)
+            write_data(cio, f, data, odr, wsession)
         end
         write(io, end_checksum(cio))
     elseif layout_class == LC_CHUNKED_STORAGE
@@ -489,7 +575,7 @@ function write_dataset{T,S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5D
         write(io, end_checksum(cio))
 
         f.end_of_data += datasz
-        write_data(f, data, odr, wsession)
+        write_data(io, f, data, odr, wsession)
     end
 
     h5offset(f, header_offset)
@@ -510,12 +596,12 @@ function write_dataset{S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dat
         push!(wsession.objects, data)
     end
 
-    cio = begin_checksum(io, fullsz - 4)
+    cio = begin_checksum_write(io, fullsz - 4)
     write_object_header_and_dataspace_message(cio, f, psz, dataspace)
     write_datatype_message(cio, datatype)
     write(cio, CompactStorageMessage(datasz))
     if datasz != 0
-        write_data(f, data, odr, wsession)
+        write_data(cio, f, data, odr, wsession)
     end
     write(io, end_checksum(cio))
 
@@ -543,7 +629,7 @@ function write_object_header_and_dataspace_message(cio::IO, f::JLDFile, psz::Int
 end
 
 function write_datatype_message(cio::IO, datatype::H5Datatype)
-    write(cio, HeaderMessage(HM_DATATYPE, sizeof(datatype), 1+2*isa(datatype, CommittedDatatype)))
+    write(cio, HeaderMessage(HM_DATATYPE, sizeof(datatype), 1 | (2*isa(datatype, CommittedDatatype))))
     write(cio, datatype)
 end
 
