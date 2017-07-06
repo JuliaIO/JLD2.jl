@@ -1,5 +1,7 @@
 const Initialized = Union{Type{Val{true}}, Type{Val{false}}}
 
+const Pointers = Union{Ptr{Void}, IndirectPointer}
+
 struct OnDiskRepresentation{Offsets,JLTypes,H5Types} end
 
 struct UnknownType{T}
@@ -471,11 +473,13 @@ end
 # h5convert! stores the HDF5 representation of Julia data to a pointer. This
 # method handles types with no padding or references where this is just a simple
 # store
-h5convert!{T}(out::Ptr, ::Type{T}, ::JLDFile, x, ::JLDWriteSession) =
+h5convert!{T}(out::Pointers, ::Type{T}, ::JLDFile, x, ::JLDWriteSession) =
     (unsafe_store!(convert(Ptr{T}, out), x); nothing)
 
 # We pack types that have padding using a staged h5convert! method
-@generated function h5convert!{Offsets,Types,H5Types}(out::Ptr, ::OnDiskRepresentation{Offsets,Types,H5Types}, file::JLDFile, x, wsession::JLDWriteSession)
+@generated function h5convert!{Offsets,Types,H5Types}(out::Pointers,
+                              ::OnDiskRepresentation{Offsets,Types,H5Types},
+                              file::JLDFile, x, wsession::JLDWriteSession)
     T = x
     types = Types.parameters
     members = H5Types.parameters
@@ -536,24 +540,24 @@ rconvert(T, x) = convert(T, x)
 sizeof{T,ODR}(::Type{CustomSerialization{T,ODR}}) = sizeof(ODR)
 
 # Usually we want to convert the object and then write it.
-@inline h5convert!{T,ODR}(out::Ptr, ::Type{CustomSerialization{T,ODR}}, f::JLDFile,
+@inline h5convert!{T,ODR}(out::Pointers, ::Type{CustomSerialization{T,ODR}}, f::JLDFile,
                           x, wsession::JLDWriteSession) =
     h5convert!(out, ODR, f, wconvert(T, x)::T, wsession)
 
 # When writing as a reference, we don't want to convert the object first. That
 # should happen automatically after write_dataset is called so that the written
 # object gets the right written_type attribute.
-@inline h5convert!{T}(out::Ptr, odr::Type{CustomSerialization{T,RelOffset}},
+@inline h5convert!{T}(out::Pointers, odr::Type{CustomSerialization{T,RelOffset}},
                       f::JLDFile, x, wsession::JLDWriteSession) =
     h5convert!(out, RelOffset, f, x, wsession)
 
 # When writing as a reference to something that's being custom-serialized as an
 # array, we have to convert the object first.
-@inline h5convert!{T<:Array}(out::Ptr, odr::Type{CustomSerialization{T,RelOffset}},
+@inline h5convert!{T<:Array}(out::Pointers, odr::Type{CustomSerialization{T,RelOffset}},
                       f::JLDFile, x, wsession::JLDWriteSession) =
     h5convert!(out, RelOffset, f, wconvert(T, x)::T, wsession)
 
-h5convert_uninitialized!{T,ODR}(out::Ptr, odr::Type{CustomSerialization{T,ODR}}) =
+h5convert_uninitialized!{T,ODR}(out::Pointers, odr::Type{CustomSerialization{T,ODR}}) =
     h5convert_uninitialized!(out, ODR)
 
 jlconvert_canbeuninitialized{T,S,ODR}(::ReadRepresentation{T,CustomSerialization{S,ODR}}) =
@@ -641,11 +645,13 @@ constructrr(f::JLDFile, T::PrimitiveTypeTypes, dt::Union{FixedPointDatatype,Floa
 h5type(::JLDFile, ::Type{RelOffset}, ::RelOffset) = ReferenceDatatype()
 odr(::Type{RelOffset}) = RelOffset
 
-@inline function h5convert!(out::Ptr, odr::Type{RelOffset}, f::JLDFile, x::Any, wsession::JLDWriteSession)
-    unsafe_store!(convert(Ptr{RelOffset}, out), write_ref(f, x, wsession))
+@inline function h5convert!(out::Pointers, odr::Type{RelOffset}, f::JLDFile, x::Any,
+                            wsession::JLDWriteSession)
+    ref = write_ref(f, x, wsession)
+    unsafe_store!(convert(Ptr{RelOffset}, out), ref)
     nothing
 end
-h5convert_uninitialized!(out::Ptr, odr::Type{RelOffset}) =
+h5convert_uninitialized!(out::Pointers, odr::Type{RelOffset}) =
     (unsafe_store!(convert(Ptr{RelOffset}, out), NULL_REFERENCE); nothing)
 
 # Reading references as references
@@ -667,18 +673,20 @@ jlconvert_isinitialized{T}(::ReadRepresentation{T,RelOffset}, ptr::Ptr) =
 ## Routines for variable-length datatypes
 
 # Write variable-length data and store the offset and length to out pointer
-@inline function store_vlen!(out::Ptr, odr, f::JLDFile, x::AbstractVector, wsession::JLDWriteSession)
+@inline function store_vlen!(out::Pointers, odr, f::JLDFile, x::AbstractVector,
+                             wsession::JLDWriteSession)
     unsafe_store!(convert(Ptr{UInt32}, out), length(x))
-    unsafe_store!(convert(Ptr{GlobalHeapID}, out)+4, write_heap_object(f, odr, x, wsession))
+    obj = write_heap_object(f, odr, x, wsession)
+    unsafe_store!(convert(Ptr{GlobalHeapID}, out)+4, obj)
     nothing
 end
 @assert sizeof(UInt32) + sizeof(GlobalHeapID) == sizeof(UInt128)
-store_null_vlen!(out::Ptr) = unsafe_store!(convert(Ptr{UInt128}, out), UInt128(0))
+store_null_vlen!(out::Pointers) = unsafe_store!(convert(Ptr{UInt128}, out), UInt128(0))
 
-h5convert!{T}(out::Ptr, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) =
+h5convert!{T}(out::Pointers, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) =
     store_vlen!(out, T, f, x, wsession)
 
-h5convert_uninitialized!{T<:Vlen}(out::Ptr, odr::Type{T}) =
+h5convert_uninitialized!{T<:Vlen}(out::Pointers, odr::Type{T}) =
     (unsafe_store!(convert(Ptr{Int128}, out), 0); nothing)
 
 # Read variable-length data given offset and length in ptr
@@ -741,9 +749,9 @@ function jltype(f::JLDFile, dt::VariableLengthDatatype)
     end
 end
 
-h5convert!(out::Ptr, ::FixedLengthString, f::JLDFile, x, ::JLDWriteSession) =
+h5convert!(out::Pointers, ::FixedLengthString, f::JLDFile, x, ::JLDWriteSession) =
     (unsafe_copy!(convert(Ptr{UInt8}, out), pointer(x), sizeof(x)); nothing)
-h5convert!(out::Ptr, ::Type{Vlen{String}}, f::JLDFile, x, wsession::JLDWriteSession) =
+h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x, wsession::JLDWriteSession) =
     store_vlen!(out, UInt8, f, Vector{UInt8}(x), wsession)
 
 jlconvert(::ReadRepresentation{String,Vlen{String}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
@@ -771,7 +779,7 @@ fieldodr(::Type{Symbol}, ::Bool) = Vlen{String}
 h5type(f::JLDFile, ::Type{Symbol}, x) = h5fieldtype(f, Symbol, typeof(x), Val{true})
 odr(::Type{Symbol}) = Vlen{String}
 
-h5convert!(out::Ptr, ::Type{Vlen{String}}, f::JLDFile, x::Symbol, ::JLDWriteSession) =
+h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x::Symbol, ::JLDWriteSession) =
     store_vlen!(out, UInt8, f, Vector{UInt8}(String(x)), f.datatype_wsession)
 
 constructrr(::JLDFile, ::Type{Symbol}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
@@ -840,7 +848,7 @@ function typename(T::DataType)
     join(tn, ".")
 end
 
-function h5convert!(out::Ptr, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
+function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     store_vlen!(out, UInt8, f, Vector{UInt8}(typename(T)), f.datatype_wsession)
     if isempty(T.parameters)
         store_null_vlen!(out+sizeof(Vlen{UInt8}))
@@ -941,7 +949,7 @@ h5type{T<:Union}(f::JLDFile, ::Type{T}, x::Any) =
     h5fieldtype(f, Union, typeof(x), Val{true})
 odr(::Type{Union}) = fieldodr(Union, true)
 
-h5convert!(out::Ptr, ::Type{Vlen{DataTypeODR()}}, f::JLDFile, x::Union, wsession::JLDWriteSession) =
+h5convert!(out::Pointers, ::Type{Vlen{DataTypeODR()}}, f::JLDFile, x::Union, wsession::JLDWriteSession) =
     store_vlen!(out, DataTypeODR(), f, Vector{DataType}(Base.uniontypes(x)), wsession)
 
 function jlconvert(::ReadRepresentation{Union, Vlen{DataTypeODR()}}, f::JLDFile,
@@ -960,7 +968,8 @@ constructrr{T<:Union}(::JLDFile, ::Type{T}, dt::VariableLengthDatatype, ::Vector
 # This needs its own h5convert! method, since otherwise we will attempt to specialize the
 # generic h5convert! method for the specific UnionAll type rather than for UnionAll
 # more generally.
-function h5convert!(out::Ptr, odr::OnDiskRepresentation{(0, 8),Tuple{TypeVar,Any},Tuple{JLD2.RelOffset,JLD2.RelOffset}},
+function h5convert!(out::Pointers,
+                    odr::OnDiskRepresentation{(0, 8),Tuple{TypeVar,Any},Tuple{JLD2.RelOffset,JLD2.RelOffset}},
                     f::JLDFile, x::UnionAll, wsession::JLDWriteSession)
     h5convert!(out, RelOffset, f, x.var, f.datatype_wsession)
     h5convert!(out+sizeof(RelOffset), RelOffset, f, x.body, f.datatype_wsession)
@@ -1319,4 +1328,20 @@ end
     end
 
     OnDiskRepresentation{(offsets...), Tuple{T.types...}, Tuple{odrs...}}()
+end
+
+abstract type DataMode end
+struct ReferenceFree <: DataMode end
+struct HasReferences <: DataMode end
+
+@Base.pure datamode{WrittenAs}(::Type{CustomSerialization{WrittenAs,<:Any}}) = datamode(WrittenAs)
+@Base.pure datamode(::Union{Type{<:Vlen},Type{RelOffset}}) = HasReferences()
+@Base.pure datamode(::DataType) = ReferenceFree()
+@Base.pure datamode(::FixedLengthString) = ReferenceFree()
+@Base.pure datamode(::Void) = ReferenceFree()
+@generated function datamode{H5Types}(odr::OnDiskRepresentation{Offsets,JLTypes,H5Types} where {Offsets,JLTypes})
+    for ty in H5Types.parameters
+        datamode(ty) == HasReferences() && return HasReferences()
+    end
+    return ReferenceFree()
 end

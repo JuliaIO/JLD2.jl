@@ -190,8 +190,7 @@ openfile(::Type{MmapIO}, fname, wr, create, truncate) =
 read_bytestring(io::IOStream) = chop(String(readuntil(io, 0x00)))
 function jldopen{T<:Union{Type{IOStream},Type{MmapIO}}}(
                 fname::AbstractString, wr::Bool,create::Bool, truncate::Bool,
-                iotype::T=@static(is_windows() ? IOStream : MmapIO);
-                compress::Bool=false, mmaparrays::Bool=false)
+                iotype::T=MmapIO; compress::Bool=false, mmaparrays::Bool=false)
     exists = isfile(fname)
     io = openfile(iotype, fname, wr, create, truncate)
     created = !exists || truncate
@@ -316,13 +315,14 @@ function Base.close(f::JLDFile)
         end
 
         eof_position = f.end_of_data
-        truncate(io, eof_position)
         seek(io, FILE_HEADER_LENGTH)
         write(io, Superblock(0, FILE_HEADER_LENGTH, UNDEFINED_ADDRESS,
               eof_position, f.root_group_offset))
+        truncate_and_close(io, eof_position)
+    else
+        close(io)
     end
     f.end_of_data = 0
-    close(io)
     nothing
 end
 
@@ -330,16 +330,13 @@ end
     safe_close(f::JLDFile)
 
 When a JLDFile is finalized, it is possible that the `MmapIO` has been munmapped, since
-Julia does not guarantee finalizer order. This means that we can't write to the `MmapIO` or
-Julia will segfault. We avoid the segfault by first finalizing the underlying parts of the
-`MmapIO`, and then constructing a new mapping and writing to it.
+Julia does not guarantee finalizer order. This means that the underlying file may be closed
+before we get a chance to write to it.
 """
 function safe_close(f::JLDFile{MmapIO})
     f.end_of_data == 0 && return
-    if f.written
-        finalize(f.io.f)
-        finalize(f.io.arr)
-        f.io = openfile(MmapIO, f.path, true, false, false)
+    if f.written && !isopen(f.io.f)
+        f.io.f = open(f.path, "r+")
     end
     close(f)
 end
@@ -366,5 +363,6 @@ include("datatypes.jl")
 include("datasets.jl")
 include("global_heaps.jl")
 include("data.jl")
+include("dataio.jl")
 
 end # module

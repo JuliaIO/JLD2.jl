@@ -110,28 +110,6 @@ end
 Base.read{T}(io::BufferedReader, ::Type{T}, n::Integer) =
     read(io, T, Int(n))
 
-# Read a null-terminated string
-function read_bytestring(io::BufferedReader)
-    position = io.position[]
-    buffer = io.buffer
-    endpos = -1
-    i = startpos
-    while true
-        buflen = length(buffer)
-        while i < buflen
-            if buffer[i+1] == 0x00
-                endpos = i
-                break
-            end
-            i += 1
-        end
-        endpos != -1 && break
-        readmore!(io, 1)
-    end
-    io.position[] = i
-    String(buffer[position+1:endpos+1])
-end
-
 Base.position(io::BufferedReader) = io.file_position + io.position[]
 
 function adjust_position!(io::BufferedReader, position::Integer)
@@ -151,6 +129,12 @@ Base.skip(io::BufferedReader, offset::Integer) =
 
 finish!(io::BufferedReader) =
     seek(io.f, io.file_position + io.position[])
+
+function truncate_and_close(io::IOStream, endpos::Integer)
+    truncate(io, endpos)
+    close(io)
+end
+
 
 # We sometimes need to compute checksums. We do this by first calling begin_checksum when
 # starting to handle whatever needs checksumming, and calling end_checksum afterwards. Note

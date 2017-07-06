@@ -85,7 +85,7 @@ function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
 
     # Write data
     seek(io, objoffset + 8+sizeof(Length))
-    write_data(io, f, data, odr, wsession) # Object data
+    write_data(io, f, data, odr, datamode(odr), wsession) # Object data
 
     GlobalHeapID(h5offset(f, gh.offset), index)
 end

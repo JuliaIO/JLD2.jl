@@ -1,6 +1,7 @@
 using BenchmarkTools, JLD2
 
-const BACKEND = IOStream
+const BACKEND = JLD2.MmapIO
+# const BACKEND = IOStream
 const TEMPFILE = begin
     tmp, io = mktemp()
     close(io)

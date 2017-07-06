@@ -356,7 +356,7 @@ abstract type UnexportedT end
 end
 
 println(fn)
-for ioty in (is_windows() ? [IOStream] : [JLD2.MmapIO, IOStream]), compress in [false, true]
+for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     fid = jldopen(fn, true, true, true, ioty, compress=compress)
     @time begin
     @write fid x
@@ -471,7 +471,7 @@ for ioty in (is_windows() ? [IOStream] : [JLD2.MmapIO, IOStream]), compress in [
     end
     close(fid)
 
-    fidr = jldopen(fn, "r")
+    fidr = jldopen(fn, false, false, false, ioty)
     @time begin
     @check fidr x
     @check fidr A

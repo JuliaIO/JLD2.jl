@@ -44,7 +44,8 @@ function write_attribute(io::IO, f::JLDFile, attr::WrittenAttribute, wsession::J
     write(io, UInt8(0))
     write(io, attr.datatype)
     write(io, attr.dataspace)
-    write_data(io, f, attr.data, objodr(attr.data), wsession)
+    odr = objodr(attr.data)
+    write_data(io, f, attr.data, odr, datamode(odr), wsession)
 end
 
 function read_attribute(io::IO, f::JLDFile)
