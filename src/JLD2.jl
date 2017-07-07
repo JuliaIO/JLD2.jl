@@ -1,3 +1,5 @@
+__precompile__()
+
 module JLD2
 using DataStructures, Libz
 import Base.sizeof
