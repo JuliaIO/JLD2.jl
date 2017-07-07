@@ -351,7 +351,7 @@ end
 
 function Base.show(io::IO, f::JLDFile)
     println(io, "JLDFile $(f.path) ", f.writable ? "(read/write)" : "(read-only)")
-    show_group(io, f.root_group)
+    show_group(io, f.root_group, " ", true)
 end
 
 include("superblock.jl")

@@ -414,8 +414,15 @@ function save_group(g::Group)
     return retval
 end
 
-function show_group(io::IO, g::Group, prefix::String=" ")
+function show_group(io::IO, g::Group, prefix::String=" ", skiptypes::Bool=false)
     ks = collect(keys(g))
+    skiptypes && filter!(x -> x != "_types", ks)
+
+    if isempty(ks) && prefix == " "
+        print(io, "  (no datasets)")
+        return
+    end
+
     for i = 1:length(ks)
         k = ks[i]
         islast = i == length(ks)
