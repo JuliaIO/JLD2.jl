@@ -90,7 +90,7 @@ end
 
 function Base.getindex(g::Group, name::AbstractString)
     f = g.f
-    f.end_of_data == 0 && throw(ArgumentError("file is closed"))
+    f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
 
     (g, name) = pathize(g, name, false)
 

@@ -134,9 +134,9 @@ mutable struct JLDFile{T<:IO}
     path::String
     writable::Bool
     written::Bool
-    created::Bool
     compress::Bool
     mmaparrays::Bool
+    n_times_opened::Int
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
@@ -152,19 +152,19 @@ mutable struct JLDFile{T<:IO}
     types_group::Group
 
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
-                        created::Bool, compress::Bool, mmaparrays::Bool) where T
-        f = new(io, path, writable, written, created, compress, mmaparrays,
+                        compress::Bool, mmaparrays::Bool) where T
+        f = new(io, path, writable, written, compress, mmaparrays, 1,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), ObjectIdDict(), ObjectIdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS)
-        finalizer(f, safe_close)
+        finalizer(f, jld_finalizer)
         f
     end
 end
-JLDFile(io::IO, path::AbstractString, writable::Bool, written::Bool, created::Bool,
-        compress::Bool, mmaparrays::Bool) =
-    JLDFile{typeof(io)}(io, path, writable, written, created, compress, mmaparrays)
+JLDFile(io::IO, path::AbstractString, writable::Bool, written::Bool, compress::Bool,
+        mmaparrays::Bool) =
+    JLDFile{typeof(io)}(io, path, writable, written, compress, mmaparrays)
 
 """
     fileoffset(f::JLDFile, x::RelOffset)
@@ -190,15 +190,46 @@ openfile(::Type{MmapIO}, fname, wr, create, truncate) =
     MmapIO(fname, wr, create, truncate)
 
 read_bytestring(io::IOStream) = chop(String(readuntil(io, 0x00)))
+
+const OPEN_FILES = Dict{String,WeakRef}()
 function jldopen{T<:Union{Type{IOStream},Type{MmapIO}}}(
-                fname::AbstractString, wr::Bool,create::Bool, truncate::Bool,
+                fname::AbstractString, wr::Bool, create::Bool, truncate::Bool,
                 iotype::T=MmapIO; compress::Bool=false, mmaparrays::Bool=false)
+    rname = realpath(fname)
+    if haskey(OPEN_FILES, rname)
+        ref = OPEN_FILES[rname]
+        f = ref.value
+        if ref.value !== nothing
+            if truncate
+                throw(ArgumentError("attempted to truncate a file that was already open"))
+            elseif !isa(f, JLDFile{iotype})
+                throw(ArgumentError("attempted to open file with $iotype backend, but already open with a different backend"))
+            elseif f.writable != wr
+                current = wr ? "read/write" : "read-only"
+                previous = f.writable ? "read/write" : "read-only"
+                throw(ArgumentError("attempted to open file $(current), but file was already open $(previous)"))
+            elseif f.compress != compress
+                throw(ArgumentError("attempted to open file with compress=$(compress), but file was already open with compress=$(f.compress)"))
+            elseif f.mmaparrays != mmaparrays
+                throw(ArgumentError("attempted to open file with mmaparrays=$(mmaparrays), but file was already open with mmaparrays=$(f.mmaparrays)"))
+            end
+
+            f = f::JLDFile{iotype}
+            f.n_times_opened += 1
+            return f
+        end
+    end
+
     exists = isfile(fname)
     io = openfile(iotype, fname, wr, create, truncate)
     created = !exists || truncate
-    f = JLDFile(io, realpath(fname), wr, truncate, created, compress, mmaparrays)
+    f = JLDFile(io, rname, wr, created, compress, mmaparrays)
+    OPEN_FILES[rname] = WeakRef(f)
 
-    if !created
+    if created
+        f.root_group = Group{typeof(f)}(f)
+        f.types_group = Group{typeof(f)}(f)
+    else
         if String(read(io, UInt8, length(FILE_HEADER))) != FILE_HEADER
             throw(ArgumentError(string('"', fname, "\" is not a JLD file")))
         end
@@ -211,19 +242,7 @@ function jldopen{T<:Union{Type{IOStream},Type{MmapIO}}}(
                  ", but this version of JLD supports only JLD file format ", CURRENT_VERSION,
                  ". Some or all data in the file may not be readable")
         end
-    end
 
-    if wr
-        seek(io, 0)
-        # Write JLD header
-        write(io, FILE_HEADER)
-        print(io, CURRENT_VERSION)
-    end
-
-    if created
-        f.root_group = Group{typeof(f)}(f)
-        f.types_group = Group{typeof(f)}(f)
-    else
         seek(io, FILE_HEADER_LENGTH)
         superblock = read(io, Superblock)
         f.end_of_data = superblock.end_of_file_address
@@ -290,9 +309,9 @@ Check that a JLD file is actually writable, and throw an error if not. Sets the 
 flag on the file.
 """
 function prewrite(f::JLDFile)
-    f.end_of_data == 0 && throw(ArgumentError("file is closed"))
+    f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
     !f.writable && throw(ArgumentError("file was opened read-only"))
-    !f.written && !f.created && load_datatypes(f)
+    !f.written && load_datatypes(f)
     f.written = true
 end
 
@@ -301,7 +320,12 @@ Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDW
     write(f.root_group, name, obj, wsession)
 
 function Base.close(f::JLDFile)
-    f.end_of_data == 0 && return
+    if f.n_times_opened != 1
+        f.n_times_opened == 0 && return
+        f.n_times_opened -= 1
+        return
+    end
+
     io = f.io
     if f.written
         # Save any groups we know of that have been modified
@@ -316,38 +340,48 @@ function Base.close(f::JLDFile)
             f.root_group_offset = res
         end
 
-        eof_position = f.end_of_data
+        # Write JLD2 header
+        seek(io, 0)
+        write(io, FILE_HEADER)
+        print(io, CURRENT_VERSION)
+
+        # Write superblock
         seek(io, FILE_HEADER_LENGTH)
         write(io, Superblock(0, FILE_HEADER_LENGTH, UNDEFINED_ADDRESS,
-              eof_position, f.root_group_offset))
-        truncate_and_close(io, eof_position)
+              f.end_of_data, f.root_group_offset))
+
+        truncate_and_close(io, f.end_of_data)
     else
         close(io)
     end
-    f.end_of_data = 0
+
+    delete!(OPEN_FILES, f.path)
+    f.n_times_opened = 0
     nothing
 end
 
 """
-    safe_close(f::JLDFile)
+    jld_finalizer(f::JLDFile)
 
 When a JLDFile is finalized, it is possible that the `MmapIO` has been munmapped, since
 Julia does not guarantee finalizer order. This means that the underlying file may be closed
 before we get a chance to write to it.
 """
-function safe_close(f::JLDFile{MmapIO})
-    f.end_of_data == 0 && return
+function jld_finalizer(f::JLDFile{MmapIO})
+    f.n_times_opened == 0 && return
     if f.written && !isopen(f.io.f)
         f.io.f = open(f.path, "r+")
     end
+    f.n_times_opened = 1
     close(f)
 end
 
-function safe_close(f::JLDFile{IOStream})
-    f.end_of_data == 0 && return
+function jld_finalizer(f::JLDFile{IOStream})
+    f.n_times_opened == 0 && return
     if f.written && !isopen(f.io)
         f.io = openfile(IOStream, f.path, true, false, false)
     end
+    f.n_times_opened = 1
     close(f)
 end
 
