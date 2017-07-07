@@ -161,7 +161,7 @@ function write_data{T,S}(io::MmapIO, f::JLDFile, data::Array{T}, odr::S, ::HasRe
     cp = IndirectPointer(io, p)
 
     for i = 1:length(data)
-        if unsafe_isdefined(data, i)
+        if (isleaftype(T) && isbits(T)) || unsafe_isdefined(data, i)
             @inbounds h5convert!(cp, odr, f, data[i], wsession)
         else
             @inbounds h5convert_uninitialized!(cp, odr)

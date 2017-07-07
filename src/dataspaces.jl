@@ -46,7 +46,7 @@ WriteDataspace(::JLDFile, ::Any, ::Any) = WriteDataspace(DS_SCALAR, (), ())
 # Ghost type array
 WriteDataspace{T}(f::JLDFile, x::Array{T}, ::Void) =
    WriteDataspace(DS_NULL, (),
-             (WrittenAttribute(f, :dimensions, Int[x for x in reverse(size(x))]),))
+             (WrittenAttribute(f, :dimensions, Int64[x for x in reverse(size(x))]),))
 
 # Reference array
 WriteDataspace{T,N}(f::JLDFile, x::Array{T,N}, ::Type{RelOffset}) =

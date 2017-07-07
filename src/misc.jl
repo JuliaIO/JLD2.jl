@@ -37,20 +37,23 @@ function define_packed(ty::DataType)
     nothing
 end
 
-# Loads a variable-length size according to flags
-# Expects that the first two bits of flags mean:
-# 0   The size of the Length of Link Name field is 1 byte.
-# 1   The size of the Length of Link Name field is 2 bytes.
-# 2   The size of the Length of Link Name field is 4 bytes.
-# 3   The size of the Length of Link Name field is 8 bytes.
-# Returns the size as a UInt and a new pointer that is offset by the
-# size of the size field
+"""
+    read_size(io::IO, flags::UInt8)
+
+Loads a variable-length size according to flags
+Expects that the first two bits of flags mean:
+0   The size of the Length of Link Name field is 1 byte.
+1   The size of the Length of Link Name field is 2 bytes.
+2   The size of the Length of Link Name field is 4 bytes.
+3   The size of the Length of Link Name field is 8 bytes.
+Returns the size as an Int
+"""
 function read_size(io::IO, flags::UInt8)
-    if (flags & 1) == 0 && (flags & 2) == 0
+    if (flags & 3) == 0
         Int(read(io, UInt8))
-    elseif (flags & 1) == 1 && (flags & 2) == 0
+    elseif (flags & 3) == 1
         Int(read(io, UInt16))
-    elseif (flags & 1) == 0 && (flags & 2) == 2
+    elseif (flags & 3) == 2
         Int(read(io, UInt32))
     else
         Int(read(io, UInt64))

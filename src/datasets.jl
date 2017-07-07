@@ -239,9 +239,15 @@ end
 
 function read_empty{T}(rr::ReadRepresentation{T}, f::JLDFile,
                     dimensions_attr::ReadAttribute, header_offset::RelOffset)
+    dimensions_attr.datatype_class == DT_FIXED_POINT || throw(UnsupportedFeatureException())
+
     io = f.io
     seek(io, dimensions_attr.dataspace.dimensions_offset)
-    ndims = read(io, Int)
+    ndims = Int(read(io, Length))
+
+    seek(io, dimensions_attr.datatype_offset)
+    read(io, FixedPointDatatype) == h5fieldtype(f, Int64, Int64, Val{true}) || throw(UnsupportedFeatureException())
+
     seek(io, dimensions_attr.data_offset)
     v = construct_array(io, T, ndims)
     if isleaftype(T)
@@ -478,18 +484,18 @@ define_packed(ContiguousStorageMessage)
     )
 
 @inline chunked_storage_message_size(ndims::Int) =
-    sizeof(HeaderMessage) + 5 + (ndims+1)*sizeof(Int) + 1 + sizeof(Length) + 4 + sizeof(RelOffset)
+    sizeof(HeaderMessage) + 5 + (ndims+1)*sizeof(Length) + 1 + sizeof(Length) + 4 + sizeof(RelOffset)
 function write_chunked_storage_message{N}(io::IO, elsize::Int, dims::NTuple{N,Int}, filtered_size::Int, offset::RelOffset)
     write(io, HeaderMessage(HM_DATA_LAYOUT, chunked_storage_message_size(N) - sizeof(HeaderMessage), 0))
     write(io, UInt8(4))                     # Version
     write(io, UInt8(LC_CHUNKED_STORAGE))    # Layout Class
     write(io, UInt8(2))                     # Flags (= SINGLE_INDEX_WITH_FILTER)
     write(io, UInt8(N+1))                   # Dimensionality
-    write(io, UInt8(sizeof(Int)))           # Dimensionality Size
+    write(io, UInt8(sizeof(Length)))        # Dimensionality Size
     for i = N:-1:1
-        write(io, dims[i])                  # Dimensions 1...N
+        write(io, Length(dims[i]))          # Dimensions 1...N
     end
-    write(io, elsize)                       # Element size (last dimension)
+    write(io, Length(elsize))               # Element size (last dimension)
     write(io, UInt8(1))                     # Chunk Indexing Type (= Single Chunk)
     write(io, Length(filtered_size))        # Size of filtered chunk
     write(io, UInt32(0))                    # Filters for chunk

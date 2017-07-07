@@ -851,7 +851,7 @@ end
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     store_vlen!(out, UInt8, f, Vector{UInt8}(typename(T)), f.datatype_wsession)
     if isempty(T.parameters)
-        store_null_vlen!(out+sizeof(Vlen{UInt8}))
+        h5convert_uninitialized!(out+sizeof(Vlen{UInt8}), Vlen{UInt8})
     else
         refs = RelOffset[begin
             if isa(x, DataType)
@@ -1039,7 +1039,7 @@ module ReconstructedTypes end
 
 function reconstruct_bitstype(name::Union{Symbol,String}, size::Integer, empty::Bool)
     sym = gensym(name)
-    eval(ReconstructedTypes, empty ? :(struct $(sym) end) : :(primitive type $(sym) $(size*8) end))
+    eval(ReconstructedTypes, empty ? :(struct $(sym) end) : :(primitive type $(sym) $(Int(size)*8) end))
     T = getfield(ReconstructedTypes, sym)
     (ReadRepresentation{T, empty ? nothing : T}(), false)
 end
