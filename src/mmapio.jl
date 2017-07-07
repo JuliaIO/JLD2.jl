@@ -98,8 +98,12 @@ function MmapIO(fname::AbstractString, write::Bool, create::Bool, truncate::Bool
     truncate && !write && throw(ArgumentError("cannot truncate file that is not writable"))
 
     f = open(fname, true, write, create, truncate, false)
-    initialsz = truncate ? 0 : filesize(fname)
-    n = initialsz + (write ? MMAP_GROW_SIZE : 0)
+    initialsz = truncate ? Int64(0) : filesize(fname)
+    @static if Int == Int32
+        initialsz > typemax(Int) && error("cannot read a file greater than 2GB on a 32-bit system")
+    end
+    n = (initialsz % Int) + (write ? MMAP_GROW_SIZE : 0)
+    n < 0 && (n = typemax(Int))
 
     @static if is_windows()
         io = MmapIO(f, write, 0, C_NULL, C_NULL, C_NULL, C_NULL)
@@ -107,7 +111,7 @@ function MmapIO(fname::AbstractString, write::Bool, create::Bool, truncate::Bool
         io = MmapIO(f, write, 0, C_NULL, C_NULL, C_NULL)
     end
     mmap!(io, n)
-    io.endptr = io.startptr + initialsz
+    io.endptr = io.startptr + (initialsz % Int)
 
     io
 end
@@ -183,7 +187,7 @@ end
 @inline Base.write(io::MmapIO, x::Int8) = _write(io, x)
 @inline Base.write(io::MmapIO, x::Plain)  = _write(io, x)
 
-function Base.unsafe_write(io::MmapIO, x::Ptr{UInt8}, n::UInt64)
+function Base.unsafe_write(io::MmapIO, x::Ptr{UInt8}, n::UInt)
     cp = io.curptr
     ep = cp + n
     if ep > io.endptr

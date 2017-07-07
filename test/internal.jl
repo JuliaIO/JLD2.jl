@@ -50,19 +50,29 @@ seek(buf, 0)
 @test JLD2.read_size(buf, UInt8(1)) == 42580
 seek(buf, 0)
 
-JLD2.write_size(buf, 3804306107)
+JLD2.write_size(buf, 1902153053)
 seek(buf, 0)
-@test read(buf, UInt32) == 3804306107
+@test read(buf, UInt32) == 1902153053
 seek(buf, 0)
-@test JLD2.read_size(buf, UInt8(2)) == 3804306107
+@test JLD2.read_size(buf, UInt8(2)) == 1902153053
 seek(buf, 0)
 
-JLD2.write_size(buf, 7832227080891617460)
-seek(buf, 0)
-@test read(buf, UInt64) == 7832227080891617460
-seek(buf, 0)
-@test JLD2.read_size(buf, UInt8(3)) == 7832227080891617460
-seek(buf, 0)
+if Int == Int64
+    # Only test this on 64-bit platforms. We can't read data of size >4GB on 32-bit anyway.
+    JLD2.write_size(buf, 3804306107)
+    seek(buf, 0)
+    @test read(buf, UInt32) == 3804306107
+    seek(buf, 0)
+    @test JLD2.read_size(buf, UInt8(2)) == 3804306107
+    seek(buf, 0)
+
+    JLD2.write_size(buf, 7832227080891617460)
+    seek(buf, 0)
+    @test read(buf, UInt64) == 7832227080891617460
+    seek(buf, 0)
+    @test JLD2.read_size(buf, UInt8(3)) == 7832227080891617460
+    seek(buf, 0)
+end
 
 @test JLD2.size_size(1) === 1
 @test JLD2.size_size(256) === 2
