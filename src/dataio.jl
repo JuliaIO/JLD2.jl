@@ -45,8 +45,10 @@ end
     inptr = io.curptr
     n = length(v)
     nb = sizeof(T)*n
-    if nb > MMAP_CUTOFF
-        # It turns out that regular IO is faster here (at least on OS X)
+    if nb > MMAP_CUTOFF && (!is_windows() || !f.written)
+        # It turns out that regular IO is faster here (at least on OS X), but on Windows,
+        # we shouldn't use ordinary IO to read, since coherency with the memory map is not
+        # guaranteed
         mmapio = f.io
         regulario = mmapio.f
         seek(regulario, inptr - io.startptr)
@@ -110,30 +112,39 @@ function write_data{S}(io::MmapIO, f::JLDFile, data, odr::S, ::HasReferences,
     nothing
 end
 
-function raw_write(io::MmapIO, ptr::Ptr{UInt8}, nb::Int)
-    if nb > MMAP_CUTOFF
-        pos = position(io)
+@static if is_unix()
+    function raw_write(io::MmapIO, ptr::Ptr{UInt8}, nb::Int)
+        if nb > MMAP_CUTOFF
+            pos = position(io)
 
-        # Ensure that the current page has been flushed to disk
-        msync(io, pos, min(io.endptr - io.curptr, nb))
+            # Ensure that the current page has been flushed to disk
+            msync(io, pos, min(io.endptr - io.curptr, nb))
 
-        # Write to the underlying IOStream
-        regulario = io.f
-        seek(regulario, pos)
-        unsafe_write(regulario, ptr, nb)
+            # Write to the underlying IOStream
+            regulario = io.f
+            seek(regulario, pos)
+            unsafe_write(regulario, ptr, nb)
 
-        # Invalidate cache of any pages that were just written to
-        msync(io, pos, min(io.n - pos, nb), true)
+            # Invalidate cache of any pages that were just written to
+            msync(io, pos, min(io.n - pos, nb), true)
 
-        # Make sure the mapping is encompasses the written data
-        ensureroom(io, nb + 1)
+            # Make sure the mapping is encompasses the written data
+            ensureroom(io, nb + 1)
 
-        # Seek to the place we just wrote
-        seek(io, pos + nb)
-    else
-        unsafe_write(io, ptr, nb)
+            # Seek to the place we just wrote
+            seek(io, pos + nb)
+        else
+            unsafe_write(io, ptr, nb)
+        end
+        nothing
     end
-    nothing
+else
+    # Don't use ordinary IO to write files on Windows, since coherency with memory map is
+    # not guaranteed
+    function raw_write(io::MmapIO, ptr::Ptr{UInt8}, nb::Int)
+        unsafe_write(io, ptr, nb)
+        nothing
+    end
 end
 
 write_data{T}(io::MmapIO, f::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree,
