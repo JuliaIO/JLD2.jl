@@ -1,3 +1,4 @@
 julia 0.6.0-pre.alpha
 DataStructures
 Libz
+FileIO 0.5.0
