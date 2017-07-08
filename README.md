@@ -5,6 +5,6 @@
 
 JLD in pure Julia
 
-JLD2 saves and loads Julia data structures in a format comprising a subset of HDF5. While other HDF5 implementations should be able to read the files it produces, there is no guarantee that JLD2 can read files produced by other implementations.
+JLD2 saves and loads Julia data structures in a format comprising a subset of HDF5. While other HDF5 implementations should be able to read the files it produces, JLD2 is likely to be incapable of reading files created or modified by other HDF5 implementations.
 
-The code here should work on Julia 0.6. It has extensive unit tests and should properly serialize and deserialize in all cases supported by JLD and then some.
+The code here should work on Julia 0.6. It has extensive unit tests, but it has received little testing in the wild. Please use caution.
