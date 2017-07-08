@@ -1,4 +1,4 @@
-using JLD2, Compat, Base.Test
+using JLD2, Base.Test
 
 macro read(fid, sym)
     if !isa(sym, Symbol)
@@ -86,7 +86,7 @@ end
 objwithpointer = ObjWithPointer(0)
 # Custom BitsType (#99)
 primitive type MyBT 64 end
-bt = reinterpret(MyBT, @compat Int64(55))
+bt = reinterpret(MyBT, Int64(55))
 btarray = fill(bt, 5, 7)
 # Symbol arrays (#100)
 sa_asc = [:a, :b]
@@ -94,7 +94,7 @@ sa_utf8 = [:α, :β]
 # SubArray (to test tuple type params)
 subarray = view([1:5;], 1:5)
 # Array of empty tuples (to test tuple type params)
-arr_empty_tuple = (@compat Tuple{})[]
+arr_empty_tuple = Tuple{}[]
 struct EmptyImmutable end
 emptyimmutable = EmptyImmutable()
 arr_emptyimmutable = [emptyimmutable]
@@ -231,7 +231,7 @@ bitsparambool   = BitsParams{true}()
 bitsparamsymbol = BitsParams{:x}()
 bitsparamint    = BitsParams{1}()
 bitsparamuint   = BitsParams{0x01}()
-bitsparamint16  = BitsParams{@compat Int16(1)}()
+bitsparamint16  = BitsParams{Int16(1)}()
 
 # Tuple of tuples
 tuple_of_tuples = (1, 2, (3, 4, [5, 6]), [7, 8])
