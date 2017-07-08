@@ -1,9 +1,9 @@
 __precompile__()
 
 module JLD2
-using DataStructures, Libz
+using DataStructures, Libz, FileIO
 import Base.sizeof
-export jldopen
+export jldopen, @load, @save, load, save
 
 const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 
@@ -12,8 +12,10 @@ const Length = UInt64
 
 # Currently we specify a 512 byte header
 const FILE_HEADER_LENGTH = 512
-const FILE_HEADER = "Julia data file (HDF5), version "
 const CURRENT_VERSION = v"0.2"
+const REQUIRED_FILE_HEADER = "Julia data file (HDF5), version "
+const FILE_HEADER = "$(REQUIRED_FILE_HEADER)$(CURRENT_VERSION)\x00 (Julia $(VERSION) $(sizeof(Int)*8)-bit $(htol(1) == 1 ? "LE" : "BE"))\x00"
+@assert length(FILE_HEADER) <= FILE_HEADER_LENGTH
 
 struct UnsupportedVersionException <: Exception end
 struct UnsupportedFeatureException <: Exception end
@@ -233,7 +235,7 @@ function jldopen{T<:Union{Type{IOStream},Type{MmapIO}}}(
         f.root_group = Group{typeof(f)}(f)
         f.types_group = Group{typeof(f)}(f)
     else
-        if String(read(io, UInt8, length(FILE_HEADER))) != FILE_HEADER
+        if String(read(io, UInt8, length(REQUIRED_FILE_HEADER))) != REQUIRED_FILE_HEADER
             throw(ArgumentError(string('"', fname, "\" is not a JLD file")))
         end
 
@@ -322,6 +324,12 @@ Base.read(f::JLDFile, name::AbstractString) = f.root_group[name]
 Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession()) =
     write(f.root_group, name, obj, wsession)
 
+Base.getindex(f::JLDFile, name::AbstractString) = f.root_group[name]
+Base.setindex!(f::JLDFile, obj, name::AbstractString) = (f.root_group[name] = obj; f)
+Base.haskey(f::JLDFile, name::AbstractString) = haskey(f.root_group, name)
+Base.isempty(f::JLDFile) = isempty(f.root_group)
+Base.keys(f::JLDFile) = filter!(x->x != "_types", keys(f.root_group))
+
 function Base.close(f::JLDFile)
     if f.n_times_opened != 1
         f.n_times_opened == 0 && return
@@ -346,7 +354,6 @@ function Base.close(f::JLDFile)
         # Write JLD2 header
         seek(io, 0)
         write(io, FILE_HEADER)
-        print(io, CURRENT_VERSION)
 
         # Write superblock
         seek(io, FILE_HEADER_LENGTH)
@@ -403,5 +410,6 @@ include("datasets.jl")
 include("global_heaps.jl")
 include("data.jl")
 include("dataio.jl")
+include("loadsave.jl")
 
 end # module

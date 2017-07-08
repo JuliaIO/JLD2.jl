@@ -415,6 +415,11 @@ function save_group(g::Group)
 end
 
 function show_group(io::IO, g::Group, prefix::String=" ", skiptypes::Bool=false)
+    if g.f.n_times_opened == 0
+        print(io, "  (closed)")
+        return
+    end
+
     ks = collect(keys(g))
     skiptypes && filter!(x -> x != "_types", ks)
 
