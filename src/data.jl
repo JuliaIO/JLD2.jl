@@ -350,14 +350,6 @@ function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{Re
     end
 end
 
-
-function constructrr(f::JLDFile, T::UnionAll, dt::CompoundDatatype,
-                     attrs::Vector{ReadAttribute},
-                     hard_failure::Bool=false)
-    warn("read type $T is not a leaf type in workspace; reconstructing")
-    return reconstruct_compound(f, string(T), dt, read_field_datatypes(f, attrs))
-end
-
 """
 constructrr(f::JLDFile, T::DataType, dt::CompoundType, attrs::Vector{ReadAttribute},
             hard_failure::Bool=false)
@@ -468,6 +460,13 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
         end
         return (ReadRepresentation{T,OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}}()}(), false)
     end
+end
+
+function constructrr(f::JLDFile, T::UnionAll, dt::CompoundDatatype,
+                     attrs::Vector{ReadAttribute},
+                     hard_failure::Bool=false)
+    warn("read type $T is not a leaf type in workspace; reconstructing")
+    return reconstruct_compound(f, string(T), dt, read_field_datatypes(f, attrs))
 end
 
 # h5convert! stores the HDF5 representation of Julia data to a pointer. This
