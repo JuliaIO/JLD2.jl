@@ -1333,7 +1333,7 @@ abstract type DataMode end
 struct ReferenceFree <: DataMode end
 struct HasReferences <: DataMode end
 
-@Base.pure datamode{WrittenAs}(::Type{CustomSerialization{WrittenAs,<:Any}}) = datamode(WrittenAs)
+@Base.pure datamode{ODR}(::Type{CustomSerialization{<:Any,ODR}}) = datamode(ODR)
 @Base.pure datamode(::Union{Type{<:Vlen},Type{RelOffset}}) = HasReferences()
 @Base.pure datamode(::DataType) = ReferenceFree()
 @Base.pure datamode(::FixedLengthString) = ReferenceFree()
