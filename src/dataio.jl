@@ -97,6 +97,7 @@ function write_data{S}(io::MmapIO, f::JLDFile, data, odr::S, ::ReferenceFree,
     ensureroom(io, sizeof(odr))
     cp = io.curptr
     h5convert!(cp, odr, f, data, wsession)
+    io.curptr == cp || throw(InternalError())
     io.curptr = cp + sizeof(odr)
     nothing
 end
@@ -155,11 +156,12 @@ function write_data{T,S}(io::MmapIO, f::JLDFile, data::Array{T}, odr::S, ::Refer
                          wsession::JLDWriteSession)
     io = f.io
     ensureroom(io, sizeof(odr) * length(data))
-    cp = io.curptr
+    cp = cporig = io.curptr
     @simd for i = 1:length(data)
         @inbounds h5convert!(cp, odr, f, data[i], wsession)
         cp += sizeof(odr)
     end
+    io.curptr == cporig || throw(InternalError())
     io.curptr = cp
     nothing
 end

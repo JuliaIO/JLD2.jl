@@ -20,6 +20,7 @@ const FILE_HEADER = "$(REQUIRED_FILE_HEADER)$(CURRENT_VERSION)\x00 (Julia $(VERS
 struct UnsupportedVersionException <: Exception end
 struct UnsupportedFeatureException <: Exception end
 struct InvalidDataException <: Exception end
+struct InternalError <: Exception end
 
 include("Lookup3.jl")
 include("mmapio.jl")
