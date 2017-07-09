@@ -1,6 +1,6 @@
 The JLD2.jl package is licensed under the MIT "Expat" License:
 
-> Copyright (c) 2015: Simon Kornblith.
+> Copyright (c) 2015-2017: Simon Kornblith and contributors.
 >
 > Permission is hereby granted, free of charge, to any person obtaining
 > a copy of this software and associated documentation files (the
@@ -20,3 +20,5 @@ The JLD2.jl package is licensed under the MIT "Expat" License:
 > CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 > TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 > SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Parts of `src/loadsave.jl` and `test/rw.jl` are derived from JLD.jl, Copyright (c) 2012-2017 Timothy E. Holy and contributors, also licensed under the MIT "Expat" License.
