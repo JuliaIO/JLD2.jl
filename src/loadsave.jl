@@ -81,7 +81,7 @@ macro load(filename, vars...)
 end
 
 # Save all the key-value pairs in the dict as top-level variables of the JLD
-function FileIO.save(f::File{format"JLD2"}, dict::Associative; kwargs...)
+function save(f::File{format"JLD2"}, dict::Associative; kwargs...)
     jldopen(FileIO.filename(f), "w"; kwargs...) do file
         wsession = JLDWriteSession()
         for (k,v) in dict
@@ -94,7 +94,7 @@ function FileIO.save(f::File{format"JLD2"}, dict::Associative; kwargs...)
 end
 
 # Or the names and values may be specified as alternating pairs
-function FileIO.save(f::File{format"JLD2"}, name::AbstractString, value, pairs...; kwargs...)
+function save(f::File{format"JLD2"}, name::AbstractString, value, pairs...; kwargs...)
     if isodd(length(pairs)) || !isa(pairs[1:2:end], Tuple{Vararg{AbstractString}})
         throw(ArgumentError("arguments must be in name-value pairs"))
     end
@@ -107,26 +107,26 @@ function FileIO.save(f::File{format"JLD2"}, name::AbstractString, value, pairs..
     end
 end
 
-FileIO.save(f::File{format"JLD2"}, value...; kwargs...) = error("must supply a name for each variable")
+save(f::File{format"JLD2"}, value...; kwargs...) = error("must supply a name for each variable")
 
 # load with just a filename returns a dictionary containing all the variables
-function FileIO.load(f::File{format"JLD2"}; kwargs...)
+function load(f::File{format"JLD2"}; kwargs...)
     jldopen(FileIO.filename(f), "r"; kwargs...) do file
         Dict{String,Any}([(var, read(file, var)) for var in keys(file)])
     end
 end
 
 # When called with explicitly requested variable names, return each one
-function FileIO.load(f::File{format"JLD2"}, varname::AbstractString; kwargs...)
+function load(f::File{format"JLD2"}, varname::AbstractString; kwargs...)
     jldopen(FileIO.filename(f), "r"; kwargs...) do file
         read(file, varname)
     end
 end
 
-FileIO.load(f::File{format"JLD2"}, varnames::AbstractString...; kwargs...) =
+load(f::File{format"JLD2"}, varnames::AbstractString...; kwargs...) =
     load(f, varnames; kwargs...)
 
-function FileIO.load(f::File{format"JLD2"}, varnames::Tuple{Vararg{AbstractString}}; kwargs...)
+function load(f::File{format"JLD2"}, varnames::Tuple{Vararg{AbstractString}}; kwargs...)
     jldopen(FileIO.filename(f), "r"; kwargs...) do file
         map((var)->read(file, var), varnames)
     end
