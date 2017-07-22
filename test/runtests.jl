@@ -1,4 +1,4 @@
-using JLD2
+using JLD2, FileIO
 using Base.Test
 
 include("lookup3.jl")

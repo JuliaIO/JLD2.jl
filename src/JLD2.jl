@@ -3,7 +3,7 @@ __precompile__()
 module JLD2
 using DataStructures, Libz, FileIO
 import Base.sizeof
-export jldopen, @load, @save, load, save
+export jldopen, @load, @save
 
 const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 

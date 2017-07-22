@@ -69,3 +69,10 @@ jldopen(fn, "r+") do f
     @test f["x1"] == x1
     @test f["x2"] == x2
 end
+
+# Issue #19
+save(fn, Dict("a"=>[1,2,3]))
+io = open(fn)
+info("The next error message (involving Nullable{String}) is a sign of normal operation")
+@test_throws MethodError load(io)
+close(io)

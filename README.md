@@ -15,6 +15,7 @@ The code here should work on Julia 0.6. It has extensive unit tests, but it has 
 The `@save` and `@load` macros are the simplest way to interact with a JLD2 file. The `@save` macro writes one or more variables from the current scope to the JLD file. For example:
 
 ```julia
+using JLD2, FileIO
 hello = "world"
 foo = :bar
 @save "example.jld2" hello foo
@@ -32,9 +33,12 @@ It is best practice to explicitly name the variables to be loaded and saved from
 
 ### `save` and `load` functions
 
-The `save` and `load` functions, provided by [FileIO](https://github.com/JuliaIO/FileIO.jl), provide an alternative mechanism to read and write data from a JLD2 file. The `save` function accepts an `Associative` yielding the key/value pairs, where the key is a string representing the name of the dataset and the value represents its contents:
+The `save` and `load` functions, provided by [FileIO](https://github.com/JuliaIO/FileIO.jl), provide an alternative mechanism to read and write data from a JLD2 file. To use these functions, you must say `using FileIO`; it is not necessary to say `using JLD2` since FileIO will determine the correct package automatically.
+
+The `save` function accepts an `Associative` yielding the key/value pairs, where the key is a string representing the name of the dataset and the value represents its contents:
 
 ```julia
+using FileIO
 save("example.jld2", Dict("hello" => "world", "foo" => :bar))
 ```
 
