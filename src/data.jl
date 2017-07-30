@@ -1205,21 +1205,27 @@ end
 # jlconvert for empty objects
 @generated function jlconvert{T}(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
                                  header_offset::RelOffset)
-   T.size == 0 && return Expr(:new, T)
+    T.size == 0 && return Expr(:new, T)
 
-   # In this case, T is a non-empty object, but the written data was empty
-   # because the custom serializers for the fields all resulted in empty
-   # objects
-   return Expr(:new, T, [begin
-       writtenas = writeas(ty)
-       @assert writtenas.size == 0
-       if writtenas === ty
-           Expr(:new, ty)
-       else
-           :(rconvert($ty, $(Expr(:new, writtenas))))
-       end
-   end for ty in T.types]...)
+    # In this case, T is a non-empty object, but the written data was empty
+    # because the custom serializers for the fields all resulted in empty
+    # objects
+    return Expr(:new, T, [begin
+        writtenas = writeas(ty)
+        @assert writtenas.size == 0
+        if writtenas === ty
+            Expr(:new, ty)
+        else
+            :(rconvert($ty, $(Expr(:new, writtenas))))
+        end
+    end for ty in T.types]...)
 end
+
+# At present, we write Union{} as an object of Core.TypeofBottom. The method above
+# basically works, but `Expr(:new, Type{Union{}})` is a bit weird and causes problems for
+# inference. Better to define a separate method.
+jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
+          header_offset::RelOffset) = Union{}
 
 # This jlconvert method handles compound types with padding or references
 @generated function jlconvert{T,S}(::ReadRepresentation{T,S}, f::JLDFile, ptr::Ptr,
