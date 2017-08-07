@@ -17,7 +17,7 @@ heap_object_length(data::AbstractArray) = length(data)
 heap_object_length(::Any) = 1
 
 function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
-    psz = sizeof(odr)*heap_object_length(data)
+    psz = odr_sizeof(odr)*heap_object_length(data)
     objsz = 8 + sizeof(Length) + psz
     objsz += 8 - mod1(objsz, 8)
 
@@ -127,8 +127,8 @@ function read_heap_object{T,RR}(f::JLDFile, hid::GlobalHeapID, rr::ReadRepresent
     end
     seek(io, gh.objects[hid.index]+8)
     len = Int(read(io, Length))
-    n = div(len, sizeof(RR))
-    len == n * sizeof(RR) || throw(InvalidDataException())
+    n = div(len, odr_sizeof(RR))
+    len == n * odr_sizeof(RR) || throw(InvalidDataException())
 
     read_array!(Vector{T}(n), f, rr)
 end

@@ -34,7 +34,7 @@ end
 define_packed(AttributeHeader)
 
 Base.sizeof(attr::WrittenAttribute) = 8 + symbol_length(attr.name) + 1 + sizeof(attr.datatype) + sizeof(attr.dataspace) +
-                                     numel(attr.dataspace) * sizeof(objodr(attr.data))
+                                     numel(attr.dataspace) * odr_sizeof(objodr(attr.data))
 
 function write_attribute(io::IO, f::JLDFile, attr::WrittenAttribute, wsession::JLDWriteSession)
     namelen = symbol_length(attr.name)

@@ -35,7 +35,7 @@ const MMAP_CUTOFF = 1048576
     io = f.io
     inptr = io.curptr
     obj = jlconvert(rr, f, inptr, header_offset)
-    io.curptr = inptr + sizeof(rr)
+    io.curptr = inptr + odr_sizeof(rr)
     obj
 end
 
@@ -44,7 +44,7 @@ end
     io = f.io
     inptr = io.curptr
     n = length(v)
-    nb = sizeof(T)*n
+    nb = odr_sizeof(T)*n
     if nb > MMAP_CUTOFF && (!is_windows() || !f.written)
         # It turns out that regular IO is faster here (at least on OS X), but on Windows,
         # we shouldn't use ordinary IO to read, since coherency with the memory map is not
@@ -56,7 +56,7 @@ end
     else
         unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), n)
     end
-    io.curptr = inptr + sizeof(T) * n
+    io.curptr = inptr + odr_sizeof(T) * n
     v
 end
 
@@ -69,9 +69,9 @@ end
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, inptr)
             @inbounds v[i] = jlconvert(rr, f, inptr, NULL_REFERENCE)
         end
-        inptr += sizeof(RR)
+        inptr += odr_sizeof(RR)
     end
-    io.curptr = inptr + sizeof(RR) * n
+    io.curptr = inptr + odr_sizeof(RR) * n
     v
 end
 
@@ -82,7 +82,7 @@ end
     inptr = io.curptr
     data = read(ZlibInflateInputStream(unsafe_wrap(Array, Ptr{UInt8}(inptr), data_length); gzip=false))
     @simd for i = 1:length(v)
-        dataptr = Ptr{Void}(pointer(data, sizeof(RR)*(i-1)+1))
+        dataptr = Ptr{Void}(pointer(data, odr_sizeof(RR)*(i-1)+1))
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
             @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
         end
@@ -94,22 +94,22 @@ end
 function write_data{S}(io::MmapIO, f::JLDFile, data, odr::S, ::ReferenceFree,
                        wsession::JLDWriteSession)
     io = f.io
-    ensureroom(io, sizeof(odr))
+    ensureroom(io, odr_sizeof(odr))
     cp = io.curptr
     h5convert!(cp, odr, f, data, wsession)
     io.curptr == cp || throw(InternalError())
-    io.curptr = cp + sizeof(odr)
+    io.curptr = cp + odr_sizeof(odr)
     nothing
 end
 
 function write_data{S}(io::MmapIO, f::JLDFile, data, odr::S, ::HasReferences,
                        wsession::JLDWriteSession)
     io = f.io
-    ensureroom(io, sizeof(odr))
+    ensureroom(io, odr_sizeof(odr))
     p = position(io)
     cp = IndirectPointer(io, p)
     h5convert!(cp, odr, f, data, wsession)
-    seek(io, p + sizeof(odr))
+    seek(io, p + odr_sizeof(odr))
     nothing
 end
 
@@ -150,16 +150,16 @@ end
 
 write_data{T}(io::MmapIO, f::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree,
               wsession::JLDWriteSession) =
-    raw_write(io, Ptr{UInt8}(pointer(data)), sizeof(odr) * length(data))
+    raw_write(io, Ptr{UInt8}(pointer(data)), odr_sizeof(odr) * length(data))
 
 function write_data{T,S}(io::MmapIO, f::JLDFile, data::Array{T}, odr::S, ::ReferenceFree,
                          wsession::JLDWriteSession)
     io = f.io
-    ensureroom(io, sizeof(odr) * length(data))
+    ensureroom(io, odr_sizeof(odr) * length(data))
     cp = cporig = io.curptr
     @simd for i = 1:length(data)
         @inbounds h5convert!(cp, odr, f, data[i], wsession)
-        cp += sizeof(odr)
+        cp += odr_sizeof(odr)
     end
     io.curptr == cporig || throw(InternalError())
     io.curptr = cp
@@ -169,7 +169,7 @@ end
 function write_data{T,S}(io::MmapIO, f::JLDFile, data::Array{T}, odr::S, ::HasReferences,
                          wsession::JLDWriteSession)
     io = f.io
-    ensureroom(io, sizeof(odr) * length(data))
+    ensureroom(io, odr_sizeof(odr) * length(data))
     p = position(io)
     cp = IndirectPointer(io, p)
 
@@ -179,7 +179,7 @@ function write_data{T,S}(io::MmapIO, f::JLDFile, data::Array{T}, odr::S, ::HasRe
         else
             @inbounds h5convert_uninitialized!(cp, odr)
         end
-        cp += sizeof(odr)
+        cp += odr_sizeof(odr)
     end
 
     seek(io, cp.offset)
@@ -191,8 +191,8 @@ end
 #
 
 @inline function read_scalar(f::JLDFile{IOStream}, rr, header_offset::RelOffset)
-    r = Vector{UInt8}(sizeof(rr))
-    unsafe_read(f.io, pointer(r), sizeof(rr))
+    r = Vector{UInt8}(odr_sizeof(rr))
+    unsafe_read(f.io, pointer(r), odr_sizeof(rr))
     jlconvert(rr, f, pointer(r), header_offset)
 end
 
@@ -202,9 +202,9 @@ end
     io = f.io
     data_offset = position(io)
     n = length(v)
-    data = read(ZlibInflateInputStream(io; gzip=false), UInt8, sizeof(RR)*n)
+    data = read(ZlibInflateInputStream(io; gzip=false), UInt8, odr_sizeof(RR)*n)
     @simd for i = 1:n
-        dataptr = Ptr{Void}(pointer(data, sizeof(RR)*(i-1)+1))
+        dataptr = Ptr{Void}(pointer(data, odr_sizeof(RR)*(i-1)+1))
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
             @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
         end
@@ -215,18 +215,18 @@ end
 
 @inline function read_array!{T}(v::Array{T}, f::JLDFile{IOStream},
                                 rr::ReadRepresentation{T,T})
-    unsafe_read(f.io, pointer(v), sizeof(T)*length(v))
+    unsafe_read(f.io, pointer(v), odr_sizeof(T)*length(v))
     v
 end
 
 @inline function read_array!{T,RR}(v::Array{T}, f::JLDFile{IOStream},
                                    rr::ReadRepresentation{T,RR})
     n = length(v)
-    nb = sizeof(RR)*n
+    nb = odr_sizeof(RR)*n
     io = f.io
     data = read(io, UInt8, nb)
     @simd for i = 1:n
-        dataptr = Ptr{Void}(pointer(data, sizeof(RR)*(i-1)+1))
+        dataptr = Ptr{Void}(pointer(data, odr_sizeof(RR)*(i-1)+1))
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
             @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
         end
@@ -238,19 +238,19 @@ function write_data{S}(io::BufferedWriter, f::JLDFile, data, odr::S, ::DataMode,
                        wsession::JLDWriteSession)
     position = io.position[]
     h5convert!(Ptr{Void}(pointer(io.buffer, position+1)), odr, f, data, wsession)
-    io.position[] = position + sizeof(odr)
+    io.position[] = position + odr_sizeof(odr)
     nothing
 end
 
 function write_data{T}(io::BufferedWriter, f::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree,
                        wsession::JLDWriteSession)
-    unsafe_write(io, Ptr{UInt8}(pointer(data)), sizeof(odr) * length(data))
+    unsafe_write(io, Ptr{UInt8}(pointer(data)), odr_sizeof(odr) * length(data))
     nothing
 end
 
 function write_data{T}(io::IOStream, f::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree,
                        wsession::JLDWriteSession)
-    unsafe_write(io, Ptr{UInt8}(pointer(data)), sizeof(odr) * length(data))
+    unsafe_write(io, Ptr{UInt8}(pointer(data)), odr_sizeof(odr) * length(data))
     nothing
 end
 
@@ -264,15 +264,15 @@ function write_data{T,S}(io::BufferedWriter, f::JLDFile, data::Array{T}, odr::S,
         else
             @inbounds h5convert_uninitialized!(cp, odr)
         end
-        cp += sizeof(odr)
+        cp += odr_sizeof(odr)
     end
-    io.position[] = position + sizeof(odr) * length(data)
+    io.position[] = position + odr_sizeof(odr) * length(data)
     nothing
 end
 
 function write_data{T,S}(io::IOStream, f::JLDFile, data::Array{T}, odr::S, wm::DataMode,
                          wsession::JLDWriteSession)
-    nb = sizeof(odr) * length(data)
+    nb = odr_sizeof(odr) * length(data)
     buf = Vector{UInt8}(nb)
     pos = position(io)
     cp = Ptr{Void}(pointer(buf))
@@ -282,7 +282,7 @@ function write_data{T,S}(io::IOStream, f::JLDFile, data::Array{T}, odr::S, wm::D
         else
             @inbounds h5convert_uninitialized!(cp, odr)
         end
-        cp += sizeof(odr)
+        cp += odr_sizeof(odr)
     end
     # We might seek around in the file as a consequence of writing stuff, so seek back. We
     # don't need to worry about this for a BufferedWriter, since it will seek back before

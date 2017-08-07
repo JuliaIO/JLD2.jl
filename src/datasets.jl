@@ -338,18 +338,18 @@ unsafe_isdefined(arr::Array, i::Int) =
     unsafe_load(Ptr{Ptr{Void}}(pointer(arr)+(i-1)*sizeof(Ptr{Void}))) != Ptr{Void}(0)
 
 function deflate_data{T,S}(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSession)
-    buf = Vector{UInt8}(sizeof(odr) * length(data))
+    buf = Vector{UInt8}(odr_sizeof(odr) * length(data))
     cp = Ptr{Void}(pointer(buf))
     @simd for i = 1:length(data)
         @inbounds h5convert!(cp, odr, f, data[i], wsession)
-        cp += sizeof(odr)
+        cp += odr_sizeof(odr)
     end
     read(ZlibDeflateInputStream(buf; gzip=false))
 end
 
 function write_dataset{T,S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data::Array{T}, wsession::JLDWriteSession)
     io = f.io
-    datasz = sizeof(odr) * numel(dataspace)
+    datasz = odr_sizeof(odr) * numel(dataspace)
     layout_class = datasz < 8192 ? LC_COMPACT_STORAGE :
                    f.compress ? LC_CHUNKED_STORAGE : LC_CONTIGUOUS_STORAGE
     psz = payload_size_without_storage_message(dataspace, datatype)
@@ -388,7 +388,7 @@ function write_dataset{T,S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5D
     elseif layout_class == LC_CHUNKED_STORAGE
         write(cio, DEFLATE_PIPELINE_MESSAGE)
         deflated = deflate_data(f, data, odr, wsession)
-        write_chunked_storage_message(cio, sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
+        write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
         write(io, end_checksum(cio))
 
         f.end_of_data += length(deflated)
@@ -406,7 +406,7 @@ end
 
 function write_dataset{S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data, wsession::JLDWriteSession)
     io = f.io
-    datasz = sizeof(odr) * numel(dataspace)
+    datasz = odr_sizeof(odr) * numel(dataspace)
     psz = payload_size_without_storage_message(dataspace, datatype) + sizeof(CompactStorageMessage) + datasz
     fullsz = sizeof(ObjectStart) + size_size(psz) + psz + 4
 

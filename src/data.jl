@@ -3,6 +3,8 @@ const Initialized = Union{Type{Val{true}}, Type{Val{false}}}
 const Pointers = Union{Ptr{Void}, IndirectPointer}
 
 struct OnDiskRepresentation{Offsets,JLTypes,H5Types} end
+odr_sizeof(::Void) = 0
+@Base.pure odr_sizeof(x::DataType) = Int(x.size)
 
 struct UnknownType{T}
     name::T
@@ -18,10 +20,10 @@ struct Vlen{T}
     size::UInt32
     id::GlobalHeapID
 end
-sizeof{T<:Vlen}(::Type{T}) = 4 + sizeof(GlobalHeapID)
+odr_sizeof{T<:Vlen}(::Type{T}) = 4 + sizeof(GlobalHeapID)
 
 # Initial ODR for DataType
-const DataTypeODR = OnDiskRepresentation{(0, sizeof(Vlen{String})),Tuple{String,Vector{Any}},Tuple{Vlen{String},Vlen{RelOffset}}}
+const DataTypeODR = OnDiskRepresentation{(0, odr_sizeof(Vlen{String})),Tuple{String,Vector{Any}},Tuple{Vlen{String},Vlen{RelOffset}}}
 
 const NULL_COMMITTED_DATATYPE = CommittedDatatype(RelOffset(0), 0)
 # Look up the corresponding committed datatype for a given type
@@ -43,7 +45,7 @@ writeas(T::Type) = T
 
 # Carries the type and on-disk representation of data to be read from
 # the disk
-sizeof{T,S}(::ReadRepresentation{T,S}) = sizeof(S)
+odr_sizeof{T,S}(::ReadRepresentation{T,S}) = odr_sizeof(S)
 
 # Determines whether a specific field type should be saved in the file
 @noinline function hasfielddata(T::ANY)
@@ -64,8 +66,8 @@ function hasdata(T::DataType)
 end
 
 # Gets the size of an on-disk representation
-Base.@pure function sizeof{Offsets,JLTypes,H5Types}(::OnDiskRepresentation{Offsets,JLTypes,H5Types})
-    Offsets[end]+sizeof(H5Types.parameters[end])
+Base.@pure function odr_sizeof{Offsets,JLTypes,H5Types}(::OnDiskRepresentation{Offsets,JLTypes,H5Types})
+    Offsets[end]+odr_sizeof(H5Types.parameters[end])
 end
 
 # Determines whether a type will have the same layout on disk as in memory
@@ -115,8 +117,8 @@ end
             return quote
                 @lookup_committed f T
                 $(if isempty(T.types)
-                    # bitstype
-                    :(return commit(f, OpaqueDatatype(sizeof(T)), T, readas))
+                    # Opaque datatype
+                    :(return commit(f, OpaqueDatatype(T.size), T, readas))
                 else
                     # Compound type
                     :(return commit_compound(f, fieldnames(T), T, readas))
@@ -328,7 +330,7 @@ end
 # Constructs a ReadRepresentation for a given opaque (bitstype) type
 function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{ReadAttribute})
     dt.class == DT_OPAQUE || throw(UnsupportedFeatureException())
-    if sizeof(T) == dt.size
+    if T.size == dt.size
         (ReadRepresentation{T,T}(), true)
     else
         empty = check_empty(attrs)
@@ -336,12 +338,12 @@ function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{Re
             if !hasdata(T)
                 (ReadRepresentation{T,nothing}(), true)
             else
-                warn("$T has $(sizeof(T)*8) bytes, but written type was empty; reconstructing")
+                warn("$T has $(T.size*8) bytes, but written type was empty; reconstructing")
                 reconstruct_bitstype(T.name.name, dt.size, empty)
             end
         else
             if isempty(T.types)
-                warn("primitive type $T has $(sizeof(T)*8) bits, but written type has $(dt.size*8) bits; reconstructing")
+                warn("primitive type $T has $(T.size*8) bits, but written type has $(dt.size*8) bits; reconstructing")
             else
                 warn("$T is a non-primitive type, but written type is a primitive type with $(dt.size*8) bits; reconstructing")
             end
@@ -384,7 +386,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
     types = Vector{Any}(length(T.types))
     odrs = Vector{Any}(length(T.types))
     fn = fieldnames(T)
-    samelayout = isbits(T) && sizeof(T) == dt.size
+    samelayout = isbits(T) && T.size == dt.size
     dtindex = 0
     for i = 1:length(T.types)
         wstype = T.types[i]
@@ -536,7 +538,7 @@ Base.showerror(io::IO, x::UndefinedFieldException) =
 wconvert(T, x) = convert(T, x)
 rconvert(T, x) = convert(T, x)
 
-sizeof{T,ODR}(::Type{CustomSerialization{T,ODR}}) = sizeof(ODR)
+odr_sizeof{T,ODR}(::Type{CustomSerialization{T,ODR}}) = odr_sizeof(ODR)
 
 # Usually we want to convert the object and then write it.
 @inline h5convert!{T,ODR}(out::Pointers, ::Type{CustomSerialization{T,ODR}}, f::JLDFile,
@@ -581,11 +583,11 @@ const PrimitiveTypes     = Union{Int8, Int16, Int32, Int64, Int128, UInt8, UInt1
 
 for T in Base.uniontypes(SignedTypes)
     @eval h5fieldtype(::JLDFile, ::$T, ::$T, ::Initialized) =
-        FixedPointDatatype(sizeof($(T.parameters[1])), true)
+        FixedPointDatatype($(T.parameters[1].size), true)
 end
 for T in Base.uniontypes(UnsignedTypes)
     @eval h5fieldtype(::JLDFile, ::$T, ::$T, ::Initialized) =
-        FixedPointDatatype(sizeof($(T.parameters[1])), false)
+        FixedPointDatatype($(T.parameters[1].size), false)
 end
 
 function jltype(f::JLDFile, dt::FixedPointDatatype)
@@ -679,7 +681,7 @@ jlconvert_isinitialized{T}(::ReadRepresentation{T,RelOffset}, ptr::Ptr) =
     unsafe_store!(convert(Ptr{GlobalHeapID}, out)+4, obj)
     nothing
 end
-@assert sizeof(UInt32) + sizeof(GlobalHeapID) == sizeof(UInt128)
+@assert odr_sizeof(Vlen) == sizeof(UInt128)
 store_null_vlen!(out::Pointers) = unsafe_store!(convert(Ptr{UInt128}, out), UInt128(0))
 
 h5convert!{T}(out::Pointers, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) =
@@ -698,8 +700,8 @@ jlconvert_isinitialized{T,S}(::ReadRepresentation{T,Vlen{S}}, ptr::Ptr) =
 ## Strings
 
 const H5TYPE_VLEN_UTF8 = VariableLengthDatatype(DT_VARIABLE_LENGTH, 0x11, 0x01, 0x00,
-                                               sizeof(Vlen{UInt8}),
-                                               FixedPointDatatype(1, false))
+                                                odr_sizeof(Vlen{UInt8}),
+                                                FixedPointDatatype(1, false))
 
 h5fieldtype(::JLDFile, ::Type{String}, ::Type{String}, ::Initialized) =
     H5TYPE_VLEN_UTF8
@@ -715,7 +717,7 @@ fieldodr(::Type{String}, ::Bool) = Vlen{String}
 struct FixedLengthString{T<:AbstractString}
     length::Int
 end
-sizeof(x::FixedLengthString{String}) = x.length
+odr_sizeof(x::FixedLengthString{String}) = x.length
 
 h5type(f::JLDFile, writeas::Type{String}, x::String) =
     StringDatatype(typeof(x), sizeof(x))
@@ -748,8 +750,10 @@ function jltype(f::JLDFile, dt::VariableLengthDatatype)
     end
 end
 
-h5convert!(out::Pointers, ::FixedLengthString, f::JLDFile, x, ::JLDWriteSession) =
-    (unsafe_copy!(convert(Ptr{UInt8}, out), pointer(x), sizeof(x)); nothing)
+function h5convert!(out::Pointers, fls::FixedLengthString, f::JLDFile, x, ::JLDWriteSession)
+    fls.length == sizeof(x) || throw(InvalidDataException())
+    (unsafe_copy!(convert(Ptr{UInt8}, out), pointer(x), fls.length); nothing)
+end
 h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x, wsession::JLDWriteSession) =
     store_vlen!(out, UInt8, f, Vector{UInt8}(x), wsession)
 
@@ -799,9 +803,9 @@ rconvert(::Type{BigFloat}, x::String) = parse(BigFloat, x)
 ## DataTypes
 
 const H5TYPE_DATATYPE = CompoundDatatype(
-    sizeof(Vlen{String})+sizeof(Vlen{RelOffset}),
+    odr_sizeof(Vlen{String})+odr_sizeof(Vlen{RelOffset}),
     ["name", "parameters"],
-    [0, sizeof(Vlen{String})],
+    [0, odr_sizeof(Vlen{String})],
     [H5TYPE_VLEN_UTF8, VariableLengthDatatype(ReferenceDatatype())]
 )
 
@@ -850,7 +854,7 @@ end
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     store_vlen!(out, UInt8, f, Vector{UInt8}(typename(T)), f.datatype_wsession)
     if isempty(T.parameters)
-        h5convert_uninitialized!(out+sizeof(Vlen{UInt8}), Vlen{UInt8})
+        h5convert_uninitialized!(out+odr_sizeof(Vlen{UInt8}), Vlen{UInt8})
     else
         refs = RelOffset[begin
             if isa(x, DataType)
@@ -870,7 +874,7 @@ function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsess
                 write_ref(f, x, wsession)
             end
         end for x in T.parameters]
-        store_vlen!(out+sizeof(Vlen{UInt8}), RelOffset, f, refs, f.datatype_wsession)
+        store_vlen!(out+odr_sizeof(Vlen{UInt8}), RelOffset, f, refs, f.datatype_wsession)
     end
     nothing
 end
@@ -879,11 +883,11 @@ end
 # could not be resolved.
 function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
                       ptr::Ptr, header_offset::RelOffset)
-    hasparams = unsafe_load(convert(Ptr{UInt32}, ptr+sizeof(Vlen{UInt8}))) != 0
+    hasparams = unsafe_load(convert(Ptr{UInt32}, ptr+odr_sizeof(Vlen{UInt8}))) != 0
     unknown_params = false
     if hasparams
         paramrefs = jlconvert(ReadRepresentation{RelOffset,Vlen{RelOffset}}(), f,
-                              ptr+sizeof(Vlen{UInt8}), NULL_REFERENCE)
+                              ptr+odr_sizeof(Vlen{UInt8}), NULL_REFERENCE)
         params = Any[begin
             # If the reference is to a committed datatype, read the datatype
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
@@ -971,7 +975,7 @@ function h5convert!(out::Pointers,
                     odr::OnDiskRepresentation{(0, 8),Tuple{TypeVar,Any},Tuple{JLD2.RelOffset,JLD2.RelOffset}},
                     f::JLDFile, x::UnionAll, wsession::JLDWriteSession)
     h5convert!(out, RelOffset, f, x.var, f.datatype_wsession)
-    h5convert!(out+sizeof(RelOffset), RelOffset, f, x.body, f.datatype_wsession)
+    h5convert!(out+odr_sizeof(RelOffset), RelOffset, f, x.body, f.datatype_wsession)
 end
 
 ## Pointers
@@ -1329,7 +1333,7 @@ end
             odrs[i] = fodr
         end
         offsets[i] = offset
-        offset += sizeof(fodr)
+        offset += odr_sizeof(fodr)
     end
 
     OnDiskRepresentation{(offsets...), Tuple{T.types...}, Tuple{odrs...}}()
