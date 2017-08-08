@@ -39,8 +39,8 @@ const MMAP_CUTOFF = 1048576
     obj
 end
 
-@inline function read_array!{T}(v::Array{T}, f::JLDFile{MmapIO},
-                                rr::ReadRepresentation{T,T})
+@inline function read_array!(v::Array{T}, f::JLDFile{MmapIO},
+                             rr::ReadRepresentation{T,T}) where T
     io = f.io
     inptr = io.curptr
     n = length(v)
@@ -60,8 +60,8 @@ end
     v
 end
 
-@inline function read_array!{T,RR}(v::Array{T}, f::JLDFile{MmapIO},
-                                   rr::ReadRepresentation{T,RR})
+@inline function read_array!(v::Array{T}, f::JLDFile{MmapIO},
+                             rr::ReadRepresentation{T,RR}) where {T,RR}
     io = f.io
     inptr = io.curptr
     n = length(v)
@@ -75,9 +75,9 @@ end
     v
 end
 
-@inline function read_compressed_array!{T,RR}(v::Array{T}, f::JLDFile{MmapIO},
-                                              rr::ReadRepresentation{T,RR},
-                                              data_length::Int)
+@inline function read_compressed_array!(v::Array{T}, f::JLDFile{MmapIO},
+                                        rr::ReadRepresentation{T,RR},
+                                        data_length::Int) where {T,RR}
     io = f.io
     inptr = io.curptr
     data = read(ZlibInflateInputStream(unsafe_wrap(Array, Ptr{UInt8}(inptr), data_length); gzip=false))
@@ -91,8 +91,8 @@ end
     v
 end
 
-function write_data{S}(io::MmapIO, f::JLDFile, data, odr::S, ::ReferenceFree,
-                       wsession::JLDWriteSession)
+function write_data(io::MmapIO, f::JLDFile, data, odr::S, ::ReferenceFree,
+                    wsession::JLDWriteSession) where S
     io = f.io
     ensureroom(io, odr_sizeof(odr))
     cp = io.curptr
@@ -102,8 +102,8 @@ function write_data{S}(io::MmapIO, f::JLDFile, data, odr::S, ::ReferenceFree,
     nothing
 end
 
-function write_data{S}(io::MmapIO, f::JLDFile, data, odr::S, ::HasReferences,
-                       wsession::JLDWriteSession)
+function write_data(io::MmapIO, f::JLDFile, data, odr::S, ::HasReferences,
+                    wsession::JLDWriteSession) where S
     io = f.io
     ensureroom(io, odr_sizeof(odr))
     p = position(io)
@@ -148,12 +148,12 @@ else
     end
 end
 
-write_data{T}(io::MmapIO, f::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree,
-              wsession::JLDWriteSession) =
+write_data(io::MmapIO, f::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree,
+           wsession::JLDWriteSession) where {T} =
     raw_write(io, Ptr{UInt8}(pointer(data)), odr_sizeof(odr) * length(data))
 
-function write_data{T,S}(io::MmapIO, f::JLDFile, data::Array{T}, odr::S, ::ReferenceFree,
-                         wsession::JLDWriteSession)
+function write_data(io::MmapIO, f::JLDFile, data::Array{T}, odr::S, ::ReferenceFree,
+                    wsession::JLDWriteSession) where {T,S}
     io = f.io
     ensureroom(io, odr_sizeof(odr) * length(data))
     cp = cporig = io.curptr
@@ -166,8 +166,8 @@ function write_data{T,S}(io::MmapIO, f::JLDFile, data::Array{T}, odr::S, ::Refer
     nothing
 end
 
-function write_data{T,S}(io::MmapIO, f::JLDFile, data::Array{T}, odr::S, ::HasReferences,
-                         wsession::JLDWriteSession)
+function write_data(io::MmapIO, f::JLDFile, data::Array{T}, odr::S, ::HasReferences,
+                    wsession::JLDWriteSession) where {T,S}
     io = f.io
     ensureroom(io, odr_sizeof(odr) * length(data))
     p = position(io)
@@ -196,9 +196,9 @@ end
     jlconvert(rr, f, pointer(r), header_offset)
 end
 
-@inline function read_compressed_array!{T,RR}(v::Array{T}, f::JLDFile{IOStream},
-                                              rr::ReadRepresentation{T,RR},
-                                              data_length::Int)
+@inline function read_compressed_array!(v::Array{T}, f::JLDFile{IOStream},
+                                        rr::ReadRepresentation{T,RR},
+                                        data_length::Int) where {T,RR}
     io = f.io
     data_offset = position(io)
     n = length(v)
@@ -213,14 +213,14 @@ end
     v
 end
 
-@inline function read_array!{T}(v::Array{T}, f::JLDFile{IOStream},
-                                rr::ReadRepresentation{T,T})
+@inline function read_array!(v::Array{T}, f::JLDFile{IOStream},
+                             rr::ReadRepresentation{T,T}) where T
     unsafe_read(f.io, pointer(v), odr_sizeof(T)*length(v))
     v
 end
 
-@inline function read_array!{T,RR}(v::Array{T}, f::JLDFile{IOStream},
-                                   rr::ReadRepresentation{T,RR})
+@inline function read_array!(v::Array{T}, f::JLDFile{IOStream},
+                             rr::ReadRepresentation{T,RR}) where {T,RR}
     n = length(v)
     nb = odr_sizeof(RR)*n
     io = f.io
@@ -234,28 +234,28 @@ end
     v
 end
 
-function write_data{S}(io::BufferedWriter, f::JLDFile, data, odr::S, ::DataMode,
-                       wsession::JLDWriteSession)
+function write_data(io::BufferedWriter, f::JLDFile, data, odr::S, ::DataMode,
+                    wsession::JLDWriteSession) where S
     position = io.position[]
     h5convert!(Ptr{Void}(pointer(io.buffer, position+1)), odr, f, data, wsession)
     io.position[] = position + odr_sizeof(odr)
     nothing
 end
 
-function write_data{T}(io::BufferedWriter, f::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree,
-                       wsession::JLDWriteSession)
+function write_data(io::BufferedWriter, f::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree,
+                    wsession::JLDWriteSession) where T
     unsafe_write(io, Ptr{UInt8}(pointer(data)), odr_sizeof(odr) * length(data))
     nothing
 end
 
-function write_data{T}(io::IOStream, f::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree,
-                       wsession::JLDWriteSession)
+function write_data(io::IOStream, f::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree,
+                    wsession::JLDWriteSession) where T
     unsafe_write(io, Ptr{UInt8}(pointer(data)), odr_sizeof(odr) * length(data))
     nothing
 end
 
-function write_data{T,S}(io::BufferedWriter, f::JLDFile, data::Array{T}, odr::S,
-                         ::DataMode, wsession::JLDWriteSession)
+function write_data(io::BufferedWriter, f::JLDFile, data::Array{T}, odr::S,
+                    ::DataMode, wsession::JLDWriteSession) where {T,S}
     position = io.position[]
     cp = Ptr{Void}(pointer(io.buffer, position+1))
     @simd for i = 1:length(data)
@@ -270,8 +270,8 @@ function write_data{T,S}(io::BufferedWriter, f::JLDFile, data::Array{T}, odr::S,
     nothing
 end
 
-function write_data{T,S}(io::IOStream, f::JLDFile, data::Array{T}, odr::S, wm::DataMode,
-                         wsession::JLDWriteSession)
+function write_data(io::IOStream, f::JLDFile, data::Array{T}, odr::S, wm::DataMode,
+                    wsession::JLDWriteSession) where {T,S}
     nb = odr_sizeof(odr) * length(data)
     buf = Vector{UInt8}(nb)
     pos = position(io)

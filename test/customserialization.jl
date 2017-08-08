@@ -1,29 +1,29 @@
 using JLD2, Base.Test
 
-immutable SingleFieldWrapper{T}
+struct SingleFieldWrapper{T}
     x::T
 end
 Base.:(==)(a::SingleFieldWrapper, b::SingleFieldWrapper) = a.x == b.x
 
-immutable MultiFieldWrapper{T}
+struct MultiFieldWrapper{T}
     x::T
     y::Int
 end
 Base.:(==)(a::MultiFieldWrapper, b::MultiFieldWrapper) = (a.x == b.x && a.y == b.y)
 
-immutable UntypedWrapper
+struct UntypedWrapper
     x
 end
 Base.:(==)(a::UntypedWrapper, b::UntypedWrapper) = a.x == b.x
 
 # This is a type with a custom serialization, where the original type has data
 # but the custom serialization is empty
-immutable CSA
+struct CSA
     x::Ptr{Void}
 end
 a = CSA(Ptr{Void}(0))
 
-immutable CSASerialization end
+struct CSASerialization end
 JLD2.writeas(::Type{CSA}) = CSASerialization
 function JLD2.wconvert(::Type{CSASerialization}, x::CSA)
     global converted = true
@@ -36,10 +36,10 @@ end
 
 # This is a type with a custom serialization, where the original type has no
 # data but the custom serialization does
-immutable CSB end
+struct CSB end
 b = CSB()
 
-immutable CSBSerialization
+struct CSBSerialization
     x::Int
 end
 JLD2.writeas(::Type{CSB}) = CSBSerialization
@@ -54,13 +54,13 @@ end
 
 # This is a type where the custom serialized data can be stored inline when it
 # is a field of another type, but the original data could not
-type CSC
+mutable struct CSC
     x::Vector{Int}
 end
 Base.:(==)(a::CSC, b::CSC) = a.x == b.x
 c = CSC(rand(Int, 2))
 
-immutable CSCSerialization
+struct CSCSerialization
     a::Int
     b::Int
 end
@@ -76,13 +76,13 @@ end
 
 # This is a type where the original data could be stored inline when it is a
 # field of another type, but the custom serialized data cannot
-immutable CSD
+struct CSD
     a::Int
     b::Int
 end
 d = CSD(rand(Int), rand(Int))
 
-immutable CSDSerialization
+struct CSDSerialization
     x::Vector{Int}
 end
 JLD2.writeas(::Type{CSD}) = CSDSerialization
@@ -96,7 +96,7 @@ function JLD2.rconvert(::Type{CSD}, x::CSDSerialization)
 end
 
 # This is a type that gets written as an array
-immutable CSE
+struct CSE
     a::Int
     b::Int
     c::Int
@@ -114,7 +114,7 @@ function JLD2.rconvert(::Type{CSE}, x::Vector{Int})
 end
 
 # This is a type that is custom-serialized as an Int
-immutable CSF
+struct CSF
     x::Int
 end
 f = CSF(rand(Int))
@@ -130,7 +130,7 @@ function Base.convert(::Type{CSF}, x::Int)
 end
 
 # This is a type that is custom-serialized as a String
-immutable CSG
+struct CSG
     x::Int
 end
 g = CSG(rand(Int))
@@ -146,7 +146,7 @@ function Base.convert(::Type{CSG}, x::String)
 end
 
 # This is a type that is custom-serialized as a DataType
-immutable CSH
+struct CSH
     T::DataType
     N::Int
 end
@@ -163,7 +163,7 @@ function Base.convert{T,N}(::Type{CSH}, x::Type{Array{T,N}})
 end
 
 # This is a type that is custom-serialized as a Union
-immutable CSK
+struct CSK
     T::DataType
     S::DataType
 end

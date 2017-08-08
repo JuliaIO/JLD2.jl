@@ -32,11 +32,11 @@ const EMPTY_DIMENSIONS = Int[]
 
 # Pass-through for custom serializations
 # Need a bunch of methods to avoid ambiguity
-WriteDataspace{S,ODR}(f::JLDFile, x, ::Type{CustomSerialization{S,ODR}}) =
+WriteDataspace(f::JLDFile, x, ::Type{CustomSerialization{S,ODR}}) where {S,ODR} =
     WriteDataspace(f, x, ODR)
-WriteDataspace{S,ODR}(f::JLDFile, x::Array, ::Type{CustomSerialization{S,ODR}}) =
+WriteDataspace(f::JLDFile, x::Array, ::Type{CustomSerialization{S,ODR}}) where {S,ODR} =
     WriteDataspace(f, x, ODR)
-WriteDataspace{T,S,ODR}(f::JLDFile, x::Array{T,0}, ::Type{CustomSerialization{S,ODR}}) =
+WriteDataspace(f::JLDFile, x::Array{T,0}, ::Type{CustomSerialization{S,ODR}}) where {T,S,ODR} =
     WriteDataspace(f, x, ODR)
 
 WriteDataspace() = WriteDataspace(DS_NULL, (), ())
@@ -44,12 +44,12 @@ WriteDataspace(::JLDFile, ::Any, odr::Void) = WriteDataspace()
 WriteDataspace(::JLDFile, ::Any, ::Any) = WriteDataspace(DS_SCALAR, (), ())
 
 # Ghost type array
-WriteDataspace{T}(f::JLDFile, x::Array{T}, ::Void) =
+WriteDataspace(f::JLDFile, x::Array{T}, ::Void) where {T} =
    WriteDataspace(DS_NULL, (),
              (WrittenAttribute(f, :dimensions, Int64[x for x in reverse(size(x))]),))
 
 # Reference array
-WriteDataspace{T,N}(f::JLDFile, x::Array{T,N}, ::Type{RelOffset}) =
+WriteDataspace(f::JLDFile, x::Array{T,N}, ::Type{RelOffset}) where {T,N} =
     WriteDataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))),
               (WrittenAttribute(f, :julia_type, write_ref(f, T, f.datatype_wsession)),))
 
@@ -58,14 +58,14 @@ WriteDataspace(f::JLDFile, x::Array, ::Any) =
     WriteDataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))), ())
 
 # Zero-dimensional arrays need an empty dimensions attribute
-WriteDataspace{T}(f::JLDFile, x::Array{T,0}, ::Void) =
+WriteDataspace(f::JLDFile, x::Array{T,0}, ::Void) where {T} =
     WriteDataspace(DS_NULL, (Length(1),),
               (WrittenAttribute(f, :dimensions, EMPTY_DIMENSIONS)))
-WriteDataspace{T}(f::JLDFile, x::Array{T,0}, ::Type{RelOffset}) =
+WriteDataspace(f::JLDFile, x::Array{T,0}, ::Type{RelOffset}) where {T} =
     WriteDataspace(DS_SIMPLE, (Length(1),),
               (WrittenAttribute(f, :julia_type, write_ref(f, T, f.datatype_wsession)),
                WrittenAttribute(f, :dimensions, EMPTY_DIMENSIONS)))
-WriteDataspace{T}(f::JLDFile, x::Array{T,0}, ::Any) =
+WriteDataspace(f::JLDFile, x::Array{T,0}, ::Any) where {T} =
     WriteDataspace(DS_SIMPLE, (Length(1),),
               (WrittenAttribute(f, :dimensions, EMPTY_DIMENSIONS),))
 
@@ -73,7 +73,7 @@ sizeof{N}(::Union{WriteDataspace{N},Type{WriteDataspace{N}}}) = 4 + sizeof(Lengt
 numel(x::WriteDataspace{0}) = x.dataspace_type == DS_SCALAR ? 1 : 0
 numel(x::WriteDataspace) = Int(prod(x.size))
 
-function Base.write{N}(io::IO, dspace::WriteDataspace{N})
+function Base.write(io::IO, dspace::WriteDataspace{N}) where N
     write(io, DataspaceStart(2, N, 0, dspace.dataspace_type))
     for x in dspace.size
         write(io, x::Length)
