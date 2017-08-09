@@ -212,7 +212,7 @@ end
 @inline Base.read(io::MmapIO, T::Type{Int8}) = _read(io, T)
 @inline Base.read(io::MmapIO, T::PlainType) = _read(io, T)
 
-function Base.read{T}(io::MmapIO, ::Type{T}, n::Int)
+function Base.read(io::MmapIO, ::Type{T}, n::Int) where T
     cp = io.curptr
     ep = cp + sizeof(T)*n
     ep > io.endptr && throw(EOFError())
@@ -221,7 +221,7 @@ function Base.read{T}(io::MmapIO, ::Type{T}, n::Int)
     io.curptr = ep
     arr
 end
-Base.read{T}(io::MmapIO, ::Type{T}, n::Integer) =
+Base.read(io::MmapIO, ::Type{T}, n::Integer) where {T} =
     read(io, T, Int(n))
 
 # Read a null-terminated string

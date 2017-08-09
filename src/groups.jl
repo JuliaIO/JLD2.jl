@@ -14,7 +14,7 @@ Group(f::JLDFile, name::AbstractString) = Group(f.root_group, name)
 
 Construct a group named `name` as a child of group `g`.
 """
-Group{T}(g::Group{T}, name::AbstractString) = (g[name] = Group{T}(g.f))
+Group(g::Group{T}, name::AbstractString) where {T} = (g[name] = Group{T}(g.f))
 
 """
     lookup_offset(g::Group, name::AbstractString) -> RelOffset

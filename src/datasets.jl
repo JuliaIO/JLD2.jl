@@ -237,8 +237,8 @@ function find_dimensions_attr(attributes::Vector{ReadAttribute})
     dimensions_attr_index
 end
 
-function read_empty{T}(rr::ReadRepresentation{T}, f::JLDFile,
-                    dimensions_attr::ReadAttribute, header_offset::RelOffset)
+function read_empty(rr::ReadRepresentation{T}, f::JLDFile,
+                 dimensions_attr::ReadAttribute, header_offset::RelOffset) where T
     dimensions_attr.datatype_class == DT_FIXED_POINT || throw(UnsupportedFeatureException())
 
     io = f.io
@@ -305,10 +305,10 @@ function construct_array{T}(io::IO, ::Type{T}, ndims::Int)::Array{T}
 end
 
 
-function read_array{T,RR}(f::JLDFile, dataspace::ReadDataspace,
-                          rr::ReadRepresentation{T,RR}, data_length::Int,
-                          filter_id::UInt16, header_offset::RelOffset, 
-                          attributes::Union{Vector{ReadAttribute},Void})
+function read_array(f::JLDFile, dataspace::ReadDataspace,
+                    rr::ReadRepresentation{T,RR}, data_length::Int,
+                    filter_id::UInt16, header_offset::RelOffset, 
+                    attributes::Union{Vector{ReadAttribute},Void}) where {T,RR}
     io = f.io
     data_offset = position(io)
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
@@ -337,7 +337,7 @@ end
 unsafe_isdefined(arr::Array, i::Int) =
     unsafe_load(Ptr{Ptr{Void}}(pointer(arr)+(i-1)*sizeof(Ptr{Void}))) != Ptr{Void}(0)
 
-function deflate_data{T,S}(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSession)
+function deflate_data(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSession) where {T,S}
     buf = Vector{UInt8}(odr_sizeof(odr) * length(data))
     cp = Ptr{Void}(pointer(buf))
     @simd for i = 1:length(data)
@@ -347,7 +347,7 @@ function deflate_data{T,S}(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWrit
     read(ZlibDeflateInputStream(buf; gzip=false))
 end
 
-function write_dataset{T,S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data::Array{T}, wsession::JLDWriteSession)
+function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data::Array{T}, wsession::JLDWriteSession) where {T,S}
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
     layout_class = datasz < 8192 ? LC_COMPACT_STORAGE :
@@ -404,7 +404,7 @@ function write_dataset{T,S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5D
     h5offset(f, header_offset)
 end
 
-function write_dataset{S}(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data, wsession::JLDWriteSession)
+function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data, wsession::JLDWriteSession) where S
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
     psz = payload_size_without_storage_message(dataspace, datatype) + sizeof(CompactStorageMessage) + datasz
@@ -485,7 +485,7 @@ define_packed(ContiguousStorageMessage)
 
 @inline chunked_storage_message_size(ndims::Int) =
     sizeof(HeaderMessage) + 5 + (ndims+1)*sizeof(Length) + 1 + sizeof(Length) + 4 + sizeof(RelOffset)
-function write_chunked_storage_message{N}(io::IO, elsize::Int, dims::NTuple{N,Int}, filtered_size::Int, offset::RelOffset)
+function write_chunked_storage_message(io::IO, elsize::Int, dims::NTuple{N,Int}, filtered_size::Int, offset::RelOffset) where N
     write(io, HeaderMessage(HM_DATA_LAYOUT, chunked_storage_message_size(N) - sizeof(HeaderMessage), 0))
     write(io, UInt8(4))                     # Version
     write(io, UInt8(LC_CHUNKED_STORAGE))    # Layout Class

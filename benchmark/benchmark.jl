@@ -65,7 +65,7 @@ bench("integer_int_vector", convert(Vector{Integer}, rand(typemin(Int):typemax(I
 bench("complex128_vector", [complex(rand(), rand()) for i = 1:10000000])
 
 # Vector{Any} of non-builtin immutable
-immutable IntWrapper
+struct IntWrapper
     x::Int
 end
 bench("any_complex128_vector", Any[complex(rand(), rand()) for i = 1:1000000])
@@ -79,7 +79,7 @@ bench("one_element_arrays", [[rand(typemin(Int):typemax(Int))] for i = 1:1000000
 # Equivalent benchmark from https://github.com/timholy/HDF5.jl/issues/170
 # This is 1/10 of the amount of data, but we don't have a problem with
 # scaling, so this should be fine
-type Cell
+mutable struct Cell
     a::Array{Float64,1}
     b::Array{Float64,1}
     c::Array{Float64,2}

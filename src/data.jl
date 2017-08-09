@@ -84,7 +84,7 @@ function samelayout(T::DataType)
     return offset == T.size
 end
 
-fieldnames{T<:Tuple}(x::Type{T}) = [Symbol(x) for x = 1:length(x.types)]
+fieldnames(x::Type{T}) where {T<:Tuple} = [Symbol(x) for x = 1:length(x.types)]
 fieldnames(x::ANY) = Base.fieldnames(x)
 
 # fieldodr gives the on-disk representation of a field of a given type,
@@ -108,8 +108,8 @@ end
 
 # h5fieldtype is fieldodr's HDF5 companion. It should give the HDF5
 # datatype reflecting the on-disk representation.
-@generated function h5fieldtype{T}(f::JLDFile, writeas::Type{T}, readas::Type,
-                                   initialized::Initialized)
+@generated function h5fieldtype(f::JLDFile, writeas::Type{T}, readas::Type,
+                                initialized::Initialized) where T
     if isleaftype(T)
         if !hasfielddata(T)
             return nothing
@@ -480,13 +480,13 @@ end
 # h5convert! stores the HDF5 representation of Julia data to a pointer. This
 # method handles types with no padding or references where this is just a simple
 # store
-h5convert!{T}(out::Pointers, ::Type{T}, ::JLDFile, x, ::JLDWriteSession) =
+h5convert!(out::Pointers, ::Type{T}, ::JLDFile, x, ::JLDWriteSession) where {T} =
     (unsafe_store!(convert(Ptr{T}, out), x); nothing)
 
 # We pack types that have padding using a staged h5convert! method
-@generated function h5convert!{Offsets,Types,H5Types}(out::Pointers,
-                              ::OnDiskRepresentation{Offsets,Types,H5Types},
-                              file::JLDFile, x, wsession::JLDWriteSession)
+@generated function h5convert!(out::Pointers,
+       ::OnDiskRepresentation{Offsets,Types,H5Types},
+       file::JLDFile, x, wsession::JLDWriteSession) where {Offsets,Types,H5Types}
     T = x
     types = Types.parameters
     members = H5Types.parameters
@@ -547,24 +547,24 @@ rconvert(T, x) = convert(T, x)
 odr_sizeof{T,ODR}(::Type{CustomSerialization{T,ODR}}) = odr_sizeof(ODR)
 
 # Usually we want to convert the object and then write it.
-@inline h5convert!{T,ODR}(out::Pointers, ::Type{CustomSerialization{T,ODR}}, f::JLDFile,
-                          x, wsession::JLDWriteSession) =
+@inline h5convert!(out::Pointers, ::Type{CustomSerialization{T,ODR}}, f::JLDFile,
+                   x, wsession::JLDWriteSession) where {T,ODR} =
     h5convert!(out, ODR, f, wconvert(T, x)::T, wsession)
 
 # When writing as a reference, we don't want to convert the object first. That
 # should happen automatically after write_dataset is called so that the written
 # object gets the right written_type attribute.
-@inline h5convert!{T}(out::Pointers, odr::Type{CustomSerialization{T,RelOffset}},
-                      f::JLDFile, x, wsession::JLDWriteSession) =
+@inline h5convert!(out::Pointers, odr::Type{CustomSerialization{T,RelOffset}},
+                   f::JLDFile, x, wsession::JLDWriteSession) where {T} =
     h5convert!(out, RelOffset, f, x, wsession)
 
 # When writing as a reference to something that's being custom-serialized as an
 # array, we have to convert the object first.
-@inline h5convert!{T<:Array}(out::Pointers, odr::Type{CustomSerialization{T,RelOffset}},
-                      f::JLDFile, x, wsession::JLDWriteSession) =
+@inline h5convert!(out::Pointers, odr::Type{CustomSerialization{T,RelOffset}},
+            f::JLDFile, x, wsession::JLDWriteSession) where {T<:Array} =
     h5convert!(out, RelOffset, f, wconvert(T, x)::T, wsession)
 
-h5convert_uninitialized!{T,ODR}(out::Pointers, odr::Type{CustomSerialization{T,ODR}}) =
+h5convert_uninitialized!(out::Pointers, odr::Type{CustomSerialization{T,ODR}}) where {T,ODR} =
     h5convert_uninitialized!(out, ODR)
 
 jlconvert_canbeuninitialized{T,S,ODR}(::ReadRepresentation{T,CustomSerialization{S,ODR}}) =
@@ -688,11 +688,11 @@ jlconvert_isinitialized{T}(::ReadRepresentation{T,RelOffset}, ptr::Ptr) =
     nothing
 end
 
-h5convert!{T}(out::Pointers, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) =
+h5convert!(out::Pointers, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) where {T} =
     store_vlen!(out, T, f, x, wsession)
 
 @assert odr_sizeof(Vlen) == sizeof(UInt128)
-h5convert_uninitialized!{T<:Vlen}(out::Pointers, odr::Type{T}) =
+h5convert_uninitialized!(out::Pointers, odr::Type{T}) where {T<:Vlen} =
     (unsafe_store!(convert(Ptr{Int128}, out), 0); nothing)
 
 # Read variable-length data given offset and length in ptr
@@ -814,7 +814,7 @@ const H5TYPE_DATATYPE = CompoundDatatype(
     [H5TYPE_VLEN_UTF8, VariableLengthDatatype(ReferenceDatatype())]
 )
 
-function h5fieldtype{T<:DataType}(f::JLDFile, ::Type{T}, readas::Type, ::Initialized)
+function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T<:DataType
     if !(readas <: DataType)
         @lookup_committed f readas
         return commit(f, H5TYPE_DATATYPE, DataType, readas)
@@ -840,7 +840,7 @@ function h5fieldtype{T<:DataType}(f::JLDFile, ::Type{T}, readas::Type, ::Initial
 end
 fieldodr{T<:DataType}(::Type{T}, ::Bool) = DataTypeODR()
 
-h5type{T<:DataType}(f::JLDFile, ::Type{T}, x) =
+h5type(f::JLDFile, ::Type{T}, x) where {T<:DataType} =
     h5fieldtype(f, DataType, typeof(x), Val{true})
 odr{T<:DataType}(::Type{T}) = DataTypeODR()
 
@@ -941,11 +941,11 @@ constructrr{T<:DataType}(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{Re
 
 const H5TYPE_UNION = VariableLengthDatatype(H5TYPE_DATATYPE)
 
-function h5fieldtype{T<:Union,S<:Union}(f::JLDFile, ::Type{T}, readas::Type{S}, ::Initialized)
+function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type{S}, ::Initialized) where {T<:Union,S<:Union}
     @lookup_committed f Union
     commit(f, H5TYPE_UNION, Union, Union)
 end
-function h5fieldtype{T<:Union}(f::JLDFile, ::Type{T}, readas::Type, ::Initialized)
+function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T<:Union
     @lookup_committed f readas
     commit(f, H5TYPE_UNION, Union, readas)
 end
@@ -953,7 +953,7 @@ fieldodr{T<:Union}(::Type{T}, ::Bool) = Vlen{DataTypeODR()}
 h5fieldtype(f::JLDFile, ::Type{Union{}}, ::Initialized) = nothing
 fieldodr(::Type{Union{}}, initialized::Bool) = nothing
 
-h5type{T<:Union}(f::JLDFile, ::Type{T}, x::Any) =
+h5type(f::JLDFile, ::Type{T}, x::Any) where {T<:Union} =
     h5fieldtype(f, Union, typeof(x), Val{true})
 odr(::Type{Union}) = fieldodr(Union, true)
 
@@ -1004,15 +1004,15 @@ end
 # This is all so that when you define a writeas method to write something as an
 # array, it writes a reference to the actual array where the datatype is
 # committed and has a written_type attribute.
-function h5fieldtype{T<:Array}(f::JLDFile, ::Type{T}, readas::DataType,
-                               ::Initialized)
+function h5fieldtype(f::JLDFile, ::Type{T}, readas::DataType,
+                     ::Initialized) where T<:Array
     @lookup_committed f readas
     commit(f, ReferenceDatatype(), T, readas)
 end
-h5type{T<:Array}(f::JLDFile, ::Type{T}, x) =
+h5type(f::JLDFile, ::Type{T}, x) where {T<:Array} =
     h5fieldtype(f, T, typeof(x), Val{true})
-_odr{T<:Array}(writtenas::Type{T}, readas::Type{T}, odr) = odr
-_odr{T<:Array}(writtenas::Type{T}, readas::DataType, odr) =
+_odr(writtenas::Type{T}, readas::Type{T}, odr) where {T<:Array} = odr
+_odr(writtenas::Type{T}, readas::DataType, odr) where {T<:Array} =
     CustomSerialization{writtenas,RelOffset}
 
 function constructrr{T<:Array}(::JLDFile, ::Type{T}, dt::BasicDatatype,
@@ -1189,7 +1189,7 @@ end
 # These need to go at the bottom. Also, JLD2 doesn't support custom serialization because
 # these methods are not guaranteed to work if you add methods to `writeas`.
 
-@generated function h5type{T<:Array}(f::JLDFile, ::Type{T}, ::T)
+@generated function h5type(f::JLDFile, ::Type{T}, ::T) where T<:Array
     if T <: Array{Union{}}
         return :(ReferenceDatatype())
     end
@@ -1340,7 +1340,7 @@ struct HasReferences <: DataMode end
 @Base.pure datamode(::DataType) = ReferenceFree()
 @Base.pure datamode(::FixedLengthString) = ReferenceFree()
 @Base.pure datamode(::Void) = ReferenceFree()
-@generated function datamode{H5Types}(odr::OnDiskRepresentation{Offsets,JLTypes,H5Types} where {Offsets,JLTypes})
+@generated function datamode(odr::OnDiskRepresentation{Offsets,JLTypes,H5Types} where {Offsets,JLTypes}) where H5Types
     for ty in H5Types.parameters
         datamode(ty) == HasReferences() && return HasReferences()
     end

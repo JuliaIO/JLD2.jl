@@ -351,7 +351,7 @@ fn = joinpath(tempdir(),"test.jld")
 # Issue #106
 module Mod106
 primitive type Typ{T} 64 end
-typ{T}(x::Int64, ::Type{T}) = Base.box(Typ{T}, Base.unbox(Int64,x))
+typ(x::Int64, ::Type{T}) where {T} = Base.box(Typ{T}, Base.unbox(Int64,x))
 abstract type UnexportedT end
 end
 

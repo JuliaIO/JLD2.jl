@@ -95,7 +95,7 @@ end
 @inline Base.read(io::BufferedReader, T::Type{Int8}) = _read(io, T)
 @inline Base.read(io::BufferedReader, T::PlainType) = _read(io, T)
 
-function Base.read{T}(io::BufferedReader, ::Type{T}, n::Int)
+function Base.read(io::BufferedReader, ::Type{T}, n::Int) where T
     position = io.position[]
     buffer = io.buffer
     n = sizeof(T) * n
@@ -107,7 +107,7 @@ function Base.read{T}(io::BufferedReader, ::Type{T}, n::Int)
     unsafe_copy!(pointer(arr), Ptr{T}(pointer(buffer, position+1)), n)
     arr
 end
-Base.read{T}(io::BufferedReader, ::Type{T}, n::Integer) =
+Base.read(io::BufferedReader, ::Type{T}, n::Integer) where {T} =
     read(io, T, Int(n))
 
 Base.position(io::BufferedReader) = io.file_position + io.position[]

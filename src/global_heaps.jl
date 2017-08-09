@@ -117,7 +117,7 @@ function Base.read(io::IO, ::Type{GlobalHeap})
     GlobalHeap(offset, heapsz, free, objects)
 end
 
-function read_heap_object{T,RR}(f::JLDFile, hid::GlobalHeapID, rr::ReadRepresentation{T,RR})
+function read_heap_object(f::JLDFile, hid::GlobalHeapID, rr::ReadRepresentation{T,RR}) where {T,RR}
     io = f.io
     if haskey(f.global_heaps, hid.heap_offset)
         gh = f.global_heaps[hid.heap_offset]

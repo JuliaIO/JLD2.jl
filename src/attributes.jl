@@ -10,7 +10,7 @@ struct WrittenAttribute{DS<:WriteDataspace,H5T<:H5Datatype,T}
     data::T
 end
 
-function WrittenAttribute{T}(f::JLDFile, name::Symbol, data::T)
+function WrittenAttribute(f::JLDFile, name::Symbol, data::T) where T
     WrittenAttribute(name, WriteDataspace(f, data, objodr(data)), h5type(f, data), data)
 end
 
