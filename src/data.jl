@@ -330,7 +330,7 @@ end
 # Constructs a ReadRepresentation for a given opaque (bitstype) type
 function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{ReadAttribute})
     dt.class == DT_OPAQUE || throw(UnsupportedFeatureException())
-    if T.size == dt.size
+    if T.size == dt.size && isempty(T.types)
         (ReadRepresentation{T,T}(), true)
     else
         empty = check_empty(attrs)
@@ -442,11 +442,14 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
         (ReadRepresentation{T,T}(), true)
     else
         wodr = odr(T)
+        # This should theoretically be moved inside the if statement, but then it returns
+        # the wrong result due to a bug in type inference on 0.6
+        typeof_wodr = typeof(wodr)
         offsets = (offsets...)
-        if isa(wodr, OnDiskRepresentation)
-            odr_offsets = typeof(wodr).parameters[1]
-            odr_types = typeof(wodr).parameters[2].parameters
-            odr_h5types = typeof(wodr).parameters[3].parameters
+        if wodr isa OnDiskRepresentation
+            odr_offsets = typeof_wodr.parameters[1]
+            odr_types = typeof_wodr.parameters[2].parameters
+            odr_h5types = typeof_wodr.parameters[3].parameters
             tequal = length(odr_types) == length(types)
             if tequal
                 for i = 1:length(types)
@@ -455,7 +458,10 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
                         break
                     end
                 end
-                if tequal && odr_types == offsets
+                if tequal && odr_offsets == offsets
+                    # This should not be necessary, but type inference mistakenly changes
+                    # the value of wodr here
+                    wodr = typeof_wodr()
                     return (ReadRepresentation{T,wodr}(), true)
                 end
             end
@@ -681,12 +687,11 @@ jlconvert_isinitialized{T}(::ReadRepresentation{T,RelOffset}, ptr::Ptr) =
     unsafe_store!(convert(Ptr{GlobalHeapID}, out)+4, obj)
     nothing
 end
-@assert odr_sizeof(Vlen) == sizeof(UInt128)
-store_null_vlen!(out::Pointers) = unsafe_store!(convert(Ptr{UInt128}, out), UInt128(0))
 
 h5convert!{T}(out::Pointers, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) =
     store_vlen!(out, T, f, x, wsession)
 
+@assert odr_sizeof(Vlen) == sizeof(UInt128)
 h5convert_uninitialized!{T<:Vlen}(out::Pointers, odr::Type{T}) =
     (unsafe_store!(convert(Ptr{Int128}, out), 0); nothing)
 
@@ -1057,11 +1062,7 @@ end
 # only used to create gensymmed names for reconstructed types.
 function typestring(T::UnknownType)
     tn = IOBuffer()
-    if isa(T.name, DataType)
-        write(tn, typename(T.name))
-    else
-        print(tn, T.name)
-    end
+    print(tn, T.name)
     if isdefined(T, :parameters)
         write(tn, '{')
         for i = 1:length(T.parameters)
@@ -1078,18 +1079,19 @@ function typestring(T::UnknownType)
     String(take!(tn))
 end
 
-# If we managed to resolve the name, but not the parameters, then try calling the
-# constructor.
-function constructrr(f::JLDFile, unk::UnknownType{T} where T<:Union{UnionAll,DataType},
-                     dt::CompoundDatatype, attrs::Vector{ReadAttribute})
+function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatype,
+                     attrs::Vector{ReadAttribute})
+    field_datatypes = read_field_datatypes(f, attrs)
     if unk.name == Tuple
-        field_datatypes = read_field_datatypes(f, attrs)
         # For a tuple with unknown fields, we should reconstruct the fields
         rodr = reconstruct_odr(f, dt, field_datatypes)
         # This is a "pseudo-RR" since the tuple is not fully parametrized, but
         # the parameters must depend on the types actually encoded in the file
         (ReadRepresentation{Tuple,rodr}(), false)
     else
+        warn("read type ", typestring(unk), " was parametrized, but type ",
+             unk.name, " in workspace is not; reconstructing")
+        reconstruct_compound(f, typestring(unk), dt, field_datatypes)
     end
 end
 
@@ -1100,16 +1102,6 @@ Given a UnionAll type, recursively eliminates the `where` clauses
 """
 behead(T::UnionAll) = behead(T.body)
 behead(T::ANY) = T
-
-function getfieldtypes(f::JLDFile, dt::CompoundDatatype, attrs::Vector{ReadAttribute})
-    datatypes = read_field_datatypes(f, attrs)
-    jltypes = Vector{Any}(length(datatypes))
-    for i = 1:length(datatypes)
-        ref = datatypes[i]
-        jltypes[i] = jltype(f, ref == NULL_REFERENCE ? dt.members[i] : f.datatype_locations[ref])
-    end
-    jltypes
-end
 
 function constructrr(f::JLDFile, unk::UnknownType{UnionAll}, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute})

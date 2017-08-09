@@ -75,6 +75,15 @@ end
 struct TestType17
     x::Int
 end
+struct TestType18
+    x::Int
+end
+struct TestType19{T}
+    x::T
+end
+primitive type TestType20 16 end
+struct TestType21 end
+
 
 fn = joinpath(tempdir(),"test.jld")
 file = jldopen(fn, "w")
@@ -107,6 +116,10 @@ write(file, "x22", TestTypeContainer5(TestType4(3), 4))
 write(file, "x23", TestType17(5678910))
 write(file, "x24", Dict(TestType4(1) => TestType5(TestType4(2))))
 write(file, "x25", Dict(TestType17(1) => reinterpret(TestType9, 0x4567)))
+write(file, "x26", TestType18(1337))
+write(file, "x27", TestType19(31337))
+write(file, "x28", reinterpret(TestType20, 0x1337))
+write(file, "x29", TestType21())
 
 close(file)
 
@@ -171,6 +184,14 @@ end
 @eval Core.Main struct TestTypeContainer5{T}
     a::T
     b::Int
+end
+@eval Core.Main abstract type TestType18 end
+@eval Core.Main struct TestType19 end
+@eval Core.Main struct TestType20
+    x::UInt16
+end
+@eval Core.Main struct TestType21
+    x::Int
 end
 @eval Core.Main begin
 const TestType17 = 5
@@ -278,6 +299,19 @@ x = read(file, "x24")
 x = read(file, "x25")
 @test first(x).first.x === 1
 @test reinterpret(UInt16, first(x).second) === 0x4567
+
+x = read(file, "x26")
+@test x.x === 1337
+
+x = read(file, "x27")
+@test x.x === 31337
+
+x = read(file, "x28")
+@test !isa(x, TestType20)
+@test reinterpret(UInt16, x) == 0x1337
+
+x = read(file, "x29")
+@test sizeof(x) == 0
 
 close(file)
 end
