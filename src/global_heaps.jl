@@ -25,11 +25,11 @@ function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
 
     # This is basically a memory allocation problem. Right now we do it
     # in a pretty naive way. We:
-
+    #
     # 1. Put the object in the last created global heap if it fits
     # 2. Extend the last global heap if it's at the end of the file
     # 3. Create a new global heap if we can't do 1 or 2
-
+    #
     # This is not a great approach if we're writing objects of
     # different sizes interspersed with new datasets. The torture case
     # would be a Vector{Any} of mutable objects, some of which contain
@@ -38,10 +38,12 @@ function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
     # strings into existing heaps, rather than writing new ones. This
     # should be revisited at a later date.
 
-    if objsz + 8 + sizeof(Length) < f.global_heap.free
+    # Can only fit up to typemax(UInt16) items in a single heap
+    heap_filled = length(f.global_heap.objects) >= typemax(UInt16)
+    if objsz + 8 + sizeof(Length) < f.global_heap.free && !heap_filled
         # Fits in existing global heap
         gh = f.global_heap
-    elseif isatend(f, f.global_heap)
+    elseif isatend(f, f.global_heap) && !heap_filled
         # Global heap is at end and can be extended
         gh = f.global_heap
         delta = objsz - gh.free + 8 + sizeof(Length)

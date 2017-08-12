@@ -265,13 +265,16 @@ cyclicobject.x = cyclicobject
 simplevec = Core.svec(1, 2, Int64, "foo")
 iseq(x::SimpleVector, y::SimpleVector) = collect(x) == collect(y)
 
-# Issue #243
+# JLD issue #243
 # Type that overloads != so that it is not boolean
 mutable struct NALikeType; end
 Base.:!=(::NALikeType, ::NALikeType) = NALikeType()
 Base.:!=(::NALikeType, ::Void) = NALikeType()
 Base.:!=(::Void, ::NALikeType) = NALikeType()
 natyperef = Any[NALikeType(), NALikeType()]
+
+# JLD2 issue #31 (lots of strings)
+lotsastrings = fill("a", 100000)
 
 iseq(x,y) = isequal(x,y)
 function iseq(x::Array{EmptyType}, y::Array{EmptyType})
@@ -346,14 +349,7 @@ function checkexpr(a::Expr, b::Expr)
     @assert i >= length(a.args) && j >= length(b.args)
 end
 
-fn = joinpath(tempdir(),"test.jld")
-
-# Issue #106
-module Mod106
-primitive type Typ{T} 64 end
-typ(x::Int64, ::Type{T}) where {T} = Base.box(Typ{T}, Base.unbox(Int64,x))
-abstract type UnexportedT end
-end
+fn = joinpath(tempdir(), "test.jld")
 
 println(fn)
 for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
@@ -468,6 +464,7 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @write fid cyclicobject
     @write fid simplevec
     @write fid natyperef
+    @write fid lotsastrings
     end
     close(fid)
 
@@ -604,6 +601,7 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
 
     @check fidr simplevec
     @check fidr natyperef
+    @check fidr lotsastrings
     end
     close(fidr)
 end
