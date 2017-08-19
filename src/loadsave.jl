@@ -109,10 +109,22 @@ end
 
 save(f::File{format"JLD2"}, value...; kwargs...) = error("must supply a name for each variable")
 
+function loadtodict!(d::Dict, g::Union{JLDFile,Group}, prefix::String="")
+    for k in keys(g)
+        v = g[k]
+        if v isa Group
+            loadtodict!(d, v, prefix*k*"/")
+        else
+            d[prefix*k] = v
+        end
+    end
+    return d
+end
+
 # load with just a filename returns a dictionary containing all the variables
 function load(f::File{format"JLD2"}; kwargs...)
     jldopen(FileIO.filename(f), "r"; kwargs...) do file
-        Dict{String,Any}([(var, read(file, var)) for var in keys(file)])
+        loadtodict!(Dict{String,Any}(), file)
     end
 end
 

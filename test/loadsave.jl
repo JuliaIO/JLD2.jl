@@ -76,3 +76,11 @@ io = open(fn)
 info("The next error message (involving Nullable{String}) is a sign of normal operation")
 @test_throws MethodError load(io)
 close(io)
+
+# Issue #33
+d = Dict("params/p1" => 1,
+         "params/p2" => 2.,
+         "params/p3/p1" => 94,
+         "data" => [[1,2,3], [4.,5.,6]])
+save(fn, d)
+@test load(fn) == d
