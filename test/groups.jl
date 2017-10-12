@@ -83,7 +83,7 @@ f = jldopen(fn, "r")
 @test_throws ArgumentError get!(f, "path_that_does_not_exist", 1.0)
 @test_throws ArgumentError get!(f["test_group_5"], "path_that_does_not_exist", 1.0)
 # Does not throw an ArgumentError because the element does exist:
-@test get!(f["test_group_1"], "x1") == 1
+@test get!(f["test_group_1"], "x1", 2) == 1
 
 # Make sure printing doesn't error
 show(IOBuffer(), f)
