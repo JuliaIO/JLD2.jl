@@ -332,8 +332,10 @@ Base.isempty(f::JLDFile) = isempty(f.root_group)
 Base.keys(f::JLDFile) = filter!(x->x != "_types", keys(f.root_group))
 Base.get(default::Function, f::Union{JLDFile, Group}, name::AbstractString) = 
     haskey(f, name) ? f[name] : default()
-Base.get(f::Union{JLDFile, Group}, name::AbstractString, default) = haskey(f, name) ? f[name] : default
-Base.get!(f::Union{JLDFile, Group}, name::AbstractString, default) = get!(() -> default, f, name)
+Base.get(f::Union{JLDFile, Group}, name::AbstractString, default) = 
+    haskey(f, name) ? f[name] : default
+Base.get!(f::Union{JLDFile, Group}, name::AbstractString, default) = 
+    get!(() -> default, f, name)
 function Base.get!(default::Function, f::Union{JLDFile, Group}, name::AbstractString)
     if haskey(f, name)
         return f[name]
