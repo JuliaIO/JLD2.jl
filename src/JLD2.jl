@@ -3,7 +3,12 @@ __precompile__()
 module JLD2
 using DataStructures, Libz, FileIO
 import Base.sizeof
-export jldopen, @load, @save
+using Compat
+if VERSION >= v"0.7.0-DEV.2009"
+    using Mmap
+end
+
+export jldopen, @load,   @save
 
 const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 
@@ -236,7 +241,7 @@ iotype::T=MmapIO; compress::Bool=false, mmaparrays::Bool=false) where T<:Union{T
         f.root_group = Group{typeof(f)}(f)
         f.types_group = Group{typeof(f)}(f)
     else
-        if String(read(io, UInt8, length(REQUIRED_FILE_HEADER))) != REQUIRED_FILE_HEADER
+        if String(read!(io, Vector{UInt8}(length(REQUIRED_FILE_HEADER)))) != REQUIRED_FILE_HEADER
             throw(ArgumentError(string('"', fname, "\" is not a JLD file")))
         end
 

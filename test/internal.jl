@@ -1,4 +1,4 @@
-using JLD2, Base.Test
+using JLD2, Compat, Compat.Test
 
 function writeloop(f, sz)
     for i = 1:sz
@@ -16,7 +16,7 @@ JLD2.truncate_and_close(f, position(f))
 
 @test filesize(name) == sz
 f = open(name)
-rd = read(f, UInt8, sz)
+rd = read!(f, Array{UInt8}(sz))
 @test all(rd .== UInt8(6))
 close(f)
 
@@ -26,7 +26,7 @@ JLD2.truncate_and_close(f, position(f))
 
 @test filesize(name) == sz
 f = open(name)
-rd = read(f, UInt8, sz)
+rd = read!(f, Array{UInt8}(sz))
 @test all(rd .== UInt8(6))
 close(f)
 
