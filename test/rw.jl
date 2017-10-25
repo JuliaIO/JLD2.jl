@@ -1,4 +1,4 @@
-using JLD2, Base.Test
+using JLD2, Compat, Compat.Test
 
 macro read(fid, sym)
     if !isa(sym, Symbol)

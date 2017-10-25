@@ -1,4 +1,4 @@
-using JLD2, Base.Test
+using JLD2, Compat, Compat.Test
 
 fn = joinpath(tempdir(),"test.jld")
 f = jldopen(fn, "w")

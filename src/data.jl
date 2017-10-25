@@ -34,7 +34,7 @@ macro lookup_committed(f, T)
     end
 end
 
-function track_weakref!(f::JLDFile, header_offset::RelOffset, v::ANY)
+function track_weakref!(f::JLDFile, header_offset::RelOffset, @nospecialize v)
     header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
     nothing
 end
@@ -48,9 +48,9 @@ writeas(T::Type) = T
 odr_sizeof{T,S}(::ReadRepresentation{T,S}) = odr_sizeof(S)
 
 # Determines whether a specific field type should be saved in the file
-@noinline function hasfielddata(T::ANY)
+@noinline function hasfielddata(@nospecialize T)
     T === Union{} && return false
-    !isleaftype(T) && return true
+    !isconcrete(T) && return true
     T = T::DataType
     (T.mutable || T <: Type) && return true
     hasdata(T)
@@ -83,15 +83,16 @@ function samelayout(T::DataType)
     end
     return offset == T.size
 end
+samelayout(::Type) = false
 
 fieldnames(x::Type{T}) where {T<:Tuple} = [Symbol(x) for x = 1:length(x.types)]
-fieldnames(x::ANY) = Base.fieldnames(x)
+fieldnames(@nospecialize x) = Base.fieldnames(x)
 
 # fieldodr gives the on-disk representation of a field of a given type,
 # which is either always initialized (initialized=true) or potentially
 # uninitialized (initialized=false)
 @generated function fieldodr{T}(::Type{T}, initialized::Bool)
-    if isleaftype(T)
+    if isconcrete(T)
         if !hasfielddata(T)
             # A ghost type, so no need to store at all
             return nothing
@@ -110,7 +111,7 @@ end
 # datatype reflecting the on-disk representation.
 @generated function h5fieldtype(f::JLDFile, writeas::Type{T}, readas::Type,
                                 initialized::Initialized) where T
-    if isleaftype(T)
+    if isconcrete(T)
         if !hasfielddata(T)
             return nothing
         elseif isbits(T) || (isa(initialized, Type{Type{Val{true}}}) && !T.mutable)
@@ -370,7 +371,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
     field_datatypes = read_field_datatypes(f, attrs)
 
     # If read type is not a leaf type, reconstruct
-    if !isleaftype(T)
+    if !isconcrete(T)
         warn("read type $T is not a leaf type in workspace; reconstructing")
         return reconstruct_compound(f, string(T), dt, field_datatypes)
     end
@@ -500,7 +501,7 @@ h5convert!(out::Pointers, ::Type{T}, ::JLDFile, x, ::JLDWriteSession) where {T} 
 
         offset = Offsets[i]
         conv = :(h5convert!(out+$offset, $(member), file, convert($(types[i]), $getindex_fn(x, $i)), wsession))
-        if i > T.ninitialized && (!isleaftype(x.types[i]) || !isbits(x.types[i]))
+        if i > T.ninitialized && (!isconcrete(x.types[i]) || !isbits(x.types[i]))
             push!(args, quote
                 if !isdefined(x, $i)
                     h5convert_uninitialized!(out+$offset, $(member))
@@ -809,7 +810,7 @@ rconvert(::Type{BigFloat}, x::String) = parse(BigFloat, x)
 
 const H5TYPE_DATATYPE = CompoundDatatype(
     odr_sizeof(Vlen{String})+odr_sizeof(Vlen{RelOffset}),
-    ["name", "parameters"],
+    [:name, :parameters],
     [0, odr_sizeof(Vlen{String})],
     [H5TYPE_VLEN_UTF8, VariableLengthDatatype(ReferenceDatatype())]
 )
@@ -988,7 +989,7 @@ end
 struct PointerException <: Exception; end
 Base.showerror(io::IO, ::PointerException) = print(io, "cannot write a pointer to JLD file")
 h5fieldtype{T<:Ptr}(::JLDFile, ::Type{T}, ::Type, ::Initialized) = throw(PointerException())
-h5type{T<:Ptr}(::JLDFile, ::Type{T}, ::ANY) = throw(PointerException())
+h5type{T<:Ptr}(::JLDFile, ::Type{T}, @nospecialize arg) = throw(PointerException())
 
 ## Arrays
 
@@ -1101,7 +1102,7 @@ end
 Given a UnionAll type, recursively eliminates the `where` clauses
 """
 behead(T::UnionAll) = behead(T.body)
-behead(T::ANY) = T
+behead(@nospecialize T) = T
 
 function constructrr(f::JLDFile, unk::UnknownType{UnionAll}, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute})

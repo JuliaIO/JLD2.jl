@@ -250,7 +250,7 @@ function read_empty(rr::ReadRepresentation{T}, f::JLDFile,
 
     seek(io, dimensions_attr.data_offset)
     v = construct_array(io, T, ndims)
-    if isleaftype(T)
+    if isconcrete(T)
         for i = 1:length(v)
             @inbounds v[i] = jlconvert(rr, f, Ptr{Void}(0), header_offset)
         end
@@ -299,7 +299,7 @@ function construct_array{T}(io::IO, ::Type{T}, ndims::Int)::Array{T}
         d1 = read(io, Int64)
         Array{T,3}(d1, d2, d3)
     else
-        ds = reverse!(read(io, Int64, ndims))
+        ds = reverse!(read!(io, Vector{Int64}(ndims)))
         Array{T}(tuple(ds...))
     end
 end
@@ -307,7 +307,7 @@ end
 
 function read_array(f::JLDFile, dataspace::ReadDataspace,
                     rr::ReadRepresentation{T,RR}, data_length::Int,
-                    filter_id::UInt16, header_offset::RelOffset, 
+                    filter_id::UInt16, header_offset::RelOffset,
                     attributes::Union{Vector{ReadAttribute},Void}) where {T,RR}
     io = f.io
     data_offset = position(io)
@@ -356,7 +356,7 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
     if datasz < 8192
         layout_class = LC_COMPACT_STORAGE
         psz += sizeof(CompactStorageMessage) + datasz
-    elseif f.compress && isleaftype(T) && isbits(T)
+    elseif f.compress && isconcrete(T) && isbits(T)
         layout_class = LC_CHUNKED_STORAGE
         psz += chunked_storage_message_size(ndims(data)) + length(DEFLATE_PIPELINE_MESSAGE)
     else

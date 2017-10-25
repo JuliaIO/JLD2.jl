@@ -45,7 +45,7 @@ end
     inptr = io.curptr
     n = length(v)
     nb = odr_sizeof(T)*n
-    if nb > MMAP_CUTOFF && (!is_windows() || !f.written)
+    if nb > MMAP_CUTOFF && (!Compat.Sys.iswindows() || !f.written)
         # It turns out that regular IO is faster here (at least on OS X), but on Windows,
         # we shouldn't use ordinary IO to read, since coherency with the memory map is not
         # guaranteed
@@ -113,7 +113,7 @@ function write_data(io::MmapIO, f::JLDFile, data, odr::S, ::HasReferences,
     nothing
 end
 
-@static if is_unix()
+@static if Compat.Sys.isunix()
     function raw_write(io::MmapIO, ptr::Ptr{UInt8}, nb::Int)
         if nb > MMAP_CUTOFF
             pos = position(io)
@@ -174,7 +174,7 @@ function write_data(io::MmapIO, f::JLDFile, data::Array{T}, odr::S, ::HasReferen
     cp = IndirectPointer(io, p)
 
     for i = 1:length(data)
-        if (isleaftype(T) && isbits(T)) || unsafe_isdefined(data, i)
+        if (isconcrete(T) && isbits(T)) || unsafe_isdefined(data, i)
             @inbounds h5convert!(cp, odr, f, data[i], wsession)
         else
             @inbounds h5convert_uninitialized!(cp, odr)
@@ -202,7 +202,7 @@ end
     io = f.io
     data_offset = position(io)
     n = length(v)
-    data = read(ZlibInflateInputStream(io; gzip=false), UInt8, odr_sizeof(RR)*n)
+    data = read!(ZlibInflateInputStream(io; gzip=false), Vector{UInt8}(odr_sizeof(RR)*n))
     @simd for i = 1:n
         dataptr = Ptr{Void}(pointer(data, odr_sizeof(RR)*(i-1)+1))
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
@@ -224,7 +224,7 @@ end
     n = length(v)
     nb = odr_sizeof(RR)*n
     io = f.io
-    data = read(io, UInt8, nb)
+    data = read!(io, Vector{UInt8}(nb))
     @simd for i = 1:n
         dataptr = Ptr{Void}(pointer(data, odr_sizeof(RR)*(i-1)+1))
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
@@ -259,7 +259,7 @@ function write_data(io::BufferedWriter, f::JLDFile, data::Array{T}, odr::S,
     position = io.position[]
     cp = Ptr{Void}(pointer(io.buffer, position+1))
     @simd for i = 1:length(data)
-        if (isleaftype(T) && isbits(T)) || unsafe_isdefined(data, i)
+        if (isconcrete(T) && isbits(T)) || unsafe_isdefined(data, i)
             @inbounds h5convert!(cp, odr, f, data[i], wsession)
         else
             @inbounds h5convert_uninitialized!(cp, odr)
@@ -277,7 +277,7 @@ function write_data(io::IOStream, f::JLDFile, data::Array{T}, odr::S, wm::DataMo
     pos = position(io)
     cp = Ptr{Void}(pointer(buf))
     @simd for i = 1:length(data)
-        if (isleaftype(T) && isbits(T)) || unsafe_isdefined(data, i)
+        if (isconcrete(T) && isbits(T)) || unsafe_isdefined(data, i)
             @inbounds h5convert!(cp, odr, f, data[i], wsession)
         else
             @inbounds h5convert_uninitialized!(cp, odr)

@@ -2,7 +2,7 @@
 # MmapIO
 #
 # An IO built on top of mmap to avoid the overhead of ordinary disk IO
-if is_windows()
+if Compat.Sys.iswindows()
     const MMAP_GROW_SIZE = 2^19
     const FILE_GROW_SIZE = 2^19
 else
@@ -23,12 +23,12 @@ mutable struct MmapIO <: IO
     startptr::Ptr{Void}
     curptr::Ptr{Void}
     endptr::Ptr{Void}
-    @static if is_windows()
+    @static if Compat.Sys.iswindows()
         mapping::Ptr{Void}
     end
 end
 
-if is_unix()
+if Compat.Sys.isunix()
     function mmap!(io::MmapIO, n::Int)
         oldptr = io.startptr
         newptr = ccall(:jl_mmap, Ptr{Void}, (Ptr{Void}, Csize_t, Cint, Cint, Cint, Int64),
@@ -54,7 +54,7 @@ if is_unix()
                           io.startptr + offset_page, mmaplen,
                           invalidate ? Mmap.MS_INVALIDATE : Mmap.MS_SYNC) != 0)
     end
-elseif is_windows()
+elseif Compat.Sys.iswindows()
     const DWORD = Culong
     function mmap!(io::MmapIO, n::Int)
         oldptr = io.startptr
@@ -105,7 +105,7 @@ function MmapIO(fname::AbstractString, write::Bool, create::Bool, truncate::Bool
     n = (initialsz % Int) + (write ? MMAP_GROW_SIZE : 0)
     n < 0 && (n = typemax(Int))
 
-    @static if is_windows()
+    @static if Compat.Sys.iswindows()
         io = MmapIO(f, write, 0, C_NULL, C_NULL, C_NULL, C_NULL)
     else
         io = MmapIO(f, write, 0, C_NULL, C_NULL, C_NULL)
@@ -118,7 +118,7 @@ end
 
 Base.show(io::IO, ::MmapIO) = print(io, "MmapIO")
 
-if is_linux()
+if Compat.Sys.islinux()
     # This is substantially faster than truncate on Linux, but slower on OS X.
     # TODO: Benchmark on Windows
     grow(io::IOStream, sz::Integer) =
@@ -135,7 +135,7 @@ function Base.resize!(io::MmapIO, newend::Ptr{Void})
     # Resize file
     ptr = io.startptr
     newsz = Int(max(newend - ptr, io.curptr - ptr + FILE_GROW_SIZE))
-    @static if !is_windows()
+    @static if !Compat.Sys.iswindows()
         grow(io.f, newsz)
     end
 

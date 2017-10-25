@@ -1,5 +1,5 @@
-using JLD2, FileIO
-using Base.Test
+using JLD2, FileIO, Compat
+using Compat.Test
 
 include("lookup3.jl")
 include("internal.jl")
