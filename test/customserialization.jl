@@ -157,7 +157,7 @@ function Base.convert(::Type{DataType}, x::CSH)
     global converted = true
     Array{x.T, x.N}
 end
-function Base.convert{T,N}(::Type{CSH}, x::Type{Array{T,N}})
+function Base.convert(::Type{CSH}, x::Type{Array{T,N}}) where {T,N}
     global converted = true
     CSH(T,N)
 end
