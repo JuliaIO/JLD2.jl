@@ -20,7 +20,7 @@ struct Vlen{T}
     size::UInt32
     id::GlobalHeapID
 end
-odr_sizeof{T<:Vlen}(::Type{T}) = 4 + sizeof(GlobalHeapID)
+odr_sizeof(::Type{T}) where {T<:Vlen} = 4 + sizeof(GlobalHeapID)
 
 # Initial ODR for DataType
 const DataTypeODR = OnDiskRepresentation{(0, odr_sizeof(Vlen{String})),Tuple{String,Vector{Any}},Tuple{Vlen{String},Vlen{RelOffset}}}
@@ -45,7 +45,7 @@ writeas(T::Type) = T
 
 # Carries the type and on-disk representation of data to be read from
 # the disk
-odr_sizeof{T,S}(::ReadRepresentation{T,S}) = odr_sizeof(S)
+odr_sizeof(::ReadRepresentation{T,S}) where {T,S} = odr_sizeof(S)
 
 # Determines whether a specific field type should be saved in the file
 @noinline function hasfielddata(@nospecialize T)
@@ -66,7 +66,7 @@ function hasdata(T::DataType)
 end
 
 # Gets the size of an on-disk representation
-Base.@pure function odr_sizeof{Offsets,JLTypes,H5Types}(::OnDiskRepresentation{Offsets,JLTypes,H5Types})
+Base.@pure function odr_sizeof(::OnDiskRepresentation{Offsets,JLTypes,H5Types}) where {Offsets,JLTypes,H5Types}
     Offsets[end]+odr_sizeof(H5Types.parameters[end])
 end
 
@@ -91,7 +91,7 @@ fieldnames(@nospecialize x) = Base.fieldnames(x)
 # fieldodr gives the on-disk representation of a field of a given type,
 # which is either always initialized (initialized=true) or potentially
 # uninitialized (initialized=false)
-@generated function fieldodr{T}(::Type{T}, initialized::Bool)
+@generated function fieldodr(::Type{T}, initialized::Bool) where T
     if isconcrete(T)
         if !hasfielddata(T)
             # A ghost type, so no need to store at all
@@ -132,8 +132,8 @@ end
 
 # Select an ODR, incorporating custom serialization only if the types do not
 # match
-CustomSerialization{WrittenAs}(::Type{WrittenAs}, ::Type{WrittenAs}, odr) = odr
-CustomSerialization{WrittenAs,ReadAs}(::Type{WrittenAs}, ::Type{ReadAs}, odr) =
+CustomSerialization(::Type{WrittenAs}, ::Type{WrittenAs}, odr) where {WrittenAs} = odr
+CustomSerialization(::Type{WrittenAs}, ::Type{ReadAs}, odr) where {WrittenAs,ReadAs} =
     CustomSerialization{WrittenAs,odr}
 
 # objodr gives the on-disk representation of a given object. This is
@@ -524,8 +524,8 @@ jlconvert_canbeuninitialized(::Any) = false
 
 # jlconvert converts data from a pointer into a Julia object. This method
 # handles types where this is just a simple load
-@inline jlconvert{T}(::ReadRepresentation{T,T}, ::JLDFile, ptr::Ptr,
-                     ::RelOffset) =
+@inline jlconvert(::ReadRepresentation{T,T}, ::JLDFile, ptr::Ptr,
+                  ::RelOffset) where {T} =
     unsafe_load(convert(Ptr{T}, ptr))
 
 # When fields are undefined in the file but can't be in the workspace, we need
@@ -545,7 +545,7 @@ Base.showerror(io::IO, x::UndefinedFieldException) =
 wconvert(T, x) = convert(T, x)
 rconvert(T, x) = convert(T, x)
 
-odr_sizeof{T,ODR}(::Type{CustomSerialization{T,ODR}}) = odr_sizeof(ODR)
+odr_sizeof(::Type{CustomSerialization{T,ODR}}) where {T,ODR} = odr_sizeof(ODR)
 
 # Usually we want to convert the object and then write it.
 @inline h5convert!(out::Pointers, ::Type{CustomSerialization{T,ODR}}, f::JLDFile,
@@ -568,12 +568,12 @@ odr_sizeof{T,ODR}(::Type{CustomSerialization{T,ODR}}) = odr_sizeof(ODR)
 h5convert_uninitialized!(out::Pointers, odr::Type{CustomSerialization{T,ODR}}) where {T,ODR} =
     h5convert_uninitialized!(out, ODR)
 
-jlconvert_canbeuninitialized{T,S,ODR}(::ReadRepresentation{T,CustomSerialization{S,ODR}}) =
+jlconvert_canbeuninitialized(::ReadRepresentation{T,CustomSerialization{S,ODR}}) where {T,S,ODR} =
     jlconvert_canbeuninitialized(ODR)
-jlconvert_isinitialized{T,S,ODR}(::ReadRepresentation{T,CustomSerialization{S,ODR}}, ptr::Ptr) =
+jlconvert_isinitialized(::ReadRepresentation{T,CustomSerialization{S,ODR}}, ptr::Ptr) where {T,S,ODR} =
     jlconvert_isinitialized(ReadRepresentation{S,ODR}(), ptr)
-jlconvert{T,S,ODR}(::ReadRepresentation{T,CustomSerialization{S,ODR}},
-                   f::JLDFile, ptr::Ptr, header_offset::RelOffset) =
+jlconvert(::ReadRepresentation{T,CustomSerialization{S,ODR}},
+          f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T,S,ODR} =
     rconvert(T, jlconvert(ReadRepresentation{S,ODR}(), f, ptr, header_offset))::T
 
 ## Primitive datatypes
@@ -669,13 +669,13 @@ jlconvert(::ReadRepresentation{RelOffset,RelOffset}, f::JLDFile, ptr::Ptr,
 jlconvert_canbeuninitialized(::ReadRepresentation{RelOffset,RelOffset}) = false
 
 # Reading references as other types
-@inline function jlconvert{T}(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr,
-                              ::RelOffset)
+@inline function jlconvert(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr,
+                           ::RelOffset) where T
     x = load_dataset(f, unsafe_load(convert(Ptr{RelOffset}, ptr)))
     (isa(x, T) ? x : convert(T, x))::T
 end
-jlconvert_canbeuninitialized{T}(::ReadRepresentation{T,RelOffset}) = true
-jlconvert_isinitialized{T}(::ReadRepresentation{T,RelOffset}, ptr::Ptr) =
+jlconvert_canbeuninitialized(::ReadRepresentation{T,RelOffset}) where {T} = true
+jlconvert_isinitialized(::ReadRepresentation{T,RelOffset}, ptr::Ptr) where {T} =
     unsafe_load(convert(Ptr{RelOffset}, ptr)) != NULL_REFERENCE
 
 ## Routines for variable-length datatypes
@@ -697,10 +697,10 @@ h5convert_uninitialized!(out::Pointers, odr::Type{T}) where {T<:Vlen} =
     (unsafe_store!(convert(Ptr{Int128}, out), 0); nothing)
 
 # Read variable-length data given offset and length in ptr
-jlconvert{T,S}(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
+jlconvert(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr, ::RelOffset) where {T,S} =
     read_heap_object(f, unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), ReadRepresentation{T, S}())
-jlconvert_canbeuninitialized{T,S}(::ReadRepresentation{T,Vlen{S}}) = true
-jlconvert_isinitialized{T,S}(::ReadRepresentation{T,Vlen{S}}, ptr::Ptr) =
+jlconvert_canbeuninitialized(::ReadRepresentation{T,Vlen{S}}) where {T,S} = true
+jlconvert_isinitialized(::ReadRepresentation{T,Vlen{S}}, ptr::Ptr) where {T,S} =
     unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)) != GlobalHeapID(RelOffset(0), 0)
 
 ## Strings
@@ -839,11 +839,11 @@ function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T
 
     cdt
 end
-fieldodr{T<:DataType}(::Type{T}, ::Bool) = DataTypeODR()
+fieldodr(::Type{T}, ::Bool) where {T<:DataType} = DataTypeODR()
 
 h5type(f::JLDFile, ::Type{T}, x) where {T<:DataType} =
     h5fieldtype(f, DataType, typeof(x), Val{true})
-odr{T<:DataType}(::Type{T}) = DataTypeODR()
+odr(::Type{T}) where {T<:DataType} = DataTypeODR()
 
 function typename(T::DataType)
     tn = Symbol[]
@@ -887,8 +887,8 @@ end
 
 # Read a type. Returns an instance of UnknownType if the type or parameters
 # could not be resolved.
-function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
-                      ptr::Ptr, header_offset::RelOffset)
+function jlconvert(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
+                   ptr::Ptr, header_offset::RelOffset) where T
     hasparams = unsafe_load(convert(Ptr{UInt32}, ptr+odr_sizeof(Vlen{UInt8}))) != 0
     unknown_params = false
     if hasparams
@@ -934,7 +934,7 @@ function jlconvert{T}(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
     m
 end
 
-constructrr{T<:DataType}(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute}) =
+constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute}) where {T<:DataType} =
     dt == H5TYPE_DATATYPE ? (ReadRepresentation{DataType,DataTypeODR()}(), true) :
                             throw(UnsupportedFeatureException())
 
@@ -950,7 +950,7 @@ function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T
     @lookup_committed f readas
     commit(f, H5TYPE_UNION, Union, readas)
 end
-fieldodr{T<:Union}(::Type{T}, ::Bool) = Vlen{DataTypeODR()}
+fieldodr(::Type{T}, ::Bool) where {T<:Union} = Vlen{DataTypeODR()}
 h5fieldtype(f::JLDFile, ::Type{Union{}}, ::Initialized) = nothing
 fieldodr(::Type{Union{}}, initialized::Bool) = nothing
 
@@ -968,7 +968,7 @@ function jlconvert(::ReadRepresentation{Union, Vlen{DataTypeODR()}}, f::JLDFile,
     v
 end
 
-constructrr{T<:Union}(::JLDFile, ::Type{T}, dt::VariableLengthDatatype, ::Vector{ReadAttribute}) =
+constructrr(::JLDFile, ::Type{T}, dt::VariableLengthDatatype, ::Vector{ReadAttribute}) where {T<:Union} =
     dt == H5TYPE_UNION ? (ReadRepresentation{Union,Vlen{DataTypeODR()}}(), true) :
                          throw(UnsupportedFeatureException())
 
@@ -988,16 +988,16 @@ end
 
 struct PointerException <: Exception; end
 Base.showerror(io::IO, ::PointerException) = print(io, "cannot write a pointer to JLD file")
-h5fieldtype{T<:Ptr}(::JLDFile, ::Type{T}, ::Type, ::Initialized) = throw(PointerException())
-h5type{T<:Ptr}(::JLDFile, ::Type{T}, @nospecialize arg) = throw(PointerException())
+h5fieldtype(::JLDFile, ::Type{T}, ::Type, ::Initialized) where {T<:Ptr} = throw(PointerException())
+h5type(::JLDFile, ::Type{T}, @nospecialize arg) where {T<:Ptr} = throw(PointerException())
 
 ## Arrays
 
-h5fieldtype{T<:Array}(::JLDFile, ::Type{T}, ::Type{T}, ::Initialized) =
+h5fieldtype(::JLDFile, ::Type{T}, ::Type{T}, ::Initialized) where {T<:Array} =
     ReferenceDatatype()
-fieldodr{T<:Array}(::Type{T}, ::Bool) = RelOffset
+fieldodr(::Type{T}, ::Bool) where {T<:Array} = RelOffset
 
-@inline function odr{T,N}(::Type{Array{T,N}})
+@inline function odr(::Type{Array{T,N}}) where {T,N}
     writtenas = writeas(T)
     CustomSerialization(writtenas, T, fieldodr(writtenas, false))
 end
@@ -1016,8 +1016,8 @@ _odr(writtenas::Type{T}, readas::Type{T}, odr) where {T<:Array} = odr
 _odr(writtenas::Type{T}, readas::DataType, odr) where {T<:Array} =
     CustomSerialization{writtenas,RelOffset}
 
-function constructrr{T<:Array}(::JLDFile, ::Type{T}, dt::BasicDatatype,
-                               attrs::Vector{ReadAttribute})
+function constructrr(::JLDFile, ::Type{T}, dt::BasicDatatype,
+                     attrs::Vector{ReadAttribute}) where T<:Array
     dt.class == DT_REFERENCE || throw(UnsupportedFeatureException())
     (ReadRepresentation{Array, RelOffset}(), true)
 end
@@ -1030,10 +1030,10 @@ rconvert(::Type{SimpleVector}, x::Vector{Any}) = Core.svec(x...)
 
 ## Dicts
 
-writeas{K,V}(::Type{Dict{K,V}}) = Vector{Pair{K,V}}
+writeas(::Type{Dict{K,V}}) where {K,V} = Vector{Pair{K,V}}
 writeas(::Type{ObjectIdDict}) = Vector{Pair{Any,Any}}
-wconvert{K,V}(::Type{Vector{Pair{K,V}}}, x::Associative{K,V}) = collect(x)
-function rconvert{T<:Associative,K,V}(::Type{T}, x::Vector{Pair{K,V}})
+wconvert(::Type{Vector{Pair{K,V}}}, x::Associative{K,V}) where {K,V} = collect(x)
+function rconvert(::Type{T}, x::Vector{Pair{K,V}}) where {T<:Associative,K,V}
     d = T()
     isa(d, Dict) && sizehint!(d::Dict, length(x))
     for (k,v) in x
@@ -1200,8 +1200,8 @@ end
 end
 
 # jlconvert for empty objects
-@generated function jlconvert{T}(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
-                                 header_offset::RelOffset)
+@generated function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
+                              header_offset::RelOffset) where T
     T.size == 0 && return Expr(:new, T)
 
     # In this case, T is a non-empty object, but the written data was empty
@@ -1225,8 +1225,8 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
           header_offset::RelOffset) = Union{}
 
 # This jlconvert method handles compound types with padding or references
-@generated function jlconvert{T,S}(::ReadRepresentation{T,S}, f::JLDFile, ptr::Ptr,
-                                   header_offset::RelOffset)
+@generated function jlconvert(::ReadRepresentation{T,S}, f::JLDFile, ptr::Ptr,
+                              header_offset::RelOffset) where {T,S}
     isa(S, DataType) && return :(convert(T, unsafe_load(convert(Ptr{S}, ptr))))
     @assert isa(S, OnDiskRepresentation)
 
@@ -1303,7 +1303,7 @@ end
 # odr gives the on-disk representation of a given type, similar to
 # fieldodr, but actually encoding the data for things that odr stores
 # as references
-@generated function odr{T}(::Type{T})
+@generated function odr(::Type{T}) where T
     if !hasdata(T)
         # A pointer singleton or ghost. We need to write something, but we'll
         # just write a single byte.
@@ -1336,7 +1336,7 @@ abstract type DataMode end
 struct ReferenceFree <: DataMode end
 struct HasReferences <: DataMode end
 
-@Base.pure datamode{WrittenAs,ODR}(::Type{CustomSerialization{WrittenAs,ODR}}) = datamode(ODR)
+@Base.pure datamode(::Type{CustomSerialization{WrittenAs,ODR}}) where {WrittenAs,ODR} = datamode(ODR)
 @Base.pure datamode(::Union{Type{<:Vlen},Type{RelOffset}}) = HasReferences()
 @Base.pure datamode(::DataType) = ReferenceFree()
 @Base.pure datamode(::FixedLengthString) = ReferenceFree()

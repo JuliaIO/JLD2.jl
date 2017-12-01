@@ -200,9 +200,8 @@ openfile(::Type{MmapIO}, fname, wr, create, truncate) =
 read_bytestring(io::IOStream) = chop(String(readuntil(io, 0x00)))
 
 const OPEN_FILES = Dict{String,WeakRef}()
-function jldopen(
-                fname::AbstractString, wr::Bool, create::Bool, truncate::Bool,
-iotype::T=MmapIO; compress::Bool=false, mmaparrays::Bool=false) where T<:Union{Type{IOStream},Type{MmapIO}}
+function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
+                 compress::Bool=false, mmaparrays::Bool=false) where T<:Union{Type{IOStream},Type{MmapIO}}
     exists = isfile(fname)
     if exists
         rname = realpath(fname)

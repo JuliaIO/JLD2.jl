@@ -69,7 +69,7 @@ WriteDataspace(f::JLDFile, x::Array{T,0}, ::Any) where {T} =
     WriteDataspace(DS_SIMPLE, (Length(1),),
               (WrittenAttribute(f, :dimensions, EMPTY_DIMENSIONS),))
 
-sizeof{N}(::Union{WriteDataspace{N},Type{WriteDataspace{N}}}) = 4 + sizeof(Length)*N
+sizeof(::Union{WriteDataspace{N},Type{WriteDataspace{N}}}) where {N} = 4 + sizeof(Length)*N
 numel(x::WriteDataspace{0}) = x.dataspace_type == DS_SCALAR ? 1 : 0
 numel(x::WriteDataspace) = Int(prod(x.size))
 

@@ -123,8 +123,8 @@ if Compat.Sys.islinux()
     # TODO: Benchmark on Windows
     grow(io::IOStream, sz::Integer) =
         systemerror("pwrite", ccall(:jl_pwrite, Cssize_t,
-                                    (Cint, Ptr{UInt8}, UInt, Int64),
-                                    fd(io), &UInt8(0), 1, sz - 1) < 1)
+                                    (Cint, Ref{UInt8}, UInt, Int64),
+                                    fd(io), UInt8(0), 1, sz - 1) < 1)
 else
     grow(io::IOStream, sz::Integer) = truncate(io, sz)
 end
@@ -269,7 +269,7 @@ function IndirectPointer(io::MmapIO, offset::Integer=position(io))
     IndirectPointer(pointer_from_objref(io) + fieldoffset(MmapIO, 4), offset)
 end
 Base.:+(x::IndirectPointer, y::Integer) = IndirectPointer(x.ptr, x.offset+y)
-Base.convert{T}(::Type{Ptr{T}}, x::IndirectPointer) = Ptr{T}(unsafe_load(x.ptr) + x.offset)
+Base.convert(::Type{Ptr{T}}, x::IndirectPointer) where {T} = Ptr{T}(unsafe_load(x.ptr) + x.offset)
 
 # We sometimes need to compute checksums. We do this by first calling begin_checksum when
 # starting to handle whatever needs checksumming, and calling end_checksum afterwards. Note
