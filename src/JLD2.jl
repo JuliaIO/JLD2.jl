@@ -24,8 +24,26 @@ const FILE_HEADER = "$(REQUIRED_FILE_HEADER)$(CURRENT_VERSION)\x00 (Julia $(VERS
 
 struct UnsupportedVersionException <: Exception end
 struct UnsupportedFeatureException <: Exception end
-struct InvalidDataException <: Exception end
 struct InternalError <: Exception end
+struct InvalidDataException <: Exception msg::String end
+
+InvalidDataException() = InvalidDataException("")
+
+Base.show(io::IO, exception::InvalidDataException) =
+    print(io, "InvalidDataException\n", exception.msg)
+
+@noinline function mmap_may_have_failed()
+    msg = """
+    Some network file systems do not properly implement mmap. As a result of
+    this, you may have experienced data loss. JLD2 may be directed to not use
+    mmap as follows:
+
+        jldopen("file.jld2", true, true, true, IOStream) do file
+            file["object"] = object
+        end
+    """
+    throw(InvalidDataException(msg))
+end
 
 include("Lookup3.jl")
 include("mmapio.jl")

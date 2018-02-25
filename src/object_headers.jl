@@ -44,6 +44,7 @@ define_packed(ObjectStart)
 # and (payload) size. Returns the size.
 function read_obj_start(io::IO)
     os = read(io, ObjectStart)
+    os.signature != 0x00000000 || mmap_may_have_failed()
     os.signature == OBJECT_HEADER_SIGNATURE || throw(InvalidDataException())
     os.version == 2 || throw(UnsupportedVersionException())
 
