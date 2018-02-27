@@ -23,7 +23,7 @@ foo = :bar
 
 This writes the variables `hello` and `foo` to datasets in a new JLD2 file named `example.jld2`. The `@load` macro loads variables out of a JLD2 file:
 
-```
+```julia
 @load "example.jld2" hello foo
 ```
 
