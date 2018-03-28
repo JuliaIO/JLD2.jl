@@ -1024,9 +1024,9 @@ end
 
 ## SimpleVectors
 
-writeas(::Type{SimpleVector}) = Vector{Any}
-wconvert(::Type{Vector{Any}}, x::SimpleVector) = Any[x for x in x]
-rconvert(::Type{SimpleVector}, x::Vector{Any}) = Core.svec(x...)
+writeas(::Type{Core.SimpleVector}) = Vector{Any}
+wconvert(::Type{Vector{Any}}, x::Core.SimpleVector) = Any[x for x in x]
+rconvert(::Type{Core.SimpleVector}, x::Vector{Any}) = Core.svec(x...)
 
 ## Dicts
 
