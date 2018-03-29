@@ -344,7 +344,7 @@ function deflate_data(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSess
         @inbounds h5convert!(cp, odr, f, data[i], wsession)
         cp += odr_sizeof(odr)
     end
-    read(ZlibDeflateInputStream(buf; gzip=false))
+    transcode(ZlibCompressor, buf)
 end
 
 function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data::Array{T}, wsession::JLDWriteSession) where {T,S}
