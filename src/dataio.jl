@@ -80,7 +80,7 @@ end
                                         data_length::Int) where {T,RR}
     io = f.io
     inptr = io.curptr
-    data = read(ZlibInflateInputStream(unsafe_wrap(Array, Ptr{UInt8}(inptr), data_length); gzip=false))
+    data = transcode(ZlibDecompressor, unsafe_wrap(Array, Ptr{UInt8}(inptr), data_length))
     @simd for i = 1:length(v)
         dataptr = Ptr{Void}(pointer(data, odr_sizeof(RR)*(i-1)+1))
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
@@ -202,7 +202,7 @@ end
     io = f.io
     data_offset = position(io)
     n = length(v)
-    data = read!(ZlibInflateInputStream(io; gzip=false), Vector{UInt8}(odr_sizeof(RR)*n))
+    data = read!(ZlibDecompressorStream(io), Vector{UInt8}(odr_sizeof(RR)*n))
     @simd for i = 1:n
         dataptr = Ptr{Void}(pointer(data, odr_sizeof(RR)*(i-1)+1))
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
