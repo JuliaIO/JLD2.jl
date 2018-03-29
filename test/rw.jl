@@ -263,7 +263,7 @@ cyclicobject.x = cyclicobject
 
 # SimpleVector
 simplevec = Core.svec(1, 2, Int64, "foo")
-iseq(x::SimpleVector, y::SimpleVector) = collect(x) == collect(y)
+iseq(x::Core.SimpleVector, y::Core.SimpleVector) = collect(x) == collect(y)
 
 # JLD issue #243
 # Type that overloads != so that it is not boolean
