@@ -12,7 +12,9 @@ The code here should work on Julia 0.6. It has extensive unit tests, but it has 
 
 ### `@save` and `@load` macros
 
-The `@save` and `@load` macros are the simplest way to interact with a JLD2 file. The `@save` macro writes one or more variables from the current scope to the JLD file. For example:
+The `@save` and `@load` macros are the simplest way to interact with a JLD2 file.
+The `@save` macro writes one or more variables from the current scope to the JLD file.
+For example:
 
 ```julia
 using JLD2, FileIO
@@ -21,7 +23,15 @@ foo = :bar
 @save "example.jld2" hello foo
 ```
 
-This writes the variables `hello` and `foo` to datasets in a new JLD2 file named `example.jld2`. The `@load` macro loads variables out of a JLD2 file:
+This writes the variables `hello` and `foo` to datasets in a new JLD2 file named `example.jld2`.
+If you want to save variables with append mode, specify `mode = "r+"` to this macro.
+
+```julia
+baz = :qwe
+@save "example.jld2" mode = "r+" baz
+```
+
+The `@load` macro loads variables out of a JLD2 file:
 
 ```julia
 @load "example.jld2" hello foo

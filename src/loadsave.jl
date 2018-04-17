@@ -39,13 +39,19 @@ macro save(filename, vars...)
             end
         end
     else
-        writeexprs = Vector{Expr}(length(vars))
-        for i = 1:length(vars)
-            writeexprs[i] = :(write(f, $(string(vars[i])), $(esc(vars[i])), wsession))
+        writeexprs = Vector{Expr}()
+        mode = "w"
+        for expr ∈ vars
+            if expr isa Symbol
+                push!(writeexprs, :(write(f, $(string(expr)), $(esc(expr)), wsession)))
+            elseif expr isa Expr && expr.head == :(=) && length(expr.args) == 2 && expr.args[] == :mode
+                mode = expr.args[2]
+                @assert(mode ∈ ("r+", "w"), "unsupport mode: $mode")
+            end
         end
 
         quote
-            jldopen($(esc(filename)), "w") do f
+            jldopen($(esc(filename)), $mode) do f
                 wsession = JLDWriteSession()
                 $(Expr(:block, writeexprs...))
             end
