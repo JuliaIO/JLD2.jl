@@ -8,20 +8,20 @@ function jldopen(f::Function, args...; kws...)
 end
 
 function _extractmode(xs)
-  mode = "w"
-  vars = sizehint!(Vector{Symbol}(), length(xs))
-  for x ∈ xs
-      if x isa Expr && x.head == :(=) && length(x.args) == 2 && x.args[] == :mode
-          mode = x.args[2]
-          !(mode ∈ ("r+", "w", "w+", "a", "a+")) && (
-              throw(ArgumentError("unsupport mode: $mode")))
-      elseif x isa Symbol
-          push!(vars, x)
-      else
-          throw(ArgumentError("unsupport expression: `$x`"))
-      end
-  end
-  mode, vars
+    mode = "w"
+    vars = sizehint!(Vector{Symbol}(), length(xs))
+    for x ∈ xs
+        if x isa Expr && x.head == :(=) && length(x.args) == 2 && x.args[] == :mode
+            mode = x.args[2]
+            !(mode ∈ ("r+", "w", "w+", "a", "a+")) && (
+                throw(ArgumentError("unsupport mode: $mode")))
+        elseif x isa Symbol
+            push!(vars, x)
+        else
+            throw(ArgumentError("unsupport expression: `$x`"))
+        end
+    end
+    mode, vars
 end
 
 """

@@ -90,24 +90,24 @@ mktempdir() do dir
     f = joinpath(dir, "test.jld2")
 
     let (x, y, z) = (1, 2, 3)
-      @save f x  # default mode is "w"
-      @save f mode = "r+" y z
+        @save f x  # default mode is "w"
+        @save f mode = "r+" y z
     end
     let
-      @load f x y z
-      @test (x, y, z) == (1, 2, 3)
+        @load f x y z
+        @test (x, y, z) == (1, 2, 3)
     end
 
     # if unsupport mode
     let x = 42
-      @test_throws ArgumentError @save f mode = "❓" x
+        @test_throws ArgumentError @save f mode = "❓" x
     end
 
     # if unsupport expression
     let
-      @test_throws ArgumentError @save f x = 42
-      @test_throws ArgumentError @save f x + 42
-      @test_throws ArgumentError @save f mode = "a" x = 42
-      @test_throws ArgumentError @save f mode = "a" x + 42
+        @test_throws ArgumentError @save f x = 42
+        @test_throws ArgumentError @save f x + 42
+        @test_throws ArgumentError @save f mode = "a" x = 42
+        @test_throws ArgumentError @save f mode = "a" x + 42
     end
 end
