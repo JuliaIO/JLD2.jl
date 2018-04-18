@@ -15,7 +15,7 @@ function _extractmode(xs)
           mode = x.args[2]
           @assert(mode ∈ ("r+", "w", "w+", "a", "a+"), "unsupport mode: $mode")
       elseif x isa Symbol
-          push!(vars)
+          push!(vars, x)
       else
           throw(ArgumentError("unsupport expression: `$x`"))
       end
@@ -62,9 +62,8 @@ macro save(filename, vars...)
             end
         end
     else
-        writeexprs = Vector{Expr}()
-        for x ∈ vars
-            push!(writeexprs, :(write(f, $(string(x)), $(esc(x)), wsession)))
+        writeexprs = map(vars) do x
+            :(write(f, $(string(x)), $(esc(x)), wsession))
         end
 
         quote
