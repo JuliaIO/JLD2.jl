@@ -13,7 +13,8 @@ function _extractmode(xs)
   for x ∈ xs
       if x isa Expr && x.head == :(=) && length(x.args) == 2 && x.args[] == :mode
           mode = x.args[2]
-          @assert(mode ∈ ("r+", "w", "w+", "a", "a+"), "unsupport mode: $mode")
+          !(mode ∈ ("r+", "w", "w+", "a", "a+")) && (
+              throw(ArgumentError("unsupport mode: $mode")))
       elseif x isa Symbol
           push!(vars, x)
       else

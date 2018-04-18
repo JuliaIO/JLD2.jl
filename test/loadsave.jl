@@ -84,3 +84,30 @@ d = Dict("params/p1" => 1,
          "data" => [[1,2,3], [4.,5.,6]])
 save(fn, d)
 @test load(fn) == d
+
+# Issue #68, mode support for `@save`
+mktempdir() do dir
+    f = joinpath(dir, "test.jld2")
+
+    let x, y, z = (1, 2, 3)
+      @save f x  # default mode is "w"
+      @save f mode = "r+" y z
+    end
+    let
+      @load f
+      @test (x, y, z) == (1, 2, 3)
+    end
+
+    # if unsupport mode
+    let x = 42
+      @test_throws ArgumentError @save f mode = "❓" x
+    end
+
+    # if unsupport expression
+    let
+      @test_throws ArgumentError @save f x = 42
+      @test_throws ArgumentError @save f x + 42
+      @test_throws ArgumentError @save f mode = "a" x = 42
+      @test_throws ArgumentError @save f mode = "a" x + 42
+    end
+end
