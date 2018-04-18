@@ -7,6 +7,12 @@ function jldopen(f::Function, args...; kws...)
     end
 end
 
+"""
+    @save "/path/file.jld2" [mode = "w"] x...
+
+Save one or more variables into `file.jld2`.
+The argument `mode` is optional, please check `?jldopen` for available modes.
+"""
 macro save(filename, vars...)
     if isempty(vars)
         # Save all variables in the current module
