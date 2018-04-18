@@ -7,6 +7,22 @@ function jldopen(f::Function, args...; kws...)
     end
 end
 
+function _extractmode(xs)
+  mode = "w"
+  vars = sizehint!(Vector{Symbol}(), length(xs))
+  for x ∈ xs
+      if x isa Expr && x.head == :(=) && length(x.args) == 2 && x.args[] == :mode
+          mode = x.args[2]
+          @assert(mode ∈ ("r+", "w", "w+", "a", "a+"), "unsupport mode: $mode")
+      elseif x isa Symbol
+          push!(vars)
+      else
+          throw(ArgumentError("unsupport expression: `$x`"))
+      end
+  end
+  mode, vars
+end
+
 """
     @save "/path/file.jld2" [mode = "w"] x...
 
@@ -14,12 +30,13 @@ Save one or more variables into `file.jld2`.
 The argument `mode` is optional, please check `?jldopen` for available modes.
 """
 macro save(filename, vars...)
+    mode, vars = _extractmode(vars)
     if isempty(vars)
         # Save all variables in the current module
         quote
             let
                 m = $(VERSION >= v"0.7.0-DEV.484" ? __module__ : current_module())
-                f = jldopen($(esc(filename)), "w")
+                f = jldopen($(esc(filename)), $mode)
                 wsession = JLDWriteSession()
                 try
                     for vname in names(m, true)
@@ -46,14 +63,8 @@ macro save(filename, vars...)
         end
     else
         writeexprs = Vector{Expr}()
-        mode = "w"
-        for expr ∈ vars
-            if expr isa Symbol
-                push!(writeexprs, :(write(f, $(string(expr)), $(esc(expr)), wsession)))
-            elseif expr isa Expr && expr.head == :(=) && length(expr.args) == 2 && expr.args[] == :mode
-                mode = expr.args[2]
-                @assert(mode ∈ ("r+", "w", "w+", "a", "a+"), "unsupport mode: $mode")
-            end
+        for x ∈ vars
+            push!(writeexprs, :(write(f, $(string(x)), $(esc(x)), wsession)))
         end
 
         quote
