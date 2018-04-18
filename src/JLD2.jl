@@ -280,11 +280,11 @@ end
 
 Opens a JLD file at path `fname`.
 
-`"r"`: Open for reading only, failing if no file exists
-`"r+"`: Open for reading and writing, failing if no file exists
-`"w"`/`"w+"`: Open for reading and writing, overwriting the file if it already exists
-`"a"`/`"a+"`: Open for reading and writing, creating a new file if none exists, but
-              preserving the existing file if one is present
+- `"r"`: Open for read-only, failing if no file exists.
+- `"r+"`: Open for reading and writing, failing if no file exists.
+- `"w"`/`"w+"`: Open for reading and writing, overwriting the file if it already exists.
+- `"a"`/`"a+"`: Open for reading and writing, creating a new file if none exists, but
+                preserving the existing file if one is present.
 """
 function jldopen(fname::AbstractString, mode::AbstractString="r"; kwargs...)
     (wr, create, truncate) = mode == "r"  ? (false, false, false) :
