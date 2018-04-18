@@ -89,12 +89,12 @@ save(fn, d)
 mktempdir() do dir
     f = joinpath(dir, "test.jld2")
 
-    let x, y, z = (1, 2, 3)
+    let (x, y, z) = (1, 2, 3)
       @save f x  # default mode is "w"
       @save f mode = "r+" y z
     end
     let
-      @load f
+      @load f x y z
       @test (x, y, z) == (1, 2, 3)
     end
 
