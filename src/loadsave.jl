@@ -46,7 +46,7 @@ macro save(filename, vars...)
                 push!(writeexprs, :(write(f, $(string(expr)), $(esc(expr)), wsession)))
             elseif expr isa Expr && expr.head == :(=) && length(expr.args) == 2 && expr.args[] == :mode
                 mode = expr.args[2]
-                @assert(mode ∈ ("r+", "w"), "unsupport mode: $mode")
+                @assert(mode ∈ ("r+", "w", "w+", "a", "a+"), "unsupport mode: $mode")
             end
         end
 
