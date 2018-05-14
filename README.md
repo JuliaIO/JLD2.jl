@@ -65,7 +65,7 @@ load("example.jld2", "hello") # -> "world"
 If called with multiple dataset names, `load` returns the contents of the given datasets as a tuple:
 
 ```julia
-load("example.jld2", "hello", "foo") # -> ("hello", :bar)
+load("example.jld2", "hello", "foo") # -> ("world", :bar)
 ```
 
 ### File interface
