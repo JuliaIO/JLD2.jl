@@ -85,7 +85,7 @@ function samelayout(T::DataType)
 end
 samelayout(::Type) = false
 
-fieldnames(x::Type{T}) where {T<:Tuple} = [Symbol(x) for x = 1:length(x.types)]
+fieldnames(x::Type{T}) where {T<:Tuple} = [Symbol(y) for y = 1:length(x.types)]
 fieldnames(@nospecialize x) = Base.fieldnames(x)
 
 # fieldodr gives the on-disk representation of a field of a given type,
