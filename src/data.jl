@@ -85,7 +85,7 @@ function samelayout(T::DataType)
 end
 samelayout(::Type) = false
 
-fieldnames(x::Type{T}) where {T<:Tuple} = [Symbol(x) for x = 1:length(x.types)]
+fieldnames(x::Type{T}) where {T<:Tuple} = [Symbol(y) for y = 1:length(x.types)]
 fieldnames(@nospecialize x) = Base.fieldnames(x)
 
 # fieldodr gives the on-disk representation of a field of a given type,
@@ -1025,7 +1025,7 @@ end
 ## SimpleVectors
 
 writeas(::Type{Core.SimpleVector}) = Vector{Any}
-wconvert(::Type{Vector{Any}}, x::Core.SimpleVector) = Any[x for x in x]
+wconvert(::Type{Vector{Any}}, x::Core.SimpleVector) = Any[y for y in x]
 rconvert(::Type{Core.SimpleVector}, x::Vector{Any}) = Core.svec(x...)
 
 ## Dicts
