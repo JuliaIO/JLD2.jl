@@ -86,7 +86,7 @@ end
 samelayout(::Type) = false
 
 fieldnames(x::Type{T}) where {T<:Tuple} = [Symbol(i) for i = 1:length(x.types)]
-fieldnames(@nospecialize x) = Base.fieldnames(x)
+fieldnames(@nospecialize x) = collect(Base.fieldnames(x))
 
 # fieldodr gives the on-disk representation of a field of a given type,
 # which is either always initialized (initialized=true) or potentially
