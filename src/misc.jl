@@ -4,10 +4,10 @@
 
 # Redefine unsafe_load, unsafe_store!, read, and write so that they pack the type
 function define_packed(ty::DataType)
-    @assert isbits(ty)
+    @assert isbitstype(ty)
     packed_offsets = cumsum([sizeof(x) for x in ty.types])
     sz = pop!(packed_offsets)
-    unshift!(packed_offsets, 0)
+    pushfirst!(packed_offsets, 0)
 
     if sz != sizeof(ty)
         @eval begin

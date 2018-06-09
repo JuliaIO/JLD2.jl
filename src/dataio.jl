@@ -54,7 +54,7 @@ end
         seek(regulario, inptr - io.startptr)
         unsafe_read(regulario, pointer(v), nb)
     else
-        unsafe_copy!(pointer(v), convert(Ptr{T}, inptr), n)
+        unsafe_copyto!(pointer(v), convert(Ptr{T}, inptr), n)
     end
     io.curptr = inptr + odr_sizeof(T) * n
     v
@@ -82,7 +82,7 @@ end
     inptr = io.curptr
     data = transcode(ZlibDecompressor, unsafe_wrap(Array, Ptr{UInt8}(inptr), data_length))
     @simd for i = 1:length(v)
-        dataptr = Ptr{Void}(pointer(data, odr_sizeof(RR)*(i-1)+1))
+        dataptr = Ptr{Cvoid}(pointer(data, odr_sizeof(RR)*(i-1)+1))
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
             @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
         end
@@ -174,7 +174,7 @@ function write_data(io::MmapIO, f::JLDFile, data::Array{T}, odr::S, ::HasReferen
     cp = IndirectPointer(io, p)
 
     for i = 1:length(data)
-        if (isconcrete(T) && isbits(T)) || unsafe_isdefined(data, i)
+        if (isconcretetype(T) && isbitstype(T)) || unsafe_isdefined(data, i)
             @inbounds h5convert!(cp, odr, f, data[i], wsession)
         else
             @inbounds h5convert_uninitialized!(cp, odr)
@@ -191,7 +191,7 @@ end
 #
 
 @inline function read_scalar(f::JLDFile{IOStream}, rr, header_offset::RelOffset)
-    r = Vector{UInt8}(odr_sizeof(rr))
+    r = Vector{UInt8}(undef, odr_sizeof(rr))
     unsafe_read(f.io, pointer(r), odr_sizeof(rr))
     jlconvert(rr, f, pointer(r), header_offset)
 end
@@ -202,9 +202,9 @@ end
     io = f.io
     data_offset = position(io)
     n = length(v)
-    data = read!(ZlibDecompressorStream(io), Vector{UInt8}(odr_sizeof(RR)*n))
+    data = read!(ZlibDecompressorStream(io), Vector{UInt8}(undef, odr_sizeof(RR)*n))
     @simd for i = 1:n
-        dataptr = Ptr{Void}(pointer(data, odr_sizeof(RR)*(i-1)+1))
+        dataptr = Ptr{Cvoid}(pointer(data, odr_sizeof(RR)*(i-1)+1))
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
             @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
         end
@@ -224,9 +224,9 @@ end
     n = length(v)
     nb = odr_sizeof(RR)*n
     io = f.io
-    data = read!(io, Vector{UInt8}(nb))
+    data = read!(io, Vector{UInt8}(undef, nb))
     @simd for i = 1:n
-        dataptr = Ptr{Void}(pointer(data, odr_sizeof(RR)*(i-1)+1))
+        dataptr = Ptr{Cvoid}(pointer(data, odr_sizeof(RR)*(i-1)+1))
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
             @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
         end
@@ -237,7 +237,7 @@ end
 function write_data(io::BufferedWriter, f::JLDFile, data, odr::S, ::DataMode,
                     wsession::JLDWriteSession) where S
     position = io.position[]
-    h5convert!(Ptr{Void}(pointer(io.buffer, position+1)), odr, f, data, wsession)
+    h5convert!(Ptr{Cvoid}(pointer(io.buffer, position+1)), odr, f, data, wsession)
     io.position[] = position + odr_sizeof(odr)
     nothing
 end
@@ -257,9 +257,9 @@ end
 function write_data(io::BufferedWriter, f::JLDFile, data::Array{T}, odr::S,
                     ::DataMode, wsession::JLDWriteSession) where {T,S}
     position = io.position[]
-    cp = Ptr{Void}(pointer(io.buffer, position+1))
+    cp = Ptr{Cvoid}(pointer(io.buffer, position+1))
     @simd for i = 1:length(data)
-        if (isconcrete(T) && isbits(T)) || unsafe_isdefined(data, i)
+        if (isconcretetype(T) && isbitstype(T)) || unsafe_isdefined(data, i)
             @inbounds h5convert!(cp, odr, f, data[i], wsession)
         else
             @inbounds h5convert_uninitialized!(cp, odr)
@@ -273,11 +273,11 @@ end
 function write_data(io::IOStream, f::JLDFile, data::Array{T}, odr::S, wm::DataMode,
                     wsession::JLDWriteSession) where {T,S}
     nb = odr_sizeof(odr) * length(data)
-    buf = Vector{UInt8}(nb)
+    buf = Vector{UInt8}(undef, nb)
     pos = position(io)
-    cp = Ptr{Void}(pointer(buf))
+    cp = Ptr{Cvoid}(pointer(buf))
     @simd for i = 1:length(data)
-        if (isconcrete(T) && isbits(T)) || unsafe_isdefined(data, i)
+        if (isconcretetype(T) && isbitstype(T)) || unsafe_isdefined(data, i)
             @inbounds h5convert!(cp, odr, f, data[i], wsession)
         else
             @inbounds h5convert_uninitialized!(cp, odr)

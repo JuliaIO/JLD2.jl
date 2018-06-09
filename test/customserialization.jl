@@ -19,9 +19,9 @@ Base.:(==)(a::UntypedWrapper, b::UntypedWrapper) = a.x == b.x
 # This is a type with a custom serialization, where the original type has data
 # but the custom serialization is empty
 struct CSA
-    x::Ptr{Void}
+    x::Ptr{Cvoid}
 end
-a = CSA(Ptr{Void}(0))
+a = CSA(Ptr{Cvoid}(0))
 
 struct CSASerialization end
 JLD2.writeas(::Type{CSA}) = CSASerialization
@@ -31,7 +31,7 @@ function JLD2.wconvert(::Type{CSASerialization}, x::CSA)
 end
 function JLD2.rconvert(::Type{CSA}, x::CSASerialization)
     global converted = true
-    CSA(Ptr{Void}(0))
+    CSA(Ptr{Cvoid}(0))
 end
 
 # This is a type with a custom serialization, where the original type has no

@@ -132,5 +132,5 @@ function read_heap_object(f::JLDFile, hid::GlobalHeapID, rr::ReadRepresentation{
     n = div(len, odr_sizeof(RR))
     len == n * odr_sizeof(RR) || throw(InvalidDataException())
 
-    read_array!(Vector{T}(n), f, rr)
+    read_array!(Vector{T}(undef, n), f, rr)
 end

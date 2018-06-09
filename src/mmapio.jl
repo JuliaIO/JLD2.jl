@@ -20,18 +20,18 @@ mutable struct MmapIO <: IO
     f::IOStream
     write::Bool
     n::Int
-    startptr::Ptr{Void}
-    curptr::Ptr{Void}
-    endptr::Ptr{Void}
+    startptr::Ptr{Cvoid}
+    curptr::Ptr{Cvoid}
+    endptr::Ptr{Cvoid}
     @static if Compat.Sys.iswindows()
-        mapping::Ptr{Void}
+        mapping::Ptr{Cvoid}
     end
 end
 
 if Compat.Sys.isunix()
     function mmap!(io::MmapIO, n::Int)
         oldptr = io.startptr
-        newptr = ccall(:jl_mmap, Ptr{Void}, (Ptr{Void}, Csize_t, Cint, Cint, Cint, Int64),
+        newptr = ccall(:jl_mmap, Ptr{Cvoid}, (Ptr{Cvoid}, Csize_t, Cint, Cint, Cint, Int64),
                        C_NULL, n, Mmap.PROT_READ | (io.write*Mmap.PROT_WRITE),
                        Mmap.MAP_SHARED, fd(io.f), 0)
         io.n = n
@@ -41,7 +41,7 @@ if Compat.Sys.isunix()
 
     munmap(io::MmapIO) =
         systemerror("munmap",
-                    ccall(:munmap, Cint, (Ptr{Void}, Int), io.startptr, io.n) != 0)
+                    ccall(:munmap, Cint, (Ptr{Cvoid}, Int), io.startptr, io.n) != 0)
 
     function msync(io::MmapIO, offset::Integer=0, len::Integer=UInt(io.endptr - io.startptr),
                    invalidate::Bool=false)
@@ -50,7 +50,7 @@ if Compat.Sys.isunix()
         # add (offset - offset_page) to `len` to get total length of memory-mapped region
         mmaplen::Int64 = (offset - offset_page) + len
         systemerror("msync",
-                    ccall(:msync, Cint, (Ptr{Void}, Csize_t, Cint),
+                    ccall(:msync, Cint, (Ptr{Cvoid}, Csize_t, Cint),
                           io.startptr + offset_page, mmaplen,
                           invalidate ? Mmap.MS_INVALIDATE : Mmap.MS_SYNC) != 0)
     end
@@ -58,14 +58,14 @@ elseif Compat.Sys.iswindows()
     const DWORD = Culong
     function mmap!(io::MmapIO, n::Int)
         oldptr = io.startptr
-        mapping = ccall(:CreateFileMappingW, stdcall, Ptr{Void},
-                        (Cptrdiff_t, Ptr{Void}, DWORD, DWORD, DWORD, Ptr{Void}),
+        mapping = ccall(:CreateFileMappingW, stdcall, Ptr{Cvoid},
+                        (Cptrdiff_t, Ptr{Cvoid}, DWORD, DWORD, DWORD, Ptr{Cvoid}),
                         Mmap.gethandle(io.f), C_NULL,
                         io.write ? Mmap.PAGE_READWRITE : Mmap.PAGE_READONLY, n >> 32,
                         n % UInt32, C_NULL)
         systemerror("CreateFileMappingW", mapping == C_NULL)
-        newptr = ccall(:MapViewOfFile, stdcall, Ptr{Void},
-                       (Ptr{Void}, DWORD, DWORD, DWORD, Csize_t),
+        newptr = ccall(:MapViewOfFile, stdcall, Ptr{Cvoid},
+                       (Ptr{Cvoid}, DWORD, DWORD, DWORD, Csize_t),
                         mapping, io.write ? Mmap.FILE_MAP_WRITE : Mmap.FILE_MAP_READ, 0, 0,
                         n)
         systemerror("MapViewOfFile", newptr == C_NULL)
@@ -77,9 +77,9 @@ elseif Compat.Sys.iswindows()
 
     function munmap(io::MmapIO)
         systemerror("UnmapViewOfFile",
-                    ccall(:UnmapViewOfFile, stdcall, Cint, (Ptr{Void},), io.startptr) == 0)
+                    ccall(:UnmapViewOfFile, stdcall, Cint, (Ptr{Cvoid},), io.startptr) == 0)
         systemerror("CloseHandle",
-                    ccall(:CloseHandle, stdcall, Cint, (Ptr{Void},), io.mapping) == 0)
+                    ccall(:CloseHandle, stdcall, Cint, (Ptr{Cvoid},), io.mapping) == 0)
     end
 
     function msync(io::MmapIO, offset::Integer=0, len::Integer=UInt(io.endptr - io.startptr),
@@ -90,7 +90,7 @@ elseif Compat.Sys.iswindows()
         mmaplen::Int64 = (offset - offset_page) + len
         systemerror("FlushViewOfFile",
                     ccall(:FlushViewOfFile, stdcall, Cint,
-                          (Ptr{Void}, Csize_t), io.startptr + offset_page, mmaplen) == 0)
+                          (Ptr{Cvoid}, Csize_t), io.startptr + offset_page, mmaplen) == 0)
     end
 end
 
@@ -129,7 +129,7 @@ else
     grow(io::IOStream, sz::Integer) = truncate(io, sz)
 end
 
-function Base.resize!(io::MmapIO, newend::Ptr{Void})
+function Base.resize!(io::MmapIO, newend::Ptr{Cvoid})
     io.write || throw(EOFError())
 
     # Resize file
@@ -195,7 +195,7 @@ function Base.unsafe_write(io::MmapIO, x::Ptr{UInt8}, n::UInt)
         cp = io.curptr
         ep = cp + n
     end
-    unsafe_copy!(Ptr{UInt8}(cp), x, n)
+    unsafe_copyto!(Ptr{UInt8}(cp), x, n)
     io.curptr = ep
     return n
 end
@@ -216,8 +216,8 @@ function Base.read(io::MmapIO, ::Type{T}, n::Int) where T
     cp = io.curptr
     ep = cp + sizeof(T)*n
     ep > io.endptr && throw(EOFError())
-    arr = Vector{T}(n)
-    unsafe_copy!(pointer(arr), Ptr{T}(cp), n)
+    arr = Vector{T}(undef, n)
+    unsafe_copyto!(pointer(arr), Ptr{T}(cp), n)
     io.curptr = ep
     arr
 end
@@ -261,7 +261,7 @@ computing a memory address until converted to a Ptr{T}, so the memory mapping ca
 enlarged and addresses will remain valid.
 """
 struct IndirectPointer
-    ptr::Ptr{Ptr{Void}}
+    ptr::Ptr{Ptr{Cvoid}}
     offset::Int
 end
 

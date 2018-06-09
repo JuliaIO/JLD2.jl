@@ -1,4 +1,4 @@
-using JLD2, Compat, Compat.Test
+using JLD2, Compat, Compat.Test, Compat.LinearAlgebra
 
 macro read(fid, sym)
     if !isa(sym, Symbol)
@@ -35,9 +35,9 @@ B = [-1.5 sqrt(2) NaN 6;
      0.0  Inf eps() -Inf]
 AB = Any[A, B]
 t = (3, "cat")
-c = Complex64(3,7)
+c = Complex{Float32}(3,7)
 cint = 1+im  # issue 108
-C = reinterpret(Complex128, B, (4,))
+C = reinterpret(Complex{Float64}, B, (4,))
 emptyA = zeros(0,2)
 emptyB = zeros(2,0)
 try
@@ -72,8 +72,8 @@ typevar = Array{Int}[[1]]
 typevar_lb = (Vector{U} where U<:Integer)[[1]]
 typevar_ub = (Vector{U} where U>:Int)[[1]]
 typevar_lb_ub = (Vector{U} where Int<:U<:Real)[[1]]
-undef = Vector{Any}(1)
-undefs = Matrix{Any}(2, 2)
+arr_undef = Vector{Any}(undef, 1)
+arr_undefs = Matrix{Any}(undef, 2, 2)
 ms_undef = MyStruct(0)
 # Unexported type:
 cpus = Base.Sys.cpu_info()
@@ -81,7 +81,7 @@ cpus = Base.Sys.cpu_info()
 rng = 1:5
 # Type with a pointer field (#84)
 struct ObjWithPointer
-    a::Ptr{Void}
+    a::Ptr{Cvoid}
 end
 objwithpointer = ObjWithPointer(0)
 # Custom BitsType (#99)
@@ -103,7 +103,7 @@ mutable struct EmptyType end
 emptytype = EmptyType()
 arr_emptytype = [emptytype]
 empty_arr_emptytype = EmptyImmutable[]
-uninitialized_arr_emptytype = Vector{EmptyType}(1)
+uninitialized_arr_emptytype = Vector{EmptyType}(undef, 1)
 struct EmptyII
     x::EmptyImmutable
 end
@@ -197,9 +197,9 @@ end
 padding_test = PaddingTest[PaddingTest(i, i) for i = 1:8]
 # Empty arrays of various types and sizes
 empty_arr_1 = Int[]
-empty_arr_2 = Matrix{Int}(56, 0)
+empty_arr_2 = Matrix{Int}(undef, 56, 0)
 empty_arr_3 = Any[]
-empty_arr_4 = Matrix{Any}(0, 97)
+empty_arr_4 = Matrix{Any}(undef, 0, 97)
 # Moderately big dataset (which will be mmapped)
 bigdata = [1:1000000;]
 # BigFloats and BigInts
@@ -215,12 +215,12 @@ bigfloatintobj = BigFloatIntObject(big(pi), big(typemax(UInt128))+1)
 # None
 none = Union{}
 nonearr = Vector{Union{}}(5)
-# nothing/Void
+# nothing/Nothing
 scalar_nothing = nothing
-vector_nothing = Union{Int,Void}[1,nothing]
+vector_nothing = Union{Int,Nothing}[1,nothing]
 
 # some data big enough to ensure that compression is used:
-Abig = kron(eye(10), rand(20,20))
+Abig = kron(Matrix{Float64}(I, 10, 10), rand(20, 20))
 Bbig = Any[i for i=1:3000]
 Sbig = "A test string "^1000
 
@@ -269,8 +269,8 @@ iseq(x::Core.SimpleVector, y::Core.SimpleVector) = collect(x) == collect(y)
 # Type that overloads != so that it is not boolean
 mutable struct NALikeType; end
 Base.:!=(::NALikeType, ::NALikeType) = NALikeType()
-Base.:!=(::NALikeType, ::Void) = NALikeType()
-Base.:!=(::Void, ::NALikeType) = NALikeType()
+Base.:!=(::NALikeType, ::Nothing) = NALikeType()
+Base.:!=(::Nothing, ::NALikeType) = NALikeType()
 natyperef = Any[NALikeType(), NALikeType()]
 
 # JLD2 issue #31 (lots of strings)
@@ -397,8 +397,8 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @write fid typevar_lb
     @write fid typevar_ub
     @write fid typevar_lb_ub
-    @write fid undef
-    @write fid undefs
+    @write fid arr_undef
+    @write fid arr_undefs
     @write fid ms_undef
     @test_throws JLD2.PointerException @write fid objwithpointer
     @write fid bt
@@ -515,13 +515,13 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @check fidr typevar_lb_ub
 
     # Special cases for reading undefs
-    undef = read(fidr, "undef")
-    if !isa(undef, Array{Any, 1}) || length(undef) != 1 || isassigned(undef, 1)
-        error("For undef, read value does not agree with written value")
+    arr_undef = read(fidr, "arr_undef")
+    if !isa(arr_undef, Array{Any, 1}) || length(arr_undef) != 1 || isassigned(arr_undef, 1)
+        error("For arr_undef, read value does not agree with written value")
     end
-    undefs = read(fidr, "undefs")
-    if !isa(undefs, Array{Any, 2}) || length(undefs) != 4 || any(map(i->isassigned(undefs, i), 1:4))
-        error("For undefs, read value does not agree with written value")
+    arr_undefs = read(fidr, "arr_undefs")
+    if !isa(arr_undefs, Array{Any, 2}) || length(arr_undefs) != 4 || any(map(i->isassigned(arr_undefs, i), 1:4))
+        error("For arr_undefs, read value does not agree with written value")
     end
     ms_undef = read(fidr, "ms_undef")
     if !isa(ms_undef, MyStruct) || ms_undef.len != 0 || isdefined(ms_undef, :data)

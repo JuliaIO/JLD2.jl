@@ -139,7 +139,7 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
                    datatype_class::UInt8, datatype_offset::Int64,
                    data_offset::Int64, data_length::Int=-1, filter_id::UInt16=UInt16(0),
                    header_offset::RelOffset=NULL_REFERENCE,
-                   attributes::Union{Vector{ReadAttribute},Void}=nothing)
+                   attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
     # See if there is a julia type attribute
     io = f.io
     if datatype_class == typemax(UInt8) # Committed datatype
@@ -164,7 +164,7 @@ end
 const BOXED_READ_DATASPACE = Ref{Tuple{ReadDataspace,RelOffset,Int,UInt16}}()
 
 # Most types can only be scalars or arrays
-function read_data(f::JLDFile, rr, attributes::Union{Vector{ReadAttribute},Void}=nothing)
+function read_data(f::JLDFile, rr, attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
     dataspace, header_offset, data_length, filter_id = BOXED_READ_DATASPACE[]
     if dataspace.dataspace_type == DS_SCALAR
         filter_id != 0 && throw(UnsupportedFeatureException())
@@ -218,7 +218,7 @@ function read_data(f::JLDFile,
 
     dimensions_attr_index = find_dimensions_attr(attributes)
     if dimensions_attr_index == 0
-        jlconvert(rr, f, Ptr{Void}(0), header_offset)
+        jlconvert(rr, f, Ptr{Cvoid}(0), header_offset)
     else
         # dimensions attribute => array of empty type
         read_empty(rr, f, attributes[dimensions_attr_index], header_offset)
@@ -250,16 +250,16 @@ function read_empty(rr::ReadRepresentation{T}, f::JLDFile,
 
     seek(io, dimensions_attr.data_offset)
     v = construct_array(io, T, ndims)
-    if isconcrete(T)
+    if isconcretetype(T)
         for i = 1:length(v)
-            @inbounds v[i] = jlconvert(rr, f, Ptr{Void}(0), header_offset)
+            @inbounds v[i] = jlconvert(rr, f, Ptr{Cvoid}(0), header_offset)
         end
     end
     header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
     v
 end
 
-get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Void) =
+get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Nothing) =
     (dataspace.dimensionality, dataspace.dimensions_offset)
 
 function get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Vector{ReadAttribute})
@@ -288,19 +288,19 @@ seeked to the correct position.
 function construct_array{T}(io::IO, ::Type{T}, ndims::Int)::Array{T}
     if ndims == 1
         n = read(io, Int64)
-        Vector{T}(n)
+        Vector{T}(undef, n)
     elseif ndims == 2
         d2 = read(io, Int64)
         d1 = read(io, Int64)
-        Matrix{T}(d1, d2)
+        Matrix{T}(undef, d1, d2)
     elseif ndims == 3
         d3 = read(io, Int64)
         d2 = read(io, Int64)
         d1 = read(io, Int64)
-        Array{T,3}(d1, d2, d3)
+        Array{T,3}(undef, d1, d2, d3)
     else
-        ds = reverse!(read!(io, Vector{Int64}(ndims)))
-        Array{T}(tuple(ds...))
+        ds = reverse!(read!(io, Vector{Int64}(undef, ndims)))
+        Array{T}(undef, tuple(ds...))
     end
 end
 
@@ -308,7 +308,7 @@ end
 function read_array(f::JLDFile, dataspace::ReadDataspace,
                     rr::ReadRepresentation{T,RR}, data_length::Int,
                     filter_id::UInt16, header_offset::RelOffset,
-                    attributes::Union{Vector{ReadAttribute},Void}) where {T,RR}
+                    attributes::Union{Vector{ReadAttribute},Nothing}) where {T,RR}
     io = f.io
     data_offset = position(io)
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
@@ -335,11 +335,11 @@ end
 
 # Like isdefined, but assumes arr is a pointer array, and can be inlined
 unsafe_isdefined(arr::Array, i::Int) =
-    unsafe_load(Ptr{Ptr{Void}}(pointer(arr)+(i-1)*sizeof(Ptr{Void}))) != Ptr{Void}(0)
+    unsafe_load(Ptr{Ptr{Cvoid}}(pointer(arr)+(i-1)*sizeof(Ptr{Cvoid}))) != Ptr{Cvoid}(0)
 
 function deflate_data(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSession) where {T,S}
-    buf = Vector{UInt8}(odr_sizeof(odr) * length(data))
-    cp = Ptr{Void}(pointer(buf))
+    buf = Vector{UInt8}(undef, odr_sizeof(odr) * length(data))
+    cp = Ptr{Cvoid}(pointer(buf))
     @simd for i = 1:length(data)
         @inbounds h5convert!(cp, odr, f, data[i], wsession)
         cp += odr_sizeof(odr)
@@ -356,7 +356,7 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
     if datasz < 8192
         layout_class = LC_COMPACT_STORAGE
         psz += sizeof(CompactStorageMessage) + datasz
-    elseif f.compress && isconcrete(T) && isbits(T)
+    elseif f.compress && isconcretetype(T) && isbitstype(T)
         layout_class = LC_CHUNKED_STORAGE
         psz += chunked_storage_message_size(ndims(data)) + length(DEFLATE_PIPELINE_MESSAGE)
     else
@@ -370,7 +370,7 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
     f.end_of_data = header_offset + fullsz
 
     if !isa(wsession, JLDWriteSession{Union{}})
-        wsession.h5offset[object_id(data)] = h5offset(f, header_offset)
+        wsession.h5offset[objectid(data)] = h5offset(f, header_offset)
         push!(wsession.objects, data)
     end
 
@@ -415,7 +415,7 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
     f.end_of_data = header_offset + fullsz
 
     if ismutabletype(typeof(data)) && !isa(wsession, JLDWriteSession{Union{}})
-        wsession.h5offset[object_id(data)] = h5offset(f, header_offset)
+        wsession.h5offset[objectid(data)] = h5offset(f, header_offset)
         push!(wsession.objects, data)
     end
 
@@ -522,7 +522,7 @@ end
 end
 
 @inline function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
-    offset = get(wsession.h5offset, object_id(x), RelOffset(0))
+    offset = get(wsession.h5offset, objectid(x), RelOffset(0))
     offset != RelOffset(0) ? offset : write_dataset(f, x, wsession)::RelOffset
 end
 

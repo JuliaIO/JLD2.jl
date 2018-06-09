@@ -9,7 +9,7 @@ using JLD2, Compat, Compat.Test
 @test JLD2.Lookup3.hash(UInt8[0, 0, 0]) == 0x6bd0060f
 @test JLD2.Lookup3.hash(UInt8[23, 187, 98, 217]) == 0x2c88bb51
 @test JLD2.Lookup3.hash(UInt8[0, 0, 0, 0]) == 0x049396b8
-large_buf = Vector{UInt8}(3093)
+large_buf = Vector{UInt8}(undef, 3093)
 for i = 1:length(large_buf)
     large_buf[i] = ((i-1) * 3) % UInt8
 end
