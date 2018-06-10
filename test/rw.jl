@@ -283,16 +283,16 @@ function iseq(x::Array{EmptyType}, y::Array{EmptyType})
         def = isassigned(x, i)
         def != isassigned(y, i) && return false
         if def
-            x[i] != y[i] && return false
+            iseq(x[i], y[i]) || return false
         end
     end
     return true
 end
 iseq(x::MyStruct, y::MyStruct) = (x.len == y.len && x.data == y.data)
 iseq(x::MyImmutable, y::MyImmutable) = (isequal(x.x, y.x) && isequal(x.y, y.y) && isequal(x.z, y.z))
-iseq(x::Union{EmptyTI,EmptyTT}, y::Union{EmptyTI,EmptyTT}) = isequal(x.x, y.x)
+iseq(x::Union{EmptyTI,EmptyTT,EmptyIT}, y::Union{EmptyTI,EmptyTT,EmptyIT}) = iseq(x.x, y.x)
 iseq(x::NoneTypedField{Union{}}, y::NoneTypedField{Union{}}) = x.a === y.a
-iseq(c1::Array{Base.Sys.CPUinfo}, c2::Array{Base.Sys.CPUinfo}) = length(c1) == length(c2) && all([iseq(c1[i], c2[i]) for i = 1:length(c1)])
+iseq(c1::Array, c2::Array) = length(c1) == length(c2) && all(p->iseq(p...), zip(c1, c2))
 function iseq(c1::Base.Sys.CPUinfo, c2::Base.Sys.CPUinfo)
     for n in fieldnames(Base.Sys.CPUinfo)
         if getfield(c1, n) != getfield(c2, n)
@@ -304,6 +304,8 @@ end
 iseq(x::MyUnicodeStruct☺, y::MyUnicodeStruct☺) = (x.α == y.α && x.∂ₓα == y.∂ₓα)
 iseq(x::Array{Union{}}, y::Array{Union{}}) = size(x) == size(y)
 iseq(x::BigFloatIntObject, y::BigFloatIntObject) = (x.bigfloat == y.bigfloat && x.bigint == y.bigint)
+iseq(x::T, y::T) where {T<:Union{EmptyType,EmptyImmutable,NALikeType}} = true
+iseq(x::BitsParams{T}, y::BitsParams{S}) where {T,S} = (T == S)
 macro check(fid, sym)
     ex = quote
         let tmp
