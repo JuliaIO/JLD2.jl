@@ -200,7 +200,12 @@ openfile(::Type{IOStream}, fname, wr, create, truncate) =
 openfile(::Type{MmapIO}, fname, wr, create, truncate) =
     MmapIO(fname, wr, create, truncate)
 
-read_bytestring(io::IOStream) = chop(String(readuntil(io, 0x00)))
+if VERSION >= v"0.7.0-DEV.3510"
+    # The delimiter is excluded by default
+    read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
+else
+    read_bytestring(io::IOStream) = chop(String(readuntil(io, 0x00)))
+end
 
 const OPEN_FILES = Dict{String,WeakRef}()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
