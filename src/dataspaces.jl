@@ -40,25 +40,25 @@ WriteDataspace(f::JLDFile, x::Array{T,0}, ::Type{CustomSerialization{S,ODR}}) wh
     WriteDataspace(f, x, ODR)
 
 WriteDataspace() = WriteDataspace(DS_NULL, (), ())
-WriteDataspace(::JLDFile, ::Any, odr::Void) = WriteDataspace()
+WriteDataspace(::JLDFile, ::Any, odr::Nothing) = WriteDataspace()
 WriteDataspace(::JLDFile, ::Any, ::Any) = WriteDataspace(DS_SCALAR, (), ())
 
 # Ghost type array
-WriteDataspace(f::JLDFile, x::Array{T}, ::Void) where {T} =
+WriteDataspace(f::JLDFile, x::Array{T}, ::Nothing) where {T} =
    WriteDataspace(DS_NULL, (),
-             (WrittenAttribute(f, :dimensions, Int64[x for x in reverse(size(x))]),))
+             (WrittenAttribute(f, :dimensions, collect(Int64, reverse(size(x)))),))
 
 # Reference array
 WriteDataspace(f::JLDFile, x::Array{T,N}, ::Type{RelOffset}) where {T,N} =
     WriteDataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))),
               (WrittenAttribute(f, :julia_type, write_ref(f, T, f.datatype_wsession)),))
 
-# isbits array
+# isbitstype array
 WriteDataspace(f::JLDFile, x::Array, ::Any) =
     WriteDataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))), ())
 
 # Zero-dimensional arrays need an empty dimensions attribute
-WriteDataspace(f::JLDFile, x::Array{T,0}, ::Void) where {T} =
+WriteDataspace(f::JLDFile, x::Array{T,0}, ::Nothing) where {T} =
     WriteDataspace(DS_NULL, (Length(1),),
               (WrittenAttribute(f, :dimensions, EMPTY_DIMENSIONS)))
 WriteDataspace(f::JLDFile, x::Array{T,0}, ::Type{RelOffset}) where {T} =

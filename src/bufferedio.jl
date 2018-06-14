@@ -19,7 +19,7 @@ end
 function BufferedWriter(io::IOStream, buffer_size::Int)
     pos = position(io)
     skip(io, buffer_size)
-    BufferedWriter(io, Vector{UInt8}(buffer_size), pos, Ref{Int}(0))
+    BufferedWriter(io, Vector{UInt8}(undef, buffer_size), pos, Ref{Int}(0))
 end
 Base.show(io::IO, ::BufferedWriter) = print(io, "BufferedWriter")
 
@@ -53,7 +53,7 @@ function Base.unsafe_write(io::BufferedWriter, x::Ptr{UInt8}, n::UInt64)
     buffer = io.buffer
     position = io.position[]
     n + position <= length(buffer) || throw(EOFError())
-    unsafe_copy!(pointer(buffer, position+1), x, n)
+    unsafe_copyto!(pointer(buffer, position+1), x, n)
     io.position[] = position + n
     # Base.show_backtrace(STDOUT, backtrace())
     # gc()
@@ -70,7 +70,7 @@ struct BufferedReader <: IO
 end
 
 BufferedReader(io::IOStream) =
-    BufferedReader(io, Vector{UInt8}(0), position(io), Ref{Int}(0))
+    BufferedReader(io, Vector{UInt8}(), position(io), Ref{Int}(0))
 Base.show(io::IO, ::BufferedReader) = print(io, "BufferedReader")
 
 function readmore!(io::BufferedReader, n::Int)
@@ -103,8 +103,8 @@ function Base.read(io::BufferedReader, ::Type{T}, n::Int) where T
         readmore!(io, sizeof(T))
     end
     io.position[] = position + n
-    arr = Vector{T}(n)
-    unsafe_copy!(pointer(arr), Ptr{T}(pointer(buffer, position+1)), n)
+    arr = Vector{T}(undef, n)
+    unsafe_copyto!(pointer(arr), Ptr{T}(pointer(buffer, position+1)), n)
     arr
 end
 Base.read(io::BufferedReader, ::Type{T}, n::Integer) where {T} =

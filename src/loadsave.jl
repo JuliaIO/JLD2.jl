@@ -39,7 +39,7 @@ macro save(filename, vars...)
             end
         end
     else
-        writeexprs = Vector{Expr}(length(vars))
+        writeexprs = Vector{Expr}(undef, length(vars))
         for i = 1:length(vars)
             writeexprs[i] = :(write(f, $(string(vars[i])), $(esc(vars[i])), wsession))
         end
@@ -81,7 +81,7 @@ macro load(filename, vars...)
 end
 
 # Save all the key-value pairs in the dict as top-level variables of the JLD
-function save(f::File{format"JLD2"}, dict::Associative; kwargs...)
+function save(f::File{format"JLD2"}, dict::AbstractDict; kwargs...)
     jldopen(FileIO.filename(f), "w"; kwargs...) do file
         wsession = JLDWriteSession()
         for (k,v) in dict

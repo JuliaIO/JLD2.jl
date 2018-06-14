@@ -1,9 +1,9 @@
 const Initialized = Union{Type{Val{true}}, Type{Val{false}}}
 
-const Pointers = Union{Ptr{Void}, IndirectPointer}
+const Pointers = Union{Ptr{Cvoid}, IndirectPointer}
 
 struct OnDiskRepresentation{Offsets,JLTypes,H5Types} end
-odr_sizeof(::Void) = 0
+odr_sizeof(::Nothing) = 0
 @Base.pure odr_sizeof(x::DataType) = Int(x.size)
 
 struct UnknownType{T}
@@ -50,7 +50,7 @@ odr_sizeof(::ReadRepresentation{T,S}) where {T,S} = odr_sizeof(S)
 # Determines whether a specific field type should be saved in the file
 @noinline function hasfielddata(@nospecialize T)
     T === Union{} && return false
-    !isconcrete(T) && return true
+    !isconcretetype(T) && return true
     T = T::DataType
     (T.mutable || T <: Type) && return true
     hasdata(T)
@@ -85,19 +85,19 @@ function samelayout(T::DataType)
 end
 samelayout(::Type) = false
 
-fieldnames(x::Type{T}) where {T<:Tuple} = [Symbol(x) for x = 1:length(x.types)]
-fieldnames(@nospecialize x) = Base.fieldnames(x)
+fieldnames(x::Type{T}) where {T<:Tuple} = [Symbol(i) for i = 1:length(x.types)]
+fieldnames(@nospecialize x) = collect(Base.fieldnames(x))
 
 # fieldodr gives the on-disk representation of a field of a given type,
 # which is either always initialized (initialized=true) or potentially
 # uninitialized (initialized=false)
 @generated function fieldodr(::Type{T}, initialized::Bool) where T
-    if isconcrete(T)
+    if isconcretetype(T)
         if !hasfielddata(T)
             # A ghost type, so no need to store at all
             return nothing
         elseif isa(T, DataType)
-            if isbits(T)
+            if isbitstype(T)
                 return :(odr(T))
             elseif !T.mutable
                 return :(initialized ? odr(T) : RelOffset)
@@ -111,10 +111,10 @@ end
 # datatype reflecting the on-disk representation.
 @generated function h5fieldtype(f::JLDFile, writeas::Type{T}, readas::Type,
                                 initialized::Initialized) where T
-    if isconcrete(T)
+    if isconcretetype(T)
         if !hasfielddata(T)
             return nothing
-        elseif isbits(T) || (isa(initialized, Type{Type{Val{true}}}) && !T.mutable)
+        elseif isbitstype(T) || (isa(initialized, Type{Type{Val{true}}}) && !T.mutable)
             return quote
                 @lookup_committed f T
                 $(if isempty(T.types)
@@ -283,7 +283,7 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
         end
     end
 
-    if isa(julia_type_attr, Void)
+    if isa(julia_type_attr, Nothing)
         throw(InvalidDataException())
     end
     julia_type_attr = julia_type_attr::ReadAttribute
@@ -371,7 +371,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
     field_datatypes = read_field_datatypes(f, attrs)
 
     # If read type is not a leaf type, reconstruct
-    if !isconcrete(T)
+    if !isconcretetype(T)
         warn("read type $T is not a leaf type in workspace; reconstructing")
         return reconstruct_compound(f, string(T), dt, field_datatypes)
     end
@@ -383,11 +383,11 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
     end
     mapped = falses(length(dt.names))
 
-    offsets = Vector{Int}(length(T.types))
-    types = Vector{Any}(length(T.types))
-    odrs = Vector{Any}(length(T.types))
+    offsets = Vector{Int}(undef, length(T.types))
+    types = Vector{Any}(undef, length(T.types))
+    odrs = Vector{Any}(undef, length(T.types))
     fn = fieldnames(T)
-    samelayout = isbits(T) && T.size == dt.size
+    samelayout = isbitstype(T) && T.size == dt.size
     dtindex = 0
     for i = 1:length(T.types)
         wstype = T.types[i]
@@ -446,7 +446,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
         # This should theoretically be moved inside the if statement, but then it returns
         # the wrong result due to a bug in type inference on 0.6
         typeof_wodr = typeof(wodr)
-        offsets = (offsets...)
+        offsets = (offsets...,)
         if wodr isa OnDiskRepresentation
             odr_offsets = typeof_wodr.parameters[1]
             odr_types = typeof_wodr.parameters[2].parameters
@@ -497,11 +497,11 @@ h5convert!(out::Pointers, ::Type{T}, ::JLDFile, x, ::JLDWriteSession) where {T} 
     args = ex.args
     for i = 1:length(Offsets)
         member = members[i]
-        isa(member, Void) && continue
+        isa(member, Nothing) && continue
 
         offset = Offsets[i]
         conv = :(h5convert!(out+$offset, $(member), file, convert($(types[i]), $getindex_fn(x, $i)), wsession))
-        if i > T.ninitialized && (!isconcrete(x.types[i]) || !isbits(x.types[i]))
+        if i > T.ninitialized && (!isconcretetype(x.types[i]) || !isbitstype(x.types[i]))
             push!(args, quote
                 if !isdefined(x, $i)
                     h5convert_uninitialized!(out+$offset, $(member))
@@ -758,7 +758,7 @@ end
 
 function h5convert!(out::Pointers, fls::FixedLengthString, f::JLDFile, x, ::JLDWriteSession)
     fls.length == sizeof(x) || throw(InvalidDataException())
-    (unsafe_copy!(convert(Ptr{UInt8}, out), pointer(x), fls.length); nothing)
+    (unsafe_copyto!(convert(Ptr{UInt8}, out), pointer(x), fls.length); nothing)
 end
 h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x, wsession::JLDWriteSession) =
     store_vlen!(out, UInt8, f, Vector{UInt8}(x), wsession)
@@ -766,8 +766,8 @@ h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x, wsession::JLDWrit
 jlconvert(::ReadRepresentation{String,Vlen{String}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
     String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
 function jlconvert(rr::FixedLengthString{String}, ::JLDFile, ptr::Ptr, ::RelOffset)
-    data = Vector{UInt8}(rr.length)
-    unsafe_copy!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
+    data = Vector{UInt8}(undef, rr.length)
+    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
     String(data)
 end
 
@@ -848,9 +848,9 @@ odr(::Type{T}) where {T<:DataType} = DataTypeODR()
 function typename(T::DataType)
     tn = Symbol[]
     m = T.name.module
-    while m != module_parent(m)
+    while m != parentmodule(m)
         push!(tn, module_name(m))
-        m = module_parent(m)
+        m = parentmodule(m)
     end
     reverse!(tn)
     push!(tn, T.name.name)
@@ -1025,15 +1025,15 @@ end
 ## SimpleVectors
 
 writeas(::Type{Core.SimpleVector}) = Vector{Any}
-wconvert(::Type{Vector{Any}}, x::Core.SimpleVector) = Any[x for x in x]
+wconvert(::Type{Vector{Any}}, x::Core.SimpleVector) = collect(Any, x)
 rconvert(::Type{Core.SimpleVector}, x::Vector{Any}) = Core.svec(x...)
 
 ## Dicts
 
 writeas(::Type{Dict{K,V}}) where {K,V} = Vector{Pair{K,V}}
 writeas(::Type{ObjectIdDict}) = Vector{Pair{Any,Any}}
-wconvert(::Type{Vector{Pair{K,V}}}, x::Associative{K,V}) where {K,V} = collect(x)
-function rconvert(::Type{T}, x::Vector{Pair{K,V}}) where {T<:Associative,K,V}
+wconvert(::Type{Vector{Pair{K,V}}}, x::AbstractDict{K,V}) where {K,V} = collect(x)
+function rconvert(::Type{T}, x::Vector{Pair{K,V}}) where {T<:AbstractDict,K,V}
     d = T()
     isa(d, Dict) && sizehint!(d::Dict, length(x))
     for (k,v) in x
@@ -1156,8 +1156,8 @@ end
 function reconstruct_odr(f::JLDFile, dt::CompoundDatatype,
                          field_datatypes::Vector{RelOffset})
     # Get the type and ODR information for each field
-    types = Vector{Any}(length(dt.names))
-    h5types = Vector{Any}(length(dt.names))
+    types = Vector{Any}(undef, length(dt.names))
+    h5types = Vector{Any}(undef, length(dt.names))
     for i = 1:length(dt.names)
         if !isempty(field_datatypes) && (ref = field_datatypes[i]) != NULL_REFERENCE
             dtrr = jltype(f, f.datatype_locations[ref])
@@ -1166,14 +1166,14 @@ function reconstruct_odr(f::JLDFile, dt::CompoundDatatype,
         end
         types[i], h5types[i] = typeof(dtrr).parameters
     end
-    return OnDiskRepresentation{(dt.offsets...), Tuple{types...}, Tuple{h5types...}}()
+    return OnDiskRepresentation{(dt.offsets...,), Tuple{types...}, Tuple{h5types...}}()
 end
 
 # Reconstruct type that is a "lost cause": either we were not able to resolve
 # the name, or the workspace type has additional fields, or cannot convert
 # fields to workspace types
 function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
-                              field_datatypes::Union{Vector{RelOffset},Void})
+                              field_datatypes::Union{Vector{RelOffset},Nothing})
     rodr = reconstruct_odr(f, dt, field_datatypes)
     types = typeof(rodr).parameters[2].parameters
 
@@ -1236,7 +1236,7 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
 
     blk = Expr(:block)
     args = blk.args
-    if isbits(T)
+    if isbitstype(T)
         # For bits types, we should always inline, because otherwise we'll just
         # pass a lot of crap around in registers
         push!(args, Expr(:meta, :inline))
@@ -1308,13 +1308,13 @@ end
         # A pointer singleton or ghost. We need to write something, but we'll
         # just write a single byte.
         return nothing
-    elseif isbits(T) && samelayout(T)
+    elseif isbitstype(T) && samelayout(T)
         # Has a specialized convert method or is an unpadded type
         return T
     end
 
     offsets = zeros(Int, length(T.types))
-    odrs = Vector{Any}(length(T.types))
+    odrs = Vector{Any}(undef, length(T.types))
     offset = 0
     for i = 1:length(T.types)
         ty = T.types[i]
@@ -1329,7 +1329,7 @@ end
         offset += odr_sizeof(fodr)
     end
 
-    OnDiskRepresentation{(offsets...), Tuple{T.types...}, Tuple{odrs...}}()
+    OnDiskRepresentation{(offsets...,), Tuple{T.types...}, Tuple{odrs...}}()
 end
 
 abstract type DataMode end
@@ -1340,7 +1340,7 @@ struct HasReferences <: DataMode end
 @Base.pure datamode(::Union{Type{<:Vlen},Type{RelOffset}}) = HasReferences()
 @Base.pure datamode(::DataType) = ReferenceFree()
 @Base.pure datamode(::FixedLengthString) = ReferenceFree()
-@Base.pure datamode(::Void) = ReferenceFree()
+@Base.pure datamode(::Nothing) = ReferenceFree()
 @generated function datamode(odr::OnDiskRepresentation{Offsets,JLTypes,H5Types} where {Offsets,JLTypes}) where H5Types
     for ty in H5Types.parameters
         datamode(ty) == HasReferences() && return HasReferences()

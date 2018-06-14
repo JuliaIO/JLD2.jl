@@ -4,8 +4,11 @@ module JLD2
 using DataStructures, CodecZlib, FileIO
 import Base.sizeof
 using Compat
-if VERSION >= v"0.7.0-DEV.2009"
-    using Mmap
+using Compat.Printf
+using Compat.Mmap
+
+if !isdefined(Base, :isbitstype)
+    const isbitstype = isbits # TODO: Add to Compat
 end
 
 export jldopen, @load,   @save
@@ -54,7 +57,7 @@ const NULL_REFERENCE = RelOffset(0)
     JLDWriteSession{T}
 
 A JLDWriteSession keeps track of references to serialized objects. If `T` is a Dict,
-`h5offset` maps an object ID (returned by calling `object_id`) to th `RelOffset` of the
+`h5offset` maps an object ID (returned by calling `objectid`) to th `RelOffset` of the
 written dataset. If it is `Union{}`, then references are not tracked, and objects
 referenced multiple times are written multiple times.
 """
@@ -197,7 +200,12 @@ openfile(::Type{IOStream}, fname, wr, create, truncate) =
 openfile(::Type{MmapIO}, fname, wr, create, truncate) =
     MmapIO(fname, wr, create, truncate)
 
-read_bytestring(io::IOStream) = chop(String(readuntil(io, 0x00)))
+if VERSION >= v"0.7.0-DEV.3510"
+    # The delimiter is excluded by default
+    read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
+else
+    read_bytestring(io::IOStream) = chop(String(readuntil(io, 0x00)))
+end
 
 const OPEN_FILES = Dict{String,WeakRef}()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
@@ -240,7 +248,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         f.root_group = Group{typeof(f)}(f)
         f.types_group = Group{typeof(f)}(f)
     else
-        if String(read!(io, Vector{UInt8}(length(REQUIRED_FILE_HEADER)))) != REQUIRED_FILE_HEADER
+        if String(read!(io, Vector{UInt8}(undef, length(REQUIRED_FILE_HEADER)))) != REQUIRED_FILE_HEADER
             throw(ArgumentError(string('"', fname, "\" is not a JLD file")))
         end
 

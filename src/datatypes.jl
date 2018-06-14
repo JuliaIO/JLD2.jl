@@ -171,9 +171,9 @@ function Base.read(io::IO, ::Type{CompoundDatatype})
     nfields = UInt16(dt.bitfield1) | UInt16(dt.bitfield2 << 8)
     dt.bitfield3 == 0 || throw(UnsupportedFeatureException())
 
-    names = Vector{Symbol}(nfields)
-    offsets = Vector{Int}(nfields)
-    members = Vector{H5Datatype}(nfields)
+    names = Vector{Symbol}(undef, nfields)
+    offsets = Vector{Int}(undef, nfields)
+    members = Vector{H5Datatype}(undef, nfields)
     for i = 1:nfields
         # Name
         names[i] = Symbol(read_bytestring(io))
