@@ -1,4 +1,4 @@
-using JLD2, Compat, Compat.Test
+using JLD2, Test
 @test JLD2.Lookup3.hash(UInt8[]) == 0xdeadbeef
 @test JLD2.Lookup3.hash(UInt8[], 1, 0, 0xdeadbeef) == 0xbd5b7dde
 @test JLD2.Lookup3.hash(UInt8[23]) == 0xa209c931

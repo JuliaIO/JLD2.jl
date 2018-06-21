@@ -1,6 +1,6 @@
-using JLD2, Compat, Compat.Test
+using JLD2, Test
 
-for ioty in [JLD2.MmapIO, IOStream]
+let fn, f; for ioty in [JLD2.MmapIO, IOStream]
     fn = joinpath(tempdir(), "test.jld")
 
     # Ensure we can handle cases where the same file is open multiple times
@@ -48,4 +48,4 @@ for ioty in [JLD2.MmapIO, IOStream]
     f = jldopen(fn, false, false, false, ioty)
     @test read(f, "x") == 1:10
     close(f)
-end
+end; end

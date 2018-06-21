@@ -3,13 +3,8 @@ __precompile__()
 module JLD2
 using DataStructures, CodecZlib, FileIO
 import Base.sizeof
-using Compat
-using Compat.Printf
-using Compat.Mmap
-
-if !isdefined(Base, :isbitstype)
-    const isbitstype = isbits # TODO: Add to Compat
-end
+using Printf
+using Mmap
 
 export jldopen, @load,   @save
 
@@ -151,8 +146,8 @@ mutable struct JLDFile{T<:IO}
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
-    jlh5type::ObjectIdDict
-    h5jltype::ObjectIdDict
+    jlh5type::IdDict{Any,Any}
+    h5jltype::IdDict{Any,Any}
     jloffset::Dict{RelOffset,WeakRef}
     end_of_data::Int64
     global_heaps::Dict{RelOffset,GlobalHeap}
@@ -166,10 +161,10 @@ mutable struct JLDFile{T<:IO}
                         compress::Bool, mmaparrays::Bool) where T
         f = new(io, path, writable, written, compress, mmaparrays, 1,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
-            JLDWriteSession(), ObjectIdDict(), ObjectIdDict(), Dict{RelOffset,WeakRef}(),
+            JLDWriteSession(), IdDict{Any,Any}(), IdDict{Any,Any}(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS)
-        finalizer(f, jld_finalizer)
+        finalizer(jld_finalizer, f)
         f
     end
 end
@@ -196,16 +191,11 @@ h5offset(f::JLDFile, x::Int64) = RelOffset(x - FILE_HEADER_LENGTH)
 #
 
 openfile(::Type{IOStream}, fname, wr, create, truncate) =
-    open(fname, true, wr, create, truncate, false)
+    open(fname, read=true, write=wr, create=create, truncate=truncate, append=false)
 openfile(::Type{MmapIO}, fname, wr, create, truncate) =
     MmapIO(fname, wr, create, truncate)
 
-if VERSION >= v"0.7.0-DEV.3510"
-    # The delimiter is excluded by default
-    read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
-else
-    read_bytestring(io::IOStream) = chop(String(readuntil(io, 0x00)))
-end
+read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
 
 const OPEN_FILES = Dict{String,WeakRef}()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
@@ -342,11 +332,11 @@ Base.setindex!(f::JLDFile, obj, name::AbstractString) = (f.root_group[name] = ob
 Base.haskey(f::JLDFile, name::AbstractString) = haskey(f.root_group, name)
 Base.isempty(f::JLDFile) = isempty(f.root_group)
 Base.keys(f::JLDFile) = filter!(x->x != "_types", keys(f.root_group))
-Base.get(default::Function, f::Union{JLDFile, Group}, name::AbstractString) = 
+Base.get(default::Function, f::Union{JLDFile, Group}, name::AbstractString) =
     haskey(f, name) ? f[name] : default()
-Base.get(f::Union{JLDFile, Group}, name::AbstractString, default) = 
+Base.get(f::Union{JLDFile, Group}, name::AbstractString, default) =
     haskey(f, name) ? f[name] : default
-Base.get!(f::Union{JLDFile, Group}, name::AbstractString, default) = 
+Base.get!(f::Union{JLDFile, Group}, name::AbstractString, default) =
     get!(() -> default, f, name)
 function Base.get!(default::Function, f::Union{JLDFile, Group}, name::AbstractString)
     if haskey(f, name)

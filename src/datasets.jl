@@ -191,7 +191,7 @@ function read_data(f::JLDFile, rr::ReadRepresentation{Any,RelOffset},
                 T = read_attr_data(f, x)
                 if isa(T, UnknownType)
                     str = typestring(T)
-                    warn("type $(str) does not exist in workspace; interpreting Array{$str} as Array{Any}")
+                    @warn("type $(str) does not exist in workspace; interpreting Array{$str} as Array{Any}")
                     T = Any
                 end
                 seek(io, startpos)
@@ -280,12 +280,12 @@ function get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Vect
 end
 
 """
-    construct_array{T}(io::IO, ::Type{T}, ndims::Int)
+    construct_array(io::IO, ::Type{T}, ndims::Int) where {T}
 
 Construct array by reading `ndims` dimensions from `io`. Assumes `io` has already been
 seeked to the correct position.
 """
-function construct_array{T}(io::IO, ::Type{T}, ndims::Int)::Array{T}
+function construct_array(io::IO, ::Type{T}, ndims::Int)::Array{T} where {T}
     if ndims == 1
         n = read(io, Int64)
         Vector{T}(undef, n)
