@@ -60,7 +60,7 @@ elseif Compat.Sys.iswindows()
         oldptr = io.startptr
         mapping = ccall(:CreateFileMappingW, stdcall, Ptr{Cvoid},
                         (Cptrdiff_t, Ptr{Cvoid}, DWORD, DWORD, DWORD, Ptr{Cvoid}),
-                        Mmap.gethandle(io.f), C_NULL,
+                        reinterpret(Cptrdiff_t,Mmap.gethandle(io.f)), C_NULL,
                         io.write ? Mmap.PAGE_READWRITE : Mmap.PAGE_READONLY, n >> 32,
                         n % UInt32, C_NULL)
         systemerror("CreateFileMappingW", mapping == C_NULL)
