@@ -8,7 +8,6 @@ include("append.jl")
 include("groups.jl")
 include("consistency.jl")
 include("loadsave.jl")
-
-# Only run the reconstruction tests on versions where `workspace` is a thing
+include("recon.jl")
 
 #include("customserialization.jl") currently broken due to #265
