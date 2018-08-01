@@ -1,4 +1,4 @@
-using JLD2, FileIO, Compat, Compat.Test
+using JLD2, FileIO, Test
 
 fn = joinpath(tempdir(), "test.jld2")
 
@@ -26,7 +26,7 @@ end
 
 func2()
 
-@test !isdefined(:loadmacrotestvar1) # should not be in global scope
+@test !@isdefined(loadmacrotestvar1) # should not be in global scope
 @test (@eval @load $fn) == [:loadmacrotestvar1, :loadmacrotestvar2]
 @test loadmacrotestvar1 == ['a', 'b', 'c']
 @test loadmacrotestvar2 == 1
@@ -73,7 +73,7 @@ end
 # Issue #19
 save(fn, Dict("a"=>[1,2,3]))
 io = open(fn)
-info("The next error message (involving Nullable{String}) is a sign of normal operation")
+@info("The next error message (involving Nullable{String}) is a sign of normal operation")
 @test_throws MethodError load(io)
 close(io)
 

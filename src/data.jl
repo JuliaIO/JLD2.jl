@@ -309,8 +309,9 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
         readas = datatype
         datatype = read_attr_data(f, written_type_attr)
         if isa(readas, UnknownType)
-            warn("custom serialization of ", typestring(readas),
-                 " encountered, but the type does not exist in the workspace; the data will be read unconverted")
+            @warn(string("custom serialization of ", typestring(readas),
+                         " encountered, but the type does not exist in the workspace;",
+                         " the data will be read unconverted"))
             rr = (constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool})[1]
             canonical = false
         else
@@ -339,14 +340,14 @@ function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{Re
             if !hasdata(T)
                 (ReadRepresentation{T,nothing}(), true)
             else
-                warn("$T has $(T.size*8) bytes, but written type was empty; reconstructing")
+                @warn("$T has $(T.size*8) bytes, but written type was empty; reconstructing")
                 reconstruct_bitstype(T.name.name, dt.size, empty)
             end
         else
             if isempty(T.types)
-                warn("primitive type $T has $(T.size*8) bits, but written type has $(dt.size*8) bits; reconstructing")
+                @warn("primitive type $T has $(T.size*8) bits, but written type has $(dt.size*8) bits; reconstructing")
             else
-                warn("$T is a non-primitive type, but written type is a primitive type with $(dt.size*8) bits; reconstructing")
+                @warn("$T is a non-primitive type, but written type is a primitive type with $(dt.size*8) bits; reconstructing")
             end
             reconstruct_bitstype(T.name.name, dt.size, empty)
         end
@@ -372,7 +373,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
 
     # If read type is not a leaf type, reconstruct
     if !isconcretetype(T)
-        warn("read type $T is not a leaf type in workspace; reconstructing")
+        @warn("read type $T is not a leaf type in workspace; reconstructing")
         return reconstruct_compound(f, string(T), dt, field_datatypes)
     end
 
@@ -399,7 +400,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
         else
             if !haskey(dtnames, fn[i])
                 hard_failure && throw(TypeMappingException())
-                warn("saved type ", T, " is missing field ", fn[i], " in workspace type; reconstructing")
+                @warn(string("saved type ", T, " is missing field ", fn[i], " in workspace type; reconstructing"))
                 return reconstruct_compound(f, string(T), dt, field_datatypes)
             end
 
@@ -413,13 +414,13 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
             readtype, odrtype = typeof(dtrr).parameters
 
             if typeintersect(readtype, wstype) === Union{} &&
-               !method_exists(convert, Tuple{Type{wstype}, readtype})
+               !hasmethod(convert, Tuple{Type{wstype}, readtype})
                 # Saved type does not match type in workspace and no
                 # convert method exists, so we definitely need to reconstruct.
                 hard_failure && throw(TypeMappingException())
-                warn("saved type ", T, " has field ", fn[i], "::", readtype,
-                     ", but workspace type has field ", fn[i], "::", wstype,
-                     ", and no applicable convert method exists; reconstructing")
+                @warn(string("saved type ", T, " has field ", fn[i], "::", readtype,
+                             ", but workspace type has field ", fn[i], "::", wstype,
+                             ", and no applicable convert method exists; reconstructing"))
                 return reconstruct_compound(f, string(T), dt, field_datatypes)
             end
 
@@ -433,10 +434,10 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
     end
 
     if !all(mapped)
-        warn("the following fields are present in type ", T,
-             " saved in the file but not present in the type the workspace:\n\n",
-             join(dt.names[.!mapped], "\n"),
-             "\n\nData in these fields will not be accessible")
+        @warn(string("the following fields are present in type ", T,
+                     " saved in the file but not present in the type the workspace:\n\n",
+                     join(dt.names[.!mapped], "\n"),
+                     "\n\nData in these fields will not be accessible"))
     end
 
     if samelayout
@@ -474,7 +475,7 @@ end
 function constructrr(f::JLDFile, T::UnionAll, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
-    warn("read type $T is not a leaf type in workspace; reconstructing")
+    @warn("read type $T is not a leaf type in workspace; reconstructing")
     return reconstruct_compound(f, string(T), dt, read_field_datatypes(f, attrs))
 end
 
@@ -761,7 +762,7 @@ function h5convert!(out::Pointers, fls::FixedLengthString, f::JLDFile, x, ::JLDW
     (unsafe_copyto!(convert(Ptr{UInt8}, out), pointer(x), fls.length); nothing)
 end
 h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x, wsession::JLDWriteSession) =
-    store_vlen!(out, UInt8, f, Vector{UInt8}(x), wsession)
+    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, x), wsession)
 
 jlconvert(::ReadRepresentation{String,Vlen{String}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
     String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
@@ -789,7 +790,7 @@ h5type(f::JLDFile, ::Type{Symbol}, x) = h5fieldtype(f, Symbol, typeof(x), Val{tr
 odr(::Type{Symbol}) = Vlen{String}
 
 h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x::Symbol, ::JLDWriteSession) =
-    store_vlen!(out, UInt8, f, Vector{UInt8}(String(x)), f.datatype_wsession)
+    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, String(x)), f.datatype_wsession)
 
 constructrr(::JLDFile, ::Type{Symbol}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
     dt == H5TYPE_VLEN_UTF8 ? (ReadRepresentation{Symbol,Vlen{String}}(), true) :
@@ -801,9 +802,9 @@ jlconvert(::ReadRepresentation{Symbol,Vlen{String}}, f::JLDFile, ptr::Ptr, ::Rel
 ## BigInts and BigFloats
 
 writeas(::Union{Type{BigInt},Type{BigFloat}}) = String
-wconvert(::Type{String}, x::BigInt) = base(62, x)
+wconvert(::Type{String}, x::BigInt) = string(x, base=62)
 wconvert(::Type{String}, x::BigFloat) = string(x)
-rconvert(::Type{BigInt}, x::String) = parse(BigInt, x, 62)
+rconvert(::Type{BigInt}, x::String) = parse(BigInt, x, base=62)
 rconvert(::Type{BigFloat}, x::String) = parse(BigFloat, x)
 
 ## DataTypes
@@ -849,7 +850,7 @@ function typename(T::DataType)
     tn = Symbol[]
     m = T.name.module
     while m != parentmodule(m)
-        push!(tn, module_name(m))
+        push!(tn, nameof(m))
         m = parentmodule(m)
     end
     reverse!(tn)
@@ -858,11 +859,11 @@ function typename(T::DataType)
 end
 
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
-    store_vlen!(out, UInt8, f, Vector{UInt8}(typename(T)), f.datatype_wsession)
+    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, typename(T)), f.datatype_wsession)
     if isempty(T.parameters)
         h5convert_uninitialized!(out+odr_sizeof(Vlen{UInt8}), Vlen{UInt8})
     else
-        refs = RelOffset[begin
+        refs = RelOffset[(
             if isa(x, DataType)
                 # The heuristic here is that, if the field type is a committed data type,
                 # then we commit the datatype and write it as a reference to the committed
@@ -879,7 +880,7 @@ function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsess
             else
                 write_ref(f, x, wsession)
             end
-        end for x in T.parameters]
+        ) for x in T.parameters]
         store_vlen!(out+odr_sizeof(Vlen{UInt8}), RelOffset, f, refs, f.datatype_wsession)
     end
     nothing
@@ -894,14 +895,14 @@ function jlconvert(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
     if hasparams
         paramrefs = jlconvert(ReadRepresentation{RelOffset,Vlen{RelOffset}}(), f,
                               ptr+odr_sizeof(Vlen{UInt8}), NULL_REFERENCE)
-        params = Any[begin
+        params = Any[(
             # If the reference is to a committed datatype, read the datatype
-            nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
-            cdt = get(f.datatype_locations, ref, nulldt)
-            res = cdt !== nulldt ? (typeof(jltype(f, cdt)::ReadRepresentation)::DataType).parameters[1] : load_dataset(f, ref)
-            unknown_params = unknown_params || isa(res, UnknownType)
+            nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0);
+            cdt = get(f.datatype_locations, ref, nulldt);
+            res = cdt !== nulldt ? (typeof(jltype(f, cdt)::ReadRepresentation)::DataType).parameters[1] : load_dataset(f, ref);
+            unknown_params = unknown_params || isa(res, UnknownType);
             res
-        end for ref in paramrefs]
+        ) for ref in paramrefs]
     end
 
     path = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
@@ -1031,7 +1032,7 @@ rconvert(::Type{Core.SimpleVector}, x::Vector{Any}) = Core.svec(x...)
 ## Dicts
 
 writeas(::Type{Dict{K,V}}) where {K,V} = Vector{Pair{K,V}}
-writeas(::Type{ObjectIdDict}) = Vector{Pair{Any,Any}}
+writeas(::Type{IdDict{Any,Any}}) = Vector{Pair{Any,Any}}
 wconvert(::Type{Vector{Pair{K,V}}}, x::AbstractDict{K,V}) where {K,V} = collect(x)
 function rconvert(::Type{T}, x::Vector{Pair{K,V}}) where {T<:AbstractDict,K,V}
     d = T()
@@ -1048,14 +1049,14 @@ module ReconstructedTypes end
 
 function reconstruct_bitstype(name::Union{Symbol,String}, size::Integer, empty::Bool)
     sym = gensym(name)
-    eval(ReconstructedTypes, empty ? :(struct $(sym) end) : :(primitive type $(sym) $(Int(size)*8) end))
+    Core.eval(ReconstructedTypes, empty ? :(struct $(sym) end) : :(primitive type $(sym) $(Int(size)*8) end))
     T = getfield(ReconstructedTypes, sym)
     (ReadRepresentation{T, empty ? nothing : T}(), false)
 end
 
 function constructrr(f::JLDFile, unk::UnknownType, dt::BasicDatatype,
                      attrs::Vector{ReadAttribute})
-    warn("type ", typestring(unk), " does not exist in workspace; reconstructing")
+    @warn("type $(typestring(unk)) does not exist in workspace; reconstructing")
     reconstruct_bitstype(typestring(unk), dt.size, check_empty(attrs))
 end
 
@@ -1090,8 +1091,8 @@ function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatyp
         # the parameters must depend on the types actually encoded in the file
         (ReadRepresentation{Tuple,rodr}(), false)
     else
-        warn("read type ", typestring(unk), " was parametrized, but type ",
-             unk.name, " in workspace is not; reconstructing")
+        @warn(string("read type ", typestring(unk), " was parametrized, but type ",
+                     unk.name, " in workspace is not; reconstructing"))
         reconstruct_compound(f, typestring(unk), dt, field_datatypes)
     end
 end
@@ -1109,8 +1110,8 @@ function constructrr(f::JLDFile, unk::UnknownType{UnionAll}, dt::CompoundDatatyp
     field_datatypes = read_field_datatypes(f, attrs)
     body = behead(unk.name)
     if length(body.parameters) != length(unk.parameters)
-        warn("read type ", typestring(unk), " has a different number of parameters from type ",
-             unk.name, " in workspace; reconstructing")
+        @warn(string("read type ", typestring(unk), " has a different number of parameters from type ",
+                     unk.name, " in workspace; reconstructing"))
         reconstruct_compound(f, typestring(unk), dt, field_datatypes)
     else
         params = copy(unk.parameters)
@@ -1127,17 +1128,17 @@ function constructrr(f::JLDFile, unk::UnknownType{UnionAll}, dt::CompoundDatatyp
         try
             T = unk.name{params...}
         catch err
-            warn("type parameters for ", typestring(unk), " do not match type ", unk.name, " in workspace; reconstructing")
+            @warn("type parameters for $(typestring(unk)) do not match type $(unk.name) in workspace; reconstructing")
             return reconstruct_compound(f, typestring(unk), dt, field_datatypes)
         end
 
         try
             (rr,) = constructrr(f, T, dt, attrs, true)
-            warn("some parameters could not be resolved for type ", typestring(unk), "; reading as ", T)
+            @warn("some parameters could not be resolved for type $(typestring(unk)); reading as $(T)")
             return (rr, false)
         catch err
             !isa(err, TypeMappingException) && rethrow(err)
-            warn("some parameters could not be resolved for type ", typestring(unk), "; reconstructing")
+            @warn("some parameters could not be resolved for type $(typestring(unk)); reconstructing")
             return reconstruct_compound(f, typestring(unk), dt, field_datatypes)
         end
     end
@@ -1147,7 +1148,7 @@ end
 function constructrr(f::JLDFile, unk::UnknownType{String}, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute})
     ts = typestring(unk)
-    warn("type ", ts, " does not exist in workspace; reconstructing")
+    @warn("type $(ts) does not exist in workspace; reconstructing")
     reconstruct_compound(f, ts, dt, read_field_datatypes(f, attrs))
 end
 
@@ -1179,7 +1180,7 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
 
     # Now reconstruct the type
     reconname = gensym(T)
-    eval(ReconstructedTypes,
+    Core.eval(ReconstructedTypes,
          Expr(VERSION >= v"0.7.0-DEV.1263" ? :struct_type : :composite_type, reconname,
               Core.svec(), Core.svec(dt.names...), Any, types, false, 0))
     T = getfield(ReconstructedTypes, reconname)

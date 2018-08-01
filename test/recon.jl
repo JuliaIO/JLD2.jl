@@ -1,3 +1,8 @@
+# test reconstruction of types by spawning a process
+# that defines and stores a number of custom structs
+using JLD2, Test
+fn = joinpath(tempdir(),"test.jld")
+code = """
 using JLD2
 
 mutable struct TestType1
@@ -85,7 +90,7 @@ primitive type TestType20 16 end
 struct TestType21 end
 
 
-fn = joinpath(tempdir(),"test.jld")
+fn = "$(fn)"
 file = jldopen(fn, "w")
 write(file, "x1", TestType1(57))
 write(file, "x2", TestType3(TestType2(1)))
@@ -122,85 +127,79 @@ write(file, "x28", reinterpret(TestType20, 0x1337))
 write(file, "x29", TestType21())
 
 close(file)
+"""
+cmd = `$(Base.julia_cmd()) --eval $code`
+@test success(cmd)
 
-workspace()
-
-# workspace doesn't work anymore unless we call @eval Core.Main afterwards. Unfortunately, we can't
-# just put all this code in a block, because then it won't be evaluated at top-level. So
-# we need a bunch of @eval Core.Mains here.
-if VERSION > v"0.7.0-DEV.1877"
-    @eval Core.Main using .LastMain.JLD2, Compat, Compat.Test
-else
-    @eval Core.Main using LastMain.JLD2, Compat, Compat.Test
-end
-@eval Core.Main mutable struct TestType1
+# reconstruct the structs from the code block above in this process
+mutable struct TestType1
     x::Float64
 end
-@eval Core.Main mutable struct TestType2
+mutable struct TestType2
     x::Int
 end
-@eval Core.Main struct TestType3
+struct TestType3
     x::TestType1
 end
-@eval Core.Main struct TestTypeContainer{T}
+struct TestTypeContainer{T}
     a::T
     b::Int
 end
-@eval Core.Main primitive type TestType9 8 end
-@eval Core.Main struct TestType10
+primitive type TestType9 8 end
+struct TestType10
     a::Int
     b::UInt8
     c::UInt8
 end
-@eval Core.Main struct TestType11
+struct TestType11
     b::UInt8
 end
-@eval Core.Main struct TestType12
+struct TestType12
     x::Int
 end
-@eval Core.Main mutable struct TestType13
+mutable struct TestType13
     a
 end
-@eval Core.Main struct TestType14{T,S}
+struct TestType14{T,S}
     x::T
     y::S
 end
-@eval Core.Main struct TestType15{T}
+struct TestType15{T}
     x::T
     y::Float64
 end
-@eval Core.Main struct TestType16{T<:Integer}
+struct TestType16{T<:Integer}
     x::T
     y::Int
 end
-@eval Core.Main struct TestTypeContainer2{T}
+struct TestTypeContainer2{T}
     a::T
     b::String
 end
-@eval Core.Main struct TestTypeContainer3{T,S}
+struct TestTypeContainer3{T,S}
     a::T
     b::S
 end
-@eval Core.Main struct TestTypeContainer4{T,S}
+struct TestTypeContainer4{T,S}
     a::T
     b::S
 end
-@eval Core.Main struct TestTypeContainer5{T}
+struct TestTypeContainer5{T}
     a::T
     b::Int
 end
-@eval Core.Main abstract type TestType18 end
-@eval Core.Main struct TestType19 end
-@eval Core.Main struct TestType20
+abstract type TestType18 end
+struct TestType19 end
+struct TestType20
     x::UInt16
 end
-@eval Core.Main struct TestType21
+struct TestType21
     x::Int
 end
-@eval Core.Main begin
+
 const TestType17 = 5
 
-file = jldopen(LastMain.fn, "r")
+file = jldopen(fn, "r")
 x = read(file, "x1")
 @test isa(x, TestType1)
 @test x.x === 57.0
@@ -256,7 +255,7 @@ x = read(file, "x14")
 @test !isa(x, TestType12)
 @test x.x == "abcdefg"
 
-@test_throws JLD2.UndefinedFieldException x = read(file, "x15")
+@test_throws JLD2.UndefinedFieldException read(file, "x15")
 
 x = read(file, "x16")
 @test !isa(x, TestType14)
@@ -318,4 +317,3 @@ x = read(file, "x29")
 @test sizeof(x) == 0
 
 close(file)
-end

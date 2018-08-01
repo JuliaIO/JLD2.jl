@@ -45,7 +45,7 @@ end
     inptr = io.curptr
     n = length(v)
     nb = odr_sizeof(T)*n
-    if nb > MMAP_CUTOFF && (!Compat.Sys.iswindows() || !f.written)
+    if nb > MMAP_CUTOFF && (!Sys.iswindows() || !f.written)
         # It turns out that regular IO is faster here (at least on OS X), but on Windows,
         # we shouldn't use ordinary IO to read, since coherency with the memory map is not
         # guaranteed
@@ -113,7 +113,7 @@ function write_data(io::MmapIO, f::JLDFile, data, odr::S, ::HasReferences,
     nothing
 end
 
-@static if Compat.Sys.isunix()
+@static if Sys.isunix()
     function raw_write(io::MmapIO, ptr::Ptr{UInt8}, nb::Int)
         if nb > MMAP_CUTOFF
             pos = position(io)

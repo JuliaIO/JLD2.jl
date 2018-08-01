@@ -16,9 +16,9 @@ macro save(filename, vars...)
                 f = jldopen($(esc(filename)), "w")
                 wsession = JLDWriteSession()
                 try
-                    for vname in names(m, true)
+                    for vname in names(m, all=true)
                         s = string(vname)
-                        if !ismatch(r"^_+[0-9]*$", s) # skip IJulia history vars
+                        if !occursin(r"^_+[0-9]*$", s) # skip IJulia history vars
                             v = getfield(m, vname)
                             if !isa(v, Module)
                                 try

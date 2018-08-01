@@ -75,7 +75,7 @@ Base.show(io::IO, ::BufferedReader) = print(io, "BufferedReader")
 
 function readmore!(io::BufferedReader, n::Int)
     f = io.f
-    amount = max(nb_available(f), n)
+    amount = max(bytesavailable(f), n)
     buffer = io.buffer
     oldlen = length(buffer)
     resize!(buffer, oldlen + amount)
