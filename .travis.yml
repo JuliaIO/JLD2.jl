@@ -1,18 +1,24 @@
 language: julia
+
 os:
   - linux
   - osx
+
 julia:
   - 0.7
   - nightly
+
 matrix:
   fast_finish: true
   allow_failures:
     - julia: nightly
+
 notifications:
   email: false
-script:
- - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
- - julia --check-bounds=yes -e 'Pkg.clone(pwd()); Pkg.build("JLD2"); Pkg.test("JLD2"; coverage=true)'
+
+# script:
+#  - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
+#  - julia --check-bounds=yes -e 'Pkg.clone(pwd()); Pkg.build("JLD2"); Pkg.test("JLD2"; coverage=true)'
+
 after_success:
   - julia -e 'cd(Pkg.dir("JLD2")); Pkg.add("Coverage"); Pkg.checkout("Coverage"); using Coverage; Codecov.submit(Codecov.process_folder())'
