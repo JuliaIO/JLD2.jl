@@ -97,7 +97,8 @@ end
 function MmapIO(fname::AbstractString, write::Bool, create::Bool, truncate::Bool)
     truncate && !write && throw(ArgumentError("cannot truncate file that is not writable"))
 
-    f = open(fname, true, write, create, truncate, false)
+    f = open(fname, read = true, write = write,
+             create = create, truncate = truncate, append = false)
     initialsz = truncate ? Int64(0) : filesize(fname)
     @static if Int == Int32
         initialsz > typemax(Int) && error("cannot read a file greater than 2GB on a 32-bit system")

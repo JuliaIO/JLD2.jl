@@ -1,5 +1,3 @@
-__precompile__()
-
 module JLD2
 using DataStructures, CodecZlib, FileIO
 import Base.sizeof
@@ -151,8 +149,8 @@ mutable struct JLDFile{T<:IO}
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
-    jlh5type::ObjectIdDict
-    h5jltype::ObjectIdDict
+    jlh5type::IdDict
+    h5jltype::IdDict
     jloffset::Dict{RelOffset,WeakRef}
     end_of_data::Int64
     global_heaps::Dict{RelOffset,GlobalHeap}
@@ -166,10 +164,10 @@ mutable struct JLDFile{T<:IO}
                         compress::Bool, mmaparrays::Bool) where T
         f = new(io, path, writable, written, compress, mmaparrays, 1,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
-            JLDWriteSession(), ObjectIdDict(), ObjectIdDict(), Dict{RelOffset,WeakRef}(),
+            JLDWriteSession(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS)
-        finalizer(f, jld_finalizer)
+        finalizer(jld_finalizer, f)
         f
     end
 end
@@ -196,7 +194,8 @@ h5offset(f::JLDFile, x::Int64) = RelOffset(x - FILE_HEADER_LENGTH)
 #
 
 openfile(::Type{IOStream}, fname, wr, create, truncate) =
-    open(fname, true, wr, create, truncate, false)
+    open(fname, read = true, write = wr, create = create,
+         truncate = truncate, append = false)
 openfile(::Type{MmapIO}, fname, wr, create, truncate) =
     MmapIO(fname, wr, create, truncate)
 

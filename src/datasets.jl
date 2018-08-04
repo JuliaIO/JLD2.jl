@@ -285,7 +285,7 @@ end
 Construct array by reading `ndims` dimensions from `io`. Assumes `io` has already been
 seeked to the correct position.
 """
-function construct_array{T}(io::IO, ::Type{T}, ndims::Int)::Array{T}
+function construct_array(io::IO, ::Type{T}, ndims::Int)::Array{T} where {T}
     if ndims == 1
         n = read(io, Int64)
         Vector{T}(undef, n)

@@ -37,7 +37,7 @@ AB = Any[A, B]
 t = (3, "cat")
 c = Complex{Float32}(3,7)
 cint = 1+im  # issue 108
-C = reinterpret(Complex{Float64}, B, (4,))
+C = reshape(reinterpret(Complex{Float64}, B), (4,))
 emptyA = zeros(0,2)
 emptyB = zeros(2,0)
 try
@@ -55,7 +55,7 @@ msempty = MyStruct(5, Float64[])
 sym = :TestSymbol
 syms = [:a, :b]
 d = Dict([(syms[1],"aardvark"), (syms[2], "banana")])
-oidd = ObjectIdDict([(syms[1],"aardvark"), (syms[2], "banana")])
+oidd = IdDict([(syms[1],"aardvark"), (syms[2], "banana")])
 ex = quote
     function incrementby1(x::Int)
         x+1
@@ -237,9 +237,9 @@ bitsparamint16  = BitsParams{Int16(1)}()
 tuple_of_tuples = (1, 2, (3, 4, [5, 6]), [7, 8])
 
 # Zero-dimensional arrays
-zerod = Array{Int}()
+zerod = Array{Int}(undef)
 zerod[] = 1
-zerod_any = Array{Any}()
+zerod_any = Array{Any}(undef)
 zerod_any[] = 1.0+1.0im
 
 # Type with None typed field
@@ -313,7 +313,7 @@ macro check(fid, sym)
                 tmp = read($fid, $(string(sym)))
             catch e
                 @show e
-                Base.show_backtrace(STDOUT, catch_backtrace())
+                Base.show_backtrace(stdout, catch_backtrace())
                 error("error reading ", $(string(sym)))
             end
             written_type = typeof($sym)
