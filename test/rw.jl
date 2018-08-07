@@ -517,7 +517,7 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @check fidr typevar_lb_ub
 
     # Special cases for reading undefs
-    arr_undef = read(fidr, "arr_undef")
+    global arr_undef = read(fidr, "arr_undef")
     if !isa(arr_undef, Array{Any, 1}) || length(arr_undef) != 1 || isassigned(arr_undef, 1)
         error("For arr_undef, read value does not agree with written value")
     end

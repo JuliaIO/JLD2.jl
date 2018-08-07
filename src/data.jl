@@ -761,7 +761,7 @@ function h5convert!(out::Pointers, fls::FixedLengthString, f::JLDFile, x, ::JLDW
     (unsafe_copyto!(convert(Ptr{UInt8}, out), pointer(x), fls.length); nothing)
 end
 h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x, wsession::JLDWriteSession) =
-    store_vlen!(out, UInt8, f, unsafe_wrap(Array{UInt8}, pointer(x), ncodeunits(x)), wsession)
+    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, x), wsession)
 
 jlconvert(::ReadRepresentation{String,Vlen{String}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
     String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
@@ -790,7 +790,7 @@ odr(::Type{Symbol}) = Vlen{String}
 
 function h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x::Symbol, ::JLDWriteSession)
     s = String(x)
-    store_vlen!(out, UInt8, f, unsafe_wrap(Array{UInt8}, pointer(s), ncodeunits(s)), f.datatype_wsession)
+    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, s), f.datatype_wsession)
 end
 
 constructrr(::JLDFile, ::Type{Symbol}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
@@ -861,7 +861,7 @@ end
 
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     t = typename(T)
-    store_vlen!(out, UInt8, f, unsafe_wrap(Array{UInt8}, pointer(t), ncodeunits(t)), f.datatype_wsession)
+    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, t), f.datatype_wsession)
     if isempty(T.parameters)
         h5convert_uninitialized!(out+odr_sizeof(Vlen{UInt8}), Vlen{UInt8})
     else
@@ -897,7 +897,7 @@ function jlconvert(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
     if hasparams
         paramrefs = jlconvert(ReadRepresentation{RelOffset,Vlen{RelOffset}}(), f,
                               ptr+odr_sizeof(Vlen{UInt8}), NULL_REFERENCE)
-        params = Any[begin
+        params = Any[let
             # If the reference is to a committed datatype, read the datatype
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
