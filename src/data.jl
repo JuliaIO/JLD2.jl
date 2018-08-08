@@ -413,7 +413,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
             readtype, odrtype = typeof(dtrr).parameters
 
             if typeintersect(readtype, wstype) === Union{} &&
-               !method_exists(convert, Tuple{Type{wstype}, readtype})
+               !hasmethod(convert, Tuple{Type{wstype}, readtype})
                 # Saved type does not match type in workspace and no
                 # convert method exists, so we definitely need to reconstruct.
                 hard_failure && throw(TypeMappingException())

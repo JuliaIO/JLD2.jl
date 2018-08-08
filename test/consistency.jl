@@ -1,4 +1,4 @@
-using JLD2, Compat, Compat.Test
+using JLD2, Compat, Test
 
 for ioty in [JLD2.MmapIO, IOStream]
     fn = joinpath(tempdir(), "test.jld")

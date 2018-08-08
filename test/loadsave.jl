@@ -1,4 +1,4 @@
-using JLD2, FileIO, Compat, Compat.Test
+using JLD2, FileIO, Compat, Test
 
 fn = joinpath(tempdir(), "test.jld2")
 

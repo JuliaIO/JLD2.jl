@@ -1,4 +1,4 @@
-using JLD2, Compat, Compat.Test
+using JLD2, Compat, Test
 
 function writeloop(f, sz)
     for i = 1:sz
