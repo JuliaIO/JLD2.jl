@@ -13,6 +13,9 @@ macro write(fid, sym)
     esc(:(write($fid, $(string(sym)), $sym)))
 end
 
+# Seed random so that we get the same values every time
+Random.seed!(1337)
+
 # Define variables of different types
 x = 3.7
 A = reshape(1:15, 3, 5)
@@ -76,7 +79,7 @@ arr_undef = Vector{Any}(undef, 1)
 arr_undefs = Matrix{Any}(undef, 2, 2)
 ms_undef = MyStruct(0)
 # Unexported type:
-cpus = Base.Sys.cpu_info()
+version_info = Base.GIT_VERSION_INFO
 # Immutable type:
 rng = 1:5
 # Type with a pointer field (#84)
@@ -393,7 +396,7 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @write fid α
     @write fid β
     @write fid vv
-    @write fid cpus
+    @write fid version_info
     @write fid rng
     @write fid typevar
     @write fid typevar_lb
@@ -510,7 +513,7 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @check fidr α
     @check fidr β
     @check fidr vv
-    @check fidr cpus
+    @check fidr version_info
     @check fidr rng
     @check fidr typevar
     @check fidr typevar_lb
