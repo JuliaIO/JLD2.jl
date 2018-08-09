@@ -1,4 +1,4 @@
-using JLD2, Compat, Compat.Test, Compat.LinearAlgebra
+using JLD2, Compat, Compat.Test, Compat.LinearAlgebra, Printf, Random
 
 macro read(fid, sym)
     if !isa(sym, Symbol)
@@ -214,7 +214,7 @@ end
 bigfloatintobj = BigFloatIntObject(big(pi), big(typemax(UInt128))+1)
 # None
 none = Union{}
-nonearr = Vector{Union{}}(5)
+nonearr = Vector{Union{}}(undef, 5)
 # nothing/Nothing
 scalar_nothing = nothing
 vector_nothing = Union{Int,Nothing}[1,nothing]
@@ -352,9 +352,9 @@ function checkexpr(a::Expr, b::Expr)
 end
 
 fn = joinpath(tempdir(), "test.jld")
-
-println(fn)
 for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
+    @info("[$fn]: Using $(ioty), $(compress ? "compressed" : "uncompressed")")
+    @info("  Write time:")
     fid = jldopen(fn, true, true, true, ioty, compress=compress)
     @time begin
     @write fid x
@@ -470,6 +470,7 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     end
     close(fid)
 
+    @info("  Read time:")
     fidr = jldopen(fn, false, false, false, ioty)
     @time begin
     @check fidr x
@@ -521,11 +522,11 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     if !isa(arr_undef, Array{Any, 1}) || length(arr_undef) != 1 || isassigned(arr_undef, 1)
         error("For arr_undef, read value does not agree with written value")
     end
-    arr_undefs = read(fidr, "arr_undefs")
+    global arr_undefs = read(fidr, "arr_undefs")
     if !isa(arr_undefs, Array{Any, 2}) || length(arr_undefs) != 4 || any(map(i->isassigned(arr_undefs, i), 1:4))
         error("For arr_undefs, read value does not agree with written value")
     end
-    ms_undef = read(fidr, "ms_undef")
+    global ms_undef = read(fidr, "ms_undef")
     if !isa(ms_undef, MyStruct) || ms_undef.len != 0 || isdefined(ms_undef, :data)
         error("For ms_undef, read value does not agree with written value")
     end
