@@ -1,13 +1,8 @@
 module JLD2
 using DataStructures, CodecZlib, FileIO
 import Base.sizeof
-using Compat
-using Compat.Printf
-using Compat.Mmap
-
-if !isdefined(Base, :isbitstype)
-    const isbitstype = isbits # TODO: Add to Compat
-end
+using Printf
+using Mmap
 
 export jldopen, @load,   @save
 
@@ -199,12 +194,8 @@ openfile(::Type{IOStream}, fname, wr, create, truncate) =
 openfile(::Type{MmapIO}, fname, wr, create, truncate) =
     MmapIO(fname, wr, create, truncate)
 
-if VERSION >= v"0.7.0-DEV.3510"
-    # The delimiter is excluded by default
-    read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
-else
-    read_bytestring(io::IOStream) = chop(String(readuntil(io, 0x00)))
-end
+# The delimiter is excluded by default
+read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
 
 const OPEN_FILES = Dict{String,WeakRef}()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
