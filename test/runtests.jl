@@ -1,4 +1,4 @@
-using JLD2, FileIO, Compat
+using JLD2, FileIO
 using Test
 
 include("lookup3.jl")
