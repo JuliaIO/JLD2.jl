@@ -192,8 +192,10 @@ end
 
 @inline function read_scalar(f::JLDFile{IOStream}, rr, header_offset::RelOffset)
     r = Vector{UInt8}(undef, odr_sizeof(rr))
-    unsafe_read(f.io, pointer(r), odr_sizeof(rr))
-    jlconvert(rr, f, pointer(r), header_offset)
+    @GC.preserve r begin
+        unsafe_read(f.io, pointer(r), odr_sizeof(rr))
+        jlconvert(rr, f, pointer(r), header_offset)
+    end
 end
 
 @inline function read_compressed_array!(v::Array{T}, f::JLDFile{IOStream},
