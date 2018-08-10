@@ -413,7 +413,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
             readtype, odrtype = typeof(dtrr).parameters
 
             if typeintersect(readtype, wstype) === Union{} &&
-               !method_exists(convert, Tuple{Type{wstype}, readtype})
+               !hasmethod(convert, Tuple{Type{wstype}, readtype})
                 # Saved type does not match type in workspace and no
                 # convert method exists, so we definitely need to reconstruct.
                 hard_failure && throw(TypeMappingException())
@@ -1183,8 +1183,7 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
     # Now reconstruct the type
     reconname = gensym(T)
     eval(ReconstructedTypes,
-         Expr(VERSION >= v"0.7.0-DEV.1263" ? :struct_type : :composite_type, reconname,
-              Core.svec(), Core.svec(dt.names...), Any, types, false, 0))
+         Expr(:struct_type, reconname, Core.svec(), Core.svec(dt.names...), Any, types, false, 0))
     T = getfield(ReconstructedTypes, reconname)
 
     (ReadRepresentation{T,rodr}(), false)

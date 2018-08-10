@@ -12,7 +12,7 @@ macro save(filename, vars...)
         # Save all variables in the current module
         quote
             let
-                m = $(VERSION >= v"0.7.0-DEV.484" ? __module__ : current_module())
+                m = $(__module__)
                 f = jldopen($(esc(filename)), "w")
                 wsession = JLDWriteSession()
                 try

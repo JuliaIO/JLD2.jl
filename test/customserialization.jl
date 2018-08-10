@@ -1,4 +1,4 @@
-using JLD2, Base.Test
+using JLD2, Test
 
 struct SingleFieldWrapper{T}
     x::T

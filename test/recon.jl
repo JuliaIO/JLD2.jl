@@ -128,11 +128,7 @@ workspace()
 # workspace doesn't work anymore unless we call @eval Core.Main afterwards. Unfortunately, we can't
 # just put all this code in a block, because then it won't be evaluated at top-level. So
 # we need a bunch of @eval Core.Mains here.
-if VERSION > v"0.7.0-DEV.1877"
-    @eval Core.Main using .LastMain.JLD2, Compat, Compat.Test
-else
-    @eval Core.Main using LastMain.JLD2, Compat, Compat.Test
-end
+@eval Core.Main using .LastMain.JLD2, Compat, Test
 @eval Core.Main mutable struct TestType1
     x::Float64
 end
