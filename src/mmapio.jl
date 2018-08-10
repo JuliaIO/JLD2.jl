@@ -59,7 +59,7 @@ elseif Compat.Sys.iswindows()
     function mmap!(io::MmapIO, n::Int)
         oldptr = io.startptr
         mapping = ccall(:CreateFileMappingW, stdcall, Ptr{Cvoid},
-                        (Cptrdiff_t, Ptr{Cvoid}, DWORD, DWORD, DWORD, Ptr{Cvoid}),
+                        (Base.Libc.WindowsRawSocket, Ptr{Cvoid}, DWORD, DWORD, DWORD, Ptr{Cvoid}),
                         Mmap.gethandle(io.f), C_NULL,
                         io.write ? Mmap.PAGE_READWRITE : Mmap.PAGE_READONLY, n >> 32,
                         n % UInt32, C_NULL)
