@@ -761,7 +761,7 @@ function h5convert!(out::Pointers, fls::FixedLengthString, f::JLDFile, x, ::JLDW
     (unsafe_copyto!(convert(Ptr{UInt8}, out), pointer(x), fls.length); nothing)
 end
 h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x, wsession::JLDWriteSession) =
-    store_vlen!(out, UInt8, f, Vector{UInt8}(x), wsession)
+    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, x), wsession)
 
 jlconvert(::ReadRepresentation{String,Vlen{String}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
     String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
@@ -788,8 +788,10 @@ fieldodr(::Type{Symbol}, ::Bool) = Vlen{String}
 h5type(f::JLDFile, ::Type{Symbol}, x) = h5fieldtype(f, Symbol, typeof(x), Val{true})
 odr(::Type{Symbol}) = Vlen{String}
 
-h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x::Symbol, ::JLDWriteSession) =
-    store_vlen!(out, UInt8, f, Vector{UInt8}(String(x)), f.datatype_wsession)
+function h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x::Symbol, ::JLDWriteSession)
+    s = String(x)
+    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, s), f.datatype_wsession)
+end
 
 constructrr(::JLDFile, ::Type{Symbol}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
     dt == H5TYPE_VLEN_UTF8 ? (ReadRepresentation{Symbol,Vlen{String}}(), true) :
@@ -801,9 +803,9 @@ jlconvert(::ReadRepresentation{Symbol,Vlen{String}}, f::JLDFile, ptr::Ptr, ::Rel
 ## BigInts and BigFloats
 
 writeas(::Union{Type{BigInt},Type{BigFloat}}) = String
-wconvert(::Type{String}, x::BigInt) = base(62, x)
+wconvert(::Type{String}, x::BigInt) = string(x, base = 62)
 wconvert(::Type{String}, x::BigFloat) = string(x)
-rconvert(::Type{BigInt}, x::String) = parse(BigInt, x, 62)
+rconvert(::Type{BigInt}, x::String) = parse(BigInt, x, base = 62)
 rconvert(::Type{BigFloat}, x::String) = parse(BigFloat, x)
 
 ## DataTypes
@@ -849,7 +851,7 @@ function typename(T::DataType)
     tn = Symbol[]
     m = T.name.module
     while m != parentmodule(m)
-        push!(tn, module_name(m))
+        push!(tn, nameof(m))
         m = parentmodule(m)
     end
     reverse!(tn)
@@ -858,11 +860,12 @@ function typename(T::DataType)
 end
 
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
-    store_vlen!(out, UInt8, f, Vector{UInt8}(typename(T)), f.datatype_wsession)
+    t = typename(T)
+    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, t), f.datatype_wsession)
     if isempty(T.parameters)
         h5convert_uninitialized!(out+odr_sizeof(Vlen{UInt8}), Vlen{UInt8})
     else
-        refs = RelOffset[begin
+        refs = RelOffset[
             if isa(x, DataType)
                 # The heuristic here is that, if the field type is a committed data type,
                 # then we commit the datatype and write it as a reference to the committed
@@ -879,7 +882,7 @@ function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsess
             else
                 write_ref(f, x, wsession)
             end
-        end for x in T.parameters]
+        for x in T.parameters]
         store_vlen!(out+odr_sizeof(Vlen{UInt8}), RelOffset, f, refs, f.datatype_wsession)
     end
     nothing
@@ -894,7 +897,7 @@ function jlconvert(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
     if hasparams
         paramrefs = jlconvert(ReadRepresentation{RelOffset,Vlen{RelOffset}}(), f,
                               ptr+odr_sizeof(Vlen{UInt8}), NULL_REFERENCE)
-        params = Any[begin
+        params = Any[let
             # If the reference is to a committed datatype, read the datatype
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
@@ -1031,7 +1034,7 @@ rconvert(::Type{Core.SimpleVector}, x::Vector{Any}) = Core.svec(x...)
 ## Dicts
 
 writeas(::Type{Dict{K,V}}) where {K,V} = Vector{Pair{K,V}}
-writeas(::Type{ObjectIdDict}) = Vector{Pair{Any,Any}}
+writeas(::Type{IdDict}) = Vector{Pair{Any,Any}}
 wconvert(::Type{Vector{Pair{K,V}}}, x::AbstractDict{K,V}) where {K,V} = collect(x)
 function rconvert(::Type{T}, x::Vector{Pair{K,V}}) where {T<:AbstractDict,K,V}
     d = T()

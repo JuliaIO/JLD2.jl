@@ -59,7 +59,7 @@ elseif Compat.Sys.iswindows()
     function mmap!(io::MmapIO, n::Int)
         oldptr = io.startptr
         mapping = ccall(:CreateFileMappingW, stdcall, Ptr{Cvoid},
-                        (Cptrdiff_t, Ptr{Cvoid}, DWORD, DWORD, DWORD, Ptr{Cvoid}),
+                        (Base.Libc.WindowsRawSocket, Ptr{Cvoid}, DWORD, DWORD, DWORD, Ptr{Cvoid}),
                         Mmap.gethandle(io.f), C_NULL,
                         io.write ? Mmap.PAGE_READWRITE : Mmap.PAGE_READONLY, n >> 32,
                         n % UInt32, C_NULL)
@@ -97,7 +97,8 @@ end
 function MmapIO(fname::AbstractString, write::Bool, create::Bool, truncate::Bool)
     truncate && !write && throw(ArgumentError("cannot truncate file that is not writable"))
 
-    f = open(fname, true, write, create, truncate, false)
+    f = open(fname, read = true, write = write,
+             create = create, truncate = truncate, append = false)
     initialsz = truncate ? Int64(0) : filesize(fname)
     @static if Int == Int32
         initialsz > typemax(Int) && error("cannot read a file greater than 2GB on a 32-bit system")

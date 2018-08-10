@@ -1,4 +1,4 @@
-using JLD2, Compat, Compat.Test, Compat.LinearAlgebra
+using JLD2, Compat, Compat.Test, Compat.LinearAlgebra, Printf, Random
 
 macro read(fid, sym)
     if !isa(sym, Symbol)
@@ -12,6 +12,9 @@ macro write(fid, sym)
     end
     esc(:(write($fid, $(string(sym)), $sym)))
 end
+
+# Seed random so that we get the same values every time
+Random.seed!(1337)
 
 # Define variables of different types
 x = 3.7
@@ -37,7 +40,7 @@ AB = Any[A, B]
 t = (3, "cat")
 c = Complex{Float32}(3,7)
 cint = 1+im  # issue 108
-C = reinterpret(Complex{Float64}, B, (4,))
+C = reshape(reinterpret(Complex{Float64}, B), (4,))
 emptyA = zeros(0,2)
 emptyB = zeros(2,0)
 try
@@ -55,7 +58,7 @@ msempty = MyStruct(5, Float64[])
 sym = :TestSymbol
 syms = [:a, :b]
 d = Dict([(syms[1],"aardvark"), (syms[2], "banana")])
-oidd = ObjectIdDict([(syms[1],"aardvark"), (syms[2], "banana")])
+oidd = IdDict([(syms[1],"aardvark"), (syms[2], "banana")])
 ex = quote
     function incrementby1(x::Int)
         x+1
@@ -76,7 +79,7 @@ arr_undef = Vector{Any}(undef, 1)
 arr_undefs = Matrix{Any}(undef, 2, 2)
 ms_undef = MyStruct(0)
 # Unexported type:
-cpus = Base.Sys.cpu_info()
+version_info = Base.GIT_VERSION_INFO
 # Immutable type:
 rng = 1:5
 # Type with a pointer field (#84)
@@ -214,7 +217,7 @@ end
 bigfloatintobj = BigFloatIntObject(big(pi), big(typemax(UInt128))+1)
 # None
 none = Union{}
-nonearr = Vector{Union{}}(5)
+nonearr = Vector{Union{}}(undef, 5)
 # nothing/Nothing
 scalar_nothing = nothing
 vector_nothing = Union{Int,Nothing}[1,nothing]
@@ -237,9 +240,9 @@ bitsparamint16  = BitsParams{Int16(1)}()
 tuple_of_tuples = (1, 2, (3, 4, [5, 6]), [7, 8])
 
 # Zero-dimensional arrays
-zerod = Array{Int}()
+zerod = Array{Int}(undef)
 zerod[] = 1
-zerod_any = Array{Any}()
+zerod_any = Array{Any}(undef)
 zerod_any[] = 1.0+1.0im
 
 # Type with None typed field
@@ -313,7 +316,7 @@ macro check(fid, sym)
                 tmp = read($fid, $(string(sym)))
             catch e
                 @show e
-                Base.show_backtrace(STDOUT, catch_backtrace())
+                Base.show_backtrace(stdout, catch_backtrace())
                 error("error reading ", $(string(sym)))
             end
             written_type = typeof($sym)
@@ -352,9 +355,9 @@ function checkexpr(a::Expr, b::Expr)
 end
 
 fn = joinpath(tempdir(), "test.jld")
-
-println(fn)
 for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
+    @info("[$fn]: Using $(ioty), $(compress ? "compressed" : "uncompressed")")
+    @info("  Write time:")
     fid = jldopen(fn, true, true, true, ioty, compress=compress)
     @time begin
     @write fid x
@@ -393,7 +396,7 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @write fid α
     @write fid β
     @write fid vv
-    @write fid cpus
+    @write fid version_info
     @write fid rng
     @write fid typevar
     @write fid typevar_lb
@@ -470,6 +473,7 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     end
     close(fid)
 
+    @info("  Read time:")
     fidr = jldopen(fn, false, false, false, ioty)
     @time begin
     @check fidr x
@@ -509,7 +513,7 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @check fidr α
     @check fidr β
     @check fidr vv
-    @check fidr cpus
+    @check fidr version_info
     @check fidr rng
     @check fidr typevar
     @check fidr typevar_lb
@@ -517,15 +521,15 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @check fidr typevar_lb_ub
 
     # Special cases for reading undefs
-    arr_undef = read(fidr, "arr_undef")
+    global arr_undef = read(fidr, "arr_undef")
     if !isa(arr_undef, Array{Any, 1}) || length(arr_undef) != 1 || isassigned(arr_undef, 1)
         error("For arr_undef, read value does not agree with written value")
     end
-    arr_undefs = read(fidr, "arr_undefs")
+    global arr_undefs = read(fidr, "arr_undefs")
     if !isa(arr_undefs, Array{Any, 2}) || length(arr_undefs) != 4 || any(map(i->isassigned(arr_undefs, i), 1:4))
         error("For arr_undefs, read value does not agree with written value")
     end
-    ms_undef = read(fidr, "ms_undef")
+    global ms_undef = read(fidr, "ms_undef")
     if !isa(ms_undef, MyStruct) || ms_undef.len != 0 || isdefined(ms_undef, :data)
         error("For ms_undef, read value does not agree with written value")
     end

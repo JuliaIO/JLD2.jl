@@ -26,7 +26,7 @@ end
 
 func2()
 
-@test !isdefined(:loadmacrotestvar1) # should not be in global scope
+@test !isdefined(@__MODULE__, :loadmacrotestvar1) # should not be in global scope
 @test (@eval @load $fn) == [:loadmacrotestvar1, :loadmacrotestvar2]
 @test loadmacrotestvar1 == ['a', 'b', 'c']
 @test loadmacrotestvar2 == 1
@@ -73,7 +73,7 @@ end
 # Issue #19
 save(fn, Dict("a"=>[1,2,3]))
 io = open(fn)
-info("The next error message (involving Nullable{String}) is a sign of normal operation")
+@info("The next error message (involving \"loading nothing\") is a sign of normal operation")
 @test_throws MethodError load(io)
 close(io)
 
