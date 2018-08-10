@@ -2,28 +2,28 @@
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 
 [[BinaryProvider]]
-deps = ["Compat", "Pkg", "SHA"]
-git-tree-sha1 = "94dac52c662ca793008fb689e3daf626b6139943"
+deps = ["Libdl", "Pkg", "SHA", "Test"]
+git-tree-sha1 = "2883bc1b389e3d57a134796c39c788db3f298cef"
 uuid = "b99e7846-7c00-51b0-8f62-c81ae34c0232"
-version = "0.3.3"
+version = "0.4.0"
 
 [[CodecZlib]]
-deps = ["BinaryProvider", "Compat", "Test", "TranscodingStreams"]
+deps = ["BinaryProvider", "Compat", "Libdl", "Test", "TranscodingStreams"]
 git-tree-sha1 = "82742ef572290f566c6fc6d977d87586a0d3d5f1"
 uuid = "944b1d66-785c-5afd-91f1-9de20f533193"
 version = "0.4.3"
 
 [[Compat]]
 deps = ["Base64", "Dates", "DelimitedFiles", "Distributed", "InteractiveUtils", "LibGit2", "Libdl", "LinearAlgebra", "Markdown", "Mmap", "Pkg", "Printf", "REPL", "Random", "Serialization", "SharedArrays", "Sockets", "SparseArrays", "Statistics", "Test", "UUIDs", "Unicode"]
-git-tree-sha1 = "c478aec93ea90bb99c307a92df17a76131bf275f"
+git-tree-sha1 = "277d3807440d9793421354b6680911fc95d91a84"
 uuid = "34da2185-b29b-5c13-b0c7-acf172513d20"
-version = "1.0.0"
+version = "1.0.1"
 
 [[DataStructures]]
 deps = ["InteractiveUtils", "REPL", "Random", "Serialization", "Test"]
-git-tree-sha1 = "a591110d3ac12c9b4d0cec163fcf234baed7f5ac"
+git-tree-sha1 = "6e72a9098f5774601c8c8d6a4511a68270594910"
 uuid = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
-version = "0.10.0"
+version = "0.11.0"
 
 [[Dates]]
 deps = ["Printf"]
@@ -38,10 +38,10 @@ deps = ["LinearAlgebra", "Random", "Serialization", "Sockets"]
 uuid = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 
 [[FileIO]]
-deps = ["InteractiveUtils", "Pkg", "Random", "Test"]
-git-tree-sha1 = "4cfe13dce8564c2d0b96ad4a3a7f99e05fb97d46"
+deps = ["Pkg", "Random", "Test"]
+git-tree-sha1 = "b80161b7e679a1241f9441ebfa60b62d4239cf99"
 uuid = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
-version = "1.0.0"
+version = "1.0.1"
 
 [[InteractiveUtils]]
 deps = ["LinearAlgebra", "Markdown"]
@@ -109,10 +109,10 @@ deps = ["Distributed", "InteractiveUtils", "Logging", "Random"]
 uuid = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [[TranscodingStreams]]
-deps = ["Compat", "Random", "Test"]
-git-tree-sha1 = "d10e1e4b8fb8c6c50a1458c8e0de8f7abd0fc144"
+deps = ["Pkg", "Random", "Test"]
+git-tree-sha1 = "530829b1099ad19067dad83d31f278cf81e68a51"
 uuid = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
-version = "0.5.3"
+version = "0.6.1"
 
 [[UUIDs]]
 deps = ["Random"]
