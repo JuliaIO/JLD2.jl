@@ -1,7 +1,7 @@
 name = "JLD2"
 uuid = "30b3fee2-9826-11e8-2ba3-a7612145d6ce"
 authors = ["Simon Kornblith <simonster@users.noreply.github.com>"]
-version = "0.0.7"
+version = "0.1.0"
 
 [deps]
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
