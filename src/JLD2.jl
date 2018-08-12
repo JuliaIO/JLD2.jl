@@ -246,8 +246,8 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         if ver < v"0.2"
             throw(ArgumentError("only JLD2 files are presently supported"))
         elseif ver > CURRENT_VERSION
-            warn('"', fname, "\" was written in JLD file format version ", ver,
-                 ", but this version of JLD supports only JLD file format ", CURRENT_VERSION,
+            @warn("\"$fname\" was written in JLD file format version $ver" *
+                 ", but this version of JLD supports only JLD file format $CURRENT_VERSION" *
                  ". Some or all data in the file may not be readable")
         end
 
