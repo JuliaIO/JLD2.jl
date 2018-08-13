@@ -309,8 +309,8 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
         readas = datatype
         datatype = read_attr_data(f, written_type_attr)
         if isa(readas, UnknownType)
-            warn("custom serialization of ", typestring(readas),
-                 " encountered, but the type does not exist in the workspace; the data will be read unconverted")
+            @warn("custom serialization of $(typestring(readas))" *
+                  " encountered, but the type does not exist in the workspace; the data will be read unconverted")
             rr = (constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool})[1]
             canonical = false
         else
@@ -339,14 +339,14 @@ function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{Re
             if !hasdata(T)
                 (ReadRepresentation{T,nothing}(), true)
             else
-                warn("$T has $(T.size*8) bytes, but written type was empty; reconstructing")
+                @warn("$T has $(T.size*8) bytes, but written type was empty; reconstructing")
                 reconstruct_bitstype(T.name.name, dt.size, empty)
             end
         else
             if isempty(T.types)
-                warn("primitive type $T has $(T.size*8) bits, but written type has $(dt.size*8) bits; reconstructing")
+                @warn("primitive type $T has $(T.size*8) bits, but written type has $(dt.size*8) bits; reconstructing")
             else
-                warn("$T is a non-primitive type, but written type is a primitive type with $(dt.size*8) bits; reconstructing")
+                @warn("$T is a non-primitive type, but written type is a primitive type with $(dt.size*8) bits; reconstructing")
             end
             reconstruct_bitstype(T.name.name, dt.size, empty)
         end
@@ -372,7 +372,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
 
     # If read type is not a leaf type, reconstruct
     if !isconcretetype(T)
-        warn("read type $T is not a leaf type in workspace; reconstructing")
+        @warn("read type $T is not a leaf type in workspace; reconstructing")
         return reconstruct_compound(f, string(T), dt, field_datatypes)
     end
 
@@ -399,7 +399,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
         else
             if !haskey(dtnames, fn[i])
                 hard_failure && throw(TypeMappingException())
-                warn("saved type ", T, " is missing field ", fn[i], " in workspace type; reconstructing")
+                @warn("saved type $T is missing field $(fn[i]) in workspace type; reconstructing")
                 return reconstruct_compound(f, string(T), dt, field_datatypes)
             end
 
@@ -417,9 +417,9 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
                 # Saved type does not match type in workspace and no
                 # convert method exists, so we definitely need to reconstruct.
                 hard_failure && throw(TypeMappingException())
-                warn("saved type ", T, " has field ", fn[i], "::", readtype,
-                     ", but workspace type has field ", fn[i], "::", wstype,
-                     ", and no applicable convert method exists; reconstructing")
+                @warn("saved type $T has field $(fn[i])::$(readtype)" *
+                      ", but workspace type has field $(fn[i])::$(wstype)" *
+                      ", and no applicable convert method exists; reconstructing")
                 return reconstruct_compound(f, string(T), dt, field_datatypes)
             end
 
@@ -433,10 +433,10 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
     end
 
     if !all(mapped)
-        warn("the following fields are present in type ", T,
-             " saved in the file but not present in the type the workspace:\n\n",
-             join(dt.names[.!mapped], "\n"),
-             "\n\nData in these fields will not be accessible")
+        @warn("the following fields are present in type $T" *
+              " saved in the file but not present in the type the workspace:\n\n" *
+              "$(join(dt.names[.!mapped], "\n"))," *
+              "\n\nData in these fields will not be accessible")
     end
 
     if samelayout
@@ -474,7 +474,7 @@ end
 function constructrr(f::JLDFile, T::UnionAll, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
-    warn("read type $T is not a leaf type in workspace; reconstructing")
+    @warn("read type $T is not a leaf type in workspace; reconstructing")
     return reconstruct_compound(f, string(T), dt, read_field_datatypes(f, attrs))
 end
 
@@ -1058,7 +1058,7 @@ end
 
 function constructrr(f::JLDFile, unk::UnknownType, dt::BasicDatatype,
                      attrs::Vector{ReadAttribute})
-    warn("type ", typestring(unk), " does not exist in workspace; reconstructing")
+    @warn("type $(typestring(unk)) does not exist in workspace; reconstructing")
     reconstruct_bitstype(typestring(unk), dt.size, check_empty(attrs))
 end
 
@@ -1093,8 +1093,8 @@ function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatyp
         # the parameters must depend on the types actually encoded in the file
         (ReadRepresentation{Tuple,rodr}(), false)
     else
-        warn("read type ", typestring(unk), " was parametrized, but type ",
-             unk.name, " in workspace is not; reconstructing")
+        @warn("read type $(typestring(unk)) was parametrized, but type " *
+              "$(unk.name) in workspace is not; reconstructing")
         reconstruct_compound(f, typestring(unk), dt, field_datatypes)
     end
 end
@@ -1112,8 +1112,8 @@ function constructrr(f::JLDFile, unk::UnknownType{UnionAll}, dt::CompoundDatatyp
     field_datatypes = read_field_datatypes(f, attrs)
     body = behead(unk.name)
     if length(body.parameters) != length(unk.parameters)
-        warn("read type ", typestring(unk), " has a different number of parameters from type ",
-             unk.name, " in workspace; reconstructing")
+        @warn("read type $(typestring(unk)) has a different number of parameters from type " *
+              "$(unk.name) in workspace; reconstructing")
         reconstruct_compound(f, typestring(unk), dt, field_datatypes)
     else
         params = copy(unk.parameters)
@@ -1130,17 +1130,17 @@ function constructrr(f::JLDFile, unk::UnknownType{UnionAll}, dt::CompoundDatatyp
         try
             T = unk.name{params...}
         catch err
-            warn("type parameters for ", typestring(unk), " do not match type ", unk.name, " in workspace; reconstructing")
+            @warn("type parameters for $(typestring(unk)) do not match type $(unk.name) in workspace; reconstructing")
             return reconstruct_compound(f, typestring(unk), dt, field_datatypes)
         end
 
         try
             (rr,) = constructrr(f, T, dt, attrs, true)
-            warn("some parameters could not be resolved for type ", typestring(unk), "; reading as ", T)
+            @warn("some parameters could not be resolved for type $(typestring(unk)); reading as $T")
             return (rr, false)
         catch err
             !isa(err, TypeMappingException) && rethrow(err)
-            warn("some parameters could not be resolved for type ", typestring(unk), "; reconstructing")
+            @warn("some parameters could not be resolved for type $(typestring(unk)); reconstructing")
             return reconstruct_compound(f, typestring(unk), dt, field_datatypes)
         end
     end
@@ -1150,7 +1150,7 @@ end
 function constructrr(f::JLDFile, unk::UnknownType{String}, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute})
     ts = typestring(unk)
-    warn("type ", ts, " does not exist in workspace; reconstructing")
+    @warn("type $ts does not exist in workspace; reconstructing")
     reconstruct_compound(f, ts, dt, read_field_datatypes(f, attrs))
 end
 

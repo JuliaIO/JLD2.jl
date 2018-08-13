@@ -25,7 +25,7 @@ macro save(filename, vars...)
                                     write(f, s, v, wsession)
                                 catch e
                                     if isa(e, PointerException)
-                                        warn("skipping $vname because it contains a pointer")
+                                        @warn("skipping $vname because it contains a pointer")
                                     else
                                         rethrow(e)
                                     end

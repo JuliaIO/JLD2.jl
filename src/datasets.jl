@@ -191,7 +191,7 @@ function read_data(f::JLDFile, rr::ReadRepresentation{Any,RelOffset},
                 T = read_attr_data(f, x)
                 if isa(T, UnknownType)
                     str = typestring(T)
-                    warn("type $(str) does not exist in workspace; interpreting Array{$str} as Array{Any}")
+                    @warn("type $(str) does not exist in workspace; interpreting Array{$str} as Array{Any}")
                     T = Any
                 end
                 seek(io, startpos)
