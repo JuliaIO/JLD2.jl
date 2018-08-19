@@ -1051,7 +1051,7 @@ module ReconstructedTypes end
 
 function reconstruct_bitstype(name::Union{Symbol,String}, size::Integer, empty::Bool)
     sym = gensym(name)
-    eval(ReconstructedTypes, empty ? :(struct $(sym) end) : :(primitive type $(sym) $(Int(size)*8) end))
+    Core.eval(ReconstructedTypes, empty ? :(struct $(sym) end) : :(primitive type $(sym) $(Int(size)*8) end))
     T = getfield(ReconstructedTypes, sym)
     (ReadRepresentation{T, empty ? nothing : T}(), false)
 end
@@ -1182,8 +1182,8 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
 
     # Now reconstruct the type
     reconname = gensym(T)
-    eval(ReconstructedTypes,
-         Expr(:struct_type, reconname, Core.svec(), Core.svec(dt.names...), Any, types, false, 0))
+    Core.eval(ReconstructedTypes,
+              Expr(:struct_type, reconname, Core.svec(), Core.svec(dt.names...), Any, types, false, 0))
     T = getfield(ReconstructedTypes, reconname)
 
     (ReadRepresentation{T,rodr}(), false)
