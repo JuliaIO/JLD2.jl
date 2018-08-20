@@ -848,8 +848,8 @@ h5type(f::JLDFile, ::Type{T}, x) where {T<:DataType} =
 odr(::Type{T}) where {T<:DataType} = DataTypeODR()
 
 function typename(T::DataType)
-    tn = Symbol[]
     m = T.name.module
+    tn = Symbol[nameof(m)]
     while m != parentmodule(m)
         push!(tn, nameof(m))
         m = parentmodule(m)
