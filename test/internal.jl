@@ -80,5 +80,4 @@ end
 @test JLD2.size_size(UInt64(4294967296)) === 8
 
 # test with one of its own types
-println()
 @test JLD2.typename(JLD2.BasicDatatype) == "JLD2.BasicDatatype"
