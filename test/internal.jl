@@ -78,3 +78,6 @@ end
 @test JLD2.size_size(256) === 2
 @test JLD2.size_size(65536) === 4
 @test JLD2.size_size(UInt64(4294967296)) === 8
+
+# test with one of its own types
+@test JLD2.typename(JLD2.BasicDataType) == "JLD2.BasicDataType"
