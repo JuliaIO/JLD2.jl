@@ -1255,11 +1255,10 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
         rtype = types[i]
         odr = odrs[i]
 
-        # TODO: `fsym` definition is not correct for mutable objects that redefine `setproperty!`
-        # Currently it is patched for `T` that is mutable and when `odr` is not nothing
-        # Other cases should be also covered in the future as I had no scenarios to test against.
-        fsym = T.mutable ? Expr(:., :obj, QuoteNode(fn[i])) : Symbol("field_", fn[i])
-        push!(fsyms, fsym)
+        if !T.mutable
+            fsym = Symbol("field_", fn[i])
+            push!(fsyms, fsym)
+        end
 
         rr = ReadRepresentation{rtype,odr}()
 
@@ -1267,12 +1266,17 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
             # Type is not stored or single instance
             if T.types[i] == Union{}
                 # This cannot be defined
+                @assert !T.mutable
                 push!(args, Expr(:return, Expr(:new, T, fsyms[1:i-1]...)))
                 return blk
             else
-                # TODO: this is broken if T is mutable and redefines `setproperty!`
-                # Should be fixed when some test data is available to verify a proper implementation
-                push!(args, :($fsym = $(Expr(:new, T.types[i]))))
+                newi = Expr(:new, T.types[i])
+                if T.mutable
+                    fni = QuoteNode(fn[i])
+                    push!(args, :(setfield!(obj, $fni, $newi)))
+                else
+                    push!(args, :($fsym = $newi))
+                end
             end
         else
             if jlconvert_canbeuninitialized(rr)
@@ -1297,7 +1301,7 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
                 push!(args, :($fsym = jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype))
             else
                 ttype = T.types[i]
-                                fni = QuoteNode(fn[i])
+                fni = QuoteNode(fn[i])
                 if T.mutable
                     push!(args, :(setfield!(obj, $fni,
                                             convert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype)))
