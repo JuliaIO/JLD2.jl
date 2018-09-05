@@ -84,3 +84,18 @@ d = Dict("params/p1" => 1,
          "data" => [[1,2,3], [4.,5.,6]])
 save(fn, d)
 @test load(fn) == d
+
+# Issue #106
+mutable struct MyMutableTest
+    a::Int
+    b::Vector{Int}
+end
+Base.getproperty(df::MyMutableTest, s::Symbol) =
+    throw(ArgumentError("should not be called"))
+Base.setproperty!(df::MyMutableTest, s::Symbol, x::Int) =
+    throw(ArgumentError("should not be called"))
+Base.isequal(x::MyMutableTest, y::MyMutableTest) =
+    isequal(getfield(x, :a), getfield(y, :a)) && isequal(getfield(x, :b), getfield(y, :b))
+mmtd = Dict("A" => MyMutableTest(1, [10]))
+save(fn, mmtd)
+@test isequal(load(fn), mmtd)

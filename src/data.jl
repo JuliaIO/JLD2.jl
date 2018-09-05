@@ -1255,8 +1255,10 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
         rtype = types[i]
         odr = odrs[i]
 
-        fsym = T.mutable ? Expr(:., :obj, QuoteNode(fn[i])) : Symbol("field_", fn[i])
-        push!(fsyms, fsym)
+        if !T.mutable
+            fsym = Symbol("field_", fn[i])
+            push!(fsyms, fsym)
+        end
 
         rr = ReadRepresentation{rtype,odr}()
 
@@ -1264,10 +1266,17 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
             # Type is not stored or single instance
             if T.types[i] == Union{}
                 # This cannot be defined
+                @assert !T.mutable
                 push!(args, Expr(:return, Expr(:new, T, fsyms[1:i-1]...)))
                 return blk
             else
-                push!(args, :($fsym = $(Expr(:new, T.types[i]))))
+                newi = Expr(:new, T.types[i])
+                if T.mutable
+                    fni = QuoteNode(fn[i])
+                    push!(args, :(setfield!(obj, $fni, $newi)))
+                else
+                    push!(args, :($fsym = $newi))
+                end
             end
         else
             if jlconvert_canbeuninitialized(rr)
@@ -1292,7 +1301,13 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
                 push!(args, :($fsym = jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype))
             else
                 ttype = T.types[i]
-                push!(args, :($fsym = convert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype))
+                fni = QuoteNode(fn[i])
+                if T.mutable
+                    push!(args, :(setfield!(obj, $fni,
+                                            convert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype)))
+                else
+                    push!(args, :($fsym = convert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype))
+                end
             end
         end
     end
