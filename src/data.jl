@@ -847,17 +847,7 @@ h5type(f::JLDFile, ::Type{T}, x) where {T<:DataType} =
     h5fieldtype(f, DataType, typeof(x), Val{true})
 odr(::Type{T}) where {T<:DataType} = DataTypeODR()
 
-function typename(T::DataType)
-    m = T.name.module
-    tn = Symbol[nameof(m)]
-    while m != parentmodule(m)
-        push!(tn, nameof(m))
-        m = parentmodule(m)
-    end
-    reverse!(tn)
-    push!(tn, T.name.name)
-    join(tn, ".")
-end
+typename(T::DataType) = join([fullname(T.name.module)..., T.name.name], ".")
 
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     t = typename(T)

@@ -319,4 +319,83 @@
 
         rm(tmpdir; force = true, recursive = true)
     end
+    @testset "issue #154 - type exists in child module but not in parent module" begin
+        original_directory = pwd()
+        tmpdir = mktempdir()
+        atexit(() -> rm(tmpdir; force = true, recursive = true))
+
+        cd(tmpdir)
+        rm("test.jld"; force = true, recursive = true)
+
+        code = """
+        using JLD2
+
+        # Always start fresh
+        rm("test.jld"; force=true)
+
+        # Write out jld file in child module
+        module Child
+        using JLD2, LinearAlgebra, Pkg
+        jldopen("test.jld", "w") do io
+            # Symmetric is correctly loadable
+            io["linalg_obj"] = Symmetric(randn(2,2,))
+
+            # PackgeSpec is not loadable, because it's actually Pkg.Types.PackageSpec; it will be "reconstructed"
+            io["pkg_types_obj"] = PackageSpec(;name = "Foo")
+        end
+        @info("Wrote out to test.jld")
+
+        # Parent module will call do_read()
+        function do_read()
+            jldopen("test.jld", "r") do io
+                io["linalg_obj"], io["pkg_types_obj"]
+            end
+        end
+        end # module Child
+
+        # Read it out in parent module (where Pkg and LinearAlgebra don't exist)
+        import .Child
+
+        result = Child.do_read()
+
+        import Test
+
+        Test.@test result isa Tuple
+        Test.@test length(result) == 2
+
+        Test.@test size(result[1]) == (2, 2)
+        Test.@test result[1][1][1] isa Float64
+        Test.@test result[1][1][2] isa Float64
+        Test.@test result[1][2][1] isa Float64
+        Test.@test result[1][2][2] isa Float64
+
+        Test.@test result[2].name isa String
+        Test.@test result[2].name == "Foo"
+
+        Test.@test !JLD2.isreconstructed(result)
+
+        Test.@test !JLD2.isreconstructed(result[1])
+        Test.@test !JLD2.isreconstructed(result[1][1][1])
+        Test.@test !JLD2.isreconstructed(result[1][1][2])
+        Test.@test !JLD2.isreconstructed(result[1][2][1])
+        Test.@test !JLD2.isreconstructed(result[1][2][2])
+
+        Test.@test !JLD2.isreconstructed(result[2])
+        Test.@test !JLD2.isreconstructed(result[2].name)
+
+        # NOTE: we do not import Pkg and LinearAlgebra into the parent
+        # module until AFTER we have run `Child.do_read()`
+        import Pkg
+        import LinearAlgebra
+
+        Test.@test result[1] isa LinearAlgebra.Symmetric{Float64,Array{Float64,2}}
+        Test.@test result[2] isa Pkg.Types.PackageSpec
+        """
+
+        loading_cmd = `$(Base.julia_cmd()) -e $(code)`
+        @test success(cmd)
+
+        cd(original_directory)
+        rm(tmpdir; force = true, recursive = true)
+    end
 end
