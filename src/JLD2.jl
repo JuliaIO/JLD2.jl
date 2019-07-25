@@ -205,6 +205,15 @@ Defaults to `false`.
 """
 const COMPRESS = Ref(false)
 
+"""
+Threshold for using the compact storage layout.
+Data items of smaller size will use the compact layout.
+Bigger data items will use either chunked or continuous layout depending on their data type.
+
+Defaults to 8192.
+"""
+const COMPACT_STORAGE_THRESHOLD = Ref(8192)
+
 const OPEN_FILES = Dict{String,WeakRef}()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
                  compress::Bool=COMPRESS[], mmaparrays::Bool=false) where T<:Union{Type{IOStream},Type{MmapIO}}

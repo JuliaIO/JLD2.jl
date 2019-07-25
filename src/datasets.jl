@@ -351,7 +351,7 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
     psz = payload_size_without_storage_message(dataspace, datatype)
-    if datasz < 8192
+    if datasz < COMPACT_STORAGE_THRESHOLD[]
         layout_class = LC_COMPACT_STORAGE
         psz += sizeof(CompactStorageMessage) + datasz
     elseif f.compress && isconcretetype(T) && isbitstype(T)
