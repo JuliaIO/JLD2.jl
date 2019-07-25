@@ -909,8 +909,13 @@ function jlconvert(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
 
     path = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
     parts = split(path, '.')
-    m = Main
-    for part in parts
+    sym = Symbol(parts[1])
+    m = filter(m->nameof(m) == sym, keys(Base.module_keys))
+    if isempty(m)
+        return hasparams ? UnknownType(path, params) : UnknownType(path)
+    end
+    m = pop!(m)
+    for part in parts[2:end]
         sym = Symbol(part)
         if !isdefined(m, sym)
             return hasparams ? UnknownType(path, params) : UnknownType(path)
