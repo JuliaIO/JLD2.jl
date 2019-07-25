@@ -350,8 +350,6 @@ end
 function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data::Array{T}, wsession::JLDWriteSession) where {T,S}
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
-    layout_class = datasz < 8192 ? LC_COMPACT_STORAGE :
-                   f.compress ? LC_CHUNKED_STORAGE : LC_CONTIGUOUS_STORAGE
     psz = payload_size_without_storage_message(dataspace, datatype)
     if datasz < 8192
         layout_class = LC_COMPACT_STORAGE
