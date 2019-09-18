@@ -1,6 +1,6 @@
 # JLD2
 
-[![Travis Build Status](https://travis-ci.org/simonster/JLD2.jl.svg?branch=master)](https://travis-ci.org/simonster/JLD2.jl)
+[![Travis Build Status](https://travis-ci.org/JuliaIO/JLD2.jl.svg?branch=master)](https://travis-ci.org/JuliaIO/JLD2.jl)
 [![AppVeyor Build Status](https://ci.appveyor.com/api/projects/status/9wk39naux5dhwhen?svg=true)](https://ci.appveyor.com/project/simonster/jld2-jl)
 [![codecov.io](http://codecov.io/github/simonster/JLD2.jl/coverage.svg?branch=master)](http://codecov.io/github/simonster/JLD2.jl?branch=master)
 
