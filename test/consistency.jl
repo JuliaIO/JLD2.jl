@@ -1,7 +1,7 @@
 using JLD2, Test
 
 for ioty in [JLD2.MmapIO, IOStream]
-    fn = joinpath(tempdir(), "test.jld")
+    fn = joinpath(mktempdir(), "test.jld")
 
     # Ensure we can handle cases where the same file is open multiple times
     f = jldopen(fn, true, true, true, ioty)

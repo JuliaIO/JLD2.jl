@@ -203,7 +203,7 @@ function read_tests(file, prefix, obj)
     @test typeof(empty_arr) == Vector{typeof(obj)} && length(empty_arr) == 0
 end
 
-fn = joinpath(tempdir(),"test.jld")
+fn = joinpath(mktempdir(),"test.jld")
 println(fn)
 file = jldopen(fn, "w")
 write_tests(file, "a", a)

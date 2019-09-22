@@ -1,6 +1,6 @@
 using JLD2, Test
 
-fn = joinpath(tempdir(),"test.jld")
+fn = joinpath(mktempdir(), "test.jld")
 f = jldopen(fn, "w")
 write(f, "x1", 1.0)
 close(f)
