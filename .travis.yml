@@ -5,9 +5,9 @@ os:
   - osx
 
 julia:
-  - 0.7
-  - 1.0
-  - nightly
+  - "1.0"
+  - "1.2"
+  - "nightly"
 
 matrix:
   fast_finish: true

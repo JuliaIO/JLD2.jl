@@ -354,7 +354,7 @@ function checkexpr(a::Expr, b::Expr)
     @assert i >= length(a.args) && j >= length(b.args)
 end
 
-fn = joinpath(tempdir(), "test.jld")
+fn = joinpath(mktempdir(), "test.jld")
 for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @info("[$fn]: Using $(ioty), $(compress ? "compressed" : "uncompressed")")
     @info("  Write time:")

@@ -1,6 +1,6 @@
 using JLD2, Test
 
-fn = joinpath(tempdir(),"test.jld")
+fn = joinpath(mktempdir(), "test.jld")
 f = jldopen(fn, "w")
 write(f, "/test_group_1/x1", 1)
 @test !isempty(read(f, "test_group_1"))

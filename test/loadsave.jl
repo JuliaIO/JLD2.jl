@@ -1,6 +1,6 @@
 using JLD2, FileIO, Test
 
-fn = joinpath(tempdir(), "test.jld2")
+fn = joinpath(mktempdir(), "test.jld2")
 
 # Test load macros
 jldopen(fn, "w") do f

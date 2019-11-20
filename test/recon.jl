@@ -85,7 +85,7 @@ primitive type TestType20 16 end
 struct TestType21 end
 
 
-fn = joinpath(tempdir(),"test.jld")
+fn = joinpath(mktempdir(), "test.jld")
 file = jldopen(fn, "w")
 write(file, "x1", TestType1(57))
 write(file, "x2", TestType3(TestType2(1)))

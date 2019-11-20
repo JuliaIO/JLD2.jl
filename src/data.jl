@@ -888,10 +888,57 @@ function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsess
     nothing
 end
 
+# returns the result of searching for the type in the specified module m
+function _resolve_type_singlemodule(::ReadRepresentation{T,DataTypeODR()},
+                                    m,
+                                    parts,
+                                    mypath,
+                                    hasparams::Bool,
+                                    params) where T
+    for part in parts[2:end]
+        sym = Symbol(part)
+        if !isdefined(m, sym)
+            return hasparams ? UnknownType(mypath, params) : UnknownType(mypath)
+        end
+        m = getfield(m, sym)
+    end
+    if !isa(m, DataType) && !isa(m, UnionAll)
+        return hasparams ? UnknownType(mypath, params) : UnknownType(mypath)
+    end
+    return m
+end
+
+_is_not_unknown_type(x::UnknownType) = false
+_is_not_unknown_type(x) = true
+
+function _resolve_type(rr::ReadRepresentation{T,DataTypeODR()},
+                       f::JLDFile,
+                       ptr::Ptr,
+                       header_offset::RelOffset,
+                       mypath,
+                       hasparams::Bool,
+                       params) where T
+    parts = split(mypath, '.')
+    for mod in Iterators.flatten((keys(Base.module_keys), stdlibmodules(Main)))
+        resolution_attempt = _resolve_type_singlemodule(rr,
+                                                        mod,
+                                                        parts,
+                                                        mypath,
+                                                        hasparams,
+                                                        params)
+        if _is_not_unknown_type(resolution_attempt)
+            return resolution_attempt
+        end
+    end
+    return hasparams ? UnknownType(mypath, params) : UnknownType(mypath)
+end
+
 # Read a type. Returns an instance of UnknownType if the type or parameters
 # could not be resolved.
-function jlconvert(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
-                   ptr::Ptr, header_offset::RelOffset) where T
+function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
+                   f::JLDFile,
+                   ptr::Ptr,
+                   header_offset::RelOffset) where T
     hasparams = unsafe_load(convert(Ptr{UInt32}, ptr+odr_sizeof(Vlen{UInt8}))) != 0
     unknown_params = false
     if hasparams
@@ -907,24 +954,8 @@ function jlconvert(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
         end for ref in paramrefs]
     end
 
-    path = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
-    parts = split(path, '.')
-    sym = Symbol(parts[1])
-    m = filter(m->nameof(m) == sym, keys(Base.module_keys))
-    if isempty(m)
-        return hasparams ? UnknownType(path, params) : UnknownType(path)
-    end
-    m = pop!(m)
-    for part in parts[2:end]
-        sym = Symbol(part)
-        if !isdefined(m, sym)
-            return hasparams ? UnknownType(path, params) : UnknownType(path)
-        end
-        m = getfield(m, sym)
-    end
-    if !isa(m, DataType) && !isa(m, UnionAll)
-        return hasparams ? UnknownType(path, params) : UnknownType(path)
-    end
+    mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
+    m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
 
     if hasparams
         unknown_params && return UnknownType(m, params)
@@ -939,7 +970,7 @@ function jlconvert(::ReadRepresentation{T,DataTypeODR()}, f::JLDFile,
         m = Tuple{}
     end
     track_weakref!(f, header_offset, m)
-    m
+    return m
 end
 
 constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute}) where {T<:DataType} =
@@ -1053,6 +1084,12 @@ end
 ## Type reconstruction
 
 module ReconstructedTypes end
+
+isreconstructed(x) = isreconstructed(typeof(x))
+
+function isreconstructed(::Type{T}) where T
+    return supertype(T) == Any && parentmodule(T) == ReconstructedTypes
+end
 
 function reconstruct_bitstype(name::Union{Symbol,String}, size::Integer, empty::Bool)
     sym = gensym(name)

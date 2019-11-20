@@ -9,6 +9,8 @@ include("groups.jl")
 include("consistency.jl")
 include("loadsave.jl")
 include("modules.jl")
+include("modules-nested.jl")
+include("isreconstructed.jl")
 
 # Only run the reconstruction tests on versions where `workspace` is a thing
 
