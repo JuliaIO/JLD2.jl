@@ -364,10 +364,12 @@
         Test.@test length(result) == 2
 
         Test.@test size(result[1]) == (2, 2)
-        Test.@test result[1][1][1] isa Float64
-        Test.@test result[1][1][2] isa Float64
-        Test.@test result[1][2][1] isa Float64
-        Test.@test result[1][2][2] isa Float64
+        @info("", length(result[1]))
+        Test.@test length(result[1]) == 4
+        Test.@test result[1][1] isa Float64
+        Test.@test result[1][2] isa Float64
+        Test.@test result[1][3] isa Float64
+        Test.@test result[1][4] isa Float64
 
         Test.@test result[2].name isa String
         Test.@test result[2].name == "Foo"
@@ -375,10 +377,10 @@
         Test.@test !JLD2.isreconstructed(result)
 
         Test.@test !JLD2.isreconstructed(result[1])
-        Test.@test !JLD2.isreconstructed(result[1][1][1])
-        Test.@test !JLD2.isreconstructed(result[1][1][2])
-        Test.@test !JLD2.isreconstructed(result[1][2][1])
-        Test.@test !JLD2.isreconstructed(result[1][2][2])
+        Test.@test !JLD2.isreconstructed(result[1][1])
+        Test.@test !JLD2.isreconstructed(result[1][2])
+        Test.@test !JLD2.isreconstructed(result[1][3])
+        Test.@test !JLD2.isreconstructed(result[1][4])
 
         Test.@test !JLD2.isreconstructed(result[2])
         Test.@test !JLD2.isreconstructed(result[2].name)
