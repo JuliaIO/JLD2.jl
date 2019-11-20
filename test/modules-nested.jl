@@ -393,6 +393,7 @@
         """
 
         my_cmd = `$(Base.julia_cmd()) -e $(code)`
+        run(my_cmd)
         @test success(my_cmd)
 
         cd(original_directory)
