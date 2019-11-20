@@ -340,7 +340,7 @@
             # Symmetric is correctly loadable
             io["linalg_obj"] = Symmetric(randn(2,2,))
 
-            # PackgeSpec is not loadable, because it's actually Pkg.Types.PackageSpec; it will be "reconstructed"
+            # PackageSpec is actually Pkg.Types.PackageSpec
             io["pkg_types_obj"] = PackageSpec(;name = "Foo")
         end
         @info("Wrote out to test.jld")
