@@ -392,8 +392,8 @@
         Test.@test result[2] isa Pkg.Types.PackageSpec
         """
 
-        loading_cmd = `$(Base.julia_cmd()) -e $(code)`
-        @test success(cmd)
+        my_cmd = `$(Base.julia_cmd()) -e $(code)`
+        @test success(my_cmd)
 
         cd(original_directory)
         rm(tmpdir; force = true, recursive = true)
