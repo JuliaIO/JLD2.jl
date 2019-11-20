@@ -848,15 +848,11 @@ h5type(f::JLDFile, ::Type{T}, x) where {T<:DataType} =
 odr(::Type{T}) where {T<:DataType} = DataTypeODR()
 
 function typename(T::DataType)
-    m = T.name.module
-    tn = Symbol[nameof(m)]
-    while m != parentmodule(m)
-        push!(tn, nameof(m))
-        m = parentmodule(m)
-    end
-    reverse!(tn)
-    push!(tn, T.name.name)
-    join(tn, ".")
+    s = IOBuffer()
+    join(s, fullname(T.name.module), '.')
+    print(s, '.')
+    print(s, T.name.name)
+    return String(resize!(s.data, s.size))
 end
 
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)

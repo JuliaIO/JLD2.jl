@@ -81,3 +81,12 @@ end
 
 # test with one of its own types
 @test JLD2.typename(JLD2.BasicDatatype) == "JLD2.BasicDatatype"
+@test JLD2.typename(String) == "Core.String"
+
+module Foo
+    module Bar
+        struct Baz end
+    end
+end
+
+@test endswith(JLD2.typename(Foo.Bar.Baz), "Foo.Bar.Baz")
