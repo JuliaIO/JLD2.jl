@@ -27,6 +27,7 @@ include("Lookup3.jl")
 include("mmapio.jl")
 include("bufferedio.jl")
 include("misc.jl")
+include("utils.jl")
 
 """
     RelOffset
@@ -202,7 +203,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                  compress::Bool=false, mmaparrays::Bool=false) where T<:Union{Type{IOStream},Type{MmapIO}}
     exists = isfile(fname)
     if exists
-        rname = realpath(fname)
+        rname = safe_realpath(fname)
         if haskey(OPEN_FILES, rname)
             ref = OPEN_FILES[rname]
             f = ref.value
@@ -229,7 +230,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
     end
 
     io = openfile(iotype, fname, wr, create, truncate)
-    rname = realpath(fname)
+    rname = safe_realpath(fname)
     created = !exists || truncate
     f = JLDFile(io, rname, wr, created, compress, mmaparrays)
     OPEN_FILES[rname] = WeakRef(f)
