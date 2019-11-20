@@ -364,7 +364,6 @@
         Test.@test length(result) == 2
 
         Test.@test size(result[1]) == (2, 2)
-        @info("", length(result[1]))
         Test.@test length(result[1]) == 4
         Test.@test result[1][1] isa Float64
         Test.@test result[1][2] isa Float64
@@ -395,7 +394,6 @@
         """
 
         my_cmd = `$(Base.julia_cmd()) -e $(code)`
-        run(my_cmd)
         @test success(my_cmd)
 
         cd(original_directory)
