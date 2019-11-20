@@ -2,7 +2,7 @@
 
 [![Travis Build Status](https://travis-ci.org/JuliaIO/JLD2.jl.svg?branch=master)](https://travis-ci.org/JuliaIO/JLD2.jl)
 [![AppVeyor Build Status](https://ci.appveyor.com/api/projects/status/9wk39naux5dhwhen?svg=true)](https://ci.appveyor.com/project/simonster/jld2-jl)
-[![codecov.io](http://codecov.io/github/simonster/JLD2.jl/coverage.svg?branch=master)](http://codecov.io/github/simonster/JLD2.jl?branch=master)
+[![codecov.io](http://codecov.io/github/JuliaIO/JLD2.jl/coverage.svg?branch=master)](http://codecov.io/github/simonster/JLD2.jl?branch=master)
 
 JLD2 saves and loads Julia data structures in a format comprising a subset of HDF5, without any dependency on the HDF5 C library. It typically outperforms [the previous JLD package](https://github.com/JuliaIO/JLD.jl) (sometimes by multiple orders of magnitude) and often outperforms Julia's built-in serializer. While other HDF5 implementations supporting HDF5 File Format Specification Version 3.0 (i.e. libhdf5 1.10 or later) should be able to read the files that JLD2 produces, JLD2 is likely to be incapable of reading files created or modified by other HDF5 implementations. JLD2 does not aim to be backwards or forwards compatible with the previous JLD package.
 
