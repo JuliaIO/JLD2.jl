@@ -42,7 +42,10 @@ function stdlibmodules(m::Module)::Vector{Module}
     for x in values(stdlib())
         s = Symbol(x)
         if isdefined(m, s)
-            push!(result, getproperty(m, s))
+            m_dot_s = getproperty(m, s)
+            if m_dot_s isa Module
+                push!(result, m_dot_s)
+            end
         end
     end
     return result
