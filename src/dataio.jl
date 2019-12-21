@@ -174,7 +174,7 @@ function write_data(io::MmapIO, f::JLDFile, data::Array{T}, odr::S, ::HasReferen
     cp = IndirectPointer(io, p)
 
     for i = 1:length(data)
-        if (isconcretetype(T) && isbitstype(T)) || unsafe_isdefined(data, i)
+        if isassigned(data, i)
             @inbounds h5convert!(cp, odr, f, data[i], wsession)
         else
             @inbounds h5convert_uninitialized!(cp, odr)
@@ -261,7 +261,7 @@ function write_data(io::BufferedWriter, f::JLDFile, data::Array{T}, odr::S,
     position = io.position[]
     cp = Ptr{Cvoid}(pointer(io.buffer, position+1))
     @simd for i = 1:length(data)
-        if (isconcretetype(T) && isbitstype(T)) || unsafe_isdefined(data, i)
+        if isassigned(data, i)
             @inbounds h5convert!(cp, odr, f, data[i], wsession)
         else
             @inbounds h5convert_uninitialized!(cp, odr)
@@ -279,7 +279,7 @@ function write_data(io::IOStream, f::JLDFile, data::Array{T}, odr::S, wm::DataMo
     pos = position(io)
     cp = Ptr{Cvoid}(pointer(buf))
     @simd for i = 1:length(data)
-        if (isconcretetype(T) && isbitstype(T)) || unsafe_isdefined(data, i)
+        if isassigned(data, i)
             @inbounds h5convert!(cp, odr, f, data[i], wsession)
         else
             @inbounds h5convert_uninitialized!(cp, odr)
