@@ -333,10 +333,6 @@ function payload_size_without_storage_message(dataspace::WriteDataspace, datatyp
     sz
 end
 
-# Like isdefined, but assumes arr is a pointer array, and can be inlined
-unsafe_isdefined(arr::Array, i::Int) =
-    unsafe_load(Ptr{Ptr{Cvoid}}(pointer(arr)+(i-1)*sizeof(Ptr{Cvoid}))) != Ptr{Cvoid}(0)
-
 function deflate_data(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSession) where {T,S}
     buf = Vector{UInt8}(undef, odr_sizeof(odr) * length(data))
     cp = Ptr{Cvoid}(pointer(buf))
