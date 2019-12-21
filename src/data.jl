@@ -1393,11 +1393,11 @@ abstract type DataMode end
 struct ReferenceFree <: DataMode end
 struct HasReferences <: DataMode end
 
-@Base.pure datamode(::Type{CustomSerialization{WrittenAs,ODR}}) where {WrittenAs,ODR} = datamode(ODR)
-@Base.pure datamode(::Union{Type{<:Vlen},Type{RelOffset}}) = HasReferences()
-@Base.pure datamode(::DataType) = ReferenceFree()
-@Base.pure datamode(::FixedLengthString) = ReferenceFree()
-@Base.pure datamode(::Nothing) = ReferenceFree()
+datamode(::Type{CustomSerialization{WrittenAs,ODR}}) where {WrittenAs,ODR} = datamode(ODR)
+datamode(::Union{Type{<:Vlen},Type{RelOffset}}) = HasReferences()
+datamode(::DataType) = ReferenceFree()
+datamode(::FixedLengthString) = ReferenceFree()
+datamode(::Nothing) = ReferenceFree()
 @generated function datamode(odr::OnDiskRepresentation{Offsets,JLTypes,H5Types} where {Offsets,JLTypes}) where H5Types
     for ty in H5Types.parameters
         datamode(ty) == HasReferences() && return HasReferences()
