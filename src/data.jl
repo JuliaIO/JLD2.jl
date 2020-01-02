@@ -891,9 +891,9 @@ function _resolve_type_singlemodule(::ReadRepresentation{T,DataTypeODR()},
                                     mypath,
                                     hasparams::Bool,
                                     params) where T
-    for part in parts[2:end]
+    for part in parts
         sym = Symbol(part)
-        if !isdefined(m, sym)
+        if !isa(m, Module) || !isdefined(m, sym)
             return hasparams ? UnknownType(mypath, params) : UnknownType(mypath)
         end
         m = getfield(m, sym)
