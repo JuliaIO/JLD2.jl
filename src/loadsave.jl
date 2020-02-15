@@ -7,6 +7,24 @@ function jldopen(f::Function, args...; kws...)
     end
 end
 
+"""
+    @save filename var1 [var2 ...]
+
+Write one or more variables `var1,...` from the current scope to a JLD2 file
+`filename`.
+
+For interactive use you can save all variables in the current module's global
+scope using `@save filename`. More permanent code should prefer the explicit
+form to avoid saving unwanted variables.
+
+# Example
+
+To save the string `hello` and array `xs` to the JLD2 file example.jld2:
+
+    hello = "world"
+    xs = [1,2,3]
+    @save "example.jld2" hello foo
+"""
 macro save(filename, vars...)
     if isempty(vars)
         # Save all variables in the current module
@@ -53,6 +71,23 @@ macro save(filename, vars...)
     end
 end
 
+"""
+    @load filename var1 [var2 ...]
+
+Load one or more variables `var1,...` from JLD2 file `filename` into the
+current scope and return a vector of the loaded variable names.
+
+For interactive use, the form `@load "somefile.jld2"` will load all variables
+from `"somefile.jld2"` into the current scope. This form only supports literal
+file names and should be avoided in more permanent code so that it's clear
+where the variables come from.
+
+# Example
+
+To load the variables `hello` and `foo` from the file example.jld2, use
+
+    @load "example.jld2" hello foo
+"""
 macro load(filename, vars...)
     if isempty(vars)
         if isa(filename, Expr)
