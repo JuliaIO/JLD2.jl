@@ -303,6 +303,6 @@ function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
 end
 
 
-struct FixedLengthString{T<:AbstractString} # moved to datatypes.jl so visible when datasets.jl included
+struct FixedLengthString{T<:AbstractString}
     length::Int
 end
