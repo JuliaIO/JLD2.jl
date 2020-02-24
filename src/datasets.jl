@@ -329,21 +329,8 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
                     rr::FixedLengthString{String}, data_length::Int,
                     filter_id::UInt16, header_offset::RelOffset,
                     attributes::Union{Vector{ReadAttribute},Nothing}) 
-    io = f.io
-    data_offset = position(io)
-    ndims, offset = get_ndims_offset(f, dataspace, attributes)
-    seek(io, offset)
-    T = UInt8
-    v = construct_array(io, T, Int(ndims))
-    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
-    n = length(v)
-    seek(io, data_offset)
-    rrv = ReadRepresentation{T,odr(T)}()
-    if filter_id == 1
-        read_compressed_array!(v, f, rrv, data_length)
-    else
-        read_array!(v, f, rrv)
-    end
+    rrv = ReadRepresentation{UInt8,odr(UInt8)}()
+    v = read_array(f, dataspace, rrv, data_length, filter_id, header_offset, attributes)
     String(v)
 end
 
