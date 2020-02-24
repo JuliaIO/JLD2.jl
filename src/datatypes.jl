@@ -301,3 +301,8 @@ function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
         return (dt, attrs)
     end
 end
+
+
+struct FixedLengthString{T<:AbstractString}
+    length::Int
+end

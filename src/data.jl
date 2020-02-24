@@ -720,9 +720,6 @@ end
 fieldodr(::Type{String}, ::Bool) = Vlen{String}
 
 # Stored as variable-length strings
-struct FixedLengthString{T<:AbstractString}
-    length::Int
-end
 odr_sizeof(x::FixedLengthString{String}) = x.length
 
 h5type(f::JLDFile, writeas::Type{String}, x::String) =

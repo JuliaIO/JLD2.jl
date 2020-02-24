@@ -99,3 +99,11 @@ Base.isequal(x::MyMutableTest, y::MyMutableTest) =
 mmtd = Dict("A" => MyMutableTest(1, [10]))
 save(fn, mmtd)
 @test isequal(load(fn), mmtd)
+
+# Issue #125
+len = 2^16
+longstring = prod(fill("*",len));
+lsd = Dict("longstring" => longstring)
+save(fn, lsd)
+@test isequal(load(fn), lsd)  
+

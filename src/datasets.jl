@@ -325,6 +325,15 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     v
 end
 
+function read_array(f::JLDFile, dataspace::ReadDataspace,
+                    rr::FixedLengthString{String}, data_length::Int,
+                    filter_id::UInt16, header_offset::RelOffset,
+                    attributes::Union{Vector{ReadAttribute},Nothing}) 
+    rrv = ReadRepresentation{UInt8,odr(UInt8)}()
+    v = read_array(f, dataspace, rrv, data_length, filter_id, header_offset, attributes)
+    String(v)
+end
+
 function payload_size_without_storage_message(dataspace::WriteDataspace, datatype::H5Datatype)
     sz = 6 + 4 + sizeof(dataspace) + 4 + sizeof(datatype) + length(dataspace.attributes)*sizeof(HeaderMessage)
     for attr in dataspace.attributes
@@ -342,7 +351,6 @@ function deflate_data(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSess
     end
     transcode(ZlibCompressor, buf)
 end
-
 function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data::Array{T}, wsession::JLDWriteSession) where {T,S}
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
@@ -515,6 +523,12 @@ end
 @inline function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
     odr = objodr(x)
     write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
+end
+
+@inline function write_dataset(f::JLDFile, s::String, wsession::JLDWriteSession)
+    x=unsafe_wrap(Vector{UInt8}, s)
+    odr = objodr(x)
+    write_dataset(f, WriteDataspace(f, x, odr), h5type(f, s), odr, x, wsession)
 end
 
 @inline function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
