@@ -368,7 +368,6 @@ function deflate_data(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSess
     end
     transcode(ZlibCompressor, buf)
 end
-   
 function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data::Array{T}, wsession::JLDWriteSession) where {T,S}
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
