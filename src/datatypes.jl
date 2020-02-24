@@ -303,6 +303,6 @@ function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
 end
 
 
-struct FixedLengthString{T<:AbstractString} 
+struct FixedLengthString{T<:AbstractString}
     length::Int
 end
