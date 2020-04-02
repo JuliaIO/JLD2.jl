@@ -134,3 +134,7 @@ vect_read = jldopen(fn,"r") do f
 end
 @test all(findall(ismissing,vect) == findall(ismissing,vect_read))
 @test all( skipmissing(vect) .=== skipmissing(vect_read))
+
+# Issue #183
+jfn, _ = mktemp()
+@test_throws SystemError jldopen(jfn, "r")
