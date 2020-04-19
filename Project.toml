@@ -1,6 +1,6 @@
 name = "JLD2"
 uuid = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
-version = "0.1.12"
+version = "0.1.13"
 
 [deps]
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
@@ -12,7 +12,7 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 
 [compat]
-CodecZlib = "0.5, 0.6"
+CodecZlib = "0.5, 0.6, 0.7"
 DataFrames = "0.19.4"
 DataStructures = "0.17"
 FileIO = "1"
