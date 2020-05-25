@@ -73,6 +73,8 @@ load("example.jld2", "hello", "foo") # -> ("world", :bar)
 It is also possible to interact with JLD2 files using a file-like interface. The `jldopen` function accepts a file name and an argument specifying how the file should be opened:
 
 ```julia
+using JLD2
+
 f = jldopen("example.jld2", "r")  # open read-only (default)
 f = jldopen("example.jld2", "r+") # open read/write, failing if no file exists
 f = jldopen("example.jld2", "w")  # open read/write, overwriting existing file
