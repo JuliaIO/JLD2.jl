@@ -1,5 +1,7 @@
 # JLD2
 
+**WARNING**: This package is not actively maintained and has several known bugs that are unlikely to be resolved in the near future. Please consider using [Julia's built-in serializer](https://docs.julialang.org/en/v1/stdlib/Serialization/) if you need performance, or [the previous JLD package](https://github.com/JuliaIO/JLD.jl) if you need HDF5 compatibility.
+
 [![Travis Build Status](https://travis-ci.org/JuliaIO/JLD2.jl.svg?branch=master)](https://travis-ci.org/JuliaIO/JLD2.jl)
 [![AppVeyor Build Status](https://ci.appveyor.com/api/projects/status/9wk39naux5dhwhen?svg=true)](https://ci.appveyor.com/project/simonster/jld2-jl)
 [![codecov.io](http://codecov.io/github/JuliaIO/JLD2.jl/coverage.svg?branch=master)](http://codecov.io/github/simonster/JLD2.jl?branch=master)
