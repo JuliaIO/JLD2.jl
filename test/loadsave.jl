@@ -105,5 +105,27 @@ len = 2^16
 longstring = prod(fill("*",len));
 lsd = Dict("longstring" => longstring)
 save(fn, lsd)
-@test isequal(load(fn), lsd)  
+@test isequal(load(fn), lsd)
 
+# Testing Save macro
+hello = "world"
+num = 1.5
+
+@save fn hello num
+@test load(fn) == Dict("hello"=>"world", "num"=>1.5)
+
+@save fn {compress=true} hello num
+@test load(fn) == Dict("hello"=>"world", "num"=>1.5)
+
+@save fn {compress=true, mmaparrays=false} hello num
+@test load(fn) == Dict("hello"=>"world", "num"=>1.5)
+
+@save fn bye = hello num
+@test load(fn) == Dict("bye"=>"world", "num"=>1.5)
+
+@save fn bye = hello num = 10
+@test load(fn) == Dict("bye"=>"world", "num"=>10)
+
+@test_throws ArgumentError @save fn {compress} hello
+
+@test_throws ArgumentError @save fn hello=>"error"

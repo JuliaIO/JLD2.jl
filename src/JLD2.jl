@@ -1,6 +1,7 @@
 module JLD2
 using DataStructures, CodecZlib, FileIO
 import Base.sizeof
+using MacroTools
 using Printf
 using Mmap
 

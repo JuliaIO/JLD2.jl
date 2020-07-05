@@ -9,7 +9,8 @@ end
 
 """
     @save filename var1 [var2 ...]
-
+    @save filename {compress=true} var1 name2=var2
+    
 Write one or more variables `var1,...` from the current scope to a JLD2 file
 `filename`.
 
@@ -23,15 +24,52 @@ To save the string `hello` and array `xs` to the JLD2 file example.jld2:
 
     hello = "world"
     xs = [1,2,3]
-    @save "example.jld2" hello foo
+    @save "example.jld2" hello xs
+
+For passing options to the saving command use {}
+
+    @save "example.jld2" {compress=true} hello xs
+
+For saving variables under a different name use regular assignment syntax
+
+    @save "example.jld2" greeting=hello xarray = xs
 """
 macro save(filename, vars...)
-    if isempty(vars)
-        # Save all variables in the current module
+    fields = []
+    options = []
+    for var in vars
+        # Capture options of the form {compress = true, mmaparrays=false}
+        if @capture(var, {opts__})
+            for opt in opts
+                if @capture(opt, key_ = val_)
+                    push!(options, :($key = $(esc(val))))
+                else
+                    return :(throw(ArgumentError("Invalid option syntax")))
+                end
+            end
+        # Allow assignment syntax a = b
+        elseif @capture(var, a_ = b_)
+            push!(fields, :(write(f, $(string(a)), $(esc(b)), wsession)))
+        # Allow single arg syntax a   → "a" = a
+        elseif @capture(var, a_Symbol)
+            push!(fields, :(write(f, $(string(a)), $(esc(a)), wsession)))
+        else
+            return :(throw(ArgumentError("Invalid field syntax")))
+        end
+    end
+    if !isempty(fields)
+        return quote
+            jldopen($(esc(filename)), "w"; $(Expr(:tuple,options...))...) do f
+                wsession = JLDWriteSession()
+                $(Expr(:block, fields...))
+            end
+        end
+    else
+        # The next part is old code that handles saving the whole workspace
         quote
             let
                 m = $(__module__)
-                f = jldopen($(esc(filename)), "w")
+                f = jldopen($(esc(filename)), "w"; $(Expr(:tuple,options...))...)
                 wsession = JLDWriteSession()
                 try
                     for vname in names(m; all=true)
@@ -54,18 +92,6 @@ macro save(filename, vars...)
                 finally
                     close(f)
                 end
-            end
-        end
-    else
-        writeexprs = Vector{Expr}(undef, length(vars))
-        for i = 1:length(vars)
-            writeexprs[i] = :(write(f, $(string(vars[i])), $(esc(vars[i])), wsession))
-        end
-
-        quote
-            jldopen($(esc(filename)), "w") do f
-                wsession = JLDWriteSession()
-                $(Expr(:block, writeexprs...))
             end
         end
     end
