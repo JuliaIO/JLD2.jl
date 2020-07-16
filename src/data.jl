@@ -1220,7 +1220,11 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
     # Now reconstruct the type
     reconname = gensym(T)
     Core.eval(ReconstructedTypes,
-              Expr(:struct_type, reconname, Core.svec(), Core.svec(dt.names...), Any, types, false, 0))
+              Expr(:struct, false, reconname,
+                   Expr(:block, Any[ Expr(Symbol("::"), dt.names[i], types[i]) for i = 1:length(types) ]...,
+                        # suppress default constructors, plus a bogus `new()` call to make sure
+                        # ninitialized is zero.
+                        Expr(:if, false, Expr(:call, :new)))))
     T = getfield(ReconstructedTypes, reconname)
 
     (ReadRepresentation{T,rodr}(), false)
