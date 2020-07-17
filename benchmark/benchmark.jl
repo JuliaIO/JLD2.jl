@@ -34,11 +34,11 @@ end
 
 function bench(title, data)
     GC.gc()
-    println(title, " JLD write")
+    println(title, " JLD2 write")
     show(stdout, MIME("text/plain"), @benchmark jld_benchmark_write($data))
     println("\n")
     GC.gc()
-    println(title, " JLD read")
+    println(title, " JLD2 read")
     show(stdout, MIME("text/plain"), @benchmark jld_benchmark_read())
     println("\n")
     GC.gc()
