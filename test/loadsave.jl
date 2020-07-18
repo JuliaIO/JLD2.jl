@@ -120,6 +120,9 @@ num = 1.5
 @save fn {compress=true, mmaparrays=false} hello num
 @test load(fn) == Dict("hello"=>"world", "num"=>1.5)
 
+@save fn {iotype=IOStream} hello num
+@test load(fn) == Dict("hello"=>"world", "num"=>1.5)
+
 @save fn bye = hello num
 @test load(fn) == Dict("bye"=>"world", "num"=>1.5)
 
