@@ -1,6 +1,6 @@
 # JLD2
 
-**WARNING**: This package is not actively maintained and has several known bugs that are unlikely to be resolved in the near future. Please consider using [Julia's built-in serializer](https://docs.julialang.org/en/v1/stdlib/Serialization/) if you need performance, or [the previous JLD package](https://github.com/JuliaIO/JLD.jl) if you need HDF5 compatibility.
+**NOTE**: This package is now **actively maintained again**! It was not maintained for some time and there still is a backlog of outstanding issues that will be adressed in the near future. You are invited to test JLD2 and raise any issues you come across. However, tread with care as you may come across problems that can potentially cause data loss.
 
 [![Travis Build Status](https://travis-ci.org/JuliaIO/JLD2.jl.svg?branch=master)](https://travis-ci.org/JuliaIO/JLD2.jl)
 [![AppVeyor Build Status](https://ci.appveyor.com/api/projects/status/9wk39naux5dhwhen?svg=true)](https://ci.appveyor.com/project/simonster/jld2-jl)
@@ -8,16 +8,16 @@
 
 JLD2 saves and loads Julia data structures in a format comprising a subset of HDF5, without any dependency on the HDF5 C library. It typically outperforms [the previous JLD package](https://github.com/JuliaIO/JLD.jl) (sometimes by multiple orders of magnitude) and often outperforms Julia's built-in serializer. While other HDF5 implementations supporting HDF5 File Format Specification Version 3.0 (i.e. libhdf5 1.10 or later) should be able to read the files that JLD2 produces, JLD2 is likely to be incapable of reading files created or modified by other HDF5 implementations. JLD2 does not aim to be backwards or forwards compatible with the previous JLD package.
 
-The code here should work on Julia 0.6. It has extensive unit tests, but it has received little testing in the wild. __Please use caution.__ If your tolerance for data loss is low, [JLD](https://github.com/JuliaIO/JLD.jl) may be a better choice at this time.
+__Please use caution.__ If your tolerance for data loss is low, [JLD](https://github.com/JuliaIO/JLD.jl) may be a better choice at this time.
 
 ## Reading and writing data
 
 ### `@save` and `@load` macros
 
-The `@save` and `@load` macros are the simplest way to interact with a JLD2 file. The `@save` macro writes one or more variables from the current scope to the JLD file. For example:
+The `@save` and `@load` macros are the simplest way to interact with a JLD2 file. The `@save` macro writes one or more variables from the current scope to the JLD2 file. For example:
 
 ```julia
-using JLD2, FileIO
+using JLD2
 hello = "world"
 foo = :bar
 @save "example.jld2" hello foo
@@ -37,7 +37,7 @@ It is best practice to explicitly name the variables to be loaded and saved from
 
 The `save` and `load` functions, provided by [FileIO](https://github.com/JuliaIO/FileIO.jl), provide an alternative mechanism to read and write data from a JLD2 file. To use these functions, you must say `using FileIO`; it is not necessary to say `using JLD2` since FileIO will determine the correct package automatically.
 
-The `save` function accepts an `Associative` yielding the key/value pairs, where the key is a string representing the name of the dataset and the value represents its contents:
+The `save` function accepts an `AbstractDict` yielding the key/value pairs, where the key is a string representing the name of the dataset and the value represents its contents:
 
 ```julia
 using FileIO
