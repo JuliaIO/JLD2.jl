@@ -1,4 +1,4 @@
-using BenchmarkTools, JLD2
+using BenchmarkTools, JLD2, Serialization
 
 const BACKEND = JLD2.MmapIO
 # const BACKEND = IOStream
@@ -33,20 +33,20 @@ function serialize_benchmark_read()
 end
 
 function bench(title, data)
-    gc()
-    println(title, " JLD write")
+    GC.gc()
+    println(title, " JLD2 write")
     show(stdout, MIME("text/plain"), @benchmark jld_benchmark_write($data))
     println("\n")
-    gc()
-    println(title, " JLD read")
+    GC.gc()
+    println(title, " JLD2 read")
     show(stdout, MIME("text/plain"), @benchmark jld_benchmark_read())
     println("\n")
-    gc()
-    println(title, " Base.serialize")
+    GC.gc()
+    println(title, " Serialization.serialize")
     show(stdout, MIME("text/plain"), @benchmark serialize_benchmark_write($data))
     println("\n")
-    gc()
-    println(title, " Base.deserialize")
+    GC.gc()
+    println(title, " Serialization.deserialize")
     show(stdout, MIME("text/plain"), @benchmark serialize_benchmark_read())
     println("\n\n")
     isa(data, Array) && empty!(data)
