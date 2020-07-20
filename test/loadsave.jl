@@ -105,5 +105,17 @@ len = 2^16
 longstring = prod(fill("*",len));
 lsd = Dict("longstring" => longstring)
 save(fn, lsd)
-@test isequal(load(fn), lsd)  
+@test isequal(load(fn), lsd)
 
+# Issue #131
+# write/read a Union{T,Missing}
+len = 10_000
+vect = Vector{Union{Bool,Missing}}(undef,len)
+vect .= true
+jldopen(fn,"w") do f
+  f["vect"] = vect
+end
+vect_read = jldopen(fn,"r") do f
+  f["vect"]
+end
+@test !any(ismissing.(vect_read))
