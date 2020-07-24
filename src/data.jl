@@ -975,16 +975,14 @@ constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute})
 
 ## Union Types
 
-# type that references either DataType and UnionAll
 const H5TYPE_UNION = CompoundDatatype(
       2*odr_sizeof(Vlen{RelOffset}),
       [:datatype, :unionall],
       [0, odr_sizeof(Vlen{RelOffset})],
       [VariableLengthDatatype(ReferenceDatatype()), VariableLengthDatatype(ReferenceDatatype())]
       )
-# #
-# # # Initial ODR for UnionDataType
-# # const
+
+# ODR for UnionDataType
 const UnionTypeODR = OnDiskRepresentation{
       (0, odr_sizeof(Vlen{RelOffset})),
       Tuple{Vector{Any}, Vector{Any}},
@@ -998,8 +996,8 @@ function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T
     @lookup_committed f readas
     commit(f, H5TYPE_UNION, Union, readas)
 end
-#fieldodr(::Type{T}, ::Bool) where {T<:Union} = Vlen{DataTypeODR()}
-fieldodr(::Type{T}, ::Bool) where {T<:Union} = UnionTypeODR()#Vlen{UnionTypeODR()}
+
+fieldodr(::Type{T}, ::Bool) where {T<:Union} = UnionTypeODR()
 h5fieldtype(f::JLDFile, ::Type{Union{}}, ::Initialized) = nothing
 fieldodr(::Type{Union{}}, initialized::Bool) = nothing
 
@@ -1037,7 +1035,6 @@ h5convert!(out::Pointers, ::UnionTypeODR, f::JLDFile, x::Union, wsession::JLDWri
     else
         h5convert_uninitialized!(out+odr_sizeof(Vlen{RelOffset}), Vlen{RelOffset})
     end
-    #store
 end
 
 
@@ -1079,8 +1076,6 @@ function jlconvert(::ReadRepresentation{Union, UnionTypeODR()}, f::JLDFile,
     track_weakref!(f, header_offset, v)
     v
 end
-
-
 
 
 function constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute}) where {T<:Union}

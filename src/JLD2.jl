@@ -430,5 +430,6 @@ include("data.jl")
 include("dataio.jl")
 include("loadsave.jl")
 include("stdlib.jl")
+include("backwards_compatibility.jl")
 
 end # module
