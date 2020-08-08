@@ -1009,13 +1009,8 @@ h5convert!(out::Pointers, ::UnionTypeODR, f::JLDFile, x::Union, wsession::JLDWri
     dts = filter(t -> t isa DataType, Base.uniontypes(x))
     uls = filter(t -> t isa UnionAll, Base.uniontypes(x))
     if !isempty(dts)
+        # This code is essentially taken from h5convert! of DataType (above)
         refs = Vector{RelOffset}(map(dts) do x
-            # The heuristic here is that, if the field type is a committed data type,
-            # then we commit the datatype and write it as a reference to the committed
-            # datatype. Otherwise we write it as a name. This ensures that type
-            # parameters that affect the structure of a type are written to the file,
-            # so that we can reconstruct the type when the layout depends on the
-            # parameters.
             dt = h5fieldtype(f, writeas(x), x, Val{true})
             if isa(dt, CommittedDatatype)
                 (dt::CommittedDatatype).header_offset
@@ -1040,8 +1035,10 @@ end
 
 function jlconvert(::ReadRepresentation{Union, UnionTypeODR()}, f::JLDFile,
                    ptr::Ptr, header_offset::RelOffset)
-
-
+    # Reconstruct a Union by reading a list of DataTypes and UnionAlls
+    # Lookup of RelOffsets is taken from jlconvert of DataTypes
+    
+    # Test for a potential null pointer indicating an empty array
     hasdatatypes = unsafe_load(convert(Ptr{UInt32}, ptr)) != 0
     if hasdatatypes
         refs = jlconvert(ReadRepresentation{RelOffset, Vlen{RelOffset}}(), f, ptr, NULL_REFERENCE)
@@ -1051,7 +1048,6 @@ function jlconvert(::ReadRepresentation{Union, UnionTypeODR()}, f::JLDFile,
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
             res = cdt !== nulldt ? (typeof(jltype(f, cdt)::ReadRepresentation)::DataType).parameters[1] : load_dataset(f, ref)
-            #unknown_params = unknown_params || isa(res, UnknownType)
             res
         end for ref in refs]
     else
@@ -1066,7 +1062,6 @@ function jlconvert(::ReadRepresentation{Union, UnionTypeODR()}, f::JLDFile,
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
             res = cdt !== nulldt ? (typeof(jltype(f, cdt)::ReadRepresentation)::DataType).parameters[1] : load_dataset(f, ref)
-            #unknown_params = unknown_params || isa(res, UnknownType)
             res
         end for ref in refs]
     else
