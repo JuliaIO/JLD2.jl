@@ -138,3 +138,43 @@ end
 # Issue #183
 jfn, _ = mktemp()
 @test_throws SystemError jldopen(jfn, "r")
+
+# PR #206 Allow serialization of UnionAll in Union
+@testset "UnionAll in Union" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+
+    U1 = Union{Float64, Int}
+    U2 = Union{Int, Vector}
+
+    struct UA1{T}; x::T; end
+    struct UA2{T}; y::T; end
+    U3 = Union{UA1, UA2, Int}
+
+    # Test types
+    jldopen(fn, "w") do f
+        f["u1"] = U1
+        f["u2"] = U2
+        f["u3"] = U3
+    end
+
+    u1, u2, u3 = jldopen(fn, "r") do f
+        f["u1"], f["u2"], f["u3"]
+    end
+    @test u1 === U1
+    @test u2 === U2
+    @test u3 === U3
+    # Test Vector with that eltype
+    jldopen(fn, "w") do f
+        f["u1"] = U1[1.0, 2, 3.0]
+        f["u2"] = U2[1, [2.0], 3, ["4"]]
+        f["u3"] = U3[UA1(1), UA2(2.0), 3, UA1("4")]
+    end
+
+    u1, u2, u3 = jldopen(fn, "r") do f
+        f["u1"], f["u2"], f["u3"]
+    end
+
+    @test u1 == U1[1.0, 2, 3.0]
+    @test u2 == U2[1, [2.0], 3, ["4"]]
+    @test u3 == U3[UA1(1), UA2(2.0), 3, UA1("4")]
+end
