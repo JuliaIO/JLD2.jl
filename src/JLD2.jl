@@ -13,7 +13,8 @@ const Length = UInt64
 
 # Currently we specify a 512 byte header
 const FILE_HEADER_LENGTH = 512
-const CURRENT_VERSION = v"0.2"
+const CURRENT_VERSION = v"0.3"
+const MINIMUM_VERSION = v"0.2"
 const REQUIRED_FILE_HEADER = "Julia data file (HDF5), version "
 const FILE_HEADER = "$(REQUIRED_FILE_HEADER)$(CURRENT_VERSION)\x00 (Julia $(VERSION) $(sizeof(Int)*8)-bit $(htol(1) == 1 ? "LE" : "BE"))\x00"
 @assert length(FILE_HEADER) <= FILE_HEADER_LENGTH
@@ -240,15 +241,15 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         f.types_group = Group{typeof(f)}(f)
     else
         if String(read!(io, Vector{UInt8}(undef, length(REQUIRED_FILE_HEADER)))) != REQUIRED_FILE_HEADER
-            throw(ArgumentError(string('"', fname, "\" is not a JLD file")))
+            throw(ArgumentError(string('"', fname, "\" is not a JLD2 file")))
         end
 
         ver = VersionNumber(read_bytestring(io))
-        if ver < v"0.2"
-            throw(ArgumentError("only JLD2 files are presently supported"))
+        if ver < MINIMUM_VERSION
+            throw(ArgumentError("This file was written with JLD2 $ver. Reading of files older than $MINIMUM_VERSION is no longer supported."))
         elseif ver > CURRENT_VERSION
-            @warn("\"$fname\" was written in JLD file format version $ver" *
-                 ", but this version of JLD supports only JLD file format $CURRENT_VERSION" *
+            @warn("\"$fname\" was written in JLD2 file format version $ver" *
+                 ", but this version of JLD2 supports only JLD2 file format $CURRENT_VERSION" *
                  ". Some or all data in the file may not be readable")
         end
 
