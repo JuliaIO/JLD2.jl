@@ -431,5 +431,5 @@ include("data.jl")
 include("dataio.jl")
 include("loadsave.jl")
 include("stdlib.jl")
-
+include("vectorunion.jl")
 end # module
