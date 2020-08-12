@@ -20,7 +20,7 @@ function verify_file_header(f)
         if !startswith(headermsg, LEGACY_REQUIRED_FILE_HEADER)
             throw(ArgumentError(string('"', fname, "\" is not a JLD2 file")))
         else
-            @warn("This file was written with an older version of JLD2. Attempting to load data.", maxlog=1)
+            #@warn("This file was written with an older version of JLD2. Attempting to load data.", maxlog=1)
             return
         end
     end
