@@ -10,11 +10,10 @@ const FORMAT_VERSION = v"0.1.0"
 const COMPATIBLE_VERSIONS = VersionRange("0.1")
 const REQUIRED_FILE_HEADER = "HDF5-based Julia Data Format, version "
 const FILE_HEADER = "$(REQUIRED_FILE_HEADER)$(FORMAT_VERSION)\x00 (Julia $(VERSION) $(sizeof(Int)*8)-bit $(htol(1) == 1 ? "LE" : "BE"))\x00"
+@assert length(FILE_HEADER) <= FILE_HEADER_LENGTH
 
 # Legacy File Header
 const LEGACY_REQUIRED_FILE_HEADER = "Julia data file (HDF5), version 0.2.0"
-
-@assert length(FILE_HEADER) <= FILE_HEADER_LENGTH
 
 
 function verify_file_header(f)
