@@ -18,6 +18,7 @@ DataFrames = "0.19.4"
 DataStructures = "0.17"
 FileIO = "1"
 LIBSVM = "0.3"
+MacroTools = "0.5"
 RDatasets = "0.6"
 julia = "0.7, 1"
 
