@@ -140,14 +140,13 @@ jfn, _ = mktemp()
 @test_throws SystemError jldopen(jfn, "r")
 
 # PR #206 Allow serialization of UnionAll in Union
+struct UA1{T}; x::T; end
+struct UA2{T}; y::T; end
 @testset "UnionAll in Union" begin
     fn = joinpath(mktempdir(), "test.jld2")
 
     U1 = Union{Float64, Int}
     U2 = Union{Int, Vector}
-
-    struct UA1{T}; x::T; end
-    struct UA2{T}; y::T; end
     U3 = Union{UA1, UA2, Int}
 
     # Test types
