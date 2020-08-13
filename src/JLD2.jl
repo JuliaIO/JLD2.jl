@@ -1,6 +1,7 @@
 module JLD2
 using DataStructures, CodecZlib, FileIO
 import Base.sizeof
+using MacroTools
 using Printf
 using Mmap
 
@@ -259,9 +260,9 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
 end
 
 """
-    jldopen(fname::AbstractString, mode::AbstractString)
+    jldopen(fname::AbstractString, mode::AbstractString; iotype=MmapIO, compress=false)
 
-Opens a JLD file at path `fname`.
+Opens a JLD2 file at path `fname`.
 
 `"r"`: Open for reading only, failing if no file exists
 `"r+"`: Open for reading and writing, failing if no file exists
@@ -269,13 +270,13 @@ Opens a JLD file at path `fname`.
 `"a"`/`"a+"`: Open for reading and writing, creating a new file if none exists, but
               preserving the existing file if one is present
 """
-function jldopen(fname::AbstractString, mode::AbstractString="r"; kwargs...)
+function jldopen(fname::AbstractString, mode::AbstractString="r"; iotype=MmapIO, kwargs...)
     (wr, create, truncate) = mode == "r"  ? (false, false, false) :
                              mode == "r+" ? (true, false, false) :
                              mode == "a" || mode == "a+" ? (true, true, false) :
                              mode == "w" || mode == "w+" ? (true, true, true) :
                              throw(ArgumentError("invalid open mode: $mode"))
-    jldopen(fname, wr, create, truncate; kwargs...)
+    jldopen(fname, wr, create, truncate, iotype; kwargs...)
 end
 
 """

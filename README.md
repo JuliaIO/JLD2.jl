@@ -33,6 +33,14 @@ This assigns the contents of the `hello` and `foo` datasets to variables of the 
 
 It is best practice to explicitly name the variables to be loaded and saved from a file, so that it is clear from whence these variables arise. However, for convenience, JLD2 also provides variants of `@load` and `@save` that do not require variables to be named explicitly. When called with no variable arguments, `@save <filename>` writes all variables in the global scope of the current module to file `<filename>`, while `@load <filename>` loads all variables in file `<filename>`. When called with no variable arguments, `@load` requires that the file name is provided as a string literal, i.e., it is not possible to select the file at runtime.
 
+Additional customization is possible using assignment syntax and option passing:
+
+```
+@save "example.jld2" bye=hello bar=foo
+@save "example.jld2" {compress=true} hello bar=foo
+```
+
+
 ### `save` and `load` functions
 
 The `save` and `load` functions, provided by [FileIO](https://github.com/JuliaIO/FileIO.jl), provide an alternative mechanism to read and write data from a JLD2 file. To use these functions, you must say `using FileIO`; it is not necessary to say `using JLD2` since FileIO will determine the correct package automatically.
