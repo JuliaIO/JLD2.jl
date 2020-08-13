@@ -107,6 +107,7 @@ lsd = Dict("longstring" => longstring)
 save(fn, lsd)
 @test isequal(load(fn), lsd)
 
+
 # Testing Save macro
 hello = "world"
 num = 1.5
@@ -132,3 +133,55 @@ num = 1.5
 @test_throws ArgumentError @save fn {compress} hello
 
 @test_throws ArgumentError @save fn hello=>"error"
+
+
+# Issue # 189
+struct RecursiveStruct
+    x::RecursiveStruct
+    RecursiveStruct() = new()
+    RecursiveStruct(x) = new(x)
+end
+
+
+@testset "Recursive Immutable Types" begin
+    x = RecursiveStruct()
+    y = RecursiveStruct(x)
+
+    @save "out.jld2" x y
+    JLD2.jldopen("out.jld2", "r") do f
+        @test f["x"] == x
+        @test f["y"] == y
+    end
+end
+
+# Issue #131
+# write/read a Union{T,Missing}
+len = 10_000
+vect = Vector{Union{Bool,Missing}}(undef,len)
+vect .= true
+jldopen(fn,"w") do f
+  f["vect"] = vect
+end
+vect_read = jldopen(fn,"r") do f
+  f["vect"]
+end
+@test !any(ismissing.(vect_read))
+
+# Also related to issue #131, but more types
+len = 10_000
+vect = Vector{Union{Missing,Float32,Float64,Int32}}(missing,len)
+vect[vcat(1:10,33,44,55)] .= Int32(21)
+vect[vcat(11:20,66,77,88)] .= 33.
+vect[vcat(21:30,99)] .= Float32(123.)
+jldopen(fn,"w") do f
+  f["vect"] = vect
+end
+vect_read = jldopen(fn,"r") do f
+  f["vect"]
+end
+@test all(findall(ismissing,vect) == findall(ismissing,vect_read))
+@test all( skipmissing(vect) .=== skipmissing(vect_read))
+
+# Issue #183
+jfn, _ = mktemp()
+@test_throws SystemError jldopen(jfn, "r")

@@ -34,6 +34,7 @@ if Sys.isunix()
         newptr = ccall(:jl_mmap, Ptr{Cvoid}, (Ptr{Cvoid}, Csize_t, Cint, Cint, Cint, Int64),
                        C_NULL, n, Mmap.PROT_READ | (io.write*Mmap.PROT_WRITE),
                        Mmap.MAP_SHARED, fd(io.f), 0)
+        systemerror("mmap", newptr == Ptr{Nothing}(-1))
         io.n = n
         io.curptr += newptr - oldptr
         io.startptr = newptr
