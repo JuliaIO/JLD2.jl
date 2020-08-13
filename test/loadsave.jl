@@ -107,6 +107,25 @@ lsd = Dict("longstring" => longstring)
 save(fn, lsd)
 @test isequal(load(fn), lsd)
 
+# Issue # 189
+struct RecursiveStruct
+    x::RecursiveStruct
+    RecursiveStruct() = new()
+    RecursiveStruct(x) = new(x)
+end
+
+
+@testset "Recursive Immutable Types" begin
+    x = RecursiveStruct()
+    y = RecursiveStruct(x)
+
+    @save "out.jld2" x y
+    JLD2.jldopen("out.jld2", "r") do f
+        @test f["x"] == x
+        @test f["y"] == y
+    end
+end
+
 # Issue #131
 # write/read a Union{T,Missing}
 len = 10_000
