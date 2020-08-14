@@ -48,19 +48,21 @@ writeas(T::Type) = T
 odr_sizeof(::ReadRepresentation{T,S}) where {T,S} = odr_sizeof(S)
 
 # Determines whether a specific field type should be saved in the file
-@noinline function hasfielddata(@nospecialize T)
+@noinline function hasfielddata(@nospecialize(T), encounteredtypes=DataType[])
     T === Union{} && return false
     !isconcretetype(T) && return true
     T = T::DataType
+    T in encounteredtypes && return true
+    push!(encounteredtypes, T)
     (T.mutable || T <: Type) && return true
-    hasdata(T)
+    hasdata(T, encounteredtypes)
 end
 
 # Determines whether a specific type has fields that should be saved in the file
-function hasdata(T::DataType)
+function hasdata(T::DataType, encounteredtypes=DataType[])
     isempty(T.types) && T.size != 0 && return true
     for ty in T.types
-        hasfielddata(writeas(ty)) && return true
+        hasfielddata(writeas(ty), encounteredtypes) && return true
     end
     false
 end
