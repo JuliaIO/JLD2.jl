@@ -19,7 +19,7 @@ MacroTools = "0.5"
 julia = "0.7, 1"
 
 [extras]
-DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 LIBSVM = "b1bec4e5-fd48-53fe-b0cb-9723c09d164b"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
@@ -28,4 +28,4 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["LIBSVM", "LinearAlgebra", "Printf", "RDatasets", "Random", "Test"]
+test = ["FileIO", "LIBSVM", "LinearAlgebra", "Printf", "RDatasets", "Random", "Test"]
