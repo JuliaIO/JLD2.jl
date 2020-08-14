@@ -25,6 +25,9 @@ matrix:
 notifications:
   email: false
 
+install:
+  - julia -e 'using Pkg; Pkg.add("FileIO")'
+
 # script:
 #  - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
 #  - julia --check-bounds=yes -e 'Pkg.clone(pwd()); Pkg.build("JLD2"); Pkg.test("JLD2"; coverage=true)'
