@@ -1,5 +1,3 @@
-@info "loading FileIO interface"
-
 using .FileIO
 
 # Save all the key-value pairs in the dict as top-level variables of the JLD
