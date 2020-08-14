@@ -31,4 +31,4 @@ notifications:
 #  - julia --check-bounds=yes -e 'Pkg.clone(pwd()); Pkg.build("JLD2"); Pkg.test("JLD2"; coverage=true)'
 
 after_success:
-  - julia -e 'cd(Pkg.dir("JLD2")); Pkg.add("Coverage"); Pkg.checkout("Coverage"); using Coverage; Codecov.submit(Codecov.process_folder())'
+  - julia -e 'using Pkg; cd(Pkg.dir("JLD2")); Pkg.add("Coverage"); Pkg.checkout("Coverage"); using Coverage; Codecov.submit(Codecov.process_folder())'
