@@ -5,21 +5,17 @@ version = "0.1.14"
 [deps]
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
-FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 Mmap = "a63ad114-7e13-5084-954f-fe012c677804"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Requires = "ae029012-a4dd-5104-9daa-d747884805df"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 
 [compat]
 CodecZlib = "0.5, 0.6, 0.7"
-DataFrames = "0.19.4"
 DataStructures = "0.17"
-FileIO = "1"
-LIBSVM = "0.3"
 MacroTools = "0.5"
-RDatasets = "0.6"
 julia = "0.7, 1"
 
 [extras]

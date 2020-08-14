@@ -1,5 +1,5 @@
 module JLD2
-using DataStructures, CodecZlib, FileIO
+using DataStructures, CodecZlib, Requires
 import Base.sizeof
 using MacroTools
 using Printf
@@ -416,5 +416,9 @@ include("data.jl")
 include("dataio.jl")
 include("loadsave.jl")
 include("stdlib.jl")
+
+function __init__()
+    @require FileIO="5789e2e9-d7fb-5bc7-8068-2c6fae9b9549" include("fileio.jl")    
+end
 
 end # module
