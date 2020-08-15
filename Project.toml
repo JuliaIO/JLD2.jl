@@ -16,6 +16,7 @@ UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 CodecZlib = "0.5, 0.6, 0.7"
 DataStructures = "0.17"
 MacroTools = "0.5"
+Requires = "1.0"
 julia = "0.7, 1"
 
 [extras]
