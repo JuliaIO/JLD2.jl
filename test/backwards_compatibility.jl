@@ -21,6 +21,6 @@ using JLD2, FileIO, Test, Base64
         f["U"], f["V"]
     end
 
-    @test u == Union{Int, String}
-    @test v == Union{Int, Float64}[1, 2.0, 3]
+    @test u == Union{Int64, String}
+    @test v == Union{Int64, Float64}[1, 2.0, 3]
 end
