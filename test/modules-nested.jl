@@ -61,6 +61,13 @@
         rm(saving_filename; force = true, recursive = true)
         rm(loading_filename; force = true, recursive = true)
 
+        if Sys.iswindows()
+            # This is needed for the backslash path separator to survive the
+            # roundtrip from string to file to included code
+            saving_contents = replace(saving_contents, '\\' => "\\\\")
+            loading_contents = replace(loading_contents, '\\' => "\\\\")
+        end
+        
         open(mycustomload_filename, "w") do io
             println(io, mycustomload_contents)
         end
@@ -131,6 +138,11 @@
         rm(my_rng_filename; force = true, recursive = true)
         rm(saving_filename; force = true, recursive = true)
         rm(loading_filename; force = true, recursive = true)
+
+        if Sys.iswindows()
+            saving_contents = replace(saving_contents, '\\' => "\\\\")
+            loading_contents = replace(loading_contents, '\\' => "\\\\")
+        end
 
         open(mycustomload_filename, "w") do io
             println(io, mycustomload_contents)
@@ -220,6 +232,11 @@
         rm(saving_filename; force = true, recursive = true)
         rm(loading_filename; force = true, recursive = true)
 
+        if Sys.iswindows()
+            saving_contents = replace(saving_contents, '\\' => "\\\\")
+            loading_contents = replace(loading_contents, '\\' => "\\\\")
+        end
+
         open(mycustomload_filename, "w") do io
             println(io, mycustomload_contents)
         end
@@ -298,6 +315,11 @@
         rm(my_object_filename; force = true, recursive = true)
         rm(saving_filename; force = true, recursive = true)
         rm(loading_filename; force = true, recursive = true)
+
+        if Sys.iswindows()
+            saving_contents = replace(saving_contents, '\\' => "\\\\")
+            loading_contents = replace(loading_contents, '\\' => "\\\\")
+        end
 
         open(mycustomload_filename, "w") do io
             println(io, mycustomload_contents)
