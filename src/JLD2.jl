@@ -12,7 +12,6 @@ const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 # Currently we specify that all offsets and lengths are 8 bytes
 const Length = UInt64
 
-
 struct UnsupportedVersionException <: Exception end
 struct UnsupportedFeatureException <: Exception end
 struct InvalidDataException <: Exception end
@@ -416,6 +415,7 @@ include("data.jl")
 include("dataio.jl")
 include("loadsave.jl")
 include("stdlib.jl")
+include("backwards_compatibility.jl")
 
 function __init__()
     @require FileIO="5789e2e9-d7fb-5bc7-8068-2c6fae9b9549" include("fileio.jl")    
