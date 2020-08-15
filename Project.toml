@@ -5,24 +5,21 @@ version = "0.2.0"
 [deps]
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
-FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 Mmap = "a63ad114-7e13-5084-954f-fe012c677804"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Requires = "ae029012-a4dd-5104-9daa-d747884805df"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 
 [compat]
 CodecZlib = "0.5, 0.6, 0.7"
-DataFrames = "0.19.4"
 DataStructures = "0.17"
-FileIO = "1"
-LIBSVM = "0.3"
-RDatasets = "0.6"
+MacroTools = "0.5"
 julia = "0.7, 1"
 
 [extras]
-DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 LIBSVM = "b1bec4e5-fd48-53fe-b0cb-9723c09d164b"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
@@ -31,4 +28,4 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 [targets]
-test = ["LIBSVM", "LinearAlgebra", "Printf", "RDatasets", "Random", "Test", "Base64"]
+test = ["FileIO", "LIBSVM", "LinearAlgebra", "Printf", "RDatasets", "Random", "Test", "Base64"]
