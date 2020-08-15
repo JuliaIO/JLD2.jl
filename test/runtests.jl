@@ -11,6 +11,7 @@ include("loadsave.jl")
 include("modules.jl")
 include("modules-nested.jl")
 include("isreconstructed.jl")
+include("backwards_compatibility.jl")
 
 # Only run the reconstruction tests on versions where `workspace` is a thing
 

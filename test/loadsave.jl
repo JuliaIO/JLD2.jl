@@ -107,6 +107,53 @@ lsd = Dict("longstring" => longstring)
 save(fn, lsd)
 @test isequal(load(fn), lsd)
 
+
+# Testing Save macro
+hello = "world"
+num = 1.5
+
+@save fn hello num
+@test load(fn) == Dict("hello"=>"world", "num"=>1.5)
+
+@save fn {compress=true} hello num
+@test load(fn) == Dict("hello"=>"world", "num"=>1.5)
+
+@save fn {compress=true, mmaparrays=false} hello num
+@test load(fn) == Dict("hello"=>"world", "num"=>1.5)
+
+@save fn {iotype=IOStream} hello num
+@test load(fn) == Dict("hello"=>"world", "num"=>1.5)
+
+@save fn bye = hello num
+@test load(fn) == Dict("bye"=>"world", "num"=>1.5)
+
+@save fn bye = hello num = 10
+@test load(fn) == Dict("bye"=>"world", "num"=>10)
+
+@test_throws ArgumentError @save fn {compress} hello
+
+@test_throws ArgumentError @save fn hello=>"error"
+
+
+# Issue # 189
+struct RecursiveStruct
+    x::RecursiveStruct
+    RecursiveStruct() = new()
+    RecursiveStruct(x) = new(x)
+end
+
+
+@testset "Recursive Immutable Types" begin
+    x = RecursiveStruct()
+    y = RecursiveStruct(x)
+
+    @save "out.jld2" x y
+    JLD2.jldopen("out.jld2", "r") do f
+        @test f["x"] == x
+        @test f["y"] == y
+    end
+end
+
 # Issue #131
 # write/read a Union{T,Missing}
 len = 10_000
@@ -138,3 +185,42 @@ end
 # Issue #183
 jfn, _ = mktemp()
 @test_throws SystemError jldopen(jfn, "r")
+
+# PR #206 Allow serialization of UnionAll in Union
+struct UA1{T}; x::T; end
+struct UA2{T}; y::T; end
+@testset "UnionAll in Union" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+
+    U1 = Union{Float64, Int}
+    U2 = Union{Int, Vector}
+    U3 = Union{UA1, UA2, Int}
+
+    # Test types
+    jldopen(fn, "w") do f
+        f["u1"] = U1
+        f["u2"] = U2
+        f["u3"] = U3
+    end
+
+    u1, u2, u3 = jldopen(fn, "r") do f
+        f["u1"], f["u2"], f["u3"]
+    end
+    @test u1 === U1
+    @test u2 === U2
+    @test u3 === U3
+    # Test Vector with that eltype
+    jldopen(fn, "w") do f
+        f["u1"] = U1[1.0, 2, 3.0]
+        f["u2"] = U2[1, [2.0], 3, ["4"]]
+        f["u3"] = U3[UA1(1), UA2(2.0), 3, UA1("4")]
+    end
+
+    u1, u2, u3 = jldopen(fn, "r") do f
+        f["u1"], f["u2"], f["u3"]
+    end
+
+    @test u1 == U1[1.0, 2, 3.0]
+    @test u2 == U2[1, [2.0], 3, ["4"]]
+    @test u3 == U3[UA1(1), UA2(2.0), 3, UA1("4")]
+end

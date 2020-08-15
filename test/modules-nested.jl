@@ -1,3 +1,18 @@
+function better_success(cmd)
+    fn1, _ = mktemp()
+    fn2, _ = mktemp()
+    try
+       run(pipeline(cmd, stdout=fn1, stderr=fn2))
+    catch
+        println(String(read(fn1)))
+        println(String(read(fn2)))
+        return false
+    end
+    return true
+end
+
+
+
 @testset "Nested modules" begin
     @testset "issue #149 - LIBSVM Kernel inside nested modules" begin
         tmpdir = mktempdir()
@@ -61,6 +76,13 @@
         rm(saving_filename; force = true, recursive = true)
         rm(loading_filename; force = true, recursive = true)
 
+        if Sys.iswindows()
+            # This is needed for the backslash path separator to survive the
+            # roundtrip from string to file to included code
+            saving_contents = replace(saving_contents, '\\' => "\\\\")
+            loading_contents = replace(loading_contents, '\\' => "\\\\")
+        end
+        
         open(mycustomload_filename, "w") do io
             println(io, mycustomload_contents)
         end
@@ -76,8 +98,8 @@
 
         rm(model_filename; force = true, recursive = true)
 
-        @test success(saving_cmd)
-        @test success(loading_cmd)
+        @test better_success(saving_cmd)
+        @test better_success(loading_cmd)
 
         rm(tmpdir; force = true, recursive = true)
     end
@@ -132,6 +154,11 @@
         rm(saving_filename; force = true, recursive = true)
         rm(loading_filename; force = true, recursive = true)
 
+        if Sys.iswindows()
+            saving_contents = replace(saving_contents, '\\' => "\\\\")
+            loading_contents = replace(loading_contents, '\\' => "\\\\")
+        end
+
         open(mycustomload_filename, "w") do io
             println(io, mycustomload_contents)
         end
@@ -147,8 +174,8 @@
 
         rm(my_rng_filename; force = true, recursive = true)
 
-        @test success(saving_cmd)
-        @test success(loading_cmd)
+        @test better_success(saving_cmd)
+        @test better_success(loading_cmd)
 
         rm(tmpdir; force = true, recursive = true)
     end
@@ -220,6 +247,11 @@
         rm(saving_filename; force = true, recursive = true)
         rm(loading_filename; force = true, recursive = true)
 
+        if Sys.iswindows()
+            saving_contents = replace(saving_contents, '\\' => "\\\\")
+            loading_contents = replace(loading_contents, '\\' => "\\\\")
+        end
+
         open(mycustomload_filename, "w") do io
             println(io, mycustomload_contents)
         end
@@ -235,8 +267,8 @@
 
         rm(my_object_filename; force = true, recursive = true)
 
-        @test success(saving_cmd)
-        @test success(loading_cmd)
+        @test better_success(saving_cmd)
+        @test better_success(loading_cmd)
 
         rm(tmpdir; force = true, recursive = true)
     end
@@ -299,6 +331,11 @@
         rm(saving_filename; force = true, recursive = true)
         rm(loading_filename; force = true, recursive = true)
 
+        if Sys.iswindows()
+            saving_contents = replace(saving_contents, '\\' => "\\\\")
+            loading_contents = replace(loading_contents, '\\' => "\\\\")
+        end
+
         open(mycustomload_filename, "w") do io
             println(io, mycustomload_contents)
         end
@@ -314,8 +351,8 @@
 
         rm(my_object_filename; force = true, recursive = true)
 
-        @test success(saving_cmd)
-        @test success(loading_cmd)
+        @test better_success(saving_cmd)
+        @test better_success(loading_cmd)
 
         rm(tmpdir; force = true, recursive = true)
     end
@@ -394,7 +431,7 @@
         """
 
         my_cmd = `$(Base.julia_cmd()) -e $(code)`
-        @test success(my_cmd)
+        @test better_success(my_cmd)
 
         cd(original_directory)
         rm(tmpdir; force = true, recursive = true)

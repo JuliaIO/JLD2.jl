@@ -3,8 +3,8 @@
 **NOTE**: This package is now **actively maintained again**! It was not maintained for some time and there still is a backlog of outstanding issues that will be adressed in the near future. You are invited to test JLD2 and raise any issues you come across. However, tread with care as you may come across problems that can potentially cause data loss.
 
 [![Travis Build Status](https://travis-ci.org/JuliaIO/JLD2.jl.svg?branch=master)](https://travis-ci.org/JuliaIO/JLD2.jl)
-[![AppVeyor Build Status](https://ci.appveyor.com/api/projects/status/9wk39naux5dhwhen?svg=true)](https://ci.appveyor.com/project/simonster/jld2-jl)
-[![codecov.io](http://codecov.io/github/JuliaIO/JLD2.jl/coverage.svg?branch=master)](http://codecov.io/github/simonster/JLD2.jl?branch=master)
+[![AppVeyor Build status](https://ci.appveyor.com/api/projects/status/j9jvpgimd04qs8dn/branch/master?svg=true)](https://ci.appveyor.com/project/JonasIsensee/jld2-jl/branch/master)
+[![codecov.io](http://codecov.io/github/JuliaIO/JLD2.jl/coverage.svg?branch=master)](http://codecov.io/github/JuliaIO/JLD2.jl?branch=master)
 
 JLD2 saves and loads Julia data structures in a format comprising a subset of HDF5, without any dependency on the HDF5 C library. It typically outperforms [the previous JLD package](https://github.com/JuliaIO/JLD.jl) (sometimes by multiple orders of magnitude) and often outperforms Julia's built-in serializer. While other HDF5 implementations supporting HDF5 File Format Specification Version 3.0 (i.e. libhdf5 1.10 or later) should be able to read the files that JLD2 produces, JLD2 is likely to be incapable of reading files created or modified by other HDF5 implementations. JLD2 does not aim to be backwards or forwards compatible with the previous JLD package.
 
@@ -32,6 +32,14 @@ This writes the variables `hello` and `foo` to datasets in a new JLD2 file named
 This assigns the contents of the `hello` and `foo` datasets to variables of the same name in the current scope.
 
 It is best practice to explicitly name the variables to be loaded and saved from a file, so that it is clear from whence these variables arise. However, for convenience, JLD2 also provides variants of `@load` and `@save` that do not require variables to be named explicitly. When called with no variable arguments, `@save <filename>` writes all variables in the global scope of the current module to file `<filename>`, while `@load <filename>` loads all variables in file `<filename>`. When called with no variable arguments, `@load` requires that the file name is provided as a string literal, i.e., it is not possible to select the file at runtime.
+
+Additional customization is possible using assignment syntax and option passing:
+
+```
+@save "example.jld2" bye=hello bar=foo
+@save "example.jld2" {compress=true} hello bar=foo
+```
+
 
 ### `save` and `load` functions
 
