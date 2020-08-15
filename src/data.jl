@@ -854,30 +854,34 @@ function typename(T::DataType)
     return String(resize!(s.data, s.size))
 end
 
+function refs_from_types(f::JLDFile, types, wsession::JLDWriteSession)
+    refs = RelOffset[
+        if isa(x, DataType)
+            # The heuristic here is that, if the field type is a committed data type,
+            # then we commit the datatype and write it as a reference to the committed
+            # datatype. Otherwise we write it as a name. This ensures that type
+            # parameters that affect the structure of a type are written to the file,
+            # so that we can reconstruct the type when the layout depends on the
+            # parameters.
+            dt = h5fieldtype(f, writeas(x), x, Val{true})
+            if isa(dt, CommittedDatatype)
+                (dt::CommittedDatatype).header_offset
+            else
+                write_ref(f, x, wsession)
+            end
+        else
+            write_ref(f, x, wsession)
+        end
+    for x in types]
+end
+
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     t = typename(T)
     store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, t), f.datatype_wsession)
     if isempty(T.parameters)
         h5convert_uninitialized!(out+odr_sizeof(Vlen{UInt8}), Vlen{UInt8})
     else
-        refs = RelOffset[
-            if isa(x, DataType)
-                # The heuristic here is that, if the field type is a committed data type,
-                # then we commit the datatype and write it as a reference to the committed
-                # datatype. Otherwise we write it as a name. This ensures that type
-                # parameters that affect the structure of a type are written to the file,
-                # so that we can reconstruct the type when the layout depends on the
-                # parameters.
-                dt = h5fieldtype(f, writeas(x), x, Val{true})
-                if isa(dt, CommittedDatatype)
-                    (dt::CommittedDatatype).header_offset
-                else
-                    write_ref(f, x, wsession)
-                end
-            else
-                write_ref(f, x, wsession)
-            end
-        for x in T.parameters]
+        refs = refs_from_types(f, T.parameters, wsession)
         store_vlen!(out+odr_sizeof(Vlen{UInt8}), RelOffset, f, refs, f.datatype_wsession)
     end
     nothing
@@ -1020,23 +1024,13 @@ h5convert!(out::Pointers, ::UnionTypeODR, f::JLDFile, x::Union, wsession::JLDWri
     dts = filter(t -> t isa DataType, Base.uniontypes(x))
     uls = filter(t -> t isa UnionAll, Base.uniontypes(x))
     if !isempty(dts)
-        # This code is essentially taken from h5convert! of DataType (above)
-        refs = Vector{RelOffset}(map(dts) do x
-            dt = h5fieldtype(f, writeas(x), x, Val{true})
-            if isa(dt, CommittedDatatype)
-                (dt::CommittedDatatype).header_offset
-            else
-                write_ref(f, x, wsession)
-            end
-        end)
+        refs = refs_from_types(f, dts, wsession)
         store_vlen!(out, RelOffset, f, refs, f.datatype_wsession)
     else
         h5convert_uninitialized!(out, Vlen{RelOffset})
     end
     if !isempty(uls)
-        refs = Vector{RelOffset}(map(uls) do x
-            write_ref(f, x, wsession)
-        end)
+        refs = RelOffset[write_ref(f, x, wsession) for x in uls]
         store_vlen!(out+odr_sizeof(Vlen{RelOffset}), RelOffset, f, refs, f.datatype_wsession)
     else
         h5convert_uninitialized!(out+odr_sizeof(Vlen{RelOffset}), Vlen{RelOffset})
