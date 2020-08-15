@@ -930,27 +930,36 @@ function _resolve_type(rr::ReadRepresentation{T,DataTypeODR()},
     return hasparams ? UnknownType(mypath, params) : UnknownType(mypath)
 end
 
-# Read a type. Returns an instance of UnknownType if the type or parameters
-# could not be resolved.
-function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
-                   f::JLDFile,
-                   ptr::Ptr,
-                   header_offset::RelOffset) where T
-    hasparams = unsafe_load(convert(Ptr{UInt32}, ptr+odr_sizeof(Vlen{UInt8}))) != 0
+
+
+function types_from_refs(f::JLDFile, ptr::Ptr)
+    # Test for a potential null pointer indicating an empty array
+    isinit = unsafe_load(convert(Ptr{UInt32}, ptr)) != 0
     unknown_params = false
-    if hasparams
-        paramrefs = jlconvert(ReadRepresentation{RelOffset,Vlen{RelOffset}}(), f,
-                              ptr+odr_sizeof(Vlen{UInt8}), NULL_REFERENCE)
-        params = Any[let
+    if isinit
+        refs = jlconvert(ReadRepresentation{RelOffset, Vlen{RelOffset}}(), f, ptr, NULL_REFERENCE)
+        params =  Any[let
             # If the reference is to a committed datatype, read the datatype
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
             res = cdt !== nulldt ? (typeof(jltype(f, cdt)::ReadRepresentation)::DataType).parameters[1] : load_dataset(f, ref)
             unknown_params = unknown_params || isa(res, UnknownType)
             res
-        end for ref in paramrefs]
+        end for ref in refs]
+        return params, unknown_params
     end
+    return [], unknown_params
+end
 
+# Read a type. Returns an instance of UnknownType if the type or parameters
+# could not be resolved.
+function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
+                   f::JLDFile,
+                   ptr::Ptr,
+                   header_offset::RelOffset) where T
+
+    params, unknown_params = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8}))
+    hasparams = !isempty(params)
     mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
     m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
 
@@ -1034,42 +1043,14 @@ h5convert!(out::Pointers, ::UnionTypeODR, f::JLDFile, x::Union, wsession::JLDWri
     end
 end
 
-
 function jlconvert(::ReadRepresentation{Union, UnionTypeODR()}, f::JLDFile,
                    ptr::Ptr, header_offset::RelOffset)
     # Reconstruct a Union by reading a list of DataTypes and UnionAlls
     # Lookup of RelOffsets is taken from jlconvert of DataTypes
-    
-    # Test for a potential null pointer indicating an empty array
-    hasdatatypes = unsafe_load(convert(Ptr{UInt32}, ptr)) != 0
-    if hasdatatypes
-        refs = jlconvert(ReadRepresentation{RelOffset, Vlen{RelOffset}}(), f, ptr, NULL_REFERENCE)
+    datatypes, = types_from_refs(f, ptr)
+    unionalls, = types_from_refs(f, ptr+odr_sizeof(Vlen{RelOffset}))
 
-        params = Any[let
-            # If the reference is to a committed datatype, read the datatype
-            nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
-            cdt = get(f.datatype_locations, ref, nulldt)
-            res = cdt !== nulldt ? (typeof(jltype(f, cdt)::ReadRepresentation)::DataType).parameters[1] : load_dataset(f, ref)
-            res
-        end for ref in refs]
-    else
-        params = []
-    end
-    hasunionalls = unsafe_load(convert(Ptr{UInt32}, ptr+odr_sizeof(Vlen{RelOffset}))) != 0
-    if hasunionalls
-
-        refs = jlconvert(ReadRepresentation{RelOffset, Vlen{RelOffset}}(),f, ptr+odr_sizeof(Vlen{RelOffset}), NULL_REFERENCE)
-        uls = Any[let
-            # If the reference is to a committed datatype, read the datatype
-            nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
-            cdt = get(f.datatype_locations, ref, nulldt)
-            res = cdt !== nulldt ? (typeof(jltype(f, cdt)::ReadRepresentation)::DataType).parameters[1] : load_dataset(f, ref)
-            res
-        end for ref in refs]
-    else
-        uls = []
-    end
-    v = Union{params..., uls...}
+    v = Union{datatypes..., unionalls...}
     track_weakref!(f, header_offset, v)
     v
 end
