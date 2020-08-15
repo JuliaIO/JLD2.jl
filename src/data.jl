@@ -991,17 +991,17 @@ constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute})
 ## Union Types
 
 const H5TYPE_UNION = CompoundDatatype(
-      2*odr_sizeof(Vlen{RelOffset}),
-      [:datatype, :unionall],
-      [0, odr_sizeof(Vlen{RelOffset})],
-      [VariableLengthDatatype(ReferenceDatatype()), VariableLengthDatatype(ReferenceDatatype())]
+      odr_sizeof(Vlen{String})+2*odr_sizeof(Vlen{RelOffset}),
+      [:description, :datatype, :unionall],
+      [0, odr_sizeof(Vlen{String}), odr_sizeof(Vlen{String})+odr_sizeof(Vlen{RelOffset})],
+      [H5TYPE_VLEN_UTF8, VariableLengthDatatype(ReferenceDatatype()), VariableLengthDatatype(ReferenceDatatype())]
       )
 
 # ODR for UnionDataType
 const UnionTypeODR = OnDiskRepresentation{
-      (0, odr_sizeof(Vlen{RelOffset})),
-      Tuple{Vector{Any}, Vector{Any}},
-      Tuple{Vlen{RelOffset}, Vlen{RelOffset}}}
+      (0, odr_sizeof(Vlen{String}), odr_sizeof(Vlen{String})+odr_sizeof(Vlen{RelOffset})),
+      Tuple{String, Vector{Any}, Vector{Any}},
+      Tuple{Vlen{String}, Vlen{RelOffset}, Vlen{RelOffset}}}
 
 function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type{S}, ::Initialized) where {T<:Union,S<:Union}
     @lookup_committed f Union
@@ -1020,7 +1020,12 @@ h5type(f::JLDFile, ::Type{T}, x::Any) where {T<:Union} =
     h5fieldtype(f, Union, typeof(x), Val{true})
 odr(::Type{Union}) = fieldodr(Union, true)
 
-h5convert!(out::Pointers, ::UnionTypeODR, f::JLDFile, x::Union, wsession::JLDWriteSession) = begin
+function h5convert!(out::Pointers, ::UnionTypeODR, f::JLDFile, x::Union, wsession::JLDWriteSession)
+    # Write a description of the union type
+    # This is not needed for loading the file but makes h5dump output clearer
+    t = string(x)
+    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, t), f.datatype_wsession)
+    out += odr_sizeof(Vlen{String})
     dts = filter(t -> t isa DataType, Base.uniontypes(x))
     uls = filter(t -> t isa UnionAll, Base.uniontypes(x))
     if !isempty(dts)
@@ -1039,6 +1044,8 @@ end
 
 function jlconvert(::ReadRepresentation{Union, UnionTypeODR()}, f::JLDFile,
                    ptr::Ptr, header_offset::RelOffset)
+    # Skip union type description in the beginning
+    ptr += odr_sizeof(Vlen{String})
     # Reconstruct a Union by reading a list of DataTypes and UnionAlls
     # Lookup of RelOffsets is taken from jlconvert of DataTypes
     datatypes, = types_from_refs(f, ptr)
