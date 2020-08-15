@@ -22,5 +22,5 @@ using JLD2, FileIO, Test, Base64
     end
 
     @test u == Union{Int64, String}
-    @test v == Union{Int64, Float64}[1, 2.0, 3]
+    @test v == Union{Int64, Float64}[Int64(1), 2.0, Int64(3)]
 end
