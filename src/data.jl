@@ -965,12 +965,15 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     params, unknown_params = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8}))
     hasparams = !isempty(params)
     mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
-    if startswith(mypath, "Union")
-        return jlconvert(ReadRepresentation{Union, UnionTypeODR()}(), f, ptr, header_offset)
-    end
     m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
 
     if hasparams
+        # This is not pretty but when reading inline unions the
+        # type to convert to (Union{T1,T2}) is not actually a datatype
+        # This branch should still be safe as no type can start with "Union{"
+        if startswith(mypath, "Union{")
+            return jlconvert(ReadRepresentation{Union, UnionTypeODR()}(), f, ptr, header_offset)
+        end
         unknown_params && return UnknownType(m, params)
         try
             m = m{params...}
