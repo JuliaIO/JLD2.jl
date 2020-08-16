@@ -44,4 +44,4 @@ function h5convert!(
 end
 
 # Singleton fields (e.g. Missing) don't actually need to be written at all
-h5convert!(::Ptr, odr::Nothing, ::JLDFile, ::Missing, ::JLDWriteSession) = nothing
+h5convert!(::Ptr, odr::Nothing, ::JLDFile, ::Any, ::JLDWriteSession) = nothing
