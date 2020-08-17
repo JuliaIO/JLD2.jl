@@ -23,6 +23,9 @@ struct InlineUnionEl{T1,T2}
 end
 
 Base.convert(::Union, x::InlineUnionEl) = iszero(x.mask) ? x.t1 : x.t2
+# The above convert method is ambiguous for Union{Nothing, Int}
+# in julia v1.0
+convert2union(x::InlineUnionEl) = iszero(x.mask) ? x.t1 : x.t2
 
 function writeasbits(T::Union)
     types = Base.uniontypes(T)
@@ -61,5 +64,8 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     else
         read_array!(v, f, rr)
     end
-    Union{T1, T2}[v;]
+
+    # Union{T1, T2}[v;]
+    # The above syntax is not compatible to julia v1.0
+    Union{T1, T2}[convert2union.(v);]
 end
