@@ -215,7 +215,7 @@ function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
 end
 
 # Write an HDF5 datatype to the file
-function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::Union{DataType,Union},
+function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::DataType,
                 attributes::WrittenAttribute...)
     io = f.io
 
@@ -968,12 +968,6 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
 
     if hasparams
-        # This is not pretty but when reading inline unions the
-        # type to convert to (Union{T1,T2}) is not actually a datatype
-        # This branch should still be safe as no type can start with "Union{"
-        if startswith(mypath, "Union{")
-            return jlconvert(ReadRepresentation{Union, UnionTypeODR()}(), f, ptr, header_offset)
-        end
         unknown_params && return UnknownType(m, params)
         try
             m = m{params...}
