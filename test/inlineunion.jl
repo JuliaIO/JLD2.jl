@@ -29,4 +29,8 @@ struct Bparam{T}; x::T; end
     u = Bparam[Bparam(1), Bparam(2.0)]
     save(fn, "u", u)
     @test u == load(fn, "u")
+
+    u = Union{Float32, Missing}[rand(5,5);]
+    save(fn, "u", u)
+    @test u == load(fn, "u")
 end

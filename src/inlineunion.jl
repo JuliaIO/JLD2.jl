@@ -1,6 +1,5 @@
 function allzeros(::Type{T}) where T
-    s = sizeof(T)
-    if s>0
+    if sizeof(T) > 0
         only(reinterpret(T,zeros(UInt8, sizeof(T))))
     else
         T()
@@ -20,28 +19,21 @@ struct InlineUnionEl{T1,T2}
     t2::T2
     InlineUnionEl{T1,T2}(mask::UInt8, x::T1, y::T2) where {T1,T2} = new{T1,T2}(mask, x, y)
     InlineUnionEl{T1,T2}(x::T1) where {T1,T2} = new{T1,T2}(UInt8(0), x, allzeros(T2))
-    InlineUnionEl{T1,T2}(x::T2) where {T1,T2} = new{T1,T2}(UInt8(0), allzeros(T1), x)
+    InlineUnionEl{T1,T2}(x::T2) where {T1,T2} = new{T1,T2}(UInt8(255), allzeros(T1), x)
 end
 
 Base.convert(::Union, x::InlineUnionEl) = iszero(x.mask) ? x.t1 : x.t2
 
-
-function writeas(::Type{Vector{T}}) where T
-    if T isa Union
-        types = Base.uniontypes(T)
-        length(types) == 2 || return Vector{T}
-        (isbitstype(types[1]) && isbitstype(types[2])) || return Vector{T}
-        return Vector{InlineUnionEl{types...}}
-    end
-    return Vector{T}
+function writeasbits(T::Union)
+    types = Base.uniontypes(T)
+    length(types) == 2 && isbitstype(types[1]) && isbitstype(types[2])
 end
 
-
-function write_dataset(f::JLDFile, x::Vector{T}, wsession::JLDWriteSession) where {T}
-    if writeas(T) <: InlineUnionEl
+function write_dataset(f::JLDFile, x::Array{T}, wsession::JLDWriteSession) where {T}
+    if T isa Union && writeasbits(T)
         # Conversion has to be done earlier here because
         # vectors are special cased in dispatch
-        y = writeas(T).(x)
+        y = InlineUnionEl{Base.uniontypes(T)...}.(x)
     else
         y = x
     end
@@ -49,7 +41,9 @@ function write_dataset(f::JLDFile, x::Vector{T}, wsession::JLDWriteSession) wher
     write_dataset(f, WriteDataspace(f, y, odr), h5type(f, y), odr, y, wsession)
 end
 
-
+# This function is identical to the one in data.jl
+# exept for the ReadRepresentation and the very last line where the data is
+# converted back into a Union Array
 function read_array(f::JLDFile, dataspace::ReadDataspace,
                     rr::ReadRepresentation{InlineUnionEl{T1,T2},RR}, data_length::Int,
                     filter_id::UInt16, header_offset::RelOffset,
@@ -67,5 +61,5 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     else
         read_array!(v, f, rr)
     end
-    convert.(Union{T1,T2}, v)
+    Union{T1, T2}[v;]
 end
