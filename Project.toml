@@ -14,12 +14,13 @@ UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 
 [compat]
 CodecZlib = "0.5, 0.6, 0.7"
-DataStructures = "0.17"
+DataStructures = "0.17, 0.18"
 MacroTools = "0.5"
 Requires = "1.0"
 julia = "0.7, 1"
 
 [extras]
+Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 LIBSVM = "b1bec4e5-fd48-53fe-b0cb-9723c09d164b"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -27,6 +28,6 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 RDatasets = "ce6b1742-4840-55fa-b093-852dadbb1d8b"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
+
 [targets]
 test = ["FileIO", "LIBSVM", "LinearAlgebra", "Printf", "RDatasets", "Random", "Test", "Base64"]
