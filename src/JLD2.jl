@@ -210,10 +210,15 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                  fallback::Union{Type, Nothing} = FallbackType(iotype),
                  compress::Bool=false, mmaparrays::Bool=false) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
-    exists = isfile(fname)
-    rname = realpath(fname)
+    exists = ispath(fname)
 
     if exists
+        rname = realpath(fname)
+        # catch existing file system entities that are not regular files
+        if !isfile(rname)
+            throw(ArgumentError("not a regular file: $fname"))
+        end
+
         if haskey(OPEN_FILES, rname)
             ref = OPEN_FILES[rname]
             f = ref.value
@@ -237,14 +242,11 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                 return f
             end
         end
-
-        if isdir(rname)
-            throw(ArgumentError("attempted to open a directory as JLD2 file"))
-        end
     end
 
     io = openfile(iotype, fname, wr, create, truncate, fallback)
     created = !exists || truncate
+    rname = realpath(fname)
     f = JLDFile(io, rname, wr, created, compress, mmaparrays)
     OPEN_FILES[rname] = WeakRef(f)
 
