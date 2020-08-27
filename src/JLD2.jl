@@ -183,22 +183,37 @@ h5offset(f::JLDFile, x::Int64) = RelOffset(x - FILE_HEADER_LENGTH)
 # File
 #
 
-openfile(::Type{IOStream}, fname, wr, create, truncate) =
+openfile(::Type{IOStream}, fname, wr, create, truncate, fallback::Nothing) =
     open(fname, read = true, write = wr, create = create,
          truncate = truncate, append = false)
-openfile(::Type{MmapIO}, fname, wr, create, truncate) =
+openfile(::Type{MmapIO}, fname, wr, create, truncate, fallback::Nothing) =
     MmapIO(fname, wr, create, truncate)
+
+function openfile(T::Type, fname, wr, create, truncate, fallback::Type)
+    try
+         openfile(T, fname, wr, create, truncate, nothing)
+    catch
+        @warn "Opening file with $T failed, falling back to $fallback"
+        openfile(fallback, fname, wr, create, truncate, nothing)
+    end
+end
+
+# default fallback behaviour : MmapIO -> IOStream -> failure
+FallbackType(::Type{MmapIO}) = IOStream
+FallbackType(::Type{IOStream}) = nothing
 
 # The delimiter is excluded by default
 read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
 
 const OPEN_FILES = Dict{String,WeakRef}()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
+                 fallback::Union{Type, Nothing} = FallbackType(iotype),
                  compress::Bool=false, mmaparrays::Bool=false) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
     exists = isfile(fname)
+    rname = realpath(fname)
+
     if exists
-        rname = realpath(fname)
         if haskey(OPEN_FILES, rname)
             ref = OPEN_FILES[rname]
             f = ref.value
@@ -222,10 +237,13 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                 return f
             end
         end
+
+        if isdir(rname)
+            throw(ArgumentError("attempted to open a directory as JLD2 file"))
+        end
     end
 
-    io = openfile(iotype, fname, wr, create, truncate)
-    rname = realpath(fname)
+    io = openfile(iotype, fname, wr, create, truncate, fallback)
     created = !exists || truncate
     f = JLDFile(io, rname, wr, created, compress, mmaparrays)
     OPEN_FILES[rname] = WeakRef(f)
@@ -418,7 +436,7 @@ include("stdlib.jl")
 include("backwards_compatibility.jl")
 
 function __init__()
-    @require FileIO="5789e2e9-d7fb-5bc7-8068-2c6fae9b9549" include("fileio.jl")    
+    @require FileIO="5789e2e9-d7fb-5bc7-8068-2c6fae9b9549" include("fileio.jl")
 end
 
 end # module
