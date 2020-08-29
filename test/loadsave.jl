@@ -184,7 +184,7 @@ end
 
 # Issue #183
 jfn, _ = mktemp()
-@test_throws SystemError jldopen(jfn, "r")
+@test_throws SystemError jldopen(jfn, "r", fallback = nothing)
 
 # PR #206 Allow serialization of UnionAll in Union
 struct UA1{T}; x::T; end

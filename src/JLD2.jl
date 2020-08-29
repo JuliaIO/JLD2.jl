@@ -183,10 +183,10 @@ h5offset(f::JLDFile, x::Int64) = RelOffset(x - FILE_HEADER_LENGTH)
 # File
 #
 
-openfile(::Type{IOStream}, fname, wr, create, truncate, fallback::Nothing) =
+openfile(::Type{IOStream}, fname, wr, create, truncate, fallback::Nothing = nothing) =
     open(fname, read = true, write = wr, create = create,
          truncate = truncate, append = false)
-openfile(::Type{MmapIO}, fname, wr, create, truncate, fallback::Nothing) =
+openfile(::Type{MmapIO}, fname, wr, create, truncate, fallback::Nothing = nothing) =
     MmapIO(fname, wr, create, truncate)
 
 function openfile(T::Type, fname, wr, create, truncate, fallback::Type)
