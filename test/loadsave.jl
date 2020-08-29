@@ -2,6 +2,18 @@ using JLD2, FileIO, Test
 
 fn = joinpath(mktempdir(), "test.jld2")
 
+# test iotype fallback
+#  no fallback specified → throw method error
+@test_throws MethodError JLD2.openfile(ArgumentError, fn, true, true, false, nothing)
+#  fallback specified → switch to fallback
+fh = JLD2.openfile(ArgumentError, fn, true, true, false, JLD2.MmapIO)
+@test fh isa JLD2.MmapIO
+close(fh)
+
+# test file path checking
+Sys.isunix() && @test_throws ArgumentError jldopen("/dev/null", "r")
+@test_throws ArgumentError jldopen(dirname(fn), "r")
+
 # Test load macros
 jldopen(fn, "w") do f
     write(f, "loadmacrotestvar1", ['a', 'b', 'c'])
