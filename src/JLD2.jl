@@ -183,22 +183,42 @@ h5offset(f::JLDFile, x::Int64) = RelOffset(x - FILE_HEADER_LENGTH)
 # File
 #
 
-openfile(::Type{IOStream}, fname, wr, create, truncate) =
+openfile(::Type{IOStream}, fname, wr, create, truncate, fallback::Nothing = nothing) =
     open(fname, read = true, write = wr, create = create,
          truncate = truncate, append = false)
-openfile(::Type{MmapIO}, fname, wr, create, truncate) =
+openfile(::Type{MmapIO}, fname, wr, create, truncate, fallback::Nothing = nothing) =
     MmapIO(fname, wr, create, truncate)
+
+function openfile(T::Type, fname, wr, create, truncate, fallback::Type)
+    try
+         openfile(T, fname, wr, create, truncate, nothing)
+    catch
+        @warn "Opening file with $T failed, falling back to $fallback"
+        openfile(fallback, fname, wr, create, truncate, nothing)
+    end
+end
+
+# default fallback behaviour : MmapIO -> IOStream -> failure
+FallbackType(::Type{MmapIO}) = IOStream
+FallbackType(::Type{IOStream}) = nothing
 
 # The delimiter is excluded by default
 read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
 
 const OPEN_FILES = Dict{String,WeakRef}()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
+                 fallback::Union{Type, Nothing} = FallbackType(iotype),
                  compress::Bool=false, mmaparrays::Bool=false) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
-    exists = isfile(fname)
+    exists = ispath(fname)
+
     if exists
         rname = realpath(fname)
+        # catch existing file system entities that are not regular files
+        if !isfile(rname)
+            throw(ArgumentError("not a regular file: $fname"))
+        end
+
         if haskey(OPEN_FILES, rname)
             ref = OPEN_FILES[rname]
             f = ref.value
@@ -224,9 +244,9 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         end
     end
 
-    io = openfile(iotype, fname, wr, create, truncate)
-    rname = realpath(fname)
+    io = openfile(iotype, fname, wr, create, truncate, fallback)
     created = !exists || truncate
+    rname = realpath(fname)
     f = JLDFile(io, rname, wr, created, compress, mmaparrays)
     OPEN_FILES[rname] = WeakRef(f)
 
