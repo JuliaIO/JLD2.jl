@@ -416,9 +416,10 @@ include("dataio.jl")
 include("loadsave.jl")
 include("stdlib.jl")
 include("backwards_compatibility.jl")
+include("inlineunion.jl")
 
 function __init__()
-    @require FileIO="5789e2e9-d7fb-5bc7-8068-2c6fae9b9549" include("fileio.jl")    
+    @require FileIO="5789e2e9-d7fb-5bc7-8068-2c6fae9b9549" include("fileio.jl")
 end
 
 end # module
