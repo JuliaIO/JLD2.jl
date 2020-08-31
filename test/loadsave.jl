@@ -8,7 +8,10 @@ fn = joinpath(mktempdir(), "test.jld2")
 #  fallback specified → switch to fallback
 fh = JLD2.openfile(ArgumentError, fn, true, true, false, JLD2.MmapIO)
 @test fh isa JLD2.MmapIO
-close(fh)
+# To avoid an mmap error on mac, have to write something to the stream before closing
+JLD2.ensureroom(fh, 8)
+write(fh, 42)
+JLD2.truncate_and_close(fh, 8)
 
 # test file path checking
 Sys.isunix() && @test_throws ArgumentError jldopen("/dev/null", "r")
