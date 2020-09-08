@@ -143,3 +143,22 @@ or using slashes as path delimiters:
 ```julia
 @assert load("example.jld2", "mygroup/mystuff") == 42
 ```
+
+
+## Known Problems - Please Read
+
+- By default `JLD2` uses memory mapping for faster reading and writing. This provides significant performance benefits on most systems. However there is an unresolved problem with memory mapping on *NFS* (network files systems).
+In particular if you are using a *NFS* (e.g. in a cluster environment) you are at risk of *DATA LOSS*. To prevent that, pass `iotype=IOStream` as a keyword argument when writing files. Example:
+
+```julia
+# Makro Syntax
+@save "myfile.jld2" {iotype=IOStream} var1 
+
+# Open Syntax
+jldopen("myfile.jld2", "w"; iotype=IOStream) do f
+    f["var1"] = var1
+end
+
+# FileIO Syntax
+FileIO.save("myfile.jld2", "var1", var1; iotype=IOStream)
+```
