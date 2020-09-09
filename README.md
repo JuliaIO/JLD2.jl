@@ -1,6 +1,6 @@
 # JLD2
 
-**NOTE**: This package is now **actively maintained again**! It was not maintained for some time and there still is a backlog of outstanding issues that will be adressed in the near future. You are invited to test JLD2 and raise any issues you come across. However, tread with care as you may come across problems that can potentially cause data loss.
+**NOTE**: This package is now **actively maintained again**! It was not maintained for some time and there still is a backlog of outstanding issues that will be addressed in the near future. You are invited to test JLD2 and raise any issues you come across. However, tread with care as you may come across problems that can potentially cause data loss.
 
 [![Travis Build Status](https://travis-ci.org/JuliaIO/JLD2.jl.svg?branch=master)](https://travis-ci.org/JuliaIO/JLD2.jl)
 [![AppVeyor Build status](https://ci.appveyor.com/api/projects/status/j9jvpgimd04qs8dn/branch/master?svg=true)](https://ci.appveyor.com/project/JonasIsensee/jld2-jl/branch/master)
