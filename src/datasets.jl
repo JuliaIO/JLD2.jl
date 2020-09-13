@@ -119,8 +119,8 @@ function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Da
         dt = read(io, typeof(expected_datatype))
         if dt == expected_datatype
             seek(f.io, attr.data_offset)
-            BOXED_READ_DATASPACE[] = (attr.dataspace, NULL_REFERENCE, -1, 0)
-            return read_data(f, rr)
+            read_dataspace = (attr.dataspace, NULL_REFERENCE, -1, 0)
+            return read_data(f, rr, read_dataspace)
         end
     end
     throw(UnsupportedFeatureException())
@@ -145,27 +145,26 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
     if datatype_class == typemax(UInt8) # Committed datatype
         rr = jltype(f, f.datatype_locations[h5offset(f, datatype_offset)])
         seek(io, data_offset)
-        BOXED_READ_DATASPACE[] = (dataspace, header_offset, data_length, filter_id)
-        read_data(f, rr, attributes)
+        read_dataspace = (dataspace, header_offset, data_length, filter_id)
+        read_data(f, rr, read_dataspace, attributes)
     else
         seek(io, datatype_offset)
         @read_datatype io datatype_class dt begin
             rr = jltype(f, dt)
             seek(io, data_offset)
-            BOXED_READ_DATASPACE[] = (dataspace, header_offset, data_length, filter_id)
-            read_data(f, rr, attributes)
+            read_dataspace = (dataspace, header_offset, data_length, filter_id)
+            read_data(f, rr, read_dataspace, attributes)
         end
     end
 end
 
-# We can avoid a box by putting the dataspace here instead of passing
-# it to read_data.  That reduces the allocation footprint, but doesn't
-# really seem to help with performance.
-const BOXED_READ_DATASPACE = Ref{Tuple{ReadDataspace,RelOffset,Int,UInt16}}()
-
 # Most types can only be scalars or arrays
-function read_data(f::JLDFile, rr, attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
-    dataspace, header_offset, data_length, filter_id = BOXED_READ_DATASPACE[]
+function read_data(f::JLDFile,
+     rr,
+     read_dataspace::Tuple{ReadDataspace,RelOffset,Int,UInt16},
+     attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
+
+    dataspace, header_offset, data_length, filter_id = read_dataspace
     if dataspace.dataspace_type == DS_SCALAR
         filter_id != 0 && throw(UnsupportedFeatureException())
         read_scalar(f, rr, header_offset)
@@ -177,9 +176,12 @@ function read_data(f::JLDFile, rr, attributes::Union{Vector{ReadAttribute},Nothi
 end
 
 # Reference arrays can only be arrays or null dataspace (for Union{} case)
-function read_data(f::JLDFile, rr::ReadRepresentation{Any,RelOffset},
-                   attributes::Vector{ReadAttribute})
-    dataspace, header_offset, data_length, filter_id = BOXED_READ_DATASPACE[]
+function read_data(f::JLDFile,
+    rr::ReadRepresentation{Any,RelOffset},
+    read_dataspace::Tuple{ReadDataspace,RelOffset,Int,UInt16},
+    attributes::Vector{ReadAttribute})
+
+    dataspace, header_offset, data_length, filter_id = read_dataspace
     filter_id != 0 && throw(UnsupportedFeatureException())
     if dataspace.dataspace_type == DS_SIMPLE
         # Since this is an array of references, there should be an attribute
@@ -211,8 +213,9 @@ end
 function read_data(f::JLDFile,
                    rr::Union{ReadRepresentation{T,nothing} where T,
                              ReadRepresentation{T,CustomSerialization{S,nothing}} where {S,T}},
+                   read_dataspace::Tuple{ReadDataspace,RelOffset,Int,UInt16},
                    attributes::Vector{ReadAttribute})
-    dataspace, header_offset, data_length, filter_id = BOXED_READ_DATASPACE[]
+    dataspace, header_offset, data_length, filter_id = read_dataspace
     filter_id != 0 && throw(UnsupportedFeatureException())
     dataspace.dataspace_type == DS_NULL || throw(UnsupportedFeatureException())
 
@@ -328,7 +331,7 @@ end
 function read_array(f::JLDFile, dataspace::ReadDataspace,
                     rr::FixedLengthString{String}, data_length::Int,
                     filter_id::UInt16, header_offset::RelOffset,
-                    attributes::Union{Vector{ReadAttribute},Nothing}) 
+                    attributes::Union{Vector{ReadAttribute},Nothing})
     rrv = ReadRepresentation{UInt8,odr(UInt8)}()
     v = read_array(f, dataspace, rrv, data_length, filter_id, header_offset, attributes)
     String(v)

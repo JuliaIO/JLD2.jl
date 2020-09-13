@@ -206,58 +206,65 @@ FallbackType(::Type{IOStream}) = nothing
 read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
 
 const OPEN_FILES = Dict{String,WeakRef}()
+const OPEN_FILES_LOCK = ReentrantLock()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
                  fallback::Union{Type, Nothing} = FallbackType(iotype),
                  compress::Bool=false, mmaparrays::Bool=false) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
     exists = ispath(fname)
 
-    if exists
-        rname = realpath(fname)
-        # catch existing file system entities that are not regular files
-        if !isfile(rname)
-            throw(ArgumentError("not a regular file: $fname"))
-        end
+    lock(OPEN_FILES_LOCK)
+    f = try
+        if exists
+            rname = realpath(fname)
+            # catch existing file system entities that are not regular files
+            if !isfile(rname)
+                throw(ArgumentError("not a regular file: $fname"))
+            end
+            if haskey(OPEN_FILES, rname)
+                ref = OPEN_FILES[rname]
+                f = ref.value
+                if ref.value !== nothing
+                    if truncate
+                        throw(ArgumentError("attempted to truncate a file that was already open"))
+                    elseif !isa(f, JLDFile{iotype})
+                        throw(ArgumentError("attempted to open file with $iotype backend, but already open with a different backend"))
+                    elseif f.writable != wr
+                        current = wr ? "read/write" : "read-only"
+                        previous = f.writable ? "read/write" : "read-only"
+                        throw(ArgumentError("attempted to open file $(current), but file was already open $(previous)"))
+                    elseif f.compress != compress
+                        throw(ArgumentError("attempted to open file with compress=$(compress), but file was already open with compress=$(f.compress)"))
+                    elseif f.mmaparrays != mmaparrays
+                        throw(ArgumentError("attempted to open file with mmaparrays=$(mmaparrays), but file was already open with mmaparrays=$(f.mmaparrays)"))
+                    end
 
-        if haskey(OPEN_FILES, rname)
-            ref = OPEN_FILES[rname]
-            f = ref.value
-            if ref.value !== nothing
-                if truncate
-                    throw(ArgumentError("attempted to truncate a file that was already open"))
-                elseif !isa(f, JLDFile{iotype})
-                    throw(ArgumentError("attempted to open file with $iotype backend, but already open with a different backend"))
-                elseif f.writable != wr
-                    current = wr ? "read/write" : "read-only"
-                    previous = f.writable ? "read/write" : "read-only"
-                    throw(ArgumentError("attempted to open file $(current), but file was already open $(previous)"))
-                elseif f.compress != compress
-                    throw(ArgumentError("attempted to open file with compress=$(compress), but file was already open with compress=$(f.compress)"))
-                elseif f.mmaparrays != mmaparrays
-                    throw(ArgumentError("attempted to open file with mmaparrays=$(mmaparrays), but file was already open with mmaparrays=$(f.mmaparrays)"))
+                    f = f::JLDFile{iotype}
+                    f.n_times_opened += 1
+                    return f
                 end
-
-                f = f::JLDFile{iotype}
-                f.n_times_opened += 1
-                return f
             end
         end
+
+        io = openfile(iotype, fname, wr, create, truncate, fallback)
+        created = !exists || truncate
+        rname = realpath(fname)
+        f = JLDFile(io, rname, wr, created, compress, mmaparrays)
+        OPEN_FILES[rname] = WeakRef(f)
+        f
+    catch e
+        rethrow(e)
+    finally
+        unlock(OPEN_FILES_LOCK)
     end
-
-    io = openfile(iotype, fname, wr, create, truncate, fallback)
-    created = !exists || truncate
-    rname = realpath(fname)
-    f = JLDFile(io, rname, wr, created, compress, mmaparrays)
-    OPEN_FILES[rname] = WeakRef(f)
-
-    if created
+    if f.written
         f.root_group = Group{typeof(f)}(f)
         f.types_group = Group{typeof(f)}(f)
     else
         verify_file_header(f)
 
-        seek(io, FILE_HEADER_LENGTH)
-        superblock = read(io, Superblock)
+        seek(f.io, FILE_HEADER_LENGTH)
+        superblock = read(f.io, Superblock)
         f.end_of_data = superblock.end_of_file_address
         f.root_group_offset = superblock.root_group_object_header_address
         f.root_group = load_group(f, superblock.root_group_object_header_address)
@@ -387,9 +394,10 @@ function Base.close(f::JLDFile)
     else
         close(io)
     end
-
-    delete!(OPEN_FILES, f.path)
-    f.n_times_opened = 0
+    lock(OPEN_FILES_LOCK) do
+        delete!(OPEN_FILES, f.path)
+        f.n_times_opened = 0
+    end
     nothing
 end
 

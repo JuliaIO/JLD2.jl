@@ -26,6 +26,10 @@ mutable struct MmapIO <: IO
     @static if Sys.iswindows()
         mapping::Ptr{Cvoid}
     end
+    # The following two fields used to be global constants but
+    # that breaks concurrent writes on separate threads
+    checksum_pos::Vector{Int64}
+    nchecksum::Int64
 end
 
 if Sys.isunix()
@@ -108,9 +112,9 @@ function MmapIO(fname::AbstractString, write::Bool, create::Bool, truncate::Bool
     n < 0 && (n = typemax(Int))
 
     @static if Sys.iswindows()
-        io = MmapIO(f, write, 0, C_NULL, C_NULL, C_NULL, C_NULL)
+        io = MmapIO(f, write, 0, C_NULL, C_NULL, C_NULL, C_NULL, Int64[], 0)
     else
-        io = MmapIO(f, write, 0, C_NULL, C_NULL, C_NULL)
+        io = MmapIO(f, write, 0, C_NULL, C_NULL, C_NULL, Int64[], 0)
     end
     mmap!(io, n)
     io.endptr = io.startptr + (initialsz % Int)
@@ -278,14 +282,12 @@ Base.convert(::Type{Ptr{T}}, x::IndirectPointer) where {T} = Ptr{T}(unsafe_load(
 # that we never compute nested checksums, but we may compute multiple checksums
 # simultaneously. This strategy is not thread-safe.
 
-const CHECKSUM_POS = Int64[]
-const NCHECKSUM = Ref{Int}(0)
 function begin_checksum_read(io::MmapIO)
-    idx = NCHECKSUM[] += 1
-    if idx > length(CHECKSUM_POS)
-        push!(CHECKSUM_POS, position(io))
+    idx = io.nchecksum += 1
+    if idx > length(io.checksum_pos)
+        push!(io.checksum_pos, position(io))
     else
-        @inbounds CHECKSUM_POS[idx] = position(io)
+        @inbounds io.checksum_pos[idx] = position(io)
     end
     io
 end
@@ -294,7 +296,7 @@ function begin_checksum_write(io::MmapIO, sz::Integer)
     begin_checksum_read(io)
 end
 function end_checksum(io::MmapIO)
-    @inbounds v = CHECKSUM_POS[NCHECKSUM[]]
-    NCHECKSUM[] -= 1
+    @inbounds v = io.checksum_pos[io.nchecksum]
+    io.nchecksum -= 1
     Lookup3.hash(Ptr{UInt8}(io.startptr + v), position(io) - v)
 end
