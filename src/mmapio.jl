@@ -121,12 +121,14 @@ end
 Base.show(io::IO, ::MmapIO) = print(io, "MmapIO")
 
 if Sys.islinux()
-    # This is substantially faster than truncate on Linux, but slower on OS X.
+    # This is used to be "pwrite" but that is actually not defined behaviour
+    # and fails on NFS systems. "ftruncate" is recommended instead
     # TODO: Benchmark on Windows
     grow(io::IOStream, sz::Integer) =
-        systemerror("pwrite", ccall(:jl_pwrite, Cssize_t,
-                                    (Cint, Ref{UInt8}, UInt, Int64),
-                                    fd(io), UInt8(0), 1, sz - 1) < 1)
+        systemerror("ftruncate",
+            ccall(:ftruncate, Cint, (Cint, Int64),
+            fd(io), sz) != 0)
+
 else
     grow(io::IOStream, sz::Integer) = truncate(io, sz)
 end
