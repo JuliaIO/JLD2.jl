@@ -119,7 +119,7 @@ function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Da
         dt = read(io, typeof(expected_datatype))
         if dt == expected_datatype
             seek(f.io, attr.data_offset)
-            read_dataspace = (attr.dataspace, NULL_REFERENCE, -1, 0)
+            read_dataspace = (attr.dataspace, NULL_REFERENCE, -1, UInt16(0))
             return read_data(f, rr, read_dataspace)
         end
     end
