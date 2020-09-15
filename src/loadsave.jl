@@ -59,9 +59,16 @@ macro save(filename, vars...)
     end
     if !isempty(fields)
         return quote
-            jldopen($(esc(filename)), "w"; $(Expr(:tuple,options...))...) do f
+            let
+                f = jldopen($(esc(filename)), "w"; $(Expr(:tuple,options...))...)
                 wsession = JLDWriteSession()
-                $(Expr(:block, fields...))
+                try
+                    $(Expr(:block, fields...))
+                catch e
+                    rethrow(e)
+                finally
+                    close(f)
+                end
             end
         end
     else
