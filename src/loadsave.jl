@@ -159,3 +159,81 @@ function loadtodict!(d::Dict, g::Union{JLDFile,Group}, prefix::String="")
     end
     return d
 end
+
+"""
+    storedict(filename, d::AbstractDict; kwargs...)
+Attempt to recursively store a hierarchy of nested dictionaries contained in
+`d` into a JLD2 group structure. This should succeed as long as all keys 
+in the dictionaries are of type `String`. Keyword arguments are forwarded
+to `jldopen`.
+
+An additional signature
+
+    storedict(g::Union{JLDFile,Group}, d::AbstractDict, prefix::String="")
+
+allows storing to an already open file.
+
+## Example
+
+    julia> d = Dict("a" => 1, "b" => Dict("c" => 2, "d" => Dict(:e => :f)))
+    Dict{String,Any} with 2 entries:
+    "b" => Dict{String,Any}("c"=>2,"d"=>Dict(:e=>:f))
+    "a" => 1
+
+
+    julia> JLD2.storedict("test.jld2", d)
+
+    
+    julia> f = jldopen("test.jld2", "r")
+    JLDFile /.../test.jld2 (read-only)
+    ├─ a
+    └─ b
+        ├─ c
+        └─ d
+"""
+function storedict(filename::AbstractString, d::AbstractDict; kwargs...)
+    f = jldopen(filename, "w", kwargs...)
+    try
+        storedict(f, d, "")
+    catch e
+        rethrow(e)
+    finally
+        close(f)
+    end
+end
+
+storedict(g::Union{JLDFile,Group}, d::AbstractDict{String}, prefix::String="") = _storedict(g, d, "")
+
+function _storedict(g::Union{JLDFile,Group}, d::AbstractDict{String}, prefix::String)
+    for k in keys(d)
+        val = d[k]
+        if val isa AbstractDict
+            _storedict(g, val, prefix*"/$k")
+        else
+            g[prefix*"/$k"] = val
+        end
+    end
+end
+function storedict(g::Union{JLDFile,Group}, d::AbstractDict, prefix::String="")
+    ks = collect(keys(d))
+    if !all(isa.(ks,String)) 
+        throw(ArgumentError("All keys need to be of type String."))
+    end
+    _storedict(g, d, prefix)
+end
+
+function _storedict(g::Union{JLDFile,Group}, d::AbstractDict, prefix::String)
+    ks = collect(keys(d))
+    if !all(isa.(ks, String)) 
+        g[prefix] = d
+    else
+        for k in ks
+            val = d[k]
+            if val isa AbstractDict
+                _storedict(g, val, prefix*"/$k")
+            else
+                g[prefix*"/$k"] = val
+            end
+        end
+    end
+end
