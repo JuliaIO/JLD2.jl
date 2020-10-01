@@ -4,6 +4,7 @@ using Pkg
 using UUIDs
 
 const STDLIB = Ref{Dict{UUID, String}}()
+const STDLIB_LOCK = ReentrantLock()
 
 function projectfile_path(env_path::String; strict=false)
     for name in Base.project_names
@@ -31,10 +32,12 @@ function load_stdlib()
 end
 
 function stdlib()
-    if !isassigned(STDLIB)
-        STDLIB[] = load_stdlib()
+    lock(STDLIB_LOCK) do
+        if !isassigned(STDLIB)
+            STDLIB[] = load_stdlib()
+        end
+        stdlib = deepcopy(STDLIB[])
     end
-    return deepcopy(STDLIB[])
 end
 
 function stdlibmodules(m::Module)::Vector{Module}
