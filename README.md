@@ -78,6 +78,36 @@ If called with multiple dataset names, `load` returns the contents of the given 
 load("example.jld2", "hello", "foo") # -> ("world", :bar)
 ```
 
+### `storedict`
+The `store_dict` function is similar to the above described `FileIO` interface. However the focus is on writing
+files that make use of JLD2's and HDF5's group structure. This is best explained by an example:
+
+```julia
+d = Dict(
+    "value1" => 21,
+    "group1" => Dict{String}(
+        "value2" => 42,
+        "group2" => Dict{String}(
+            "value3" => 84
+        )
+    )
+)
+storedict("test.jld2", d)
+```
+
+```julia
+ulia> f = jldopen("test.jld2", "r")
+JLDFile /home/jonas/test.jld2 (read-only)
+ ├─🔢 value1
+ └─📂 group1
+    ├─🔢 value2
+    └─📂 group2
+       └─🔢 value3
+
+```
+Nested dictionaries with string keys will be unrolled into a group structure that is accessible for the
+standard HDF5 implementation as well.
+
 ### File interface
 
 It is also possible to interact with JLD2 files using a file-like interface. The `jldopen` function accepts a file name and an argument specifying how the file should be opened:
