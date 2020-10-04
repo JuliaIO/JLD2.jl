@@ -966,9 +966,9 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     hasparams = !isempty(params)
     mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
     m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
-
+    m isa UnknownType && return m
+    
     if hasparams
-        unknown_params && return UnknownType(m, params)
         try
             m = m{params...}
         catch e
