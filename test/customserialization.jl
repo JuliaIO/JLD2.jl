@@ -178,7 +178,7 @@ function Base.convert(::Type{Union}, x::CSK)
 end
 function Base.convert(::Type{CSK}, x::Union)
     global converted = true
-    CSK(x.types...)
+    CSK(Base.uniontypes(x)...)
 end
 
 function write_tests(file, prefix, obj)
