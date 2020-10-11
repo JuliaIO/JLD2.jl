@@ -1310,7 +1310,7 @@ end
 # jlconvert for empty objects
 function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
                               header_offset::RelOffset) where T
-    T.size == 0 && return T()
+    #T.size == 0 && return T()
 
     # In this case, T is a non-empty object, but the written data was empty
     # because the custom serializers for the fields all resulted in empty
