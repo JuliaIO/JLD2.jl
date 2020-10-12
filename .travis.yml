@@ -25,7 +25,10 @@ matrix:
 notifications:
   email: false
 
-
+cache:
+  directories:
+  - $HOME/.julia/artifacts
+  
 # script:
 #  - if [[ -a .git/shallow ]]; then git fetch --unshallow; fi
 #  - julia --check-bounds=yes -e 'Pkg.clone(pwd()); Pkg.build("JLD2"); Pkg.test("JLD2"; coverage=true)'

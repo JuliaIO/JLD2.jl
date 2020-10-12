@@ -14,94 +14,96 @@ end
 
 
 @testset "Nested modules" begin
-    @testset "issue #149 - LIBSVM Kernel inside nested modules" begin
-        tmpdir = mktempdir()
-        atexit(() -> rm(tmpdir; force = true, recursive = true))
+    if VERSION >= v"1.3" # LIBSVM no longer supports julia < v1.3
+        @testset "issue #149 - LIBSVM Kernel inside nested modules" begin
+            tmpdir = mktempdir()
+            atexit(() -> rm(tmpdir; force = true, recursive = true))
 
-        mycustomload_filename = joinpath(tmpdir, "mycustomload.jl")
-        model_filename = joinpath(tmpdir, "model.jld2")
-        saving_filename = joinpath(tmpdir, "saving.jl")
-        loading_filename = joinpath(tmpdir, "loading.jl")
+            mycustomload_filename = joinpath(tmpdir, "mycustomload.jl")
+            model_filename = joinpath(tmpdir, "model.jld2")
+            saving_filename = joinpath(tmpdir, "saving.jl")
+            loading_filename = joinpath(tmpdir, "loading.jl")
 
-        mycustomload_contents = """
-        module MyCustomLoad
-        using FileIO, JLD2
+            mycustomload_contents = """
+            module MyCustomLoad
+            using FileIO, JLD2
 
-        function load_my_model(filename::AbstractString)
-            d = FileIO.load(filename)
-            model = d["model"]
-            return model
-        end
+            function load_my_model(filename::AbstractString)
+                d = FileIO.load(filename)
+                model = d["model"]
+                return model
+            end
 
-        end # module
-        """
+            end # module
+            """
 
-        saving_contents = """
-            append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
-            unique!(Base.LOAD_PATH)
-            using FileIO, JLD2, LIBSVM, RDatasets
-            iris = dataset("datasets", "iris")
-            labels = convert(Vector{String}, iris[!, :Species])
-            instances = convert(Matrix{Float64}, iris[!, 1:4])'
-            model = svmtrain(instances[:, 1:2:end], labels[1:2:end])
-            model_filename = "$(model_filename)"
+            saving_contents = """
+                append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
+                unique!(Base.LOAD_PATH)
+                using FileIO, JLD2, LIBSVM, RDatasets
+                iris = dataset("datasets", "iris")
+                labels = convert(Vector{String}, iris[!, :Species])
+                instances = convert(Matrix{Float64}, iris[!, 1:4])'
+                model = svmtrain(instances[:, 1:2:end], labels[1:2:end])
+                model_filename = "$(model_filename)"
+                rm(model_filename; force = true, recursive = true)
+                FileIO.save(model_filename, Dict("model" => model))
+            """
+
+            loading_contents = """
+                append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
+                unique!(Base.LOAD_PATH)
+                tmpdir = "$(tmpdir)"
+                include(joinpath(tmpdir, "mycustomload.jl"))
+                using LIBSVM, Test
+                model_filename = "$(model_filename)"
+                model = @test_nowarn MyCustomLoad.load_my_model(model_filename)
+                @test model.SVMtype isa DataType
+                @test model.SVMtype <: LIBSVM.SVC
+                @test model.kernel isa LIBSVM.Kernel.KERNEL
+                @test model.SVs isa LIBSVM.SupportVectors
+                using JLD2
+                @test !JLD2.isreconstructed(model)
+                @test !JLD2.isreconstructed(model.SVMtype)
+                @test !JLD2.isreconstructed(model.kernel)
+                @test !JLD2.isreconstructed(model.SVs)
+                @test !JLD2.isreconstructed(LIBSVM.SVC)
+                @test !JLD2.isreconstructed(LIBSVM.Kernel.KERNEL)
+                @test !JLD2.isreconstructed(LIBSVM.SupportVectors)
+            """
+
+            rm(mycustomload_filename; force = true, recursive = true)
             rm(model_filename; force = true, recursive = true)
-            FileIO.save(model_filename, Dict("model" => model))
-        """
+            rm(saving_filename; force = true, recursive = true)
+            rm(loading_filename; force = true, recursive = true)
 
-        loading_contents = """
-            append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
-            unique!(Base.LOAD_PATH)
-            tmpdir = "$(tmpdir)"
-            include(joinpath(tmpdir, "mycustomload.jl"))
-            using LIBSVM, Test
-            model_filename = "$(model_filename)"
-            model = @test_nowarn MyCustomLoad.load_my_model(model_filename)
-            @test model.SVMtype isa DataType
-            @test model.SVMtype <: LIBSVM.SVC
-            @test model.kernel isa LIBSVM.Kernel.KERNEL
-            @test model.SVs isa LIBSVM.SupportVectors
-            using JLD2
-            @test !JLD2.isreconstructed(model)
-            @test !JLD2.isreconstructed(model.SVMtype)
-            @test !JLD2.isreconstructed(model.kernel)
-            @test !JLD2.isreconstructed(model.SVs)
-            @test !JLD2.isreconstructed(LIBSVM.SVC)
-            @test !JLD2.isreconstructed(LIBSVM.Kernel.KERNEL)
-            @test !JLD2.isreconstructed(LIBSVM.SupportVectors)
-        """
+            if Sys.iswindows()
+                # This is needed for the backslash path separator to survive the
+                # roundtrip from string to file to included code
+                saving_contents = replace(saving_contents, '\\' => "\\\\")
+                loading_contents = replace(loading_contents, '\\' => "\\\\")
+            end
 
-        rm(mycustomload_filename; force = true, recursive = true)
-        rm(model_filename; force = true, recursive = true)
-        rm(saving_filename; force = true, recursive = true)
-        rm(loading_filename; force = true, recursive = true)
+            open(mycustomload_filename, "w") do io
+                println(io, mycustomload_contents)
+            end
+            open(saving_filename, "w") do io
+                println(io, saving_contents)
+            end
+            open(loading_filename, "w") do io
+                println(io, loading_contents)
+            end
 
-        if Sys.iswindows()
-            # This is needed for the backslash path separator to survive the
-            # roundtrip from string to file to included code
-            saving_contents = replace(saving_contents, '\\' => "\\\\")
-            loading_contents = replace(loading_contents, '\\' => "\\\\")
+            saving_cmd = `$(Base.julia_cmd()) $(saving_filename)`
+            loading_cmd = `$(Base.julia_cmd()) $(loading_filename)`
+
+            rm(model_filename; force = true, recursive = true)
+
+            @test better_success(saving_cmd)
+            @test better_success(loading_cmd)
+
+            rm(tmpdir; force = true, recursive = true)
         end
-        
-        open(mycustomload_filename, "w") do io
-            println(io, mycustomload_contents)
-        end
-        open(saving_filename, "w") do io
-            println(io, saving_contents)
-        end
-        open(loading_filename, "w") do io
-            println(io, loading_contents)
-        end
-
-        saving_cmd = `$(Base.julia_cmd()) $(saving_filename)`
-        loading_cmd = `$(Base.julia_cmd()) $(loading_filename)`
-
-        rm(model_filename; force = true, recursive = true)
-
-        @test better_success(saving_cmd)
-        @test better_success(loading_cmd)
-
-        rm(tmpdir; force = true, recursive = true)
     end
     @testset "issue #112 - Random.DSFMT" begin
         tmpdir = mktempdir()
