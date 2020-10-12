@@ -239,3 +239,14 @@ struct UA2{T}; y::T; end
     @test u2 == U2[1, [2.0], 3, ["4"]]
     @test u3 == U3[UA1(1), UA2(2.0), 3, UA1("4")]
 end
+
+
+
+# Test for Issue #247
+@testset "Tuple of Empty Structs" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+    @save fn tup=(EmptyImmutable(), EmptyImmutable())
+    @load fn tup
+
+    @test tup == (EmptyImmutable(), EmptyImmutable())
+end
