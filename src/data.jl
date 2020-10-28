@@ -1319,10 +1319,18 @@ function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
         writtenas = writeas(ty)
         @assert writtenas.size == 0
         if writtenas === ty
-            ty()
+            # This will usually equal `ty()` unless ty does not have a
+            # constructor without arguments 
+            jlconvert(ReadRepresentation{ty,nothing}(), f, ptr, header_offset)
         else
-            rconvert(ty, writtenas())
+            rconvert(ty, 
+                jlconvert(ReadRepresentation{writtenas,nothing}(), f, ptr, header_offset)
+            )
         end
+    end
+    if T <: Tuple
+        # Tuples are weird in that you can't instantiate them with Tuple{T,S}(t,s)
+        return (fields...,)::T
     end
     return T(fields...)
 end
