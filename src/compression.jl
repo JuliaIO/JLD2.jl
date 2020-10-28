@@ -104,3 +104,34 @@ end
     seek(io, data_offset + data_length)
     v
 end
+
+
+# Optimizations for primitive types
+
+
+@inline function read_compressed_array!(v::Array{T}, f::JLDFile{MmapIO},
+                                        rr::ReadRepresentation{T,T},
+                                        data_length::Int,
+                                        ::Val{BLOSC_ID}) where {T,RR}
+    io = f.io
+    inptr = io.curptr
+    decompress!(
+        unsafe_wrap(Array, Ptr{T}(pointer(v)), length(v)),
+        unsafe_wrap(Array, Ptr{UInt8}(inptr), data_length))
+    io.curptr = inptr + data_length
+    v
+end
+
+function deflate_data(f::JLDFile, data::Array{T}, odr::Type{T}, wsession::JLDWriteSession) where {T,S}
+    Blosc.compress(data)
+end
+
+function write_compressed_data(cio, f, data, odr, wsession)
+    write(cio, DEFLATE_PIPELINE_MESSAGE)
+    deflated = deflate_data(f, data, odr, wsession)
+    write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
+    write(f.io, end_checksum(cio))
+
+    f.end_of_data += length(deflated)
+    write(f.io, deflated)
+end
