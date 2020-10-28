@@ -62,7 +62,7 @@ end
 function hasdata(T::DataType, encounteredtypes=DataType[])
     isempty(T.types) && T.size != 0 && return true
     for ty in T.types
-        hasfielddata(writeas(ty), encounteredtypes) && return true
+        hasfielddata(writeas(ty), copy(encounteredtypes)) && return true
     end
     false
 end
