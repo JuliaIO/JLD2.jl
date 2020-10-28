@@ -3,6 +3,7 @@ uuid = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 version = "0.2.3"
 
 [deps]
+Blosc = "a74b3585-a348-5f62-a45c-50e91977d574"
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"

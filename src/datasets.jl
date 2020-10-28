@@ -69,7 +69,7 @@ function load_dataset(f::JLDFile, offset::RelOffset)
             nfilters = read(cio, UInt8)
             nfilters == 1 || throw(UnsupportedFeatureException())
             filter_id = read(cio, UInt16)
-            filter_id == 1 || throw(UnsupportedFeatureException())
+            issupported_filter(filter_id) || throw(UnsupportedFeatureException())
         elseif msg.msg_type == HM_ATTRIBUTE
             if attrs === EMPTY_READ_ATTRIBUTES
                 attrs = ReadAttribute[read_attribute(cio, f)]
@@ -320,8 +320,8 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
     n = length(v)
     seek(io, data_offset)
-    if filter_id == 1
-        read_compressed_array!(v, f, rr, data_length)
+    if filter_id !=0
+        read_compressed_array!(v, f, rr, data_length, Val{filter_id}())
     else
         read_array!(v, f, rr)
     end
@@ -345,15 +345,7 @@ function payload_size_without_storage_message(dataspace::WriteDataspace, datatyp
     sz
 end
 
-function deflate_data(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSession) where {T,S}
-    buf = Vector{UInt8}(undef, odr_sizeof(odr) * length(data))
-    cp = Ptr{Cvoid}(pointer(buf))
-    @simd for i = 1:length(data)
-        @inbounds h5convert!(cp, odr, f, data[i], wsession)
-        cp += odr_sizeof(odr)
-    end
-    transcode(ZlibCompressor, buf)
-end
+
 function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data::Array{T}, wsession::JLDWriteSession) where {T,S}
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
@@ -393,13 +385,9 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
         end
         write(io, end_checksum(cio))
     elseif layout_class == LC_CHUNKED_STORAGE
-        write(cio, DEFLATE_PIPELINE_MESSAGE)
-        deflated = deflate_data(f, data, odr, wsession)
-        write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
-        write(io, end_checksum(cio))
 
-        f.end_of_data += length(deflated)
-        write(io, deflated)
+        write_compressed_data(cio, f, data, odr, wsession)
+
     else
         write(cio, ContiguousStorageMessage(datasz, h5offset(f, f.end_of_data)))
         write(io, end_checksum(cio))
@@ -509,17 +497,6 @@ function write_chunked_storage_message(io::IO, elsize::Int, dims::NTuple{N,Int},
     write(io, offset)                       # Address
 end
 
-const DEFLATE_PIPELINE_MESSAGE = let
-    io = IOBuffer()
-    write(io, HeaderMessage(HM_FILTER_PIPELINE, 12, 0))
-    write(io, UInt8(2))                 # Version
-    write(io, UInt8(1))                 # Number of Filters
-    write(io, UInt16(1))                # Filter Identification Value (= deflate)
-    write(io, UInt16(0))                # Flags
-    write(io, UInt16(1))                # Number of Client Data Values
-    write(io, UInt32(5))                # Client Data (Compression Level)
-    take!(io)
-end
 
 @Base.pure ismutabletype(x::DataType) = x.mutable
 

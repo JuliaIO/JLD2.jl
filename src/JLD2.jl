@@ -1,5 +1,6 @@
 module JLD2
-using DataStructures, CodecZlib, Requires
+using DataStructures, CodecZlib, Blosc
+using Requires
 import Base.sizeof
 using MacroTools
 using Printf
@@ -445,6 +446,7 @@ include("loadsave.jl")
 include("stdlib.jl")
 include("backwards_compatibility.jl")
 include("inlineunion.jl")
+include("compression.jl")
 
 function __init__()
     @require FileIO="5789e2e9-d7fb-5bc7-8068-2c6fae9b9549" include("fileio.jl")
