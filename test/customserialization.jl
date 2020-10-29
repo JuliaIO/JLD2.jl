@@ -40,7 +40,7 @@ struct CSB end
 b = CSB()
 
 struct CSBSerialization
-    x::Int
+    x::Int64
 end
 JLD2.writeas(::Type{CSB}) = CSBSerialization
 function JLD2.wconvert(::Type{CSBSerialization}, x::CSB)
