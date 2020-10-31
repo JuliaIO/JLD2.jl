@@ -429,8 +429,9 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
             odrs[i] = odrtype
             offsets[i] = dt.offsets[dtindex]
 
-            # Have to check odrs here as well. Can't just hope that everything is alright
-            # just because offsets and sizes are the same odr can be different
+            # The on disk representation of T can only be the same as in memory
+            # if the offsets are the same, field type on disk (readtype) and in memory (wstype)
+            # are the same and if no CustomSerialization is involved 
             samelayout = samelayout && offsets[i] == fieldoffset(T, i) && types[i] === wstype && !(odrs[i] <: CustomSerialization)
 
             mapped[dtindex] = true
