@@ -55,9 +55,16 @@ function load_dataset(f::JLDFile, offset::RelOffset)
                 skip(cio, Int(dimensionality)*Int(dimensionality_size))
 
                 chunk_indexing_type = read(cio, UInt8)
-                chunk_indexing_type == 1 || throw(UnsupportedFeatureException())
-                data_length = read(cio, Length)
-                read(cio, UInt32)
+                #chunk_indexing_type == 1 || throw(UnsupportedFeatureException())
+                chunk_indexing_type == 3 && @info "Fixed Array Indexing"
+                if chunk_indexing_type == 1
+                    data_length = read(cio, Length)
+                    read(cio, UInt32)
+                elseif chunk_indexing_type == 3
+                    read(cio, UInt8)
+                else
+                    throw(UnsupportedFeatureException())
+                end
                 data_offset = fileoffset(f, read(cio, RelOffset))
                 chunked_storage = true
             else
@@ -313,8 +320,9 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
                     filter_id::UInt16, header_offset::RelOffset,
                     attributes::Union{Vector{ReadAttribute},Nothing}) where {T,RR}
     io = f.io
-    data_offset = position(io)
-    ndims, offset = get_ndims_offset(f, dataspace, attributes)
+    @show data_offset = position(io)
+    @show ndims, offset = get_ndims_offset(f, dataspace, attributes)
+    
     seek(io, offset)
     v = construct_array(io, T, Int(ndims))
     header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
@@ -478,24 +486,6 @@ define_packed(ContiguousStorageMessage)
         4, LC_CONTIGUOUS_STORAGE, offset, datasz
     )
 
-@inline chunked_storage_message_size(ndims::Int) =
-    sizeof(HeaderMessage) + 5 + (ndims+1)*sizeof(Length) + 1 + sizeof(Length) + 4 + sizeof(RelOffset)
-function write_chunked_storage_message(io::IO, elsize::Int, dims::NTuple{N,Int}, filtered_size::Int, offset::RelOffset) where N
-    write(io, HeaderMessage(HM_DATA_LAYOUT, chunked_storage_message_size(N) - sizeof(HeaderMessage), 0))
-    write(io, UInt8(4))                     # Version
-    write(io, UInt8(LC_CHUNKED_STORAGE))    # Layout Class
-    write(io, UInt8(2))                     # Flags (= SINGLE_INDEX_WITH_FILTER)
-    write(io, UInt8(N+1))                   # Dimensionality
-    write(io, UInt8(sizeof(Length)))        # Dimensionality Size
-    for i = N:-1:1
-        write(io, Length(dims[i]))          # Dimensions 1...N
-    end
-    write(io, Length(elsize))               # Element size (last dimension)
-    write(io, UInt8(1))                     # Chunk Indexing Type (= Single Chunk)
-    write(io, Length(filtered_size))        # Size of filtered chunk
-    write(io, UInt32(0))                    # Filters for chunk
-    write(io, offset)                       # Address
-end
 
 
 @Base.pure ismutabletype(x::DataType) = x.mutable
