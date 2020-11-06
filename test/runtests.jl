@@ -1,6 +1,7 @@
 using JLD2, FileIO
 using Test
 
+include("bufferedreader.jl")
 include("lookup3.jl")
 include("internal.jl")
 include("rw.jl")
