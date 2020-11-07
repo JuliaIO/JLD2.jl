@@ -98,11 +98,11 @@ end
 function Base.read(io::BufferedReader, ::Type{T}, n::Int) where T
     position = io.position[]
     buffer = io.buffer
-    n = sizeof(T) * n
-    if length(buffer) - position < n
-        readmore!(io, sizeof(T))
+    m = sizeof(T) * n
+    if length(buffer) - position < m
+        readmore!(io, m)
     end
-    io.position[] = position + n
+    io.position[] = position + m
     arr = Vector{T}(undef, n)
     unsafe_copyto!(pointer(arr), Ptr{T}(pointer(buffer, position+1)), n)
     arr
