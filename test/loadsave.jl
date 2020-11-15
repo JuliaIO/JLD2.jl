@@ -249,4 +249,11 @@ end
     @load fn tup
 
     @test tup == (EmptyImmutable(), EmptyImmutable())
+    
+    # Test for Recursively Empty struct
+    @save fn tup=(EmptyII(EmptyImmutable()), EmptyImmutable())
+    @load fn tup
+
+    @test tup == (EmptyII(EmptyImmutable()), EmptyImmutable())
 end
+

@@ -428,7 +428,11 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
             types[i] = readtype
             odrs[i] = odrtype
             offsets[i] = dt.offsets[dtindex]
-            samelayout = samelayout && offsets[i] == fieldoffset(T, i) && types[i] === wstype
+
+            # The on disk representation of T can only be the same as in memory
+            # if the offsets are the same, field type on disk (readtype) and in memory (wstype)
+            # are the same and if no CustomSerialization is involved 
+            samelayout = samelayout && offsets[i] == fieldoffset(T, i) && types[i] === wstype && !(odrs[i] <: CustomSerialization)
 
             mapped[dtindex] = true
         end
@@ -967,7 +971,7 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
     m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
     m isa UnknownType && return m
-    
+
     if hasparams
         try
             m = m{params...}
@@ -1288,35 +1292,51 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
     (ReadRepresentation{T,rodr}(), false)
 end
 
-# These need to go at the bottom. Also, JLD2 doesn't support custom serialization because
-# these methods are not guaranteed to work if you add methods to `writeas`.
 
-@generated function h5type(f::JLDFile, ::Type{T}, ::T) where T<:Array
+function h5type(f::JLDFile, ::Type{T}, ::T) where T<:Array
     if T <: Array{Union{}}
-        return :(ReferenceDatatype())
+        return ReferenceDatatype()
     end
     ty = T.parameters[1]
     writtenas = writeas(ty)
-    !hasfielddata(writtenas) ? :(h5type(f, $writtenas, $(Expr(:new, ty)))) : :(h5fieldtype(f, $writtenas, $ty, Val{false}))
+    if !hasfielddata(writtenas)
+        # This is a hacky way to generate an instance of ty
+        # the instance isn't actually needed for anything except that inside
+        # h5type ty is determined via typeof(x)
+        # one reasonable optimization would be to make h5type accept a type directly
+        h5type(f, writtenas, rconvert(ty, writtenas()))
+    else
+        h5fieldtype(f, writtenas, ty, Val{false})
+    end
 end
 
+
 # jlconvert for empty objects
-@generated function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
+function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
                               header_offset::RelOffset) where T
-    T.size == 0 && return Expr(:new, T)
+    #T.size == 0 && return T()
 
     # In this case, T is a non-empty object, but the written data was empty
     # because the custom serializers for the fields all resulted in empty
     # objects
-    return Expr(:new, T, [begin
+    fields = map(T.types) do ty
         writtenas = writeas(ty)
         @assert writtenas.size == 0
         if writtenas === ty
-            Expr(:new, ty)
+            # This will usually equal `ty()` unless ty does not have a
+            # constructor without arguments 
+            jlconvert(ReadRepresentation{ty,nothing}(), f, ptr, header_offset)
         else
-            :(rconvert($ty, $(Expr(:new, writtenas))))
+            rconvert(ty, 
+                jlconvert(ReadRepresentation{writtenas,nothing}(), f, ptr, header_offset)
+            )
         end
-    end for ty in T.types]...)
+    end
+    if T <: Tuple
+        # Tuples are weird in that you can't instantiate them with Tuple{T,S}(t,s)
+        return (fields...,)::T
+    end
+    return T(fields...)
 end
 
 # At present, we write Union{} as an object of Core.TypeofBottom. The method above
@@ -1419,7 +1439,7 @@ end
 # odr gives the on-disk representation of a given type, similar to
 # fieldodr, but actually encoding the data for things that odr stores
 # as references
-@generated function odr(::Type{T}) where T
+function odr(::Type{T}) where T
     if !hasdata(T)
         # A pointer singleton or ghost. We need to write something, but we'll
         # just write a single byte.

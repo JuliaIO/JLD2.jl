@@ -40,7 +40,7 @@ struct CSB end
 b = CSB()
 
 struct CSBSerialization
-    x::Int
+    x::Int64
 end
 JLD2.writeas(::Type{CSB}) = CSBSerialization
 function JLD2.wconvert(::Type{CSBSerialization}, x::CSB)
@@ -178,13 +178,13 @@ function Base.convert(::Type{Union}, x::CSK)
 end
 function Base.convert(::Type{CSK}, x::Union)
     global converted = true
-    CSK(x.types...)
+    CSK(Base.uniontypes(x)...)
 end
 
 function write_tests(file, prefix, obj)
     write(file, prefix, obj)
     write(file, "$(prefix)_singlefieldwrapper", SingleFieldWrapper(obj))
-    write(file, "$(prefix)_multifieldwrapper", MultiFieldWrapper(obj, 5935250212119237787))
+    write(file, "$(prefix)_multifieldwrapper", MultiFieldWrapper(obj, 2147483645))
     write(file, "$(prefix)_untypedwrapper", UntypedWrapper(obj))
     write(file, "$(prefix)_arr", [obj])
     write(file, "$(prefix)_empty_arr", typeof(obj)[])
@@ -195,7 +195,7 @@ function read_tests(file, prefix, obj)
     @test read(file, prefix) == obj
     @test converted
     @test read(file, "$(prefix)_singlefieldwrapper") == SingleFieldWrapper(obj)
-    @test read(file, "$(prefix)_multifieldwrapper") == MultiFieldWrapper(obj, 5935250212119237787)
+    @test read(file, "$(prefix)_multifieldwrapper") == MultiFieldWrapper(obj, 2147483645)
     @test read(file, "$(prefix)_untypedwrapper") == UntypedWrapper(obj)
     arr = read(file, "$(prefix)_arr")
     @test typeof(arr) == Vector{typeof(obj)} && length(arr) == 1 && arr[1] == obj
