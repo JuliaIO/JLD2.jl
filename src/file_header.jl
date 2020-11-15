@@ -3,7 +3,7 @@ import Pkg.Types: VersionRange
 # Currently we specify a 512 byte header
 const FILE_HEADER_LENGTH = 512
 
-const FORMAT_VERSION = v"0.1.0"
+const FORMAT_VERSION = v"0.1.1"
 # Range of file format versions that can be read
 # Publish patch release relaxing upper version bound
 # if the imminent major release is not breaking
