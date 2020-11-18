@@ -1336,7 +1336,7 @@ function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
         # Tuples are weird in that you can't instantiate them with Tuple{T,S}(t,s)
         return (fields...,)::T
     end
-    return T(fields...)
+    return eval(Expr(:new, T, fields...))
 end
 
 # At present, we write Union{} as an object of Core.TypeofBottom. The method above
