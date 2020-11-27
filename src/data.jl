@@ -1292,6 +1292,23 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
     (ReadRepresentation{T,rodr}(), false)
 end
 
+initstruct(T) = ccall(:jl_new_struct_uninit, Any, (Any,), T)
+
+function newstruct(T, fields)
+    if !T.mutable
+        return ccall(:jl_new_structv, Any, (Any,Ptr{Cvoid},UInt32), T, fields, length(fields))
+    else
+        # Manual inline of newstruct! to work around bug
+        # https://github.com/MikeInnes/BSON.jl/issues/2#issuecomment-452204339
+        x = initstruct(T)
+    
+        for (i, f) = enumerate(fields)
+            ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), x, i-1, f)
+        end
+        x  
+    end
+end
+
 
 function h5type(f::JLDFile, ::Type{T}, ::T) where T<:Array
     if T <: Array{Union{}}
@@ -1303,8 +1320,8 @@ function h5type(f::JLDFile, ::Type{T}, ::T) where T<:Array
         # This is a hacky way to generate an instance of ty
         # the instance isn't actually needed for anything except that inside
         # h5type ty is determined via typeof(x)
-        # one reasonable optimization would be to make h5type accept a type directly
-        h5type(f, writtenas, rconvert(ty, writtenas()))
+        # annoyingly for some types h5type needs the instance
+        h5type(f, writtenas, rconvert(ty, newstruct(writtenas, [])))
     else
         h5fieldtype(f, writtenas, ty, Val{false})
     end
@@ -1336,7 +1353,8 @@ function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
         # Tuples are weird in that you can't instantiate them with Tuple{T,S}(t,s)
         return (fields...,)::T
     end
-    return eval(Expr(:new, T, fields...))
+    #return eval(Expr(:new, T, fields...))
+    return newstruct(T, fields)::T
 end
 
 # At present, we write Union{} as an object of Core.TypeofBottom. The method above
