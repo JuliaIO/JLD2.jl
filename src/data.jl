@@ -1292,7 +1292,13 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
     (ReadRepresentation{T,rodr}(), false)
 end
 
-initstruct(T) = ccall(:jl_new_struct_uninit, Any, (Any,), T)
+
+# The following two definitions are borrowed from BSON.
+# They are used to generate instances of arbitrary types
+# given their fields regarless of potential constructors.
+# It is unclear to the author whether this approach is 
+# optimal.
+newstruct(T) = ccall(:jl_new_struct_uninit, Any, (Any,), T)
 
 function newstruct(T, fields)
     if !T.mutable
@@ -1300,7 +1306,7 @@ function newstruct(T, fields)
     else
         # Manual inline of newstruct! to work around bug
         # https://github.com/MikeInnes/BSON.jl/issues/2#issuecomment-452204339
-        x = initstruct(T)
+        x = newstruct(T)
     
         for (i, f) = enumerate(fields)
             ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), x, i-1, f)
@@ -1321,7 +1327,7 @@ function h5type(f::JLDFile, ::Type{T}, ::T) where T<:Array
         # the instance isn't actually needed for anything except that inside
         # h5type ty is determined via typeof(x)
         # annoyingly for some types h5type needs the instance
-        h5type(f, writtenas, rconvert(ty, newstruct(writtenas, [])))
+        h5type(f, writtenas, rconvert(ty, newstruct(writtenas)))
     else
         h5fieldtype(f, writtenas, ty, Val{false})
     end
@@ -1331,7 +1337,7 @@ end
 # jlconvert for empty objects
 function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
                               header_offset::RelOffset) where T
-    #T.size == 0 && return T()
+    T.size == 0 && return newstruct(T)::T
 
     # In this case, T is a non-empty object, but the written data was empty
     # because the custom serializers for the fields all resulted in empty
@@ -1353,7 +1359,6 @@ function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
         # Tuples are weird in that you can't instantiate them with Tuple{T,S}(t,s)
         return (fields...,)::T
     end
-    #return eval(Expr(:new, T, fields...))
     return newstruct(T, fields)::T
 end
 
