@@ -16,6 +16,14 @@ struct UntypedWrapper
 end
 Base.:(==)(a::UntypedWrapper, b::UntypedWrapper) = a.x == b.x
 
+# Mutable field wrapper
+mutable struct MutableFieldWrapper{T}
+    x::T
+    y::Int
+end
+Base.:(==)(a::MutableFieldWrapper, b::MutableFieldWrapper) = a.x == b.x
+
+
 # This is a type with a custom serialization, where the original type has data
 # but the custom serialization is empty
 struct CSA
@@ -189,6 +197,7 @@ function write_tests(file, prefix, obj)
     write(file, "$(prefix)_arr", [obj])
     write(file, "$(prefix)_empty_arr", typeof(obj)[])
     write(file, "$(prefix)_tuple", (obj,))
+    write(file, "$(prefix)_mutablefieldwrapper", MutableFieldWrapper(obj, 42))
 end
 
 function read_tests(file, prefix, obj)
@@ -203,6 +212,7 @@ function read_tests(file, prefix, obj)
     empty_arr = read(file, "$(prefix)_empty_arr")
     @test typeof(empty_arr) == Vector{typeof(obj)} && length(empty_arr) == 0
     @test read(file, "$(prefix)_tuple") == (obj,) 
+    @test read(file, "$(prefix)_mutablefieldwrapper") == MutableFieldWrapper(obj, 42)
 end
 
 @testset "Custom Serialization" begin
