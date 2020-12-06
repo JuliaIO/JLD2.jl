@@ -1141,6 +1141,7 @@ end
 ## NTuples
 
 writeas(::Type{NTuple{N,T}}) where {N,T} = Vector{T}
+writeas(::Type{Tuple{}}) = Tuple{}
 wconvert(::Type{Vector{T}}, x::NTuple{N,T}) where {N,T} = reduce(vcat, x)
 rconvert(::Type{NTuple{N,T}}, x::Vector{T}) where {N,T} = NTuple{N,T}(x)
 
