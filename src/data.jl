@@ -1138,6 +1138,12 @@ function rconvert(::Type{T}, x::Vector{Pair{K,V}}) where {T<:AbstractDict,K,V}
     d
 end
 
+## NTuples
+
+writeas(::Type{NTuple{N,T}}) where {N,T} = Vector{T}
+wconvert(::Type{Vector{T}}, x::NTuple{N,T}) where {N,T} = reduce(vcat, x)
+rconvert(::Type{NTuple{N,T}}, x::Vector{T}) where {N,T} = NTuple{N,T}(x)
+
 ## Type reconstruction
 
 module ReconstructedTypes end
