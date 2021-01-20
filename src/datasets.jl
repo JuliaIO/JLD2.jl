@@ -333,8 +333,10 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
                     filter_id::UInt16, header_offset::RelOffset,
                     attributes::Union{Vector{ReadAttribute},Nothing})
     rrv = ReadRepresentation{UInt8,odr(UInt8)}()
-    v = read_array(f, dataspace, rrv, data_length, filter_id, header_offset, attributes)
-    String(v)
+    v = read_array(f, dataspace, rrv, data_length, filter_id, NULL_REFERENCE, attributes)
+    s = String(v)
+    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(s))
+    s
 end
 
 function payload_size_without_storage_message(dataspace::WriteDataspace, datatype::H5Datatype)

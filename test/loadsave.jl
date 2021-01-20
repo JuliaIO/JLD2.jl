@@ -249,7 +249,7 @@ end
     @load fn tup
 
     @test tup == (EmptyImmutable(), EmptyImmutable())
-    
+
     # Test for Recursively Empty struct
     @save fn tup=(EmptyII(EmptyImmutable()), EmptyImmutable())
     @load fn tup
@@ -257,3 +257,18 @@ end
     @test tup == (EmptyII(EmptyImmutable()), EmptyImmutable())
 end
 
+
+
+# Test for Issue #269
+@testset "Repeatedly load String" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+    s = "Lorem Ipsum"
+    @save fn s="Lorem Ipsum"
+    f = jldopen(fn, "r")
+
+    @test s == f["s"]
+    @test s == f["s"]
+    @test s == f["s"]
+    @test s == f["s"]
+    @test s == f["s"]
+end
