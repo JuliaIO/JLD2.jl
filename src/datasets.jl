@@ -441,14 +441,12 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
             write_data(cio, f, data, odr, datamode(odr), wsession)
         end
         write(io, end_checksum(cio))
-    elseif layout_class == LC_CONTIGUOUS_STORAGE
+    else
         write(cio, ContiguousStorageMessage(datasz, h5offset(f, f.end_of_data)))
         write(io, end_checksum(cio))
 
         f.end_of_data += datasz
         write_data(io, f, data, odr, datamode(odr), wsession)
-    else
-        throw(Error("Storage Message Error"))
     end
 
     h5offset(f, header_offset)
