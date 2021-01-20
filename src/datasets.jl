@@ -328,14 +328,6 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     v
 end
 
-function read_array(f::JLDFile, dataspace::ReadDataspace,
-                    rr::FixedLengthString{String}, data_length::Int,
-                    filter_id::UInt16, header_offset::RelOffset,
-                    attributes::Union{Vector{ReadAttribute},Nothing})
-    rrv = ReadRepresentation{UInt8,odr(UInt8)}()
-    v = read_array(f, dataspace, rrv, data_length, filter_id, header_offset, attributes)
-    String(v)
-end
 
 function payload_size_without_storage_message(dataspace::WriteDataspace, datatype::H5Datatype)
     sz = 6 + 4 + sizeof(dataspace) + 4 + sizeof(datatype) + length(dataspace.attributes)*sizeof(HeaderMessage)
@@ -414,7 +406,19 @@ end
 function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data, wsession::JLDWriteSession) where S
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
-    psz = payload_size_without_storage_message(dataspace, datatype) + sizeof(CompactStorageMessage) + datasz
+    psz = payload_size_without_storage_message(dataspace, datatype)
+
+    # The simplest CompactStorageMessage only supports data sets < 2^16
+    if datasz < typemax(UInt16)
+        layout_class = LC_COMPACT_STORAGE
+        storage_message = CompactStorageMessage
+        psz += sizeof(CompactStorageMessage) + datasz
+    else
+        layout_class = LC_CONTIGUOUS_STORAGE
+        storage_message = ContiguousStorageMessage
+        psz += sizeof(ContiguousStorageMessage)
+    end
+
     fullsz = sizeof(ObjectStart) + size_size(psz) + psz + 4
 
     header_offset = f.end_of_data
@@ -429,11 +433,23 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
     cio = begin_checksum_write(io, fullsz - 4)
     write_object_header_and_dataspace_message(cio, f, psz, dataspace)
     write_datatype_message(cio, datatype)
-    write(cio, CompactStorageMessage(datasz))
-    if datasz != 0
-        write_data(cio, f, data, odr, datamode(odr), wsession)
+
+    # Data storage layout
+    if layout_class == LC_COMPACT_STORAGE
+        write(cio, CompactStorageMessage(datasz))
+        if datasz != 0
+            write_data(cio, f, data, odr, datamode(odr), wsession)
+        end
+        write(io, end_checksum(cio))
+    elseif layout_class == LC_CONTIGUOUS_STORAGE
+        write(cio, ContiguousStorageMessage(datasz, h5offset(f, f.end_of_data)))
+        write(io, end_checksum(cio))
+
+        f.end_of_data += datasz
+        write_data(io, f, data, odr, datamode(odr), wsession)
+    else
+        throw(Error("Storage Message Error"))
     end
-    write(io, end_checksum(cio))
 
     h5offset(f, header_offset)
 end
@@ -526,12 +542,6 @@ end
 @inline function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
     odr = objodr(x)
     write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
-end
-
-@inline function write_dataset(f::JLDFile, s::String, wsession::JLDWriteSession)
-    x=unsafe_wrap(Vector{UInt8}, s)
-    odr = objodr(x)
-    write_dataset(f, WriteDataspace(f, x, odr), h5type(f, s), odr, x, wsession)
 end
 
 @inline function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
