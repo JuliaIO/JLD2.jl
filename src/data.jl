@@ -600,20 +600,14 @@ for T in Base.uniontypes(SignedTypes)
 end
 for T in Base.uniontypes(UnsignedTypes)
     @eval h5fieldtype(::JLDFile, ::$T, ::$T, ::Initialized) =
-        FixedPointDatatype($(T.parameters[1].size), false)
+    FixedPointDatatype($(T.parameters[1].size), false)
 end
 
-h5fieldtype(::JLDFile, ::Type{Bool}, ::Type{Bool}, ::Initialized) =
-    FixedPointDatatype(DT_BITFIELD, 0x00, 0x00, 0x00, 1, 0, 8)
 
 function jltype(f::JLDFile, dt::FixedPointDatatype)
-    if dt.class == DT_BITFIELD
-        # Only Bool uses DT_BITFIELD
-        return ReadRepresentation{Bool, Bool}()
-    end
     signed = dt.bitfield1 == 0x08 ? true : dt.bitfield1 == 0x00 ? false : throw(UnsupportedFeatureException())
     ((dt.bitfield2 == 0x00) & (dt.bitfield3 == 0x00) & (dt.bitoffset == 0) & (dt.bitprecision == dt.size*8)) ||
-        throw(UnsupportedFeatureException())
+    throw(UnsupportedFeatureException())
     if dt.size == 8
         return signed ? ReadRepresentation{Int64,Int64}() : ReadRepresentation{UInt64,UInt64}()
     elseif dt.size == 1
@@ -628,6 +622,10 @@ function jltype(f::JLDFile, dt::FixedPointDatatype)
         throw(UnsupportedFeatureException())
     end
 end
+
+# Special handling for booleans as they are not considered <: Integer in HDF5
+h5fieldtype(::JLDFile, ::Type{Bool}, ::Type{Bool}, ::Initialized) =BitFieldDatatype(1)
+jltype(::JLDFile, ::BitFieldDatatype) = ReadRepresentation{Bool, Bool}()
 
 h5fieldtype(::JLDFile, ::Type{Float16}, ::Type{Float16}, ::Initialized) =
     FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x0f, 0x00, 2, 0, 16, 10, 5, 0, 10, 0x0000000f)

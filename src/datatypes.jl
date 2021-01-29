@@ -78,6 +78,8 @@ macro read_datatype(io, datatype_class, datatype, then)
             $(replace_expr(then, datatype, :(read($io, CompoundDatatype))))
         elseif $datatype_class == DT_VARIABLE_LENGTH
             $(replace_expr(then, datatype, :(read($io, VariableLengthDatatype))))
+        elseif $datatype_class == DT_BITFIELD
+            $(replace_expr(then, datatype, :(read($io, BitFieldDatatype))))
         else
             throw(UnsupportedFeatureException())
         end
@@ -96,6 +98,20 @@ end
 define_packed(FixedPointDatatype)
 FixedPointDatatype(size::Integer, signed::Bool) =
     FixedPointDatatype(DT_FIXED_POINT, ifelse(signed, 0x08, 0x00), 0x00, 0x00, size, 0, 8*size)
+
+struct BitFieldDatatype <: H5Datatype
+    class::UInt8
+    bitfield1::UInt8
+    bitfield2::UInt8
+    bitfield3::UInt8
+    size::UInt32
+    bitoffset::UInt16
+    bitprecision::UInt16
+end
+define_packed(BitFieldDatatype)
+BitFieldDatatype(size) =
+    BitFieldDatatype(DT_BITFIELD, 0x00, 0x00, 0x00, size, 0, 8*size)
+
 
 struct FloatingPointDatatype <: H5Datatype
     class::UInt8
