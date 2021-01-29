@@ -431,7 +431,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
 
             # The on disk representation of T can only be the same as in memory
             # if the offsets are the same, field type on disk (readtype) and in memory (wstype)
-            # are the same and if no CustomSerialization is involved 
+            # are the same and if no CustomSerialization is involved
             samelayout = samelayout && offsets[i] == fieldoffset(T, i) && types[i] === wstype && !(odrs[i] <: CustomSerialization)
 
             mapped[dtindex] = true
@@ -590,8 +590,8 @@ jlconvert(::ReadRepresentation{T,CustomSerialization{S,ODR}},
 const SignedTypes        = Union{Type{Int8}, Type{Int16}, Type{Int32}, Type{Int64}, Type{Int128}}
 const UnsignedTypes      = Union{Type{UInt8}, Type{UInt16}, Type{UInt32}, Type{UInt64}, Type{UInt128}}
 const FloatTypes         = Union{Type{Float16}, Type{Float32}, Type{Float64}}
-const PrimitiveTypeTypes = Union{SignedTypes, UnsignedTypes, FloatTypes}
-const PrimitiveTypes     = Union{Int8, Int16, Int32, Int64, Int128, UInt8, UInt16, UInt32,
+const PrimitiveTypeTypes = Union{SignedTypes, UnsignedTypes, FloatTypes, Type{Bool}}
+const PrimitiveTypes     = Union{Bool, Int8, Int16, Int32, Int64, Int128, UInt8, UInt16, UInt32,
                                  UInt64, UInt128, Float16, Float32, Float64}
 
 for T in Base.uniontypes(SignedTypes)
@@ -603,7 +603,14 @@ for T in Base.uniontypes(UnsignedTypes)
         FixedPointDatatype($(T.parameters[1].size), false)
 end
 
+h5fieldtype(::JLDFile, ::Type{Bool}, ::Type{Bool}, ::Initialized) =
+    FixedPointDatatype(DT_BITFIELD, 0x00, 0x00, 0x00, 1, 0, 8)
+
 function jltype(f::JLDFile, dt::FixedPointDatatype)
+    if dt.class == DT_BITFIELD
+        # Only Bool uses DT_BITFIELD
+        return ReadRepresentation{Bool, Bool}()
+    end
     signed = dt.bitfield1 == 0x08 ? true : dt.bitfield1 == 0x00 ? false : throw(UnsupportedFeatureException())
     ((dt.bitfield2 == 0x00) & (dt.bitfield3 == 0x00) & (dt.bitoffset == 0) & (dt.bitprecision == dt.size*8)) ||
         throw(UnsupportedFeatureException())
@@ -1296,7 +1303,7 @@ end
 # The following two definitions are borrowed from BSON.
 # They are used to generate instances of arbitrary types
 # given their fields regarless of potential constructors.
-# It is unclear to the author whether this approach is 
+# It is unclear to the author whether this approach is
 # optimal.
 newstruct(T) = ccall(:jl_new_struct_uninit, Any, (Any,), T)
 
@@ -1307,11 +1314,11 @@ function newstruct(T, fields)
         # Manual inline of newstruct! to work around bug
         # https://github.com/MikeInnes/BSON.jl/issues/2#issuecomment-452204339
         x = newstruct(T)
-    
+
         for (i, f) = enumerate(fields)
             ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), x, i-1, f)
         end
-        x  
+        x
     end
 end
 
@@ -1347,10 +1354,10 @@ function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
         @assert writtenas.size == 0
         if writtenas === ty
             # This will usually equal `ty()` unless ty does not have a
-            # constructor without arguments 
+            # constructor without arguments
             jlconvert(ReadRepresentation{ty,nothing}(), f, ptr, header_offset)
         else
-            rconvert(ty, 
+            rconvert(ty,
                 jlconvert(ReadRepresentation{writtenas,nothing}(), f, ptr, header_offset)
             )
         end
