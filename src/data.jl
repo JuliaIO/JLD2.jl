@@ -600,14 +600,14 @@ for T in Base.uniontypes(SignedTypes)
 end
 for T in Base.uniontypes(UnsignedTypes)
     @eval h5fieldtype(::JLDFile, ::$T, ::$T, ::Initialized) =
-    FixedPointDatatype($(T.parameters[1].size), false)
+        FixedPointDatatype($(T.parameters[1].size), false)
 end
 
 
 function jltype(f::JLDFile, dt::FixedPointDatatype)
     signed = dt.bitfield1 == 0x08 ? true : dt.bitfield1 == 0x00 ? false : throw(UnsupportedFeatureException())
     ((dt.bitfield2 == 0x00) & (dt.bitfield3 == 0x00) & (dt.bitoffset == 0) & (dt.bitprecision == dt.size*8)) ||
-    throw(UnsupportedFeatureException())
+        throw(UnsupportedFeatureException())
     if dt.size == 8
         return signed ? ReadRepresentation{Int64,Int64}() : ReadRepresentation{UInt64,UInt64}()
     elseif dt.size == 1
