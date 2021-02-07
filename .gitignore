@@ -2,3 +2,5 @@
 *.jl.mem
 
 /test/test_out.jld
+
+docs/build/
