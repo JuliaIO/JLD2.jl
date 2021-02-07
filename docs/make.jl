@@ -17,3 +17,9 @@ makedocs(;
 	"HDF5 Compatibility" => "hdf5compat.md",
     	],
     )
+
+deploydocs(
+    repo = "github.com/JuliaIO/JLD2.jl.git",
+    target = "build",
+    push_preview = true,
+)
