@@ -1,24 +1,41 @@
 name: CI
 on: [push]
 jobs:
-  build:
-    runs-on: macos-latest
+  test:
+    name: Tests, Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - '1.0'
+        os:  [macos-latest] # adjust according to need, e.g. os: [ubuntu-latest] if testing only on linux
+        arch:
+          - x64
     steps:
-    - uses: actions/checkout@v2
-    - uses: julia-actions/setup-julia@v1
-      with:
-        version: '1.0'
-        arch: x64
-    - uses: actions/cache@v1
-      env:
-        cache-name: cache-artifacts
-      with:
-        path: ~/.julia/artifacts
-        key: ${{ runner.os }}-test-${{ env.cache-name }}-${{ hashFiles('**/Project.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-test-${{ env.cache-name }}-
-          ${{ runner.os }}-test-
-          ${{ runner.os }}-
-    - uses: julia-actions/julia-buildpkg@v1
-    - name: Setup tmate session
-      uses: mxschmitt/action-tmate@v3
+      # Cancel ongoing CI test runs if pushing to branch again before the previous tests
+      # have finished
+      - name: Cancel ongoing test runs for previous commits
+        uses: styfle/cancel-workflow-action@0.6.0
+        with:
+          access_token: ${{ github.token }}
+
+      # Do tests
+      - uses: actions/checkout@v2
+      - uses: julia-actions/setup-julia@v1
+        with:
+          version: ${{ matrix.version }}
+          arch: ${{ matrix.arch }}
+      - uses: actions/cache@v1
+        env:
+          cache-name: cache-artifacts
+        with:
+          path: ~/.julia/artifacts
+          key: ${{ runner.os }}-test-${{ env.cache-name }}-${{ hashFiles('**/Project.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-test-${{ env.cache-name }}-
+            ${{ runner.os }}-test-
+            ${{ runner.os }}-
+      - uses: julia-actions/julia-buildpkg@v1
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
