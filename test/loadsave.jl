@@ -162,8 +162,8 @@ end
     x = RecursiveStruct()
     y = RecursiveStruct(x)
 
-    @save "out.jld2" x y
-    JLD2.jldopen("out.jld2", "r") do f
+    @save fn x y
+    JLD2.jldopen(fn, "r") do f
         @test f["x"] == x
         @test f["y"] == y
     end
