@@ -1,10 +1,9 @@
-# JLD2
+# Julia Data Format - JLD2
 
-**NOTE**: This package is now **actively maintained again**! It was not maintained for some time and there still is a backlog of outstanding issues that will be addressed in the near future. You are invited to test JLD2 and raise any issues you come across. However, tread with care as you may come across problems that can potentially cause data loss.
+[![Travis Build Status](https://travis-ci.org/JuliaIO/JLD2.jl.svg?branch=master)](https://travis-ci.org/JuliaIO/JLD2.jl)
+[![AppVeyor Build status](https://ci.appveyor.com/api/projects/status/j9jvpgimd04qs8dn/branch/master?svg=true)](https://ci.appveyor.com/project/JonasIsensee/jld2-jl/branch/master)
+[![codecov.io](http://codecov.io/github/JuliaIO/JLD2.jl/coverage.svg?branch=master)](http://codecov.io/github/JuliaIO/JLD2.jl?branch=master)
 
-| **Documentation**   |  **Tests**     | **CodeCov**  |
-|:--------:|:---------------:|:-------:|
-|[![](https://img.shields.io/badge/docs-online-blue.svg)](https://JuliaIO.github.io/JLD2.jl/dev)| [![CI](https://github.com/juliaio/JLD2.jl/workflows/CI/badge.svg?branch=master)](https://github.com/JuliaIO/JLD2.jl/actions) | [![codecov.io](https://codecov.io/github/JuliaIO/JLD2.jl/coverage.svg?branch=master)](https://codecov.io/github/JuliaIO/JLD2.jl?branch=master) |
 
 JLD2 saves and loads Julia data structures in a format comprising a subset of HDF5, without any dependency on the HDF5 C library. It typically outperforms [the JLD package](https://github.com/JuliaIO/JLD.jl) (sometimes by multiple orders of magnitude) and often outperforms Julia's built-in serializer. While other HDF5 implementations supporting HDF5 File Format Specification Version 3.0 (i.e. libhdf5 1.10 or later) should be able to read the files that JLD2 produces, JLD2 is likely to be incapable of reading files created or modified by other HDF5 implementations. JLD2 does not aim to be backwards or forwards compatible with the JLD package.
 
@@ -36,6 +35,11 @@ Additional customization is possible using assignment syntax and option passing:
 ```
 @save "example.jld2" bye=hello bar=foo
 @save "example.jld2" {compress=true} hello bar=foo
+```
+
+```@docs
+@save
+@load
 ```
 
 
@@ -76,7 +80,7 @@ If called with multiple dataset names, `load` returns the contents of the given 
 load("example.jld2", "hello", "foo") # -> ("world", :bar)
 ```
 
-### File interface
+## File interface
 
 It is also possible to interact with JLD2 files using a file-like interface. The `jldopen` function accepts a file name and an argument specifying how the file should be opened:
 
@@ -99,7 +103,7 @@ jldopen("example.jld2", "w") do file
 end
 ```
 
-### Groups
+## Groups
 
 It is possible to construct groups within a JLD2 file, which may or may not be useful for organizing your data. You can create groups explicitly:
 
@@ -141,54 +145,3 @@ or using slashes as path delimiters:
 ```julia
 @assert load("example.jld2", "mygroup/mystuff") == 42
 ```
-
-### Custom Serialization (Experimental)
-
-Version `v0.3.0` of introduces support for custom serialization.
-For now this feature is considered experimental as it passes tests but 
-has little testing in the wild. → Please test and report if you encounter problems.
-
-The API is simple enough, to enable custom serialization for your type `A` you define
-a new type e.g. `ASerialization` that contains the fields you want to store and define
-`JLD2.writeas(::Type{A}) = ASerialization`.
-Internally JLD2 will call `Base.convert` when writing and loading, so you need to make sure to extend that for your type.
-
-```julia
-struct A
-    x::Int
-end
-
-struct ASerialization
-    x::Vector{Int}
-end
-
-JLD2.writeas(::Type{A}) = ASerialization
-Base.convert(::Type{ASerialization}, a::A) = ASerialization([a.x])
-Base.convert(::Type{A}, a::ASerialization) = A(only(a.x))
-```
-
-If you do not want to overload `Base.convert` then you can also define
-
-```julia
-JLD2.wconvert(::Type{ASerialization}, a::A) = ASerialization([a.x])
-JLD2.rconvert(::Type{A}, a::ASerialization) = A(only(a.x))
-```
-
-instead. This may be particularly relevant when types are involved that are not your own.
-
-```julia
-struct B
-    x::Float64
-end
-
-JLD2.writeas(::Type{B}) = Float64
-JLD2.wconvert(::Type{Float64}, b::B) = b.x
-JLD2.rconvert(::Type{B}, x::Float64) = B(x)
-
-arr = [B(rand()) for i=1:10]
-
-@save "test.jld2" arr
-```
-
-In this example JLD2 converts the array of `B` structs to a plain `Vector{Float64}` prior to 
-storing to disk.
