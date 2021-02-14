@@ -264,11 +264,11 @@ end
     @save fn ptr=pointer(zeros(5))
     @load fn ptr
 
-    @test ptr == Ptr{Float64}()
+    @test ptr == Ptr{Float64}(0)
     
     # Test for pointer inside structure
     @save fn tup=(; ptr = pointer(zeros(5)))
     @load fn tup
 
-    @test tup == (; ptr = Ptr{Float64}())
+    @test tup == (; ptr = Ptr{Float64}(0))
 end
