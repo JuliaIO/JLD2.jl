@@ -48,6 +48,9 @@ end
 @inline jlwrite(io::BufferedWriter, x::UInt8) = _write(io, x)
 @inline jlwrite(io::BufferedWriter, x::Int8) = _write(io, x)
 @inline jlwrite(io::BufferedWriter, x::Plain)  = _write(io, x)
+@inline Base.write(io::BufferedWriter, x::UInt8) = _write(io, x)
+@inline Base.write(io::BufferedWriter, x::Int8) = _write(io, x)
+@inline Base.write(io::BufferedWriter, x::Plain)  = _write(io, x)
 
 function Base.unsafe_write(io::BufferedWriter, x::Ptr{UInt8}, n::UInt64)
     buffer = io.buffer
