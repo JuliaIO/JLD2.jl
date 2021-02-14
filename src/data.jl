@@ -1090,7 +1090,7 @@ end
 # Due to popular demand and in particular to not error on serializing complex structures
 # that contain non-essential pointers this has been changed to instead 
 # return null pointers.
-writeas(::Type{<:Ptr}) = Nothing
+writeas(::Type{Ptr{T}}) where {T} = Nothing
 wconvert(::Type{Nothing}, ::Ptr) = nothing
 rconvert(::Type{Ptr{T}}, ::Nothing) where {T} = Ptr{T}()
 
