@@ -82,11 +82,6 @@ ms_undef = MyStruct(0)
 version_info = Base.GIT_VERSION_INFO
 # Immutable type:
 rng = 1:5
-# Type with a pointer field (#84)
-struct ObjWithPointer
-    a::Ptr{Cvoid}
-end
-objwithpointer = ObjWithPointer(0)
 # Custom BitsType (#99)
 primitive type MyBT 64 end
 bt = reinterpret(MyBT, Int64(55))
@@ -405,7 +400,6 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @write fid arr_undef
     @write fid arr_undefs
     @write fid ms_undef
-    @test_throws JLD2.PointerException @write fid objwithpointer
     @write fid bt
     @write fid btarray
     @write fid sa_asc
