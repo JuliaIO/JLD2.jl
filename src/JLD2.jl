@@ -1,11 +1,10 @@
 module JLD2
 using DataStructures, CodecZlib, Requires
-import Base.sizeof
 using MacroTools
 using Printf
 using Mmap
 
-export jldopen, @load,   @save
+export jldopen, @load, @save
 
 const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 
@@ -16,6 +15,15 @@ struct UnsupportedVersionException <: Exception end
 struct UnsupportedFeatureException <: Exception end
 struct InvalidDataException <: Exception end
 struct InternalError <: Exception end
+
+# Due to custom overrides we do not use Base functions directly
+# but define our own to avoid type piracy
+jlwrite(io, x) = Base.write(io, x)
+jlread(io, x) = Base.read(io, x)
+jlsizeof(x) = Base.sizeof(x)
+jlunsafe_store!(p, x) = Base.unsafe_store!(p, x)
+jlunsafe_load(p) = Base.unsafe_load(p)
+
 
 include("file_header.jl")
 include("Lookup3.jl")
@@ -155,7 +163,7 @@ mutable struct JLDFile{T<:IO}
         f = new(io, path, writable, written, compress, mmaparrays, 1,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
-            Int64(FILE_HEADER_LENGTH + sizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
+            Int64(FILE_HEADER_LENGTH + jlsizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS)
         finalizer(jld_finalizer, f)
         f
@@ -264,7 +272,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         verify_file_header(f)
 
         seek(f.io, FILE_HEADER_LENGTH)
-        superblock = read(f.io, Superblock)
+        superblock = jlread(f.io, Superblock)
         f.end_of_data = superblock.end_of_file_address
         f.root_group_offset = superblock.root_group_object_header_address
         f.root_group = load_group(f, superblock.root_group_object_header_address)
@@ -383,11 +391,11 @@ function Base.close(f::JLDFile)
 
         # Write JLD2 header
         seek(io, 0)
-        write(io, FILE_HEADER)
+        jlwrite(io, FILE_HEADER)
 
         # Write superblock
         seek(io, FILE_HEADER_LENGTH)
-        write(io, Superblock(0, FILE_HEADER_LENGTH, UNDEFINED_ADDRESS,
+        jlwrite(io, Superblock(0, FILE_HEADER_LENGTH, UNDEFINED_ADDRESS,
               f.end_of_data, f.root_group_offset))
 
         truncate_and_close(io, f.end_of_data)

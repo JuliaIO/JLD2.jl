@@ -181,15 +181,15 @@ end
 
 @inline function _write(io::MmapIO, x)
     cp = io.curptr
-    ep = cp + sizeof(x)
+    ep = cp + jlsizeof(x)
     if ep > io.endptr
         resize!(io, ep)
         cp = io.curptr
-        ep = cp + sizeof(x)
+        ep = cp + jlsizeof(x)
     end
-    unsafe_store!(Ptr{typeof(x)}(cp), x)
+    jlunsafe_store!(Ptr{typeof(x)}(cp), x)
     io.curptr = ep
-    return sizeof(x)
+    return jlsizeof(x)
 end
 @inline Base.write(io::MmapIO, x::UInt8) = _write(io, x)
 @inline Base.write(io::MmapIO, x::Int8) = _write(io, x)
@@ -210,9 +210,9 @@ end
 
 @inline function _read(io::MmapIO, T::DataType)
     cp = io.curptr
-    ep = cp + sizeof(T)
+    ep = cp + jlsizeof(T)
     ep > io.endptr && throw(EOFError())
-    v = unsafe_load(Ptr{T}(cp))
+    v = jlunsafe_load(Ptr{T}(cp))
     io.curptr = ep
     v
 end
@@ -222,22 +222,22 @@ end
 
 function Base.read(io::MmapIO, ::Type{T}, n::Int) where T
     cp = io.curptr
-    ep = cp + sizeof(T)*n
+    ep = cp + jlsizeof(T)*n
     ep > io.endptr && throw(EOFError())
     arr = Vector{T}(undef, n)
     unsafe_copyto!(pointer(arr), Ptr{T}(cp), n)
     io.curptr = ep
     arr
 end
-Base.read(io::MmapIO, ::Type{T}, n::Integer) where {T} =
-    read(io, T, Int(n))
+Base.read(io::MmapIO, ::Type{T}, n::Integer) where {T} = read(io, T, Int(n))
+jlread(io::MmapIO, ::Type{T}, n::Integer) where {T} = read(io, T, Int(n))
 
 # Read a null-terminated string
 function read_bytestring(io::MmapIO)
     # TODO do not try to read outside the buffer
     cp = io.curptr
     str = unsafe_string(convert(Ptr{UInt8}, cp))
-    io.curptr = cp + sizeof(str) + 1
+    io.curptr = cp + jlsizeof(str) + 1
     str
 end
 
@@ -277,7 +277,7 @@ function IndirectPointer(io::MmapIO, offset::Integer=position(io))
     IndirectPointer(pointer_from_objref(io) + fieldoffset(MmapIO, 4), offset)
 end
 Base.:+(x::IndirectPointer, y::Integer) = IndirectPointer(x.ptr, x.offset+y)
-Base.convert(::Type{Ptr{T}}, x::IndirectPointer) where {T} = Ptr{T}(unsafe_load(x.ptr) + x.offset)
+Base.convert(::Type{Ptr{T}}, x::IndirectPointer) where {T} = Ptr{T}(jlunsafe_load(x.ptr) + x.offset)
 
 # We sometimes need to compute checksums. We do this by first calling begin_checksum when
 # starting to handle whatever needs checksumming, and calling end_checksum afterwards. Note

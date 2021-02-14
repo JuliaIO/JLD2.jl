@@ -20,7 +20,7 @@ struct Vlen{T}
     size::UInt32
     id::GlobalHeapID
 end
-odr_sizeof(::Type{T}) where {T<:Vlen} = 4 + sizeof(GlobalHeapID)
+odr_sizeof(::Type{T}) where {T<:Vlen} = 4 + jlsizeof(GlobalHeapID)
 
 # Look up the corresponding committed datatype for a given type
 macro lookup_committed(f, T)

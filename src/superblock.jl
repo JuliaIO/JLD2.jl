@@ -14,52 +14,52 @@ struct Superblock
     root_group_object_header_address::RelOffset
 end
 
-Base.sizeof(::Union{Type{Superblock},Superblock}) =
-    12+sizeof(RelOffset)*4+4
+jlsizeof(::Union{Type{Superblock},Superblock}) =
+    12+jlsizeof(RelOffset)*4+4
 
-function Base.read(io::IO, ::Type{Superblock})
+function jlread(io::IO, ::Type{Superblock})
     cio = begin_checksum_read(io)
 
     # Signature
-    signature = read(cio, UInt64)
+    signature = jlread(cio, UInt64)
     signature == SUPERBLOCK_SIGNATURE || throw(InvalidDataException())
 
     # Version
-    version = read(cio, UInt8)
+    version = jlread(cio, UInt8)
     version == 2 || throw(UnsupportedVersionException())
 
     # Size of offsets and size of lengths
-    size_of_offsets = read(cio, UInt8)
-    size_of_lengths = read(cio, UInt8)
+    size_of_offsets = jlread(cio, UInt8)
+    size_of_lengths = jlread(cio, UInt8)
     (size_of_offsets == 8 && size_of_lengths == 8) || throw(UnsupportedFeatureException())
 
     # File consistency flags
-    file_consistency_flags = read(cio, UInt8)
+    file_consistency_flags = jlread(cio, UInt8)
 
     # Addresses
-    base_address = read(cio, Int64)
-    superblock_extension_address = read(cio, RelOffset)
-    end_of_file_address = read(cio, Int64)
-    root_group_object_header_address = read(cio, RelOffset)
+    base_address = jlread(cio, Int64)
+    superblock_extension_address = jlread(cio, RelOffset)
+    end_of_file_address = jlread(cio, Int64)
+    root_group_object_header_address = jlread(cio, RelOffset)
 
     # Checksum
     cs = end_checksum(cio)
-    read(io, UInt32) == cs || throw(InvalidDataException())
+    jlread(io, UInt32) == cs || throw(InvalidDataException())
 
     Superblock(file_consistency_flags, base_address, superblock_extension_address,
                 end_of_file_address, root_group_object_header_address)
 end
 
-function Base.write(io::IO, s::Superblock)
-    cio = begin_checksum_write(io, 8+4+4*sizeof(RelOffset))
-    write(cio, SUPERBLOCK_SIGNATURE::UInt64)    # Signature
-    write(cio, UInt8(2))                        # Version
-    write(cio, UInt8(8))                        # Size of offsets
-    write(cio, UInt8(8))                        # Size of lengths
-    write(cio, s.file_consistency_flags::UInt8)
-    write(cio, s.base_address::Int64)
-    write(cio, s.superblock_extension_address::RelOffset)
-    write(cio, s.end_of_file_address::Int64)
-    write(cio, s.root_group_object_header_address::RelOffset)
-    write(io, end_checksum(cio))
+function jlwrite(io::IO, s::Superblock)
+    cio = begin_checksum_write(io, 8+4+4*jlsizeof(RelOffset))
+    jlwrite(cio, SUPERBLOCK_SIGNATURE::UInt64)    # Signature
+    jlwrite(cio, UInt8(2))                        # Version
+    jlwrite(cio, UInt8(8))                        # Size of offsets
+    jlwrite(cio, UInt8(8))                        # Size of lengths
+    jlwrite(cio, s.file_consistency_flags::UInt8)
+    jlwrite(cio, s.base_address::Int64)
+    jlwrite(cio, s.superblock_extension_address::RelOffset)
+    jlwrite(cio, s.end_of_file_address::Int64)
+    jlwrite(cio, s.root_group_object_header_address::RelOffset)
+    jlwrite(io, end_checksum(cio))
 end

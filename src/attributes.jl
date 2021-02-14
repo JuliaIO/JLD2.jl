@@ -33,29 +33,29 @@ struct AttributeHeader
 end
 define_packed(AttributeHeader)
 
-Base.sizeof(attr::WrittenAttribute) = 8 + symbol_length(attr.name) + 1 + sizeof(attr.datatype) + sizeof(attr.dataspace) +
+jlsizeof(attr::WrittenAttribute) = 8 + symbol_length(attr.name) + 1 + jlsizeof(attr.datatype) + jlsizeof(attr.dataspace) +
                                      numel(attr.dataspace) * odr_sizeof(objodr(attr.data))
 
 function write_attribute(io::IO, f::JLDFile, attr::WrittenAttribute, wsession::JLDWriteSession)
     namelen = symbol_length(attr.name)
-    write(io, AttributeHeader(0x02, isa(attr.datatype, CommittedDatatype), namelen+1,
-                              sizeof(attr.datatype), sizeof(attr.dataspace)))
+    jlwrite(io, AttributeHeader(0x02, isa(attr.datatype, CommittedDatatype), namelen+1,
+                              jlsizeof(attr.datatype), jlsizeof(attr.dataspace)))
     unsafe_write(io, Base.unsafe_convert(Ptr{Cchar}, attr.name), namelen)
-    write(io, UInt8(0))
-    write(io, attr.datatype)
-    write(io, attr.dataspace)
+    jlwrite(io, UInt8(0))
+    jlwrite(io, attr.datatype)
+    jlwrite(io, attr.dataspace)
     odr = objodr(attr.data)
     write_data(io, f, attr.data, odr, datamode(odr), wsession)
 end
 
 function read_attribute(io::IO, f::JLDFile)
-    ah = read(io, AttributeHeader)
+    ah = jlread(io, AttributeHeader)
     ah.version == 0x02 || throw(UnsupportedVersionException())
     committed = ah.flags == 1
     !committed && ah.flags != 0 && throw(UnsupportedFeatureException())
 
-    name = Symbol(read(io, UInt8, ah.name_size-1))
-    read(io, UInt8) == 0 || throw(InvalidDataException())
+    name = Symbol(jlread(io, UInt8, ah.name_size-1))
+    jlread(io, UInt8) == 0 || throw(InvalidDataException())
 
     datatype_end = position(io) + ah.datatype_size
     datatype_class, datatype_offset = read_datatype_message(io, f, committed)

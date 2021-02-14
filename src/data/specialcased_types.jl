@@ -18,11 +18,11 @@ fieldodr(::Type{String}, ::Bool) = Vlen{String}
 odr_sizeof(x::FixedLengthString{String}) = x.length
 
 h5type(f::JLDFile, writeas::Type{String}, x::String) =
-    StringDatatype(typeof(x), sizeof(x))
+    StringDatatype(typeof(x), jlsizeof(x))
 h5type(f::JLDFile, writeas::Type{String}, x) =
     h5fieldtype(f, writeas, typeof(x), Val{true})
 odr(::Type{String}) = fieldodr(String, true)
-objodr(x::String) = FixedLengthString{String}(sizeof(x))
+objodr(x::String) = FixedLengthString{String}(jlsizeof(x))
 
 function jltype(f::JLDFile, dt::BasicDatatype)
     if dt.class == DT_STRING
@@ -49,7 +49,7 @@ function jltype(f::JLDFile, dt::VariableLengthDatatype)
 end
 
 function h5convert!(out::Pointers, fls::FixedLengthString, f::JLDFile, x, ::JLDWriteSession)
-    fls.length == sizeof(x) || throw(InvalidDataException())
+    fls.length == jlsizeof(x) || throw(InvalidDataException())
     (unsafe_copyto!(convert(Ptr{UInt8}, out), pointer(x), fls.length); nothing)
 end
 h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x, wsession::JLDWriteSession) =

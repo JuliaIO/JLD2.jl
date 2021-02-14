@@ -290,6 +290,6 @@ function write_data(io::IOStream, f::JLDFile, data::Array{T}, odr::S, wm::DataMo
     # don't need to worry about this for a BufferedWriter, since it will seek back before
     # writing.
     !isa(wm, ReferenceFree) && seek(io, pos)
-    write(io, buf)
+    jlwrite(io, buf)
     nothing
 end

@@ -218,7 +218,7 @@ end
 # method handles types with no padding or references where this is just a simple
 # store
 h5convert!(out::Pointers, ::Type{T}, ::JLDFile, x, ::JLDWriteSession) where {T} =
-    (unsafe_store!(convert(Ptr{T}, out), x); nothing)
+    (jlunsafe_store!(convert(Ptr{T}, out), x); nothing)
 
 # We pack types that have padding using a staged h5convert! method
 @generated function h5convert!(out::Pointers,
@@ -262,7 +262,7 @@ jlconvert_canbeuninitialized(::Any) = false
 # handles types where this is just a simple load
 @inline jlconvert(::ReadRepresentation{T,T}, ::JLDFile, ptr::Ptr,
                   ::RelOffset) where {T} =
-    unsafe_load(convert(Ptr{T}, ptr))
+    jlunsafe_load(convert(Ptr{T}, ptr))
 
 # When fields are undefined in the file but can't be in the workspace, we need
 # to throw exceptions to prevent errors on null pointer loads
@@ -283,52 +283,52 @@ odr(::Type{RelOffset}) = RelOffset
 @inline function h5convert!(out::Pointers, odr::Type{RelOffset}, f::JLDFile, x::Any,
                             wsession::JLDWriteSession)
     ref = write_ref(f, x, wsession)
-    unsafe_store!(convert(Ptr{RelOffset}, out), ref)
+    jlunsafe_store!(convert(Ptr{RelOffset}, out), ref)
     nothing
 end
 h5convert_uninitialized!(out::Pointers, odr::Type{RelOffset}) =
-    (unsafe_store!(convert(Ptr{RelOffset}, out), NULL_REFERENCE); nothing)
+    (jlunsafe_store!(convert(Ptr{RelOffset}, out), NULL_REFERENCE); nothing)
 
 # Reading references as references
 jlconvert(::ReadRepresentation{RelOffset,RelOffset}, f::JLDFile, ptr::Ptr,
           ::RelOffset) =
-    unsafe_load(convert(Ptr{RelOffset}, ptr))
+    jlunsafe_load(convert(Ptr{RelOffset}, ptr))
 jlconvert_canbeuninitialized(::ReadRepresentation{RelOffset,RelOffset}) = false
 
 # Reading references as other types
 @inline function jlconvert(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr,
                            ::RelOffset) where T
-    x = load_dataset(f, unsafe_load(convert(Ptr{RelOffset}, ptr)))
+    x = load_dataset(f, jlunsafe_load(convert(Ptr{RelOffset}, ptr)))
     (isa(x, T) ? x : convert(T, x))::T
 end
 jlconvert_canbeuninitialized(::ReadRepresentation{T,RelOffset}) where {T} = true
 jlconvert_isinitialized(::ReadRepresentation{T,RelOffset}, ptr::Ptr) where {T} =
-    unsafe_load(convert(Ptr{RelOffset}, ptr)) != NULL_REFERENCE
+    jlunsafe_load(convert(Ptr{RelOffset}, ptr)) != NULL_REFERENCE
 
 ## Routines for variable-length datatypes
 
 # Write variable-length data and store the offset and length to out pointer
 @inline function store_vlen!(out::Pointers, odr, f::JLDFile, x::AbstractVector,
                              wsession::JLDWriteSession)
-    unsafe_store!(convert(Ptr{UInt32}, out), length(x))
+    jlunsafe_store!(convert(Ptr{UInt32}, out), length(x))
     obj = write_heap_object(f, odr, x, wsession)
-    unsafe_store!(convert(Ptr{GlobalHeapID}, out)+4, obj)
+    jlunsafe_store!(convert(Ptr{GlobalHeapID}, out)+4, obj)
     nothing
 end
 
 h5convert!(out::Pointers, ::Type{Vlen{T}}, f::JLDFile, x, wsession::JLDWriteSession) where {T} =
     store_vlen!(out, T, f, x, wsession)
 
-@assert odr_sizeof(Vlen) == sizeof(UInt128)
+@assert odr_sizeof(Vlen) == jlsizeof(UInt128)
 h5convert_uninitialized!(out::Pointers, odr::Type{T}) where {T<:Vlen} =
-    (unsafe_store!(convert(Ptr{Int128}, out), 0); nothing)
+    (jlunsafe_store!(convert(Ptr{Int128}, out), 0); nothing)
 
 # Read variable-length data given offset and length in ptr
 jlconvert(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr, ::RelOffset) where {T,S} =
-    read_heap_object(f, unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), ReadRepresentation{T, S}())
+    read_heap_object(f, jlunsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)), ReadRepresentation{T, S}())
 jlconvert_canbeuninitialized(::ReadRepresentation{T,Vlen{S}}) where {T,S} = true
 jlconvert_isinitialized(::ReadRepresentation{T,Vlen{S}}, ptr::Ptr) where {T,S} =
-    unsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)) != GlobalHeapID(RelOffset(0), 0)
+    jlunsafe_load(convert(Ptr{GlobalHeapID}, ptr+4)) != GlobalHeapID(RelOffset(0), 0)
 
 
 

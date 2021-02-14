@@ -184,14 +184,14 @@ const LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT = UInt8(2^4)
 
 function read_link(io::IO)
     # Version
-    version = read(io, UInt8)
+    version = jlread(io, UInt8)
     version == 1 || throw(UnsupportedVersionException())
 
     # Flags
-    flags = read(io, UInt8)
+    flags = jlread(io, UInt8)
 
     if (flags & LM_LINK_TYPE_FIELD_PRESENT) != 0
-        read(io, UInt8) == 0 || throw(UnsupportedFeatureException())
+        jlread(io, UInt8) == 0 || throw(UnsupportedFeatureException())
     end
 
     if (flags & LM_CREATION_ORDER_PRESENT) != 0
@@ -201,13 +201,13 @@ function read_link(io::IO)
     # Link name character set
     cset = CSET_ASCII
     if (flags & LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT) != 0
-        cset_byte = read(io, UInt8)
+        cset_byte = jlread(io, UInt8)
         cset = CharacterSet(cset_byte)
     end
 
     sz = read_size(io, flags)  # Size
-    name = read(io, UInt8, sz) # Link name
-    target = read(io, RelOffset)  # Link information
+    name = jlread(io, UInt8, sz) # Link name
+    target = jlread(io, RelOffset)  # Link information
 
     (String(name), target)
 end
@@ -235,21 +235,21 @@ function load_group(f::JLDFile, roffset::RelOffset)
             continuation_offset = -1
 
             cio = begin_checksum_read(io)
-            read(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
+            jlread(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
         end
 
         while (curpos = position(cio)) <= chunk_checksum_offset - 4
-            msg = read(cio, HeaderMessage)
-            endpos = curpos + sizeof(HeaderMessage) + msg.size
+            msg = jlread(cio, HeaderMessage)
+            endpos = curpos + jlsizeof(HeaderMessage) + msg.size
             if msg.msg_type == HM_NIL
                 if continuation_message_goes_here == -1 &&
-                   chunk_checksum_offset - curpos >= sizeof(HeaderMessage) + sizeof(RelOffset) + sizeof(Length)
+                   chunk_checksum_offset - curpos >= jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
                     continuation_message_goes_here = curpos
                 end
             else
                 continuation_message_goes_here = -1
                 if msg.msg_type == HM_LINK_INFO
-                    link_info = read(cio, LinkInfo)
+                    link_info = jlread(cio, LinkInfo)
                     link_info.fractal_heap_address == UNDEFINED_ADDRESS || throw(UnsupportedFeatureException())
                 elseif msg.msg_type == HM_GROUP_INFO
                     # This message doesn't help us much, so we ignore it for now
@@ -257,8 +257,8 @@ function load_group(f::JLDFile, roffset::RelOffset)
                     name, loffset = read_link(cio)
                     links[name] = loffset
                 elseif msg.msg_type == HM_OBJECT_HEADER_CONTINUATION
-                    continuation_offset = chunk_start_offset = fileoffset(f, read(cio, RelOffset))
-                    continuation_length = read(cio, Length)
+                    continuation_offset = chunk_start_offset = fileoffset(f, jlread(cio, RelOffset))
+                    continuation_length = jlread(cio, Length)
                 elseif (msg.flags & 2^3) != 0
                     throw(UnsupportedFeatureException())
                 end
@@ -268,7 +268,7 @@ function load_group(f::JLDFile, roffset::RelOffset)
 
         # Checksum
         seek(cio, chunk_checksum_offset)
-        end_checksum(cio) == read(io, UInt32) || throw(InvalidDataException())
+        end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())
 
         continuation_offset == -1 && break
     end
@@ -284,7 +284,7 @@ end
 Returns the size of a link message, including message header.
 """
 link_size(name::String) =
-    3 + size_size(sizeof(name)) + sizeof(name) + sizeof(RelOffset)
+    3 + size_size(jlsizeof(name)) + jlsizeof(name) + jlsizeof(RelOffset)
 
 """
     links_size(pairs)
@@ -295,7 +295,7 @@ Returns the size of several link messages. `pairs` is an iterator of
 function links_size(pairs)
     sz = 0
     for (name::String,) in pairs
-        sz += link_size(name) + sizeof(HeaderMessage)
+        sz += link_size(name) + jlsizeof(HeaderMessage)
     end
     sz
 end
@@ -308,12 +308,12 @@ but not the object header. `pairs` is an iterator of `String => RelOffset` pairs
 space after the last object message for a continuation message.
 """
 group_payload_size(pairs) =
-    sizeof(HeaderMessage) + sizeof(LinkInfo) + sizeof(HeaderMessage) + 2 + links_size(pairs) +
-    sizeof(HeaderMessage) + sizeof(RelOffset) + sizeof(Length)
+    jlsizeof(HeaderMessage) + jlsizeof(LinkInfo) + jlsizeof(HeaderMessage) + 2 + links_size(pairs) +
+    jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
 
 group_continuation_size(pairs) =
-    sizeof(OBJECT_HEADER_CONTINUATION_SIGNATURE) + links_size(pairs) +
-    sizeof(HeaderMessage) + sizeof(RelOffset) + sizeof(Length) + 4 # Checksum is included
+    jlsizeof(OBJECT_HEADER_CONTINUATION_SIGNATURE) + links_size(pairs) +
+    jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length) + 4 # Checksum is included
 
 """
     save_group(g::Group) -> RelOffset
@@ -337,7 +337,7 @@ function save_group(g::Group)
     io = f.io
     if g.last_chunk_start_offset == -1
         psz = group_payload_size(g.unwritten_links)
-        sz = sizeof(ObjectStart) + size_size(psz) + psz
+        sz = jlsizeof(ObjectStart) + size_size(psz) + psz
 
         g.last_chunk_start_offset = f.end_of_data
         retval = h5offset(f, f.end_of_data)
@@ -345,17 +345,17 @@ function save_group(g::Group)
         cio = begin_checksum_write(io, sz)
 
         # Object header
-        write(cio, ObjectStart(size_flag(psz)))
+        jlwrite(cio, ObjectStart(size_flag(psz)))
         write_size(cio, psz)
         x = position(cio)
 
         # Link info message
-        write(cio, HeaderMessage(HM_LINK_INFO, sizeof(LinkInfo), 0))
-        write(cio, LinkInfo())
+        jlwrite(cio, HeaderMessage(HM_LINK_INFO, jlsizeof(LinkInfo), 0))
+        jlwrite(cio, LinkInfo())
 
         # Group info message
-        write(cio, HeaderMessage(HM_GROUP_INFO, 2, 0))
-        write(cio, UInt16(0))
+        jlwrite(cio, HeaderMessage(HM_GROUP_INFO, 2, 0))
+        jlwrite(cio, UInt16(0))
     else
         # If no changes, no need to save
         isempty(g.unwritten_links) && return UNDEFINED_ADDRESS
@@ -366,48 +366,48 @@ function save_group(g::Group)
 
         # Object continuation message
         seek(io, g.continuation_message_goes_here)
-        write(io, HeaderMessage(HM_OBJECT_HEADER_CONTINUATION, sizeof(RelOffset) + sizeof(Length), 0))
-        write(io, h5offset(f, continuation_start))
-        write(io, Length(csz))
+        jlwrite(io, HeaderMessage(HM_OBJECT_HEADER_CONTINUATION, jlsizeof(RelOffset) + jlsizeof(Length), 0))
+        jlwrite(io, h5offset(f, continuation_start))
+        jlwrite(io, Length(csz))
 
         # Re-calculate checksum
         seek(io, g.last_chunk_start_offset)
         cio = begin_checksum_read(io)
         seek(cio, g.last_chunk_checksum_offset)
         seek(io, g.last_chunk_checksum_offset)
-        write(io, end_checksum(cio))
+        jlwrite(io, end_checksum(cio))
 
         # Object continuation
         seek(io, continuation_start)
         g.last_chunk_start_offset = continuation_start
         cio = begin_checksum_write(io, csz - 4)
-        write(cio, OBJECT_HEADER_CONTINUATION_SIGNATURE)
+        jlwrite(cio, OBJECT_HEADER_CONTINUATION_SIGNATURE)
     end
 
     # Links
     for (name, offset) in g.unwritten_links
-        write(cio, HeaderMessage(HM_LINK_MESSAGE, link_size(name), 0))
-        write(cio, UInt8(1))             # Version
+        jlwrite(cio, HeaderMessage(HM_LINK_MESSAGE, link_size(name), 0))
+        jlwrite(cio, UInt8(1))             # Version
 
         # Flags
-        flags = size_flag(sizeof(name)) | LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT
-        write(cio, flags::UInt8)
+        flags = size_flag(jlsizeof(name)) | LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT
+        jlwrite(cio, flags::UInt8)
 
-        write(cio, UInt8(CSET_UTF8))     # Link name character set
-        write_size(cio, sizeof(name))    # Length of link name
-        write(cio, name)                 # Link name
-        write(cio, offset)               # Link target
+        jlwrite(cio, UInt8(CSET_UTF8))     # Link name character set
+        write_size(cio, jlsizeof(name))    # Length of link name
+        jlwrite(cio, name)                 # Link name
+        jlwrite(cio, offset)               # Link target
     end
     empty!(g.unwritten_links)
 
     # Extra space for object continuation
     g.continuation_message_goes_here = position(cio)
-    write(cio, HeaderMessage(HM_NIL, sizeof(RelOffset)+sizeof(Length), 0))
-    write(cio, RelOffset(0))
-    write(cio, Length(0))
+    jlwrite(cio, HeaderMessage(HM_NIL, jlsizeof(RelOffset)+jlsizeof(Length), 0))
+    jlwrite(cio, RelOffset(0))
+    jlwrite(cio, Length(0))
 
     # Checksum
-    write(io, end_checksum(cio))
+    jlwrite(io, end_checksum(cio))
     f.end_of_data = position(io)
     g.last_chunk_checksum_offset = f.end_of_data - 4
 

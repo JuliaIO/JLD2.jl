@@ -11,14 +11,14 @@ end
 define_packed(GlobalHeapID)
 
 isatend(f::JLDFile, gh::GlobalHeap) =
-    gh.offset != 0 && f.end_of_data == gh.offset + 8 + sizeof(Length) + gh.length
+    gh.offset != 0 && f.end_of_data == gh.offset + 8 + jlsizeof(Length) + gh.length
 
 heap_object_length(data::AbstractArray) = length(data)
 heap_object_length(::Any) = 1
 
 function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
     psz = odr_sizeof(odr)*heap_object_length(data)
-    objsz = 8 + sizeof(Length) + psz
+    objsz = 8 + jlsizeof(Length) + psz
     objsz += 8 - mod1(objsz, 8)
 
     io = f.io
@@ -40,26 +40,26 @@ function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
 
     # Can only fit up to typemax(UInt16) items in a single heap
     heap_filled = length(f.global_heap.objects) >= typemax(UInt16)
-    if objsz + 8 + sizeof(Length) < f.global_heap.free && !heap_filled
+    if objsz + 8 + jlsizeof(Length) < f.global_heap.free && !heap_filled
         # Fits in existing global heap
         gh = f.global_heap
     elseif isatend(f, f.global_heap) && !heap_filled
         # Global heap is at end and can be extended
         gh = f.global_heap
-        delta = objsz - gh.free + 8 + sizeof(Length)
+        delta = objsz - gh.free + 8 + jlsizeof(Length)
         gh.free += delta
         gh.length += delta
         seek(io, gh.offset + 8)
-        write(io, gh.length)
+        jlwrite(io, gh.length)
         f.end_of_data += delta
     else
         # Need to create a new global heap
         heapsz = max(objsz, 4096)
         offset = f.end_of_data + 8 - mod1(f.end_of_data, 8)
         seek(io, offset)
-        write(io, GLOBAL_HEAP_SIGNATURE)
-        write(io, UInt32(1))      # Version & Reserved
-        write(io, Length(heapsz)) # Collection size
+        jlwrite(io, GLOBAL_HEAP_SIGNATURE)
+        jlwrite(io, UInt32(1))      # Version & Reserved
+        jlwrite(io, Length(heapsz)) # Collection size
         f.end_of_data = position(io) + heapsz
         gh = f.global_heap = f.global_heaps[h5offset(f, offset)] =
             GlobalHeap(offset, heapsz, heapsz, Int64[])
@@ -67,26 +67,26 @@ function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
 
     # Write data
     index = length(gh.objects) + 1
-    objoffset = gh.offset + 8 + sizeof(Length) + gh.length - gh.free
+    objoffset = gh.offset + 8 + jlsizeof(Length) + gh.length - gh.free
     seek(io, objoffset)
-    write(io, UInt16(index))           # Heap object index
-    write(io, UInt16(1))               # Reference count
-    write(io, UInt32(0))               # Reserved
-    write(io, Length(psz))             # Object size
+    jlwrite(io, UInt16(index))           # Heap object index
+    jlwrite(io, UInt16(1))               # Reference count
+    jlwrite(io, UInt32(0))               # Reserved
+    jlwrite(io, Length(psz))             # Object size
 
     # Update global heap object
     gh.free -= objsz
     push!(gh.objects, objoffset)
 
     # Write free space object
-    if gh.free >= 8 + sizeof(Length)
+    if gh.free >= 8 + jlsizeof(Length)
         seek(io, objoffset + objsz)
-        write(io, UInt64(0))           # Object index, reference count, reserved
-        write(io, Length(gh.free - 8 - sizeof(Length))) # Object size
+        jlwrite(io, UInt64(0))           # Object index, reference count, reserved
+        jlwrite(io, Length(gh.free - 8 - jlsizeof(Length))) # Object size
     end
 
     # Write data
-    seek(io, objoffset + 8 + sizeof(Length))
+    seek(io, objoffset + 8 + jlsizeof(Length))
     write_data(io, f, data, odr, datamode(odr), wsession) # Object data
 
     GlobalHeapID(h5offset(f, gh.offset), index)
@@ -96,22 +96,22 @@ end
 write_heap_object(f::JLDFile, odr::Type{Union{}}, data, wsession::JLDWriteSession) =
     error("ODR is invalid")
 
-function Base.read(io::IO, ::Type{GlobalHeap})
+function jlread(io::IO, ::Type{GlobalHeap})
     offset = position(io)
-    read(io, UInt32) == GLOBAL_HEAP_SIGNATURE || throw(InvalidDataException())
-    read(io, UInt32) == 1 || throw(UnsupportedVersionException())
-    heapsz = read(io, Length)
+    jlread(io, UInt32) == GLOBAL_HEAP_SIGNATURE || throw(InvalidDataException())
+    jlread(io, UInt32) == 1 || throw(UnsupportedVersionException())
+    heapsz = jlread(io, Length)
     index = 1
     objects = Int64[]
     startpos = position(io)
     free = heapsz
-    while free > 8 + sizeof(Length)
+    while free > 8 + jlsizeof(Length)
         push!(objects, position(io))
-        objidx = read(io, UInt16)
+        objidx = jlread(io, UInt16)
         objidx == 0 && break
         objidx == index || throw(UnsupportedFeatureException())
         skip(io, 6)                    # Reference count and reserved
-        sz = read(io, Length)          # Length
+        sz = jlread(io, Length)          # Length
         skip(io, sz + 8 - mod1(sz, 8)) # Payload
         free = heapsz - Length(position(io) - startpos)
         index += 1
@@ -125,10 +125,10 @@ function read_heap_object(f::JLDFile, hid::GlobalHeapID, rr::ReadRepresentation{
         gh = f.global_heaps[hid.heap_offset]
     else
         seek(io, fileoffset(f, hid.heap_offset))
-        f.global_heaps[hid.heap_offset] = gh = read(io, GlobalHeap)
+        f.global_heaps[hid.heap_offset] = gh = jlread(io, GlobalHeap)
     end
     seek(io, gh.objects[hid.index]+8)
-    len = Int(read(io, Length))
+    len = Int(jlread(io, Length))
     n = div(len, odr_sizeof(RR))
     len == n * odr_sizeof(RR) || throw(InvalidDataException())
 
