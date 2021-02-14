@@ -257,3 +257,18 @@ end
     @test tup == (EmptyII(EmptyImmutable()), EmptyImmutable())
 end
 
+
+# Test for storing pointers
+@testset "Pointer Serialization" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+    @save fn ptr=pointer(zeros(5))
+    @load fn ptr
+
+    @test ptr == Ptr{Float64}(0)
+    
+    # Test for pointer inside structure
+    @save fn tup=(; ptr = pointer(zeros(5)))
+    @load fn tup
+
+    @test tup == (; ptr = Ptr{Float64}(0))
+end

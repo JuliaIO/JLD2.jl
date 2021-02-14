@@ -101,10 +101,34 @@ We can see that the file contains two things at top-level. There is a dataset `"
 (that is what we wanted to store) and there is a group `_types` which is where
 all the necessary type information is stored.
 
-You can see that JLD2 _commited_ two compound datatypes. The first one is `Core.Datatype`
+You can see that JLD2 _committed_ two compound datatypes. The first one is `Core.Datatype`
 which at first seems rather unintuitive. It is needed to tell HDF5 what a serialized 
 julia datatype looks like (a name and a list of parameters).
 
 Below that is the definition of `MyCustomStruct` with two fields 
 `H5T_STD_I64LE "x"` and `H5T_IEEE_F64LE "y"` defining the integer field `x` and
 the float field `y`.
+
+## A note on pointers
+
+In the julia programming language pointers `Ptr` are not needed very often. However,
+when binary dependencies come into play and memory is passed back and forth,
+pointers do become relevant. Pointers are addresses to locations in memory and
+thus lose their meaning after a program has terminated.
+
+In principle, there is little point in storing a pointer to a file but
+in order to allow for a more seamless experience JLD2 will, similar to `Base.Serialization`
+silently accept pointers. This is useful when storing large structures such as
+a `DifferentialEquations.jl` solution object that might contain a pointer somewhere.
+Upon deserialization any pointer fields are instantiated as null pointers.
+
+This is done with just three lines of code utilizing the custom serialization logic and 
+it is shown here as it serves as a good example for usage of that feature.
+
+```julia
+   writeas(::Type{<:Ptr}) = Nothing
+   rconvert(::Type{Ptr{T}}, ::Nothing) where {T} = Ptr{T}()
+```
+
+Usually one would also have to define a method for `wconvert`. However, in this 
+case JLD2 figures out that ne explicit conversion is needed to construct `nothing`.
