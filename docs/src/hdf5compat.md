@@ -127,6 +127,8 @@ it is shown here as it serves as a good example for usage of that feature.
 
 ```julia
    writeas(::Type{<:Ptr}) = Nothing
-   wconvert(::Type{Nothing}, ::Ptr) = nothing
    rconvert(::Type{Ptr{T}}, ::Nothing) where {T} = Ptr{T}()
 ```
+
+Usually one would also have to define a method for `wconvert`. However, in this 
+case JLD2 figures out that ne explicit conversion is needed to construct `nothing`.

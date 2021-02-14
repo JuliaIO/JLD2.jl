@@ -1091,7 +1091,6 @@ end
 # that contain non-essential pointers this has been changed to instead 
 # return null pointers.
 writeas(::Type{Ptr{T}}) where {T} = Nothing
-wconvert(::Type{Nothing}, ::Ptr) = nothing
 rconvert(::Type{Ptr{T}}, ::Nothing) where {T} = Ptr{T}(0)
 
 ## Arrays
