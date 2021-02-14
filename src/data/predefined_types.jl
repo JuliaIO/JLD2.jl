@@ -130,6 +130,24 @@ function h5fieldtype(f::JLDFile, ::Type{T}, readas::DataType,
 end
 h5type(f::JLDFile, ::Type{T}, x) where {T<:Array} =
     h5fieldtype(f, T, typeof(x), Val{true})
+
+function h5type(f::JLDFile, ::Type{T}, ::T) where T<:Array
+    if T <: Array{Union{}}
+        return ReferenceDatatype()
+    end
+    ty = T.parameters[1]
+    writtenas = writeas(ty)
+    if !hasfielddata(writtenas)
+        # This is a hacky way to generate an instance of ty
+        # the instance isn't actually needed for anything except that inside
+        # h5type ty is determined via typeof(x)
+        # annoyingly for some types h5type needs the instance
+        h5type(f, writtenas, rconvert(ty, newstruct(writtenas)))
+    else
+        h5fieldtype(f, writtenas, ty, Val{false})
+    end
+end
+
 _odr(writtenas::Type{T}, readas::Type{T}, odr) where {T<:Array} = odr
 _odr(writtenas::Type{T}, readas::DataType, odr) where {T<:Array} =
     CustomSerialization{writtenas,RelOffset}
