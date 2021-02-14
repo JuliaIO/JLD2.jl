@@ -1086,11 +1086,13 @@ function h5convert!(out::Pointers,
 end
 
 ## Pointers
-
-struct PointerException <: Exception; end
-Base.showerror(io::IO, ::PointerException) = print(io, "cannot write a pointer to JLD file")
-h5fieldtype(::JLDFile, ::Type{T}, ::Type, ::Initialized) where {T<:Ptr} = throw(PointerException())
-h5type(::JLDFile, ::Type{T}, @nospecialize arg) where {T<:Ptr} = throw(PointerException())
+# Previously it was disallowed to serialize pointers.
+# Due to popular demand and in particular to not error on serializing complex structures
+# that contain non-essential pointers this has been changed to instead 
+# return null pointers.
+writeas(::Type{<:Ptr}) = Nothing
+wconvert(::Type{Nothing}, ::Ptr) = nothing
+rconvert(::Type{Ptr{T}}, ::Nothing) where {T} = Ptr{T}()
 
 ## Arrays
 
