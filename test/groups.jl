@@ -20,6 +20,11 @@ JLD2.Group(f, "group_with_one_group_child/empty_group")
 @test !haskey(f["test_group_1"], "/test_group_1/x1/path/that/does/not/exist")
 @test !haskey(f["test_group_1"], "x1/path/that/does/not/exist")
 @test haskey(f, "/test_group_1/x1")
+close(f)
+f = jldopen(fn, "a")
+@test haskey(f, "test_group_1")
+@test haskey(f, "test_group_1/x1")
+
 @test get(f, "path_that_does_not_exist", 2.0) == 2.0
 @test get!(f, "path_created_by_get!", "x") == "x"
 @test f["path_created_by_get!"] == "x"
