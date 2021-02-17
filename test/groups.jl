@@ -16,6 +16,15 @@ JLD2.Group(f, "group_with_one_group_child/empty_group")
 @test_throws ArgumentError JLD2.Group(f, "test_group_4")
 @test_throws ArgumentError write(f, "test_group_4/contained_group", 0)
 @test !haskey(f, "path_that_does_not_exist")
+@test !haskey(f, "/test_group_1/x1/path/that/does/not/exist")
+@test !haskey(f["test_group_1"], "/test_group_1/x1/path/that/does/not/exist")
+@test !haskey(f["test_group_1"], "x1/path/that/does/not/exist")
+@test haskey(f, "/test_group_1/x1")
+close(f)
+f = jldopen(fn, "a")
+@test haskey(f, "test_group_1")
+@test haskey(f, "test_group_1/x1")
+
 @test get(f, "path_that_does_not_exist", 2.0) == 2.0
 @test get!(f, "path_created_by_get!", "x") == "x"
 @test f["path_created_by_get!"] == "x"
