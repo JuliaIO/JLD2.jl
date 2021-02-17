@@ -145,7 +145,43 @@ function Base.setindex!(g::Group, offset::RelOffset, name::AbstractString)
 end
 
 function Base.haskey(g::Group, name::AbstractString)
-    (g, name) = pathize(g, name, false)
+    if '/' in name
+        f = g.f
+        dirs = split(name, '/')
+
+        # Handles the absolute path case where the name starts with /
+        if isempty(first(dirs))
+            g = f.root_group
+            start = 2
+        else
+            start = 1
+        end
+
+        for i = start:length(dirs)-1
+            dir = dirs[i]
+            isempty(dir) && continue
+
+            # See if a group already exists
+            offset = lookup_offset(g, dir)
+            if offset == UNDEFINED_ADDRESS
+                if haskey(g.unwritten_child_groups, dir)
+                    # It's possible that lookup_offset fails because the group has not yet
+                    # been written to the file
+                    g = g.unwritten_child_groups[dir]
+                else
+                    return false
+                end
+            elseif haskey(f.loaded_groups, offset)
+                g = f.loaded_groups[offset]
+            elseif !isgroup(f, offset)
+                return false
+            else
+                g = f.loaded_groups[offset] = load_group(f, offset)
+            end
+        end
+
+        name = String(dirs[end])
+    end
     (g.last_chunk_start_offset != -1 && haskey(g.written_links, name)) ||
         haskey(g.unwritten_links, name) || haskey(g.unwritten_child_groups, name)
 end
