@@ -309,6 +309,8 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
                    header_offset::RelOffset) where T
 
     params, unknown_params = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8}))
+    # For cross-platform compatibility convert integer type parameters to system precision
+    params = [p isa Union{Int64,Int32} ? Int(p) : p for p in params]
     hasparams = !isempty(params)
     mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
     m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
