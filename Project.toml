@@ -1,33 +1,33 @@
 name = "JLD2"
 uuid = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
-version = "0.4.1"
+version = "0.4.2"
 
 [deps]
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
-DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
-MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
-Mmap = "a63ad114-7e13-5084-954f-fe012c677804"
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
+Mmap = "a63ad114-7e13-5084-954f-fe012c677804"
+UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Requires = "ae029012-a4dd-5104-9daa-d747884805df"
-UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
-
-[compat]
-CodecZlib = "0.5, 0.6, 0.7"
-DataStructures = "0.17, 0.18"
-MacroTools = "0.5"
-Requires = "1.0"
-julia = "0.7, 1"
+MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 
 [extras]
-Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
-LIBSVM = "b1bec4e5-fd48-53fe-b0cb-9723c09d164b"
+Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 RDatasets = "ce6b1742-4840-55fa-b093-852dadbb1d8b"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+LIBSVM = "b1bec4e5-fd48-53fe-b0cb-9723c09d164b"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+
+[compat]
+CodecZlib = "0.5, 0.6, 0.7"
+julia = "0.7, 1"
+DataStructures = "0.17, 0.18"
+Requires = "1.0"
+MacroTools = "0.5"
 
 [targets]
 test = ["FileIO", "LIBSVM", "LinearAlgebra", "Printf", "RDatasets", "Random", "Test", "Base64"]
