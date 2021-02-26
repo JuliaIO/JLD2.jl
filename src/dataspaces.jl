@@ -69,14 +69,14 @@ WriteDataspace(f::JLDFile, x::Array{T,0}, ::Any) where {T} =
     WriteDataspace(DS_SIMPLE, (Length(1),),
               (WrittenAttribute(f, :dimensions, EMPTY_DIMENSIONS),))
 
-sizeof(::Union{WriteDataspace{N},Type{WriteDataspace{N}}}) where {N} = 4 + sizeof(Length)*N
+jlsizeof(::Union{WriteDataspace{N},Type{WriteDataspace{N}}}) where {N} = 4 + jlsizeof(Length)*N
 numel(x::WriteDataspace{0}) = x.dataspace_type == DS_SCALAR ? 1 : 0
 numel(x::WriteDataspace) = Int(prod(x.size))
 
-function Base.write(io::IO, dspace::WriteDataspace{N}) where N
-    write(io, DataspaceStart(2, N, 0, dspace.dataspace_type))
+function jlwrite(io::IO, dspace::WriteDataspace{N}) where N
+    jlwrite(io, DataspaceStart(2, N, 0, dspace.dataspace_type))
     for x in dspace.size
-        write(io, x::Length)
+        jlwrite(io, x::Length)
     end
 end
 
@@ -85,7 +85,7 @@ end
 # tuple, where dataspace_type is one of the DS_* constants and
 # dataspace_dimensions are the corresponding dimensions
 function read_dataspace_message(io::IO)
-    dspace_start = read(io, DataspaceStart)
+    dspace_start = jlread(io, DataspaceStart)
     dspace_start.version == 2 || throw(UnsupportedVersionException())
     dataspace_type = dspace_start.dataspace_type
     ReadDataspace(dataspace_type, dspace_start.dimensionality, position(io))

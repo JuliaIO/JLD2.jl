@@ -1,6 +1,6 @@
 function allzeros(::Type{T}) where T
-    if sizeof(T) > 0
-        first(reinterpret(T,zeros(UInt8, sizeof(T))))
+    if jlsizeof(T) > 0
+        first(reinterpret(T,zeros(UInt8, jlsizeof(T))))
     else
         T()
     end

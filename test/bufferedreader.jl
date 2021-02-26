@@ -12,7 +12,7 @@ tdir = tempdir()
         end
         b = open("testfile.1", "r") do ff
             br = JLD2.BufferedReader(ff)
-            b = read(br, Float64, 100)
+            b = JLD2.jlread(br, Float64, 100)
         end
         @test a ≈ b
         rm("testfile.1")

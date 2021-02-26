@@ -49,6 +49,6 @@ load(f::File{format"JLD2"}, varnames::AbstractString...; kwargs...) =
 
 function load(f::File{format"JLD2"}, varnames::Tuple{Vararg{AbstractString}}; kwargs...)
     jldopen(FileIO.filename(f), "r"; kwargs...) do file
-        map((var)->read(file, var), varnames)
+        map((var)->jlread(file, var), varnames)
     end
 end

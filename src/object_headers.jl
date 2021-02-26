@@ -43,7 +43,7 @@ define_packed(ObjectStart)
 # Reads the start of an object including the signature, version, flags,
 # and (payload) size. Returns the size.
 function read_obj_start(io::IO)
-    os = read(io, ObjectStart)
+    os = jlread(io, ObjectStart)
     os.signature == OBJECT_HEADER_SIGNATURE || throw(InvalidDataException())
     os.version == 2 || throw(UnsupportedVersionException())
 
@@ -74,7 +74,7 @@ function isgroup(f::JLDFile, roffset::RelOffset)
     sz = read_obj_start(io)
     pmax::Int64 = position(io) + sz
     while position(io) <= pmax-4
-        msg = read(io, HeaderMessage)
+        msg = jlread(io, HeaderMessage)
         endpos = position(io) + msg.size
         if msg.msg_type == HM_LINK_INFO || msg.msg_type == HM_GROUP_INFO || msg.msg_type == HM_LINK_MESSAGE
             return true

@@ -29,7 +29,7 @@ function finish!(io::BufferedWriter)
     io.position[] == length(buffer) ||
         error("buffer not written to end; position is $(io.position[]) but length is $(length(buffer))")
     seek(f, io.file_position)
-    write(f, buffer)
+    jlwrite(f, buffer)
     io.position[] = 0
     nothing
 end
@@ -37,14 +37,17 @@ end
 @inline function _write(io::BufferedWriter, x)
     position = io.position[]
     buffer = io.buffer
-    n = sizeof(x)
+    n = jlsizeof(x)
     n + position <= length(buffer) || throw(EOFError())
     io.position[] = position + n
-    unsafe_store!(Ptr{typeof(x)}(pointer(buffer, position+1)), x)
+    jlunsafe_store!(Ptr{typeof(x)}(pointer(buffer, position+1)), x)
     # Base.show_backtrace(STDOUT, backtrace())
     # gc()
     return n
 end
+@inline jlwrite(io::BufferedWriter, x::UInt8) = _write(io, x)
+@inline jlwrite(io::BufferedWriter, x::Int8) = _write(io, x)
+@inline jlwrite(io::BufferedWriter, x::Plain)  = _write(io, x)
 @inline Base.write(io::BufferedWriter, x::UInt8) = _write(io, x)
 @inline Base.write(io::BufferedWriter, x::Int8) = _write(io, x)
 @inline Base.write(io::BufferedWriter, x::Plain)  = _write(io, x)
@@ -85,20 +88,20 @@ end
 @inline function _read(io::BufferedReader, T::DataType)
     position = io.position[]
     buffer = io.buffer
-    if length(buffer) - position < sizeof(T)
-        readmore!(io, sizeof(T))
+    if length(buffer) - position < jlsizeof(T)
+        readmore!(io, jlsizeof(T))
     end
-    io.position[] = position + sizeof(T)
-    unsafe_load(Ptr{T}(pointer(buffer, position+1)))
+    io.position[] = position + jlsizeof(T)
+    jlunsafe_load(Ptr{T}(pointer(buffer, position+1)))
 end
-@inline Base.read(io::BufferedReader, T::Type{UInt8}) = _read(io, T)
-@inline Base.read(io::BufferedReader, T::Type{Int8}) = _read(io, T)
-@inline Base.read(io::BufferedReader, T::PlainType) = _read(io, T)
+@inline jlread(io::BufferedReader, T::Type{UInt8}) = _read(io, T)
+@inline jlread(io::BufferedReader, T::Type{Int8}) = _read(io, T)
+@inline jlread(io::BufferedReader, T::PlainType) = _read(io, T)
 
-function Base.read(io::BufferedReader, ::Type{T}, n::Int) where T
+function jlread(io::BufferedReader, ::Type{T}, n::Int) where T
     position = io.position[]
     buffer = io.buffer
-    m = sizeof(T) * n
+    m = jlsizeof(T) * n
     if length(buffer) - position < m
         readmore!(io, m)
     end
@@ -107,8 +110,8 @@ function Base.read(io::BufferedReader, ::Type{T}, n::Int) where T
     unsafe_copyto!(pointer(arr), Ptr{T}(pointer(buffer, position+1)), n)
     arr
 end
-Base.read(io::BufferedReader, ::Type{T}, n::Integer) where {T} =
-    read(io, T, Int(n))
+jlread(io::BufferedReader, ::Type{T}, n::Integer) where {T} =
+    jlread(io, T, Int(n))
 
 Base.position(io::BufferedReader) = io.file_position + io.position[]
 
