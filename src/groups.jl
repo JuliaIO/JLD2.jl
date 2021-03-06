@@ -22,13 +22,14 @@ Group(g::Group{T}, name::AbstractString) where {T} = (g[name] = Group{T}(g.f))
 Lookup the offset of a dataset in a group. Returns `UNDEFINED_ADDRESS` if the dataset is
 not present. Does not inspect `unwritten_child_groups`.
 """
-function lookup_offset(g::Group, name::AbstractString)
+function lookup_offset(g::Group, name::StringOrSymbol)
+    sname = stringify(name)
     if g.last_chunk_start_offset != -1
         # Has been saved to file, so written_links exists
-        roffset = get(g.written_links, name, UNDEFINED_ADDRESS)
+        roffset = get(g.written_links, sname, UNDEFINED_ADDRESS)
         roffset != UNDEFINED_ADDRESS && return roffset
     end
-    roffset = get(g.unwritten_links, name, UNDEFINED_ADDRESS)
+    roffset = get(g.unwritten_links, sname, UNDEFINED_ADDRESS)
 end
 
 """
@@ -37,10 +38,11 @@ end
 Converts a path to a group and name object. If `create` is true, any intermediate groups
 will be created, and the dataset name will be checked for uniqueness with existing names.
 """
-function pathize(g::Group, name::AbstractString, create::Bool)
-    if '/' in name
+function pathize(g::Group, name::StringOrSymbol, create::Bool)
+    sname = stringify(name)
+    if '/' in sname
         f = g.f
-        dirs = split(name, '/')
+        dirs = split(sname, '/')
 
         # Handles the absolute path case where the name starts with /
         if isempty(first(dirs))
@@ -85,10 +87,10 @@ function pathize(g::Group, name::AbstractString, create::Bool)
         throw(ArgumentError("a group or dataset named $name is already present within this group"))
     end
 
-    return (g, name)
+    return (g, sname)
 end
 
-function Base.getindex(g::Group, name::AbstractString)
+function Base.getindex(g::Group, name::StringOrSymbol)
     f = g.f
     f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
 
@@ -109,7 +111,7 @@ function Base.getindex(g::Group, name::AbstractString)
     end
 end
 
-function Base.write(g::Group, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession())
+function Base.write(g::Group, name::StringOrSymbol, obj, wsession::JLDWriteSession=JLDWriteSession())
     if g.last_chunk_start_offset != -1 && g.continuation_message_goes_here == -1
         error("objects cannot be added to this group because it was created with a previous version of JLD2")
     end
@@ -120,7 +122,7 @@ function Base.write(g::Group, name::AbstractString, obj, wsession::JLDWriteSessi
     nothing
 end
 
-function Base.setindex!(g::Group, obj, name::AbstractString)
+function Base.setindex!(g::Group, obj, name::StringOrSymbol)
     write(g, name, obj)
     g
 end
@@ -143,6 +145,8 @@ function Base.setindex!(g::Group, offset::RelOffset, name::AbstractString)
     g.unwritten_links[name] = offset
     g
 end
+
+Base.haskey(g::Group, name::Symbol) = haskey(g, stringify(name))
 
 function Base.haskey(g::Group, name::AbstractString)
     if '/' in name
@@ -197,7 +201,13 @@ function Base.keys(g::Group)
     end
     append!(ks, keys(g.unwritten_links))
     append!(ks, keys(g.unwritten_child_groups))
-    ks
+    map(ks) do k
+        if startswith(k, "__") 
+            Symbol(k[3:end])
+        else
+            k
+        end     
+    end
 end
 
 struct LinkInfo

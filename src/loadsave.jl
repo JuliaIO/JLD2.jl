@@ -154,7 +154,11 @@ function loadtodict!(d::Dict, g::Union{JLDFile,Group}, prefix::String="")
         if v isa Group
             loadtodict!(d, v, prefix*k*"/")
         else
-            d[prefix*k] = v
+            if !isempty(prefix)
+                d[prefix*string(k)] = v
+            else
+                d[k] = v
+            end
         end
     end
     return d

@@ -272,3 +272,25 @@ end
 
     @test tup == (; ptr = Ptr{Float64}(0))
 end
+
+
+# Test for symbol identifiers
+@testset "Symbol Identifiers" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+    data = Dict(:a => 1, :b => 2)
+    FileIO.save(fn, data)
+    @test isempty(setdiff(keys(FileIO.load(fn)), keys(data)))
+
+    data = Dict(:a => 1, "b" => 2)
+    FileIO.save(fn, data)
+    @test isempty(setdiff(keys(FileIO.load(fn)), keys(data)))
+
+    jldopen(fn, "w") do f
+        f[:a] = 1
+        write(f, :b, 2)
+    end
+    jldopen(fn, "r") do f
+        @test read(f, :a) == 1
+        @test f[:b] == 2
+    end
+end

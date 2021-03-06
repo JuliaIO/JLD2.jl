@@ -343,22 +343,27 @@ function prewrite(f::JLDFile)
     f.written = true
 end
 
-Base.read(f::JLDFile, name::AbstractString) = f.root_group[name]
-Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession()) =
+const StringOrSymbol = Union{Symbol, AbstractString}
+
+stringify(name::Symbol) = "__"*string(name)
+stringify(name::AbstractString) = string(name)
+
+Base.read(f::JLDFile, name::StringOrSymbol) = f.root_group[name]
+Base.write(f::JLDFile, name::StringOrSymbol, obj, wsession::JLDWriteSession=JLDWriteSession()) =
     write(f.root_group, name, obj, wsession)
 
-Base.getindex(f::JLDFile, name::AbstractString) = f.root_group[name]
-Base.setindex!(f::JLDFile, obj, name::AbstractString) = (f.root_group[name] = obj; f)
-Base.haskey(f::JLDFile, name::AbstractString) = haskey(f.root_group, name)
+Base.getindex(f::JLDFile, name::StringOrSymbol) = f.root_group[name]
+Base.setindex!(f::JLDFile, obj, name::StringOrSymbol) = (f.root_group[name] = obj; f)
+Base.haskey(f::JLDFile, name::StringOrSymbol) = haskey(f.root_group, name)
 Base.isempty(f::JLDFile) = isempty(f.root_group)
 Base.keys(f::JLDFile) = filter!(x->x != "_types", keys(f.root_group))
-Base.get(default::Function, f::Union{JLDFile, Group}, name::AbstractString) =
+Base.get(default::Function, f::Union{JLDFile, Group}, name::StringOrSymbol) =
     haskey(f, name) ? f[name] : default()
-Base.get(f::Union{JLDFile, Group}, name::AbstractString, default) =
+Base.get(f::Union{JLDFile, Group}, name::StringOrSymbol, default) =
     haskey(f, name) ? f[name] : default
-Base.get!(f::Union{JLDFile, Group}, name::AbstractString, default) =
+Base.get!(f::Union{JLDFile, Group}, name::StringOrSymbol, default) =
     get!(() -> default, f, name)
-function Base.get!(default::Function, f::Union{JLDFile, Group}, name::AbstractString)
+function Base.get!(default::Function, f::Union{JLDFile, Group}, name::StringOrSymbol)
     if haskey(f, name)
         return f[name]
     else
