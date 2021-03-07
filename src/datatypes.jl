@@ -259,7 +259,7 @@ function jlwrite(io::IO, dt::CommittedDatatype)
     jlwrite(io, dt.header_offset)
 end
 
-function commit(f::JLDFile, dt::H5Datatype, attrs::Tuple{Vararg{WrittenAttribute}}=())
+function commit(f::JLDFile, @nospecialize(dt::H5Datatype), attrs::Tuple{Vararg{WrittenAttribute}}=())
     psz = jlsizeof(HeaderMessage) * (length(attrs) + 1) + jlsizeof(dt)
     for attr in attrs
         psz += jlsizeof(attr)

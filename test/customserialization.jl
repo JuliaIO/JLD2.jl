@@ -143,11 +143,11 @@ end
 g = CSG(rand(Int))
 
 JLD2.writeas(::Type{CSG}) = String
-function Base.convert(::Type{String}, x::CSG)
+function JLD2.wconvert(::Type{String}, x::CSG)
     global converted = true
     convert(String, string(x.x))
 end
-function Base.convert(::Type{CSG}, x::String)
+function JLD2.rconvert(::Type{CSG}, x::String)
     global converted = true
     CSG(parse(Int, x))
 end
@@ -160,11 +160,11 @@ end
 h = CSH(Int, 2)
 
 JLD2.writeas(::Type{CSH}) = DataType
-function Base.convert(::Type{DataType}, x::CSH)
+function JLD2.wconvert(::Type{DataType}, x::CSH)
     global converted = true
     Array{x.T, x.N}
 end
-function Base.convert(::Type{CSH}, x::Type{Array{T,N}}) where {T,N}
+function JLD2.rconvert(::Type{CSH}, x::Type{Array{T,N}}) where {T,N}
     global converted = true
     CSH(T,N)
 end
@@ -179,11 +179,11 @@ Base.:(==)(x::CSK, y::CSK) = (x.T == y.T && x.S == y.S) ||
                              (x.T == y.S && x.S == y.T)
 
 JLD2.writeas(::Type{CSK}) = Union
-function Base.convert(::Type{Union}, x::CSK)
+function JLD2.wconvert(::Type{Union}, x::CSK)
     global converted = true
     Union{x.T,x.S}
 end
-function Base.convert(::Type{CSK}, x::Union)
+function JLD2.rconvert(::Type{CSK}, x::Union)
     global converted = true
     CSK(Base.uniontypes(x)...)
 end
