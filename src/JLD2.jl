@@ -436,7 +436,7 @@ end
 
 function Base.show(io::IO, f::JLDFile)
     println(io, "JLDFile $(f.path) ", f.writable ? "(read/write)" : "(read-only)")
-    show_group(io, f.root_group, " ", true)
+    show_group(io, f.root_group, 10, " ", true)
 end
 
 include("superblock.jl")
@@ -465,4 +465,7 @@ function __init__()
     @require FileIO="5789e2e9-d7fb-5bc7-8068-2c6fae9b9549" include("fileio.jl")
 end
 
+#= include("../precompile_JLD2.jl")
+_precompile_()
+ =#
 end # module

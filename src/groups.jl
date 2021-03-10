@@ -450,7 +450,8 @@ function save_group(g::Group)
     return retval
 end
 
-function show_group(io::IO, g::Group, prefix::String=" ", skiptypes::Bool=false)
+function show_group(io::IO, g::Group, maxnumlines::Int=10, prefix::String=" ", skiptypes::Bool=false)
+    iszero(maxnumlines) && return 0
     if g.f.n_times_opened == 0
         print(io, "  (closed)")
         return
@@ -468,19 +469,36 @@ function show_group(io::IO, g::Group, prefix::String=" ", skiptypes::Bool=false)
         k = ks[i]
         islast = i == length(ks)
         isagroup = haskey(g.unwritten_child_groups, k) || isgroup(g.f, lookup_offset(g, k))
+        if (maxnumlines <= 1 && !islast) #|| (maxnumlines < 2 && isagroup))
+            print(io, prefix, "└─ ⋯ ($(length(ks)-i+1) more entries)")
+            return 0
+        end
         print(io, prefix, islast ? "└─" : "├─", isagroup ? "📂 " : "🔢 ", k)
+        maxnumlines = maxnumlines - 1
         if isagroup
             newg = g[k]
             if !isempty(newg)
-                print(io, '\n')
-                show_group(io, newg, prefix*(islast ? "   " : "│  "))
+                if (maxnumlines > 1 || (islast && maxnumlines >= 2))
+                    print(io, '\n')
+                    maxnumlines = show_group(io, newg, islast ? maxnumlines : maxnumlines-1, prefix*(islast ? "   " : "│  "), false)
+                    maxnumlines += islast ? 0 : 1
+                else
+                    nentries = length(keys(newg))
+                    if nentries == 1
+                        print(io, " (1 entry)")
+                    else
+                        print(io, " ($(nentries) entries)")
+                    end
+                end
+
             end
         end
         !islast && print(io, '\n')
     end
+    return maxnumlines
 end
 
 function Base.show(io::IO, g::Group)
     println(io, "JLD2.Group")
-    show_group(io, g)
+    show_group(io, g, false, 10)
 end
