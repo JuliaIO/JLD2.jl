@@ -89,7 +89,7 @@ end
 save(fn, Dict("a"=>[1,2,3]))
 io = open(fn)
 @info("The next error message (involving \"loading nothing\") is a sign of normal operation")
-@test_throws MethodError load(io)
+@test_throws FileIO.CapturedException load(io)
 close(io)
 
 # Issue #33
