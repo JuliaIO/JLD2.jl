@@ -24,6 +24,9 @@ jobs:
           - os: ubuntu-latest
             version: '1'
             arch: x86
+        exclude:
+          - os: macos-latest
+            version: '1.0'
     steps:
       # Cancel ongoing CI test runs if pushing to branch again before the previous tests
       # have finished
