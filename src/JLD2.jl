@@ -4,7 +4,7 @@ using MacroTools
 using Printf
 using Mmap
 
-export jldopen, @load, @save
+export jldopen, @load, @save, printtoc
 
 const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 
@@ -434,10 +434,30 @@ function jld_finalizer(f::JLDFile{IOStream})
     close(f)
 end
 
+# Display functions
+
+# simple one-line display (without trailing line break)
 function Base.show(io::IO, f::JLDFile)
-    println(io, "JLDFile $(f.path) ", f.writable ? "(read/write)" : "(read-only)")
-    show_group(io, f.root_group, 10, " ", true)
+    print(io, "JLDFile $(f.path)")
+    if get(io, :compact, false)
+        return
+    else
+        print(io, f.writable ? " (read/write)" : " (read-only)")
+    end
 end
+
+# fancy multi-line display (unless an IOContext requests compactness)
+function Base.show(io::IO, ::MIME"text/plain", f::JLDFile; numlines = get(io, :jld2_numlines, 10))
+    show(io, f)
+    if !get(io, :compact, false)
+        print(io, "\n")
+        show_group(io, f.root_group, numlines, " ", true)
+    end
+end
+
+# KLUDGE
+printtoc(io::IO, f::JLDFile) = show(io, MIME"text/plain"(), f, numlines = typemax(Int64))
+printtoc(f::JLDFile) = printtoc(Base.stdout, f)
 
 include("superblock.jl")
 include("object_headers.jl")

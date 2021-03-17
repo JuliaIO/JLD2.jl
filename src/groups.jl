@@ -500,5 +500,5 @@ end
 
 function Base.show(io::IO, g::Group)
     println(io, "JLD2.Group")
-    show_group(io, g, false, 10)
+    show_group(io, g, 10, " ", false)
 end
