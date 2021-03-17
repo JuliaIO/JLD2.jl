@@ -447,17 +447,25 @@ function Base.show(io::IO, f::JLDFile)
 end
 
 # fancy multi-line display (unless an IOContext requests compactness)
-function Base.show(io::IO, ::MIME"text/plain", f::JLDFile; numlines = get(io, :jld2_numlines, 10))
+function Base.show(io::IO, ::MIME"text/plain", f::JLDFile)
     show(io, f)
     if !get(io, :compact, false)
         print(io, "\n")
-        show_group(io, f.root_group, numlines, " ", true)
+        printtoc(io, f; numlines = get(io, :jld2_numlines, 10))
     end
 end
 
-# KLUDGE
-printtoc(io::IO, f::JLDFile) = show(io, MIME"text/plain"(), f, numlines = typemax(Int64))
-printtoc(f::JLDFile) = printtoc(Base.stdout, f)
+"""
+    printtoc([io::IO,] f::JLDFile [; numlines])
+Prints an overview of the contents of `f` to the `IO`.
+
+Use the optional `numlines` parameter to restrict the amount of items listed.
+"""
+printtoc(f::JLDFile; kwargs...) = printtoc(Base.stdout, f; kwargs...)
+printtoc(io::IO, f::JLDFile; numlines = typemax(Int64)) =
+    show_group(io, f.root_group, numlines, " ", true)
+
+
 
 include("superblock.jl")
 include("object_headers.jl")
