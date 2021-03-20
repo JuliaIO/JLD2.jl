@@ -163,10 +163,12 @@ end
 """
     save_object(filename, x)
 
-Write one object `x` from the current scope to a JLD2 file `filename`. The
-object is stored with a default name of "single_stored_object". If the default
-name needs to be overridden use [`@save`](@ref) instead. If the file exists, it
-overwrites it.
+Stores an object `x` in a new JLD2 file at `filename`. If a file exists at this
+path, it will be overwritten.
+
+Since the JLD2 format requires that all objects have a name, the object will be
+stored as `single_sotred_object`. If you want to store more than one object, use
+[`@save`](@ref) macro, [`jldopen`](@ref) or the FileIO API.
 
 # Example
 
@@ -185,11 +187,11 @@ end
 """
     load_object(filename)
 
-Load the only available object from the JLD2 file `filename`. Provides
-functionality similar to `loadRDS`. If `filename` contains more than one object,
-the function throws an `ArgumentError`. The object name is not loaded into namespace. For
-loading more than one object or objects directly into namespace, use
-[`@load`](@ref).
+Returns the only available object from the JLD2 file `filename`. If the file
+contains more than one or no objects, the function throws an `ArgumentError`.
+
+For loading more than one object, use [`@load`](@ref) macro, [`jldopen`](@ref)
+or the FileIO API.
 
 # Example
 

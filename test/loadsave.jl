@@ -50,6 +50,10 @@ func2()
 
 @testset "load_object / save_object" begin
   @test_throws ArgumentError load_object(fn) #fn already has two objects
+  #Create a file with no objects
+  jldopen(fn, "w") do f
+  end
+  @test_throws ArgumentError load_object(fn) #fn no objects
 
   save_object(fn, ['a', 'b', 'c']) #rewrite fn to have one object
   l1 = jldopen(fn, "r") do f
