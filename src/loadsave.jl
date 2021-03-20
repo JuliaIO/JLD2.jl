@@ -202,6 +202,7 @@ To load the only object from the JLD2 file example.jld2:
 function load_object(filename)
   jldopen(filename, "r") do file
     all_keys = keys(file)
+    length(all_keys) == 0 && throw(ArgumentError("File $filename does not contain any object"))
     length(all_keys) > 1 && throw(ArgumentError("File $filename contains more than one object. Use `load` or `@load` instead"))
     file[all_keys[1]] #Uses HDF5 functionality of treating the file like a dict
   end
