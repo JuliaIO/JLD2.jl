@@ -159,3 +159,49 @@ function loadtodict!(d::Dict, g::Union{JLDFile,Group}, prefix::String="")
     end
     return d
 end
+
+"""
+    save_object(filename, x)
+
+Write one object `x` from the current scope to a JLD2 file `filename`. The
+object is stored with a default name of "single_stored_object". If default name
+needs to be overridden use [`@save`](@ref) instead. If the file exists, it
+overwrites it.
+
+# Example
+
+To save the string `hello` to the JLD2 file example.jld2:
+
+    hello = "world"
+    save_object("example.jld2", hello)
+"""
+function save_object(filename, x)
+  jldopen(filename, "w") do file
+    file["single_stored_object"] = x
+  end
+  return
+end
+
+"""
+    load_object(filename)
+
+Load the only available object from the JLD2 file `filename`. Provides
+functionality similar to `loadRDS`. If `filename` contains more than one object,
+the function throws an `ArgumentError`. The object name is not loaded into namespace. For
+loading more than one object or objects directly into namespace, use
+[`@load`](@ref).
+
+# Example
+
+To load the only object from the JLD2 file example.jld2:
+
+    hello = "world"
+    save_object("example.jld2", hello)
+    hello_loaded = load_object("example.jl2")
+"""
+function load_object(filename)
+  jldopen(filename, "r") do file
+    length(keys(file)) > 1 && throw(ArgumentError("File $filename contains more than one object. Use `load` or `@load` instead"))
+    file[file |> keys |> only] #Uses HDF5 functionality of treating the file like a dict
+  end
+end

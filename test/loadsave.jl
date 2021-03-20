@@ -46,6 +46,30 @@ func2()
 @test loadmacrotestvar1 == ['a', 'b', 'c']
 @test loadmacrotestvar2 == 1
 
+#Test load_object/save_object function Issue#210
+
+fn2 = joinpath(dirname(fn), "test2.jld2")
+save_object(fn2, ['a', 'b', 'c'])
+l1 = jldopen(fn2, "r") do f
+  f["single_stored_object"]
+end
+@test l1 == ['a', 'b', 'c']
+
+
+fn3 = joinpath(dirname(fn), "test3.jld2")
+jldopen(fn3, "w") do f
+  write(f, "loadobjecttestvar2", 1)
+end
+
+@test_throws ArgumentError load_object(fn)
+
+l1 = load_object(fn2)
+l2 = load_object(fn3)
+@test !isdefined(@__MODULE__, :single_stored_object) # should not be in global scope
+@test !isdefined(@__MODULE__, :loadobjecttestvar2) # should not be in global scope
+@test l1 == ['a', 'b', 'c']
+@test l2 == 1
+
 # Test save macros
 hello = "world"
 @save fn hello

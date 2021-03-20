@@ -4,7 +4,7 @@ using MacroTools
 using Printf
 using Mmap
 
-export jldopen, @load, @save
+export jldopen, @load, @save, save_object, load_object
 
 const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 
