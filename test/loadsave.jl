@@ -52,7 +52,7 @@ func2()
   @test_throws ArgumentError load_object(fn) #fn already has two objects
 
   save_object(fn, ['a', 'b', 'c']) #rewrite fn to have one object
-  l1 = jldopen(fn2, "r") do f
+  l1 = jldopen(fn, "r") do f
     @test length(keys(f)) == 1
     f["single_stored_object"]
   end
