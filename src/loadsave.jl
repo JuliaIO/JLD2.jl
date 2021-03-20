@@ -164,8 +164,8 @@ end
     save_object(filename, x)
 
 Write one object `x` from the current scope to a JLD2 file `filename`. The
-object is stored with a default name of "single_stored_object". If default name
-needs to be overridden use [`@save`](@ref) instead. If the file exists, it
+object is stored with a default name of "single_stored_object". If the default
+name needs to be overridden use [`@save`](@ref) instead. If the file exists, it
 overwrites it.
 
 # Example
