@@ -58,7 +58,7 @@ func2()
   save_object(fn, ['a', 'b', 'c']) #rewrite fn to have one object
   l1 = jldopen(fn, "r") do f
     @test length(keys(f)) == 1
-    f[SINGLE_OBJECT_NAME]
+    f[JLD2.SINGLE_OBJECT_NAME]
   end
   @test l1 == ['a', 'b', 'c']
 
