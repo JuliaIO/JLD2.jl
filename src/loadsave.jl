@@ -160,6 +160,9 @@ function loadtodict!(d::Dict, g::Union{JLDFile,Group}, prefix::String="")
     return d
 end
 
+# Name used in JLD2 file to identify objects stored with `save_object`
+const SINGLE_OBJECT_NAME = "single_stored_object"
+
 """
     save_object(filename, x)
 
@@ -179,7 +182,7 @@ To save the string `hello` to the JLD2 file example.jld2:
 """
 function save_object(filename, x)
   jldopen(filename, "w") do file
-    file["single_stored_object"] = x
+    file[SINGLE_OBJECT_NAME] = x
   end
   return
 end
@@ -187,8 +190,9 @@ end
 """
     load_object(filename)
 
-Returns the only available object from the JLD2 file `filename`. If the file
-contains more than one or no objects, the function throws an `ArgumentError`.
+Returns the only available object from the JLD2 file `filename` (The stored
+object name is inconsequential). If the file contains more than one or no
+objects, the function throws an `ArgumentError`.
 
 For loading more than one object, use [`@load`](@ref) macro, [`jldopen`](@ref)
 or the FileIO API.

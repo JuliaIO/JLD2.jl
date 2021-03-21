@@ -58,13 +58,12 @@ func2()
   save_object(fn, ['a', 'b', 'c']) #rewrite fn to have one object
   l1 = jldopen(fn, "r") do f
     @test length(keys(f)) == 1
-    f["single_stored_object"]
+    f[SINGLE_OBJECT_NAME]
   end
   @test l1 == ['a', 'b', 'c']
 
   #Test with default name
   l1 = load_object(fn)
-  @test !isdefined(@__MODULE__, :single_stored_object) # should not be in global scope
   @test l1 == ['a', 'b', 'c']
 
   #Test with non-default name
@@ -72,7 +71,6 @@ func2()
     write(f, "loadobjecttestvar2", 1)
   end
   l2 = load_object(fn)
-  @test !isdefined(@__MODULE__, :loadobjecttestvar2) # should not be in global scope
   @test l2 == 1
 end
 
