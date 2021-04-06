@@ -642,7 +642,7 @@ function delete_written_link!(f::JLDFile, roffset::RelOffset, name::AbstractStri
             endpos = curpos + jlsizeof(HeaderMessage) + msg.size
             
             if msg.msg_type == HM_LINK_MESSAGE
-                dataset_name, loffset = read_link(cio)
+                dataset_name, loffset = read_link(io)
                 if dataset_name == name
                     # delete link
                     seek(io, curpos)
