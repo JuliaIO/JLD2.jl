@@ -558,3 +558,113 @@ function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
     end
 end
 write_ref(f::JLDFile, x::RelOffset, wsession::JLDWriteSession) = x
+
+Base.delete!(f::JLDFile, x::AbstractString) = delete!(f.root_group, x)
+
+function Base.delete!(g::Group, name::AbstractString)
+    g.f.writable || throw(ArgumentError("Cannot delete in read-only mode"))
+    if !haskey(g, name)
+        @warn "No entry named $name was found"
+        return
+    end
+
+    if '/' in name
+        dir, dname = rsplit(name, '/'; limit=2)
+        if isempty(dir)
+            g = g.f.root_group
+        else
+            g = g[dir]
+        end
+        name = string(dname)
+    end
+
+    # Simple case first. If it hasn't been written yet,
+    # the file doesn't need to be altered.
+    if haskey(g.unwritten_links, name)
+        delete!(g.unwritten_links, name)
+        return
+    elseif haskey(g.unwritten_child_groups, name)
+        delete!(g.unwritten_child_groups, name)
+        return
+    end
+
+    # Dataset must already exist in the file
+    # Retrieve offset of group in file
+    offset = group_offset(g)    
+    offset == NULL_REFERENCE && throw(InternalError("Group could not be found."))
+    delete_written_link!(g.f, offset, name)
+    delete!(g.written_links, name)
+    return
+end
+
+
+function group_offset(g::Group)
+    # Given a group, retrieve its offset inside the parent file
+    # Return a null reference when it can't be found. However, that
+    # should never be the case as the calling functions checks for this
+    if g === g.f.root_group
+        return g.f.root_group_offset
+    end
+    for (offset, lg) in pairs(g.f.loaded_groups)
+        if lg === g
+            return offset
+        end
+    end
+    return NULL_REFERENCE
+end
+
+function delete_written_link!(f::JLDFile, roffset::RelOffset, name::AbstractString)
+    # Location of written link in group structure is not known a priory
+    # Instead, we walk through the structure similar to `load_group`
+    # until the correct link message is found
+    # The deletion is done by replacing that message by a placeholder nill message
+    io = f.io
+    chunk_start_offset::Int64 = fileoffset(f, roffset)
+    seek(io, chunk_start_offset)
+
+    sz = read_obj_start(io)
+    chunk_checksum_offset::Int64 = position(io) + sz
+
+    continuation_offset::Int64 = -1
+    continuation_length::Length = 0
+    link_deleted = false
+    while !link_deleted
+        if continuation_offset != -1
+            seek(io, continuation_offset)
+            chunk_start_offset = continuation_offset
+            chunk_checksum_offset = continuation_offset + continuation_length - 4
+            continuation_offset = -1
+            jlread(io, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
+        end
+
+        while (curpos = position(io)) <= chunk_checksum_offset - 4
+            msg = jlread(io, HeaderMessage)
+            endpos = curpos + jlsizeof(HeaderMessage) + msg.size
+            
+            if msg.msg_type == HM_LINK_MESSAGE
+                dataset_name, loffset = read_link(cio)
+                if dataset_name == name
+                    # delete link
+                    seek(io, curpos)
+                    jlwrite(io, HeaderMessage(HM_NIL, msg.size, 0))
+                    link_deleted = true
+                    break
+                end
+            elseif msg.msg_type == HM_OBJECT_HEADER_CONTINUATION
+                continuation_offset = chunk_start_offset = fileoffset(f, jlread(io, RelOffset))
+                continuation_length = jlread(io, Length)
+            end
+            seek(io, endpos)
+        end
+
+        continuation_offset == -1 && break
+    end
+
+    # Update the Checksum
+    seek(io, chunk_start_offset)
+    cio = begin_checksum_read(io)
+    seek(cio, chunk_checksum_offset)
+    seek(io, chunk_checksum_offset)
+    jlwrite(io, end_checksum(cio))
+    return
+end
