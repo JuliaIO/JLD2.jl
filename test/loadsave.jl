@@ -46,6 +46,34 @@ func2()
 @test loadmacrotestvar1 == ['a', 'b', 'c']
 @test loadmacrotestvar2 == 1
 
+#Test load_object/save_object function Issue#210
+
+@testset "load_object / save_object" begin
+  @test_throws ArgumentError load_object(fn) #fn already has two objects
+  #Create a file with no objects
+  jldopen(fn, "w") do f
+  end
+  @test_throws ArgumentError load_object(fn) #fn no objects
+
+  save_object(fn, ['a', 'b', 'c']) #rewrite fn to have one object
+  l1 = jldopen(fn, "r") do f
+    @test length(keys(f)) == 1
+    f[JLD2.SINGLE_OBJECT_NAME]
+  end
+  @test l1 == ['a', 'b', 'c']
+
+  #Test with default name
+  l1 = load_object(fn)
+  @test l1 == ['a', 'b', 'c']
+
+  #Test with non-default name
+  jldopen(fn, "w") do f
+    write(f, "loadobjecttestvar2", 1)
+  end
+  l2 = load_object(fn)
+  @test l2 == 1
+end
+
 # Test save macros
 hello = "world"
 @save fn hello
@@ -89,7 +117,7 @@ end
 save(fn, Dict("a"=>[1,2,3]))
 io = open(fn)
 @info("The next error message (involving \"loading nothing\") is a sign of normal operation")
-@test_throws MethodError load(io)
+@test_throws FileIO.CapturedException load(io)
 close(io)
 
 # Issue #33
