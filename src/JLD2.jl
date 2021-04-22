@@ -117,8 +117,8 @@ mutable struct Group{T}
     continuation_message_goes_here::Int64
     last_chunk_checksum_offset::Int64
     next_link_offset::Int64
-    est_num_entries::Int64
-    est_link_name_len::Int64
+    est_num_entries::Int
+    est_link_name_len::Int
     unwritten_links::OrderedDict{String,RelOffset}
     unwritten_child_groups::OrderedDict{String,Group}
     written_links::OrderedDict{String,RelOffset}
