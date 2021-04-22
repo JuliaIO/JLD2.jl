@@ -317,4 +317,54 @@ end
         @test f["a"] == 1
         @test f["b"] == 2
     end 
+# Test for object deletion
+@testset "Object Deletion" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+    # To hit all code paths, need to write sufficiently many entries
+    jldopen(fn, "w") do f
+        write(f, "a", 1)
+        write(f, "b", 2)
+        write(f, "g/a", 3)
+        write(f, "g/b", 4)
+    end
+    jldopen(fn, "a") do f
+        write(f, "c", 5)
+        write(f, "d", 6)
+        write(f, "e", 7)
+        write(f, "f", 9)
+    end
+    jldopen(fn, "a") do f
+        write(f, "h", 6)
+        write(f, "i", 7)
+        write(f, "j", 9)
+    end
+
+
+    data = FileIO.load(fn)
+    @test all(["a", "b", "g/a", "g/b"] .∈ Ref(collect(keys(data))))
+
+    # test read-only
+    jldopen(fn, "r") do f
+        @test_throws ArgumentError delete!(f, "a")
+    end
+
+    # test delete and write again
+    jldopen(fn, "a") do f
+        @test haskey(f, "g")
+        delete!(f, "g")
+        @test !haskey(f, "g")
+    end
+    jldopen(fn, "a") do f
+        @test !haskey(f, "g")
+        write(f, "g", 10)
+        @test haskey(f, "g")
+    end
+
+    # test delete of group
+    jldopen(fn, "a") do f
+        delete!(f, "g")
+    end
+    jldopen(fn, "r") do f
+        @test !haskey(f, "g")
+    end
 end

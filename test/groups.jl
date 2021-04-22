@@ -97,3 +97,40 @@ f = jldopen(fn, "r")
 # Make sure printing doesn't error
 show(IOBuffer(), f)
 close(f)
+
+
+# Test for non-default group size
+@testset "Custom estimated Group size" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+
+    # It is difficult to test the behaviour 
+    # of non-default group allocation size
+    # as results should always be independent of this.
+    # Test against regressions by comparing to current number of allocated bytes.
+    # This may need to be updated if the relevant code sections are changed.
+    # Also test for persistence of the settings when loading a file again.
+
+    # An empty group leaves has 151 bytes by default
+    jldopen(fn, "w") do f
+        JLD2.Group(f, "g")
+    end
+    jldopen(fn, "r") do f
+        g = f["g"]
+        chunk_length = g.last_chunk_checksum_offset - g.last_chunk_start_offset
+        @test chunk_length == 151
+    end
+
+    # An empty group with non-default size allocates more space
+    jldopen(fn, "w") do f
+        g = JLD2.Group(f, "g"; est_num_entries=42, est_link_name_len=21)
+        @test g.est_link_name_len == 21
+        @test g.est_num_entries == 42
+    end
+    jldopen(fn, "r") do f
+        g = f["g"]
+        @test g.est_link_name_len == 21
+        @test g.est_num_entries == 42
+        chunk_length = g.last_chunk_checksum_offset - g.last_chunk_start_offset
+        @test chunk_length == 1614
+    end
+end
