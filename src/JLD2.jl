@@ -4,7 +4,7 @@ using MacroTools
 using Printf
 using Mmap
 
-export jldopen, @load, @save, printtoc
+export jldopen, @load, @save, save_object, load_object, printtoc
 
 const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 
@@ -493,7 +493,4 @@ function __init__()
     @require FileIO="5789e2e9-d7fb-5bc7-8068-2c6fae9b9549" include("fileio.jl")
 end
 
-#= include("../precompile_JLD2.jl")
-_precompile_()
- =#
 end # module

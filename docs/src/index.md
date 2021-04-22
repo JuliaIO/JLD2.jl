@@ -37,6 +37,15 @@ Additional customization is possible using assignment syntax and option passing:
 @load
 ```
 
+### `save_object` and `load_object` functions
+
+If only a single object needs to stored and loaded from a file, one can use
+`save_object` and `load_object` functions.
+
+```@docs
+save_object
+load_object
+```
 
 ### `save` and `load` functions
 
