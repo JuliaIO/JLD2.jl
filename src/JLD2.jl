@@ -116,18 +116,26 @@ mutable struct Group{T}
     last_chunk_start_offset::Int64
     continuation_message_goes_here::Int64
     last_chunk_checksum_offset::Int64
+    next_link_offset::Int64
+    est_num_entries::Int
+    est_link_name_len::Int
     unwritten_links::OrderedDict{String,RelOffset}
     unwritten_child_groups::OrderedDict{String,Group}
     written_links::OrderedDict{String,RelOffset}
 
-    Group{T}(f) where T =
-        new(f, -1, -1, -1, OrderedDict{String,RelOffset}(), OrderedDict{String,Group}())
+    Group{T}(f; est_num_entries::Int=4, est_link_name_len::Int=8) where T =
+        new(f, -1, -1, -1, -1, est_num_entries, est_link_name_len,
+        OrderedDict{String,RelOffset}(), OrderedDict{String,Group}())
 
     Group{T}(f, last_chunk_start_offset, continuation_message_goes_here,
-             last_chunk_checksum_offset, unwritten_links, unwritten_child_groups,
+             last_chunk_checksum_offset, next_link_offset, 
+             est_num_entries, est_link_name_len,
+             unwritten_links, unwritten_child_groups,
              written_links) where T =
         new(f, last_chunk_start_offset, continuation_message_goes_here,
-            last_chunk_checksum_offset, unwritten_links, unwritten_child_groups,
+            last_chunk_checksum_offset, next_link_offset,
+            est_num_entries, est_link_name_len,
+            unwritten_links, unwritten_child_groups,
             written_links)
 end
 
