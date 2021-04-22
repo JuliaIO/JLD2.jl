@@ -1,8 +1,9 @@
 module JLD2
-using DataStructures, CodecZlib, Requires
+using DataStructures, CodecZlib, Requires, Reexport
 using MacroTools
 using Printf
 using Mmap
+@reexport using FileIO: load, save
 
 export jldopen, @load, @save, save_object, load_object, printtoc
 
@@ -496,9 +497,6 @@ include("loadsave.jl")
 include("stdlib.jl")
 include("backwards_compatibility.jl")
 include("inlineunion.jl")
-
-function __init__()
-    @require FileIO="5789e2e9-d7fb-5bc7-8068-2c6fae9b9549" include("fileio.jl")
-end
+include("fileio.jl")
 
 end # module
