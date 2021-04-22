@@ -317,6 +317,8 @@ end
         @test f["a"] == 1
         @test f["b"] == 2
     end 
+end
+
 # Test for object deletion
 @testset "Object Deletion" begin
     fn = joinpath(mktempdir(), "test.jld2")
