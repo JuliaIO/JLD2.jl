@@ -7,14 +7,14 @@
 
 Construct an empty group named `name` at the top level of `JLDFile` `f`.
 """
-Group(f::JLDFile, name::AbstractString) = Group(f.root_group, name)
+Group(f::JLDFile, name::AbstractString; kwargs...) = Group(f.root_group, name; kwargs...)
 
 """
     Group(g::Group, name::AbstractString)
 
 Construct a group named `name` as a child of group `g`.
 """
-Group(g::Group{T}, name::AbstractString) where {T} = (g[name] = Group{T}(g.f))
+Group(g::Group{T}, name::AbstractString; kwargs...) where {T} = (g[name] = Group{T}(g.f; kwargs...))
 
 """
     lookup_offset(g::Group, name::AbstractString) -> RelOffset
@@ -248,6 +248,8 @@ function read_link(io::IO)
     (String(name), target)
 end
 
+const CONTINUATION_MSG_SIZE = jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
+
 function load_group(f::JLDFile, roffset::RelOffset)
     io = f.io
     chunk_start_offset::Int64 = fileoffset(f, roffset)
@@ -263,6 +265,9 @@ function load_group(f::JLDFile, roffset::RelOffset)
 
     continuation_offset::Int64 = -1
     continuation_length::Length = 0
+    next_link_offset::Int64 = -1
+    est_num_entries::Int64 = 4
+    est_link_name_len::Int64 = 8
 
     while true
         if continuation_offset != -1
@@ -278,9 +283,12 @@ function load_group(f::JLDFile, roffset::RelOffset)
             msg = jlread(cio, HeaderMessage)
             endpos = curpos + jlsizeof(HeaderMessage) + msg.size
             if msg.msg_type == HM_NIL
-                if continuation_message_goes_here == -1 &&
-                   chunk_checksum_offset - curpos >= jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
+                if continuation_message_goes_here == -1 && 
+                    chunk_checksum_offset - curpos == CONTINUATION_MSG_SIZE
                     continuation_message_goes_here = curpos
+                elseif endpos + CONTINUATION_MSG_SIZE == chunk_checksum_offset
+                    # This is the remaining space at the end of a chunk
+                    next_link_offset = curpos
                 end
             else
                 continuation_message_goes_here = -1
@@ -288,7 +296,14 @@ function load_group(f::JLDFile, roffset::RelOffset)
                     link_info = jlread(cio, LinkInfo)
                     link_info.fractal_heap_address == UNDEFINED_ADDRESS || throw(UnsupportedFeatureException())
                 elseif msg.msg_type == HM_GROUP_INFO
-                    # This message doesn't help us much, so we ignore it for now
+                    if msg.size > 2
+                        # Version Flag
+                        jlread(cio, UInt8) == 0 || throw(UnsupportedFeatureException()) 
+                        # Verify that non-default group size is given
+                        jlread(cio, UInt8) == 2 || throw(UnsupportedFeatureException()) 
+                        est_num_entries = jlread(cio, UInt16)
+                        est_link_name_len = jlread(cio, UInt16)
+                    end
                 elseif msg.msg_type == HM_LINK_MESSAGE
                     name, loffset = read_link(cio)
                     links[name] = loffset
@@ -309,9 +324,10 @@ function load_group(f::JLDFile, roffset::RelOffset)
         continuation_offset == -1 && break
     end
 
-    Group{typeof(f)}(f, chunk_start_offset, continuation_message_goes_here,
-                     chunk_checksum_offset, OrderedDict{String,RelOffset}(),
-                     OrderedDict{String,Group}(), links)
+    Group{typeof(f)}(f, chunk_start_offset, continuation_message_goes_here,        
+                     chunk_checksum_offset, next_link_offset, est_num_entries,
+                     est_link_name_len,
+                     OrderedDict{String,RelOffset}(), OrderedDict{String,Group}(), links)
 end
 
 """
@@ -337,20 +353,76 @@ function links_size(pairs)
 end
 
 """
-    group_payload_size(pairs)
+    group_payload_size(g)
 
 Returns the size of a group payload, including link info, group info, and link messages,
-but not the object header. `pairs` is an iterator of `String => RelOffset` pairs. Provides
+but not the object header. Provides
 space after the last object message for a continuation message.
 """
-group_payload_size(pairs) =
-    jlsizeof(HeaderMessage) + jlsizeof(LinkInfo) + jlsizeof(HeaderMessage) + 2 + links_size(pairs) +
+group_payload_size(g) =
+    jlsizeof(HeaderMessage) + jlsizeof(LinkInfo) + group_info_message_size(g) + links_size(g.unwritten_links) +
     jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
 
 group_continuation_size(pairs) =
     jlsizeof(OBJECT_HEADER_CONTINUATION_SIGNATURE) + links_size(pairs) +
     jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length) + 4 # Checksum is included
 
+
+"""
+    write_link(cio, name, offset)
+Write a link message at current position in `cio`.
+"""
+function write_link(cio, name, offset)
+    jlwrite(cio, HeaderMessage(HM_LINK_MESSAGE, link_size(name), 0))
+    jlwrite(cio, UInt8(1))             # Version
+
+    # Flags
+    flags = size_flag(jlsizeof(name)) | LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT
+    jlwrite(cio, flags::UInt8)
+
+    jlwrite(cio, UInt8(CSET_UTF8))     # Link name character set
+    write_size(cio, jlsizeof(name))    # Length of link name
+    jlwrite(cio, name)                 # Link name
+    jlwrite(cio, offset)               # Link target
+end
+
+function group_extra_space(g)
+    remaining_entries = g.est_num_entries - length(g.unwritten_links)
+    extraspace = 0
+    if remaining_entries > 0
+        extraspace += remaining_entries * (12 + g.est_link_name_len + 4)
+    end
+     # Can't create a placeholder NIL message larger than that
+    min(extraspace, typemax(UInt16))
+end
+
+function update_checksum(io, g)
+    seek(io, g.last_chunk_start_offset)
+    cio = begin_checksum_read(io)
+    seek(cio, g.last_chunk_checksum_offset)
+    seek(io, g.last_chunk_checksum_offset)
+    jlwrite(io, end_checksum(cio))
+end
+
+function group_info_message_size(g)
+    jlsizeof(HeaderMessage) + 2 + 4*(g.est_num_entries != 4 || g.est_link_name_len != 8)
+end
+
+function write_group_info_message(cio, g)
+    # Check for non standard value of 
+    # est_num_entries [== 4]
+    # est_link_name_len [== 8]
+    if g.est_num_entries == 4 && g.est_link_name_len == 8
+        jlwrite(cio, HeaderMessage(HM_GROUP_INFO, 2, 0))
+        jlwrite(cio, UInt16(0))
+    else
+        jlwrite(cio, HeaderMessage(HM_GROUP_INFO, 6, 0))
+        jlwrite(cio, UInt8(0)) # Version
+        jlwrite(cio, UInt8(2)) # Flags (non-default sizes)
+        jlwrite(cio, UInt16(g.est_num_entries))
+        jlwrite(cio, UInt16(g.est_link_name_len))
+    end
+end
 """
     save_group(g::Group) -> RelOffset
 
@@ -372,8 +444,11 @@ function save_group(g::Group)
     f = g.f
     io = f.io
     if g.last_chunk_start_offset == -1
-        psz = group_payload_size(g.unwritten_links)
-        sz = jlsizeof(ObjectStart) + size_size(psz) + psz
+        totalsize = psz = group_payload_size(g)
+        # add to size to make space for additional links
+        extraspace = group_extra_space(g)
+        totalsize += extraspace
+        sz = jlsizeof(ObjectStart) + size_size(totalsize) + totalsize
 
         g.last_chunk_start_offset = f.end_of_data
         retval = h5offset(f, f.end_of_data)
@@ -381,37 +456,72 @@ function save_group(g::Group)
         cio = begin_checksum_write(io, sz)
 
         # Object header
-        jlwrite(cio, ObjectStart(size_flag(psz)))
-        write_size(cio, psz)
-        x = position(cio)
+        jlwrite(cio, ObjectStart(size_flag(totalsize)))
+        write_size(cio, totalsize)
 
         # Link info message
         jlwrite(cio, HeaderMessage(HM_LINK_INFO, jlsizeof(LinkInfo), 0))
         jlwrite(cio, LinkInfo())
 
         # Group info message
-        jlwrite(cio, HeaderMessage(HM_GROUP_INFO, 2, 0))
-        jlwrite(cio, UInt16(0))
+        write_group_info_message(cio, g)
+
     else
         # If no changes, no need to save
         isempty(g.unwritten_links) && return UNDEFINED_ADDRESS
 
         retval = UNDEFINED_ADDRESS
+
+        # Try to write unwritten links in previously left extra space
+        if g.next_link_offset != -1
+            seek(io, g.next_link_offset)
+            # Remaining space
+            remaining_space = g.last_chunk_checksum_offset - 20 - g.next_link_offset
+            while !isempty(g.unwritten_links)
+                l = first(g.unwritten_links)
+                lsz = link_size(l[1]) + jlsizeof(HeaderMessage)
+                # produce no gaps smaller than 4 bytes (NIL Msg size)
+                if remaining_space >= lsz + 4 || remaining_space == lsz 
+                    write_link(io, l...)
+                    g.next_link_offset += lsz # == position(io)
+                    remaining_space -= lsz
+                    delete!(g.unwritten_links, l[1])
+                else
+                    # Link doesn't fit so write a NIL message
+                    jlwrite(io, HeaderMessage(HM_NIL, remaining_space-4, 0))
+                    jlwrite(io, zeros(UInt8, remaining_space-4))
+                    remaining_space = 0
+                    g.next_link_offset = -1
+                    break
+                end
+            end
+            if isempty(g.unwritten_links)
+                # Managed to add all new links into spare space
+                # Write a NIL Message to mark remaining space
+                if !iszero(remaining_space)
+                    jlwrite(io, HeaderMessage(HM_NIL, remaining_space-4, 0))
+                    jlwrite(io, zeros(UInt8, remaining_space-4))
+                end
+
+                # Re-calculate checksum
+                update_checksum(io, g)
+                return retval
+            end
+        end
+
+        # If we got to here then an a new continuation needs to be created
         continuation_start = f.end_of_data
         csz = group_continuation_size(g.unwritten_links)
-
+        extraspace = group_extra_space(g)
+        totalsize = csz + extraspace
         # Object continuation message
         seek(io, g.continuation_message_goes_here)
         jlwrite(io, HeaderMessage(HM_OBJECT_HEADER_CONTINUATION, jlsizeof(RelOffset) + jlsizeof(Length), 0))
         jlwrite(io, h5offset(f, continuation_start))
-        jlwrite(io, Length(csz))
+        jlwrite(io, Length(totalsize))
 
         # Re-calculate checksum
-        seek(io, g.last_chunk_start_offset)
-        cio = begin_checksum_read(io)
-        seek(cio, g.last_chunk_checksum_offset)
-        seek(io, g.last_chunk_checksum_offset)
-        jlwrite(io, end_checksum(cio))
+        update_checksum(io, g)
 
         # Object continuation
         seek(io, continuation_start)
@@ -422,20 +532,15 @@ function save_group(g::Group)
 
     # Links
     for (name, offset) in g.unwritten_links
-        jlwrite(cio, HeaderMessage(HM_LINK_MESSAGE, link_size(name), 0))
-        jlwrite(cio, UInt8(1))             # Version
-
-        # Flags
-        flags = size_flag(jlsizeof(name)) | LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT
-        jlwrite(cio, flags::UInt8)
-
-        jlwrite(cio, UInt8(CSET_UTF8))     # Link name character set
-        write_size(cio, jlsizeof(name))    # Length of link name
-        jlwrite(cio, name)                 # Link name
-        jlwrite(cio, offset)               # Link target
+        write_link(cio, name, offset)
     end
     empty!(g.unwritten_links)
-
+    # Write a HM_NIL Message to fill up the remaining space
+    if extraspace > 0
+        g.next_link_offset = position(cio)
+        jlwrite(cio, HeaderMessage(HM_NIL, extraspace-4, 0))
+        jlwrite(cio, zeros(UInt8, extraspace-4))
+    end
     # Extra space for object continuation
     g.continuation_message_goes_here = position(cio)
     jlwrite(cio, HeaderMessage(HM_NIL, jlsizeof(RelOffset)+jlsizeof(Length), 0))
