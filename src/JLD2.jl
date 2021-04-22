@@ -4,7 +4,7 @@ using MacroTools
 using Printf
 using Mmap
 
-export jldopen, @load, @save, save_object, load_object
+export jldopen, @load, @save, save_object, load_object, printtoc
 
 const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 
@@ -442,10 +442,38 @@ function jld_finalizer(f::JLDFile{IOStream})
     close(f)
 end
 
+# Display functions
+
+# simple one-line display (without trailing line break)
 function Base.show(io::IO, f::JLDFile)
-    println(io, "JLDFile $(f.path) ", f.writable ? "(read/write)" : "(read-only)")
-    show_group(io, f.root_group, " ", true)
+    print(io, "JLDFile $(f.path)")
+    if get(io, :compact, false)
+        return
+    else
+        print(io, f.writable ? " (read/write)" : " (read-only)")
+    end
 end
+
+# fancy multi-line display (unless an IOContext requests compactness)
+function Base.show(io::IO, ::MIME"text/plain", f::JLDFile)
+    show(io, f)
+    if !get(io, :compact, false)
+        print(io, "\n")
+        printtoc(io, f; numlines = get(io, :jld2_numlines, 10))
+    end
+end
+
+"""
+    printtoc([io::IO,] f::JLDFile [; numlines])
+Prints an overview of the contents of `f` to the `IO`.
+
+Use the optional `numlines` parameter to restrict the amount of items listed.
+"""
+printtoc(f::JLDFile; kwargs...) = printtoc(Base.stdout, f; kwargs...)
+printtoc(io::IO, f::JLDFile; numlines = typemax(Int64)) =
+    show_group(io, f.root_group, numlines, " ", true)
+
+
 
 include("superblock.jl")
 include("object_headers.jl")
