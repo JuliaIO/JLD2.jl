@@ -227,10 +227,12 @@ end
     nb = odr_sizeof(RR)*n
     io = f.io
     data = read!(io, Vector{UInt8}(undef, nb))
-    @simd for i = 1:n
-        dataptr = Ptr{Cvoid}(pointer(data, odr_sizeof(RR)*(i-1)+1))
-        if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
-            @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
+    @GC.preserve data begin
+        @simd for i = 1:n
+            dataptr = Ptr{Cvoid}(pointer(data, odr_sizeof(RR)*(i-1)+1))
+            if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
+                @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
+            end
         end
     end
     v
