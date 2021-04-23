@@ -15,6 +15,7 @@ makedocs(;
 	"Custom Serialization" => "customserialization.md",
 	"Internals & Design" => "internals.md",
 	"HDF5 Compatibility" => "hdf5compat.md",
+    "Legacy" => "legacy.md"
     	],
     )
 

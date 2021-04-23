@@ -9,39 +9,9 @@
 JLD2 saves and loads Julia data structures in a format comprising a subset of HDF5, without any dependency on the HDF5 C library. It typically outperforms [the JLD package](https://github.com/JuliaIO/JLD.jl) (sometimes by multiple orders of magnitude) and often outperforms Julia's built-in serializer. While other HDF5 implementations supporting HDF5 File Format Specification Version 3.0 (i.e. libhdf5 1.10 or later) should be able to read the files that JLD2 produces, JLD2 is likely to be incapable of reading files created or modified by other HDF5 implementations. JLD2 does not aim to be backwards or forwards compatible with the JLD package.
 
 ## Reading and writing data
-
-### `@save` and `@load` macros
-
-The `@save` and `@load` macros are the simplest way to interact with a JLD2 file. The `@save` macro writes one or more variables from the current scope to the JLD2 file. For example:
-
-```julia
-using JLD2
-hello = "world"
-foo = :bar
-@save "example.jld2" hello foo
-```
-
-This writes the variables `hello` and `foo` to datasets in a new JLD2 file named `example.jld2`. The `@load` macro loads variables out of a JLD2 file:
-
-```julia
-@load "example.jld2" hello foo
-```
-
-This assigns the contents of the `hello` and `foo` datasets to variables of the same name in the current scope.
-
-It is best practice to explicitly name the variables to be loaded and saved from a file, so that it is clear from whence these variables arise. However, for convenience, JLD2 also provides variants of `@load` and `@save` that do not require variables to be named explicitly. When called with no variable arguments, `@save <filename>` writes all variables in the global scope of the current module to file `<filename>`, while `@load <filename>` loads all variables in file `<filename>`. When called with no variable arguments, `@load` requires that the file name is provided as a string literal, i.e., it is not possible to select the file at runtime.
-
-Additional customization is possible using assignment syntax and option passing:
-
-```
-@save "example.jld2" bye=hello bar=foo
-@save "example.jld2" {compress=true} hello bar=foo
-```
-
-
 ### `save` and `load` functions
 
-The `save` and `load` functions, provided by [FileIO](https://github.com/JuliaIO/FileIO.jl), provide an alternative mechanism to read and write data from a JLD2 file. To use these functions, you must say `using FileIO`; it is not necessary to say `using JLD2` since FileIO will determine the correct package automatically.
+The `save` and `load` functions, provided by [FileIO](https://github.com/JuliaIO/FileIO.jl), provide a mechanism to read and write data from a JLD2 file. To use these functions, you may either write `using FileIO` or `using JLD2`. FileIO will determine the correct package automatically.
 
 The `save` function accepts an `AbstractDict` yielding the key/value pairs, where the key is a string representing the name of the dataset and the value represents its contents:
 
@@ -75,6 +45,30 @@ If called with multiple dataset names, `load` returns the contents of the given 
 ```julia
 load("example.jld2", "hello", "foo") # -> ("world", :bar)
 ```
+
+### A new interface: jldsave
+
+`jldsave` makes use of julia's keyword argument syntax to store files,
+thus leveraging the parser and not having to rely on macros. To use it, write
+
+```julia
+x = 1
+y = 2
+z = 42
+
+# The simplest case:
+jldsave("example.jld2"; x, y, z)
+# it is equivalent to 
+jldsave("example.jld2"; x=x, y=y, z=z)
+
+# You can assign new names selectively
+jldsave("example.jld2"; x, a=y, z)
+
+# and if you want to confuse your future self and everyone else, do
+jldsave("example.jld2"; z=x, x=y, y=z)
+```
+
+Compression and non-default IO types may be set via positional arguments.
 
 ### File interface
 
