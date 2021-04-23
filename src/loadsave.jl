@@ -213,3 +213,39 @@ function load_object(filename)
     file[all_keys[1]] #Uses HDF5 functionality of treating the file like a dict
   end
 end
+
+
+"""
+    jldsave(filename, compress=false; kwargs...)
+
+Creates a JLD2 file at `filename` and stores the variables given as keyword arguments.
+
+# Examples
+
+    jldsave("example.jld2"; a=1, b=2, c)
+    
+is equivalent to
+
+    jldopen("example.jld2, "w") do f
+        f["a"] = 1
+        f["b"] = 2
+        f["c"] = c
+    end
+
+
+To choose the io type `IOStream` instead of the default `MmapIO` use 
+`jldsave{IOStream}(fn; kwargs...)`.
+"""
+function jldsave(filename::AbstractString, compress=false, iotype::T=MmapIO; 
+                    kwargs...
+                    ) where T<:Union{Type{IOStream},Type{MmapIO}}
+    jldopen(filename, "w"; compress=compress, iotype=iotype) do f
+        wsession = JLDWriteSession()
+        for (k,v) in pairs(kwargs)
+            write(f, string(k), v, wsession)
+        end
+    end
+end
+
+jldsave(filename::AbstractString, iotype::Union{Type{IOStream},Type{MmapIO}}; kwargs...) = 
+    jldsave(filename, false, iotype; kwargs...)

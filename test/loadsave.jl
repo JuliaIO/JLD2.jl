@@ -301,6 +301,24 @@ end
     @test tup == (; ptr = Ptr{Float64}(0))
 end
 
+
+# Test jldsave
+@testset "jldsave API" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+
+    jldsave(fn; a=1, b=2)
+    jldopen(fn, "r") do f
+        @test f["a"] == 1
+        @test f["b"] == 2
+    end
+
+    jldsave(fn, IOStream; a=1, b=2)
+    jldopen(fn, "r") do f
+        @test f["a"] == 1
+        @test f["b"] == 2
+    end 
+end
+
 # Test for object deletion
 @testset "Object Deletion" begin
     fn = joinpath(mktempdir(), "test.jld2")
