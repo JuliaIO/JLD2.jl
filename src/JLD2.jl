@@ -6,6 +6,7 @@ using Mmap
 @reexport using FileIO: load, save
 
 export jldopen, @load, @save, save_object, load_object, printtoc
+export jldsave
 
 const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 
