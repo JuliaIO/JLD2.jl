@@ -1,8 +1,10 @@
 module JLD2
-using DataStructures, CodecZlib, Requires, Reexport
+using DataStructures, Requires, Reexport
+import Base.sizeof
 using MacroTools
 using Printf
 using Mmap
+using TranscodingStreams
 @reexport using FileIO: load, save
 
 export jldopen, @load, @save, save_object, load_object, printtoc
@@ -13,10 +15,24 @@ const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 # Currently we specify that all offsets and lengths are 8 bytes
 const Length = UInt64
 
-struct UnsupportedVersionException <: Exception end
-struct UnsupportedFeatureException <: Exception end
-struct InvalidDataException <: Exception end
-struct InternalError <: Exception end
+struct UnsupportedVersionException <: Exception 
+    msg::String
+end
+struct UnsupportedFeatureException <: Exception 
+    msg::String
+end
+struct InvalidDataException <: Exception 
+    msg::String
+end
+struct InternalError <: Exception 
+    msg::String
+end
+
+# In the future a more descriptive error should be returned
+UnsupportedVersionException() = UnsupportedVersionException("")
+UnsupportedFeatureException() = UnsupportedFeatureException("")
+InvalidDataException() = InvalidDataException("")
+InternalError() = InternalError("")
 
 # Due to custom overrides we do not use Base functions directly
 # but define our own to avoid type piracy
@@ -151,7 +167,7 @@ mutable struct JLDFile{T<:IO}
     path::String
     writable::Bool
     written::Bool
-    compress::Bool
+    compress#::Union{Bool,Symbol}
     mmaparrays::Bool
     n_times_opened::Int
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
@@ -169,7 +185,8 @@ mutable struct JLDFile{T<:IO}
     types_group::Group
 
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
-                        compress::Bool, mmaparrays::Bool) where T
+                        compress,#::Union{Bool,Symbol},
+                        mmaparrays::Bool) where T
         f = new(io, path, writable, written, compress, mmaparrays, 1,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
@@ -179,8 +196,7 @@ mutable struct JLDFile{T<:IO}
         f
     end
 end
-JLDFile(io::IO, path::AbstractString, writable::Bool, written::Bool, compress::Bool,
-        mmaparrays::Bool) =
+JLDFile(io::IO, path::AbstractString, writable::Bool, written::Bool, compress, mmaparrays::Bool) =
     JLDFile{typeof(io)}(io, path, writable, written, compress, mmaparrays)
 
 """
@@ -227,7 +243,9 @@ const OPEN_FILES = Dict{String,WeakRef}()
 const OPEN_FILES_LOCK = ReentrantLock()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
                  fallback::Union{Type, Nothing} = FallbackType(iotype),
-                 compress::Bool=false, mmaparrays::Bool=false) where T<:Union{Type{IOStream},Type{MmapIO}}
+                 compress=false,
+                 mmaparrays::Bool=false
+                 ) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
     exists = ispath(fname)
 
@@ -354,8 +372,8 @@ function prewrite(f::JLDFile)
 end
 
 Base.read(f::JLDFile, name::AbstractString) = f.root_group[name]
-Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession()) =
-    write(f.root_group, name, obj, wsession)
+#Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession()) =
+#    write(f.root_group, name, obj, wsession)
 
 Base.getindex(f::JLDFile, name::AbstractString) = f.root_group[name]
 Base.setindex!(f::JLDFile, obj, name::AbstractString) = (f.root_group[name] = obj; f)
@@ -499,5 +517,6 @@ include("stdlib.jl")
 include("backwards_compatibility.jl")
 include("inlineunion.jl")
 include("fileio.jl")
+include("compression.jl")
 
 end # module

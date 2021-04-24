@@ -55,21 +55,21 @@ function load_dataset(f::JLDFile, offset::RelOffset)
                 skip(cio, Int(dimensionality)*Int(dimensionality_size))
 
                 chunk_indexing_type = jlread(cio, UInt8)
-                chunk_indexing_type == 1 || throw(UnsupportedFeatureException())
+                chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
                 data_length = jlread(cio, Length)
                 jlread(cio, UInt32)
                 data_offset = fileoffset(f, jlread(cio, RelOffset))
                 chunked_storage = true
             else
-                throw(UnsupportedFeatureException())
+                throw(UnsupportedFeatureException("Unknown data layout"))
             end
         elseif msg.msg_type == HM_FILTER_PIPELINE
             version = jlread(cio, UInt8)
-            version == 2 || throw(UnsupportedVersionException())
+            version == 2 || throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
             nfilters = jlread(cio, UInt8)
             nfilters == 1 || throw(UnsupportedFeatureException())
             filter_id = jlread(cio, UInt16)
-            filter_id == 1 || throw(UnsupportedFeatureException())
+            issupported_filter(filter_id) || throw(UnsupportedFeatureException("Unknown Compression Filter $filter_id"))
         elseif msg.msg_type == HM_ATTRIBUTE
             if attrs === EMPTY_READ_ATTRIBUTES
                 attrs = ReadAttribute[read_attribute(cio, f)]
@@ -83,10 +83,10 @@ function load_dataset(f::JLDFile, offset::RelOffset)
     end
     seek(cio, pmax)
 
-    filter_id != 0 && !chunked_storage && throw(InvalidDataException())
+    filter_id != 0 && !chunked_storage && throw(InvalidDataException("Compressed data must be chunked"))
 
     # Checksum
-    end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())
+    end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException("Invalid Checksum"))
 
     # TODO verify that data length matches
     val = read_data(f, dataspace, datatype_class, datatype_offset, data_offset, data_length,
@@ -315,16 +315,17 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     io = f.io
     data_offset = position(io)
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
+    
     seek(io, offset)
     v = construct_array(io, T, Int(ndims))
-    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
     n = length(v)
     seek(io, data_offset)
-    if filter_id == 1
-        read_compressed_array!(v, f, rr, data_length)
+    if filter_id !=0
+        read_compressed_array!(v, f, rr, data_length, filter_id)
     else
         read_array!(v, f, rr)
     end
+    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
     v
 end
 
@@ -337,27 +338,38 @@ function payload_size_without_storage_message(dataspace::WriteDataspace, datatyp
     sz
 end
 
-function deflate_data(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSession) where {T,S}
-    buf = Vector{UInt8}(undef, odr_sizeof(odr) * length(data))
-    cp = Ptr{Cvoid}(pointer(buf))
-    @simd for i = 1:length(data)
-        @inbounds h5convert!(cp, odr, f, data[i], wsession)
-        cp += odr_sizeof(odr)
-    end
-    transcode(ZlibCompressor, buf)
-end
-function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data::Array{T}, wsession::JLDWriteSession) where {T,S}
+
+function write_dataset(
+        f::JLDFile,
+        dataspace::WriteDataspace,
+        datatype::H5Datatype,
+        odr::S,
+        data::Array{T},
+        wsession::JLDWriteSession,
+        compress = f.compress,
+        ) where {T,S}
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
-    layout_class = datasz < 8192 ? LC_COMPACT_STORAGE :
-                   f.compress ? LC_CHUNKED_STORAGE : LC_CONTIGUOUS_STORAGE
+    #layout_class
+    if datasz < 8192 
+        layout_class = LC_COMPACT_STORAGE
+    elseif compress != false 
+        layout_class = LC_CHUNKED_STORAGE 
+    else 
+        layout_class = LC_CONTIGUOUS_STORAGE
+    end
     psz = payload_size_without_storage_message(dataspace, datatype)
     if datasz < 8192
         layout_class = LC_COMPACT_STORAGE
         psz += jlsizeof(CompactStorageMessage) + datasz
-    elseif f.compress && isconcretetype(T) && isbitstype(T)
+    elseif compress != false && isconcretetype(T) && isbitstype(T)
+        # Only now figure out if the compression argument is valid
+        invoke_again, filter_id, compressor = get_compressor(compress)
+        if invoke_again
+            return Base.invokelatest(write_dataset, f, dataspace, datatype, odr, data, wsession, compress)
+        end
         layout_class = LC_CHUNKED_STORAGE
-        psz += chunked_storage_message_size(ndims(data)) + length(DEFLATE_PIPELINE_MESSAGE)
+        psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(filter_id)
     else
         layout_class = LC_CONTIGUOUS_STORAGE
         psz += jlsizeof(ContiguousStorageMessage)
@@ -385,13 +397,9 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
         end
         jlwrite(io, end_checksum(cio))
     elseif layout_class == LC_CHUNKED_STORAGE
-        jlwrite(cio, DEFLATE_PIPELINE_MESSAGE)
-        deflated = deflate_data(f, data, odr, wsession)
-        write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
-        jlwrite(io, end_checksum(cio))
 
-        f.end_of_data += length(deflated)
-        jlwrite(io, deflated)
+        write_compressed_data(cio, f, data, odr, wsession, filter_id, compressor)
+
     else
         jlwrite(cio, ContiguousStorageMessage(datasz, h5offset(f, f.end_of_data)))
         jlwrite(io, end_checksum(cio))
@@ -503,37 +511,6 @@ define_packed(ContiguousStorageMessage)
         HeaderMessage(HM_DATA_LAYOUT, jlsizeof(ContiguousStorageMessage) - jlsizeof(HeaderMessage), 0),
         4, LC_CONTIGUOUS_STORAGE, offset, datasz
     )
-
-@inline chunked_storage_message_size(ndims::Int) =
-    jlsizeof(HeaderMessage) + 5 + (ndims+1)*jlsizeof(Length) + 1 + jlsizeof(Length) + 4 + jlsizeof(RelOffset)
-function write_chunked_storage_message(io::IO, elsize::Int, dims::NTuple{N,Int}, filtered_size::Int, offset::RelOffset) where N
-    jlwrite(io, HeaderMessage(HM_DATA_LAYOUT, chunked_storage_message_size(N) - jlsizeof(HeaderMessage), 0))
-    jlwrite(io, UInt8(4))                     # Version
-    jlwrite(io, UInt8(LC_CHUNKED_STORAGE))    # Layout Class
-    jlwrite(io, UInt8(2))                     # Flags (= SINGLE_INDEX_WITH_FILTER)
-    jlwrite(io, UInt8(N+1))                   # Dimensionality
-    jlwrite(io, UInt8(jlsizeof(Length)))        # Dimensionality Size
-    for i = N:-1:1
-        jlwrite(io, Length(dims[i]))          # Dimensions 1...N
-    end
-    jlwrite(io, Length(elsize))               # Element size (last dimension)
-    jlwrite(io, UInt8(1))                     # Chunk Indexing Type (= Single Chunk)
-    jlwrite(io, Length(filtered_size))        # Size of filtered chunk
-    jlwrite(io, UInt32(0))                    # Filters for chunk
-    jlwrite(io, offset)                       # Address
-end
-
-const DEFLATE_PIPELINE_MESSAGE = let
-    io = IOBuffer()
-    jlwrite(io, HeaderMessage(HM_FILTER_PIPELINE, 12, 0))
-    jlwrite(io, UInt8(2))                 # Version
-    jlwrite(io, UInt8(1))                 # Number of Filters
-    jlwrite(io, UInt16(1))                # Filter Identification Value (= deflate)
-    jlwrite(io, UInt16(0))                # Flags
-    jlwrite(io, UInt16(1))                # Number of Client Data Values
-    jlwrite(io, UInt32(5))                # Client Data (Compression Level)
-    take!(io)
-end
 
 @Base.pure ismutabletype(x::DataType) = x.mutable
 

@@ -32,7 +32,7 @@ function writeasbits(T::Union)
     length(types) == 2 && isbitstype(types[1]) && isbitstype(types[2])
 end
 
-function write_dataset(f::JLDFile, x::Array{T}, wsession::JLDWriteSession) where {T}
+function write_dataset(f::JLDFile, x::Array{T}, wsession::JLDWriteSession, compress=f.compress) where {T}
     if T isa Union && writeasbits(T)
         # Conversion has to be done earlier here because
         # vectors are special cased in dispatch
@@ -41,7 +41,7 @@ function write_dataset(f::JLDFile, x::Array{T}, wsession::JLDWriteSession) where
         y = x
     end
     odr = objodr(y)
-    write_dataset(f, WriteDataspace(f, y, odr), h5type(f, y), odr, y, wsession)
+    write_dataset(f, WriteDataspace(f, y, odr), h5type(f, y), odr, y, wsession, compress)
 end
 
 # This function is identical to the one in data.jl
@@ -59,8 +59,8 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
     n = length(v)
     seek(io, data_offset)
-    if filter_id == 1
-        read_compressed_array!(v, f, rr, data_length)
+    if !iszero(filter_id)
+        read_compressed_array!(v, f, rr, data_length, filter_id)
     else
         read_array!(v, f, rr)
     end

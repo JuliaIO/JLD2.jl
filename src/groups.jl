@@ -109,16 +109,16 @@ function Base.getindex(g::Group, name::AbstractString)
     end
 end
 
-function Base.write(g::Group, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession())
-    if g.last_chunk_start_offset != -1 && g.continuation_message_goes_here == -1
-        error("objects cannot be added to this group because it was created with a previous version of JLD2")
-    end
-    f = g.f
-    prewrite(f)
-    (g, name) = pathize(g, name, true)
-    g[name] = write_dataset(f, obj, wsession)
-    nothing
-end
+# function Base.write(g::Group, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession())
+#     if g.last_chunk_start_offset != -1 && g.continuation_message_goes_here == -1
+#         error("objects cannot be added to this group because it was created with a previous version of JLD2")
+#     end
+#     f = g.f
+#     prewrite(f)
+#     (g, name) = pathize(g, name, true)
+#     g[name] = write_dataset(f, obj, wsession)
+#     nothing
+# end
 
 function Base.setindex!(g::Group, obj, name::AbstractString)
     write(g, name, obj)

@@ -13,9 +13,10 @@ makedocs(;
     pages = [
         "Basics" => "index.md",
 	"Custom Serialization" => "customserialization.md",
+    "Compression" => "compression.md",
 	"Internals & Design" => "internals.md",
 	"HDF5 Compatibility" => "hdf5compat.md",
-    "Legacy" => "legacy.md"
+    "Legacy" => "legacy.md",
     	],
     )
 
