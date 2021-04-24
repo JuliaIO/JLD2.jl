@@ -133,7 +133,7 @@ end
 
 
 @inline chunked_storage_message_size(ndims::Int) =
-    sizeof(HeaderMessage) + 5 + (ndims+1)*sizeof(Length) + 1 + sizeof(Length) + 4 + sizeof(RelOffset)
+    jlsizeof(HeaderMessage) + 5 + (ndims+1)*jlsizeof(Length) + 1 + jlsizeof(Length) + 4 + jlsizeof(RelOffset)
 
 
 function write_chunked_storage_message( io::IO,
@@ -165,10 +165,10 @@ function write_compressed_data(cio, f, data, odr, wsession, filter_id, compresso
     deflated = deflate_data(f, data, odr, wsession, compressor)
 
     write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
-    write(f.io, end_checksum(cio))
+    jlwrite(f.io, end_checksum(cio))
    
     f.end_of_data += length(deflated)
-    write(f.io, deflated)
+    jlwrite(f.io, deflated)
 end
 
 
