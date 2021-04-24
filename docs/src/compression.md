@@ -6,17 +6,17 @@ type fields.
 
 To enable the default compression, you can write
 ```
-    FileIO.save("example.jld2", "large_array", zeros(10000); compress = true)
+FileIO.save("example.jld2", "large_array", zeros(10000); compress = true)
 ```
 using the `FileIO` API. Alternatively use
 ```
-    jldsave("example.jld2", true; large_array=zeros(10000))
+jldsave("example.jld2", true; large_array=zeros(10000))
 ```
 or
 ```
-    jldopen("example.jld2", "w"; compress = true) do f
-        f["large_array"] = zeros(10000)
-    end
+jldopen("example.jld2", "w"; compress = true) do f
+    f["large_array"] = zeros(10000)
+end
 ```
 
 `JLD2` uses [`TranscodingStreams.jl`](https://github.com/JuliaIO/TranscodingStreams.jl)
@@ -39,10 +39,10 @@ your needs, you can also directly pass a compressor.
 To use any of these, replace the `compress = true` argument with an instance of the
 compressor, e.g.
 ```
-    using JLD2, CodecBzip2
-    jldopen("example.jld2", "w"; compress = Bzip2Compressor()) do f
-        f["large_array"] = zeros(10000)
-    end
+using JLD2, CodecBzip2
+jldopen("example.jld2", "w"; compress = Bzip2Compressor()) do f
+    f["large_array"] = zeros(10000)
+end
 ```
 
 ### Manually selecting compression for datasets
@@ -53,12 +53,12 @@ that for others it is not worth the effort. For precise control, the
 settings.
 
 ```
-    using JLD2
-    jldopen("example.jld2", "w") do f
-        # This can be efficiently compressed  → use compression
-        write(f, "compressed_array", zeros(10000); compress=true)
+using JLD2
+jldopen("example.jld2", "w") do f
+    # This can be efficiently compressed  → use compression
+    write(f, "compressed_array", zeros(10000); compress=true)
 
-        # Don't compress this 
-        write(f, "large_array", rand(10000))
-    end
+    # Don't compress this 
+    write(f, "large_array", rand(10000))
+end
 ```
