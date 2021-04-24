@@ -17,7 +17,7 @@ function read_array! end
 
 
 """
-    read_compressed_array!(v::Array, f::JLDFile, rr, data_length::Int)
+    read_compressed_array!(v::Array, f::JLDFile, rr, data_length::Int, ::Val{filter_id})
 
 Fill the array `v` with the compressed contents of JLDFile `f` at the current position,
 assuming a ReadRepresentation `rr` and that the compressed data has length `data_length`.
@@ -75,21 +75,6 @@ end
     v
 end
 
-@inline function read_compressed_array!(v::Array{T}, f::JLDFile{MmapIO},
-                                        rr::ReadRepresentation{T,RR},
-                                        data_length::Int) where {T,RR}
-    io = f.io
-    inptr = io.curptr
-    data = transcode(ZlibDecompressor, unsafe_wrap(Array, Ptr{UInt8}(inptr), data_length))
-    @simd for i = 1:length(v)
-        dataptr = Ptr{Cvoid}(pointer(data, odr_sizeof(RR)*(i-1)+1))
-        if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
-            @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
-        end
-    end
-    io.curptr = inptr + data_length
-    v
-end
 
 function write_data(io::MmapIO, f::JLDFile, data, odr::S, ::ReferenceFree,
                     wsession::JLDWriteSession) where S
@@ -198,22 +183,6 @@ end
     end
 end
 
-@inline function read_compressed_array!(v::Array{T}, f::JLDFile{IOStream},
-                                        rr::ReadRepresentation{T,RR},
-                                        data_length::Int) where {T,RR}
-    io = f.io
-    data_offset = position(io)
-    n = length(v)
-    data = read!(ZlibDecompressorStream(io), Vector{UInt8}(undef, odr_sizeof(RR)*n))
-    @simd for i = 1:n
-        dataptr = Ptr{Cvoid}(pointer(data, odr_sizeof(RR)*(i-1)+1))
-        if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
-            @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
-        end
-    end
-    seek(io, data_offset + data_length)
-    v
-end
 
 @inline function read_array!(v::Array{T}, f::JLDFile{IOStream},
                              rr::ReadRepresentation{T,T}) where T
