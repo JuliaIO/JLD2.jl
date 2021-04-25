@@ -17,21 +17,22 @@ UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 [compat]
 DataStructures = "0.17, 0.18"
 FileIO = "1"
-Reexport = "1"
 MacroTools = "0.5"
+Reexport = "1"
 Requires = "1.0"
+TranscodingStreams = "0.9"
 julia = "0.7, 1"
 
 [extras]
 Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
+CodecBzip2 = "523fee87-0ab8-5b00-afb7-3ecf72e48cfd"
+CodecLz4 = "5ba52731-8f18-5e0d-9241-30f10d1ec561"
+CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-CodecLz4 = "5ba52731-8f18-5e0d-9241-30f10d1ec561"
-CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
-CodecBzip2 = "523fee87-0ab8-5b00-afb7-3ecf72e48cfd"
 
 [targets]
-test = ["FileIO", "LinearAlgebra", "Printf", "Random", "Test", "Base64", "CodecLz4", "CodecZlib",  "CodecBzip2"]
+test = ["FileIO", "LinearAlgebra", "Printf", "Random", "Test", "Base64", "CodecLz4", "CodecZlib", "CodecBzip2"]
