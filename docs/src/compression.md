@@ -19,10 +19,18 @@ jldopen("example.jld2", "w"; compress = true) do f
 end
 ```
 
+When reading a file `JLD2` detects compression and automatically decompresses the data
+so it is not necessary to pass any extra parameters for that case.
+
 `JLD2` uses [`TranscodingStreams.jl`](https://github.com/JuliaIO/TranscodingStreams.jl)
 to interact with compression algorithms. Compression is disabled by
 default and if `compress = true` is passed, 
 [`CodecZlib.jl`](https://github.com/JuliaIO/CodecZlib.jl) will be used.
+
+!!! note
+    Note that `CodecZlib.jl` must be explicitly installed for compression/decompression
+    to work. If the package is not already loaded `JLD2` will try to dynamically load it,
+    but it is recommended to do it explicitly, e.g. `using JLD2, CodecZlib`.
 
 ### Choosing a compression algorithm
 
