@@ -134,3 +134,16 @@ close(f)
         @test chunk_length == 1614
     end
 end
+
+
+# Test for Issue #307
+@testset "Repeatedly appending to file" begin
+    fn = joinpath(mktempdir(), "test.jld2")   
+    for n = 1:25
+        jldopen(fn, "a") do fid
+            group = JLD2.Group(fid, string(n))
+            group["result"] = 1
+            @test keys(fid) == string.(1:n)
+        end
+    end
+end
