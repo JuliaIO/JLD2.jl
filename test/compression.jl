@@ -44,3 +44,13 @@ end
     r = jldopen(f -> f["randomdata"], fn, "r")
     @test r == randomdata
 end
+
+@testset "Verify Correctness of Compressor" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+
+    @test_throws ArgumentError jldopen(fn, "w"; compress = 42)
+
+    jldopen(fn, "w") do f
+        @test_throws ArgumentError write(f, "x", zeros(10); compress = π)
+    end
+end

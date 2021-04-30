@@ -247,6 +247,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                  mmaparrays::Bool=false
                  ) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
+    verify_compressor(compress)
     exists = ispath(fname)
 
     lock(OPEN_FILES_LOCK)

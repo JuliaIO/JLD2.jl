@@ -131,7 +131,7 @@ end
               datatype_offset::Int64, data_offset::Int64[, filter_id::UInt16,
               header_offset::RelOffset, attributes::Vector{ReadAttribute}])
 
-jlread data from a file. If `datatype_class` is typemax(UInt8), the datatype is assumed to be
+Read data from a file. If `datatype_class` is typemax(UInt8), the datatype is assumed to be
 committed, and `datatype_offset` points to the offset of the committed datatype's header.
 Otherwise, datatype_offset points to the offset of the datatype attribute.
 """

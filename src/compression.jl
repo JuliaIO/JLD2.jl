@@ -16,6 +16,17 @@ const ID_TO_DECOMPRESSOR = Dict(
 
 issupported_filter(filter_id) = filter_id ∈ keys(ID_TO_DECOMPRESSOR)
 
+function verify_compressor(compressor)
+    (compressor isa Bool || haskey(COMPRESSOR_TO_ID, nameof(typeof(compressor)))) && return
+
+    crs = map(values(ID_TO_DECOMPRESSOR)) do val
+        "\n\t"*string(val[1])*"."*string(val[2])
+    end
+
+    
+    throw(ArgumentError("""Unsupported Compressor
+    Supported Compressors are $(crs...)"""))
+end
 #############################################################################################################
 # Dynamic Package Loading Logic copied from FileIO
 const load_locker = Base.ReentrantLock()
@@ -66,6 +77,7 @@ function Base.write(g::Group, name::AbstractString, obj, wsession::JLDWriteSessi
     prewrite(f)
     (g, name) = pathize(g, name, true)
     if !(compress === nothing) 
+        verify_compressor(compress)
         if obj isa Array
             g[name] = write_dataset(f, obj, wsession, compress)
             return nothing
