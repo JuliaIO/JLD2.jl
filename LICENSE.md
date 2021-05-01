@@ -1,5 +1,6 @@
 The JLD2.jl package is licensed under the MIT "Expat" License:
 
+> Copyright (c) 2020-2021: Jonas Isensee, and contributors.
 > Copyright (c) 2015-2017: Simon Kornblith, Google Inc., and contributors.
 >
 > Permission is hereby granted, free of charge, to any person obtaining
