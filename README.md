@@ -181,7 +181,7 @@ JLD2.rconvert(::Type{B}, x::Float64) = B(x)
 
 arr = [B(rand()) for i=1:10]
 
-@save "test.jld2" arr
+jldsave("test.jld2"; arr)
 ```
 
 In this example JLD2 converts the array of `B` structs to a plain `Vector{Float64}` prior to 
