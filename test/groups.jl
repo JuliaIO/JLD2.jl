@@ -160,7 +160,7 @@ end
         show(io, f)
         String(take!(io))
     end
-    @test !isnothing(match(r"^JLDFile.*\(read/write\)$", filestr))
+    @test !(match(r"^JLDFile.*\(read/write\)$", filestr) === nothing)
 
     groupstr = let
         io = IOBuffer()
