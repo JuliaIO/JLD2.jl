@@ -370,7 +370,7 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
 
     if mypath in keys(f.type_map)
         m = f.type_map[mypath]
-    elseif startswith(last(split(mypath, '.')), '#') # Never return anonymous things
+    elseif !isnothing(match(r"#[0-9]*#[0-9]*", mypath)) # Never return anonymous things
         return UnknownType(mypath, params)
     else
         m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
