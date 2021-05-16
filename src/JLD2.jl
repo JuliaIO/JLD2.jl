@@ -183,6 +183,7 @@ mutable struct JLDFile{T<:IO}
     root_group_offset::RelOffset
     root_group::Group
     types_group::Group
+    type_map::Dict{String, Any}
 
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
                         compress,#::Union{Bool,Symbol},
@@ -318,7 +319,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
             f.types_group = Group{typeof(f)}(f)
         end
     end
-
+    f.type_map = Dict{String,Any}()
     f
 end
 

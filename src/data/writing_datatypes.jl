@@ -187,6 +187,23 @@ function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::DataTy
     typeattr = WrittenAttribute(
         :julia_type, WriteDataspace(f, DataType, odr(DataType)), h5type(f, DataType, DataType), readas)
 
+    if isanon(writeas)
+        stn = SerializedTypeName(writeas.name)
+        smt = SerializedMethodTable(writeas.name.mt)
+        attributes = [attributes...,
+            WrittenAttribute(:typenameinfo,
+                WriteDataspace(f, stn, objodr(stn)),
+                h5type(f, stn),
+                stn
+            ),
+            WrittenAttribute(:methods,
+                WriteDataspace(f, smt, objodr(smt)),
+                h5type(f, smt),
+                smt
+            )
+        ]
+    end
+
     offset = f.end_of_data
 
     seek(io, offset)
@@ -199,9 +216,9 @@ function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::DataTy
     f.types_group[@sprintf("%08d", id)] = h5o
 
     if writeas !== readas
-        wrtypeattr = WrittenAttribute(:written_type,
-                                      WriteDataspace(f, DataType, odr(DataType)),
-                                      h5type(f, DataType, DataType), writeas)
+        wrtypeattr = WrittenAttribute(:written_type, 
+            WriteDataspace(f, DataType, odr(DataType)), 
+            h5type(f, DataType, DataType), writeas)
         f.h5jltype[cdt] = ReadRepresentation{readas,CustomSerialization{writeas, odr(writeas)}}()
         commit(f, dtype, tuple(typeattr, wrtypeattr, attributes...))
     else
@@ -299,7 +316,7 @@ jlconvert_canbeuninitialized(::ReadRepresentation{RelOffset,RelOffset}) = false
 @inline function jlconvert(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr,
                            ::RelOffset) where T
     x = load_dataset(f, jlunsafe_load(convert(Ptr{RelOffset}, ptr)))
-    (isa(x, T) ? x : convert(T, x))::T
+    (isa(x, T) ? x : rconvert(T, x))::T
 end
 jlconvert_canbeuninitialized(::ReadRepresentation{T,RelOffset}) where {T} = true
 jlconvert_isinitialized(::ReadRepresentation{T,RelOffset}, ptr::Ptr) where {T} =
@@ -403,11 +420,12 @@ end
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     t = typename(T)
     store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, t), f.datatype_wsession)
+    out += odr_sizeof(Vlen{UInt8})
     if isempty(T.parameters)
-        h5convert_uninitialized!(out+odr_sizeof(Vlen{UInt8}), Vlen{UInt8})
+        h5convert_uninitialized!(out, Vlen{UInt8})
     else
         refs = refs_from_types(f, T.parameters, wsession)
-        store_vlen!(out+odr_sizeof(Vlen{UInt8}), RelOffset, f, refs, f.datatype_wsession)
+        store_vlen!(out, RelOffset, f, refs, f.datatype_wsession)
     end
     nothing
 end

@@ -25,11 +25,18 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
 
     julia_type_attr = nothing
     written_type_attr = nothing
+    method_table_attr = nothing
+    typename_attr = nothing
     for attr in attrs
         if attr.name == :julia_type
             julia_type_attr = attr
         elseif attr.name == :written_type
             written_type_attr = attr
+        elseif attr.name == :typenameinfo
+            typename_attr = attr
+        elseif attr.name == :methods
+            method_table_attr = attr
+
         end
     end
 
@@ -53,6 +60,41 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
         return (f.h5jltype[cdt] = ReadRepresentation{DataType, DataTypeODR()}())
     end
 
+    
+    # Special handling of function types
+    if !isnothing(typename_attr)
+        @assert !isnothing(method_table_attr)
+        # Read julia type
+        # this gives access to the name and such
+        datatype = read_attr_data(f, julia_type_attr)
+        if datatype isa UnknownType
+            writtenname = string(datatype.name)
+            stn = read_attr_data(f, typename_attr)
+            # Potentially add condition here if named functions ever get methods attached
+            # Constructing a gensym name similar to how julia seems to do it for anon functions
+            mtname = gensym()
+            stn.name = Symbol(string(mtname) * string(gensym()))
+        
+            datatype = newstruct_raw(TypeName, stn).wrapper
+
+            f.type_map[writtenname] = datatype
+
+            # Need fully created type before adding methods
+            rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
+            canonical && (f.jlh5type[datatype] = cdt)
+            f.datatypes[cdt.index] = dt
+            f.h5jltype[cdt] = rr
+
+            # Finally add methods
+            smt = read_attr_data(f, method_table_attr)
+            smt.name = mtname
+            add_method_table(datatype.name, smt)
+        
+            return  rr
+        end
+    end
+    
+    
     datatype = read_attr_data(f, julia_type_attr)
     if written_type_attr !== nothing
         # Custom serialization
@@ -313,8 +355,27 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     params = [p isa Union{Int64,Int32} ? Int(p) : p for p in params]
     hasparams = !isempty(params)
     mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
-    m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
-    m isa UnknownType && return m
+
+    #= if startswith(last(split(mypath, '.')), '#') 
+        # Stored type is a gensym like an anonymous function
+        # Generate a new one
+        @assert !hasparams
+        #f.datatype_locations[header_offset]
+        #return typeof(function () end)
+        println(rr)
+        println(mypath)
+        #println(backtrace())
+        throw(error(""))
+    end =#
+
+    if mypath in keys(f.type_map)
+        m = f.type_map[mypath]
+    elseif startswith(last(split(mypath, '.')), '#') # Never return anonymous things
+        return UnknownType(mypath, params)
+    else
+        m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
+        m isa UnknownType && return m
+    end
 
     if hasparams
         try
@@ -327,6 +388,12 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
         # Tuple{Vararg{Any}}
         m = Tuple{}
     end
+
+#=     refptr = ptr + odr_sizeof(Vlen{UInt8}) + odr_sizeof(Vlen{RelOffset})
+    ref = jlconvert(ReadRepresentation{RelOffset, RelOffset}(), f, refptr, NULL_REFERENCE)
+    println(ref)
+    typenameinfo = load_dataset(f, ref)
+    @info "Recovered $typenameinfo" =#
     track_weakref!(f, header_offset, m)
     return m
 end
@@ -585,6 +652,5 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
     end
 
     push!(args, T.mutable ? (:obj) : T <: Tuple ? Expr(:tuple, fsyms...) : Expr(:new, T, fsyms...))
-
     blk
 end
