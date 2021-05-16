@@ -75,7 +75,7 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
             mtname = gensym()
             stn.name = Symbol(string(mtname) * string(gensym()))
         
-            datatype = newstruct_raw(TypeName, stn).wrapper
+            datatype = new_typename(TypeName, stn).wrapper
 
             f.type_map[writtenname] = datatype
 
