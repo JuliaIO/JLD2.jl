@@ -41,6 +41,11 @@ end
 @testset "Anonymous Functions" begin
     fn = joinpath(mktempdir(), "test.jld2")
 
+    # Regular function first
+    jldsave(fn; cos)
+    loaded_cos = load(fn, "cos")
+    @test cos === loaded_cos
+
     # "Pure" function
     f1 = (x) -> x^2
 
