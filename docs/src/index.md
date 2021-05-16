@@ -139,3 +139,26 @@ or using slashes as path delimiters:
 ```julia
 @assert load("example.jld2", "mygroup/mystuff") == 42
 ```
+
+### Storing Anonymous Functions
+
+It is finally possible to store and load anonymous functions using JLD2!
+Please be aware that this is still very experimental. Do not use this 
+for important data.
+
+```
+using JLD2
+
+f = x -> x^2
+g = let 
+    x = 41
+    x -> (x+=1)
+end
+
+jldsave("test.jld2; f, g)
+h = load("test.jld2", "f")
+k = load("test.jld2", "g")
+
+h(2) == f(2)
+g() == k() == 42
+```

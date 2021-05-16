@@ -136,11 +136,7 @@ or using slashes as path delimiters:
 @assert load("example.jld2", "mygroup/mystuff") == 42
 ```
 
-### Custom Serialization (Experimental)
-
-Version `v0.3.0` of introduces support for custom serialization.
-For now this feature is considered experimental as it passes tests but 
-has little testing in the wild. → Please test and report if you encounter problems.
+### Custom Serialization 
 
 The API is simple enough, to enable custom serialization for your type `A` you define
 a new type e.g. `ASerialization` that contains the fields you want to store and define
@@ -186,3 +182,27 @@ jldsave("test.jld2"; arr)
 
 In this example JLD2 converts the array of `B` structs to a plain `Vector{Float64}` prior to 
 storing to disk.
+
+
+### Storing Anonymous Functions
+
+It is finally possible to store and load anonymous functions using JLD2!
+Please be aware that this is still very experimental. Do not use this 
+for important data.
+
+```
+using JLD2
+
+f = x -> x^2
+g = let 
+    x = 41
+    x -> (x+=1)
+end
+
+jldsave("test.jld2; f, g)
+h = load("test.jld2", "f")
+k = load("test.jld2", "g")
+
+h(2) == f(2)
+g() == k() == 42
+```
