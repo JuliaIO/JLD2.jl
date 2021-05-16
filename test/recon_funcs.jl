@@ -38,6 +38,21 @@ end
     @test 42 == round_trip(S3(λ)).f()
 end
 
+# Same as in "modules-nested.jl". Only here to make script run as standalone.
+function better_success(cmd)
+    fn1, _ = mktemp()
+    fn2, _ = mktemp()
+    try
+       run(pipeline(cmd, stdout=fn1, stderr=fn2))
+    catch
+        println(String(read(fn1)))
+        println(String(read(fn2)))
+        return false
+    end
+    return true
+end
+
+
 @testset "Anonymous Functions" begin
     fn = joinpath(mktempdir(), "test.jld2")
 
@@ -97,6 +112,17 @@ end
             # Global Ref
             f3 = () -> global_variable
 
+            # With struct
+            struct SomeStructWithFunctionInside
+                x::Int
+                func::Function
+
+                function SomeStructWithFunctionInside(x)
+                    return new(x, (y)-> y * exp(x))
+                end
+            end
+
+
             module AnonFunctionModule
                 # "Pure" function
                 f4 = (x) -> sqrt(x)
@@ -111,7 +137,7 @@ end
                 f6 = () -> module_variable
             end
             using .AnonFunctionModule: f4, f5, f6
-            jldsave("$(fn)"; f1, f2, f3, f4, f5, f6)
+            jldsave("$(fn)"; f1, f2, f3, f4, f5, f6, a=SomeStructWithFunctionInside(1))
         """
         open(saving_filename, "w") do io
             println(io, saving_contents)
@@ -132,14 +158,21 @@ end
         f6 = load(fn, "f6")
         @test_throws UndefVarError f6()
         global module_variable = 3
-        @test f6() == module_variable 
-
-        module AnonFunctionModule
+        @test f6() == module_variable
+        @eval module AnonFunctionModule
             module_variable = 4
         end
         f6 = load(fn, "f6")
         f6()
 
+        # With struct
+        load(fn, "a")
+        struct SomeStructWithFunctionInside
+            x::Int
+            func::Function
+            SomeStructWithFunctionInside(x) = new(x, (y)-> y * exp(x))
+        end
+        @test_nowarn load(fn, "a")
     end
 
 end

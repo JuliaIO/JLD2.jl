@@ -75,20 +75,22 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
             mtname = gensym()
             stn.name = Symbol(string(mtname) * string(gensym()))
         
-            datatype = new_typename(TypeName, stn).wrapper
+            newtype = new_typename(TypeName, stn).wrapper
+            f.type_map[writtenname] = newtype
 
-            f.type_map[writtenname] = datatype
-
+            if !isempty(datatype.parameters)
+                newtype = newtype{datatype.parameters...}
+            end
             # Need fully created type before adding methods
-            rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
-            canonical && (f.jlh5type[datatype] = cdt)
+            rr, canonical = constructrr(f, newtype, dt, attrs)::Tuple{ReadRepresentation,Bool}
+            canonical && (f.jlh5type[newtype] = cdt)
             f.datatypes[cdt.index] = dt
             f.h5jltype[cdt] = rr
 
             # Finally add methods
             smt = read_attr_data(f, method_table_attr)
             smt.name = mtname
-            add_method_table(datatype.name, smt)
+            add_method_table(newtype.name, smt)
         
             return  rr
         end
