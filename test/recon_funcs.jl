@@ -139,6 +139,10 @@ end
             using .AnonFunctionModule: f4, f5, f6
             jldsave("$(fn)"; f1, f2, f3, f4, f5, f6, a=SomeStructWithFunctionInside(1))
         """
+        if Sys.iswindows()
+            saving_contents = replace(saving_contents, '\\' => "\\\\")
+        end
+
         open(saving_filename, "w") do io
             println(io, saving_contents)
         end

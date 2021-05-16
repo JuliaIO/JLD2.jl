@@ -15,7 +15,6 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.0'
           - '1.5'
           - '1'
         os:  [ubuntu-latest, windows-latest, macos-latest] # adjust according to need, e.g. os: [ubuntu-latest] if testing only on linux
