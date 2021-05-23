@@ -76,7 +76,7 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
             stn.name = Symbol(string(mtname) * string(gensym()))
         
             newtype = new_typename(TypeName, stn).wrapper
-            f.type_map[writtenname] = newtype
+            f.typemap[writtenname] = newtype
 
             if !isempty(datatype.parameters)
                 newtype = newtype{datatype.parameters...}
@@ -370,8 +370,8 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
         throw(error(""))
     end =#
 
-    if mypath in keys(f.type_map)
-        m = f.type_map[mypath]
+    if mypath in keys(f.typemap)
+        m = f.typemap[mypath]
     elseif !isnothing(match(r"#[0-9]*#[0-9]*", mypath)) # Never return anonymous things
         return UnknownType(mypath, params)
     else

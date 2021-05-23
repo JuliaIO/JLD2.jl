@@ -173,6 +173,7 @@ mutable struct JLDFile{T<:IO}
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
+    typemap::Dict{String, DataType}
     jlh5type::IdDict
     h5jltype::IdDict
     jloffset::Dict{RelOffset,WeakRef}
@@ -183,14 +184,13 @@ mutable struct JLDFile{T<:IO}
     root_group_offset::RelOffset
     root_group::Group
     types_group::Group
-    type_map::Dict{String, Any}
 
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
                         compress,#::Union{Bool,Symbol},
                         mmaparrays::Bool) where T
         f = new(io, path, writable, written, compress, mmaparrays, 1,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
-            JLDWriteSession(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
+            JLDWriteSession(), Dict{String,DataType}(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + jlsizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS)
         finalizer(jld_finalizer, f)
@@ -245,7 +245,8 @@ const OPEN_FILES_LOCK = ReentrantLock()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
                  fallback::Union{Type, Nothing} = FallbackType(iotype),
                  compress=false,
-                 mmaparrays::Bool=false
+                 mmaparrays::Bool=false,
+                 typemap::Dict{String,DataType}=Dict{String,DataType}(),
                  ) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
     verify_compressor(compress)
@@ -319,7 +320,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
             f.types_group = Group{typeof(f)}(f)
         end
     end
-    f.type_map = Dict{String,Any}()
+    merge!(f.typemap, typemap)
     f
 end
 

@@ -32,8 +32,8 @@ Dict{String, Any} with 1 entry:
 
 ```
 
-As of JLD2 version `v0.4.5` there is a fix. The `JLDFile` struct contains a `type_map`
-dictionary that allows for explicit type remapping. Now you can define a struct
+As of JLD2 version `v0.4.8` there is a fix. The `JLDFile` struct contains a `typemap` dictionary that allows for explicit type remapping. 
+Now you can define a struct
 that matches the old definition and load your data.
 
 ```julia
@@ -41,12 +41,9 @@ julia> struct A_old
             x::Int
         end
 
-julia> f = jldopen("example.jld2","r")
+julia> f = jldopen("example.jld2","r"; typemap=Dict("Main.A" => A_old))
 JLDFile /home/jonas/.julia/dev/JLD2/example.jld2 (read-only)
  └─🔢 a
-
-julia> f.type_map["Main.A"] = A_old
-A_old
 
 julia> f["a"]
 A_old(42)
