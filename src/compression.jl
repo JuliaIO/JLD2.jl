@@ -92,13 +92,11 @@ end
 get_compressor(compressor) = false, COMPRESSOR_TO_ID[nameof(typeof(compressor))], compressor
 
 function get_compressor(::Bool) 
-    # This method is only called when the argument is true
-    # No specific compression lib was given. Return the default
-    if !isdefined(JLD2, :CodecZlib)
-        m = checked_import(:CodecZlib)
+   call_again, m = checked_import(:CodecZlib)
+    if call_again
         return true, Base.invokelatest(get_compressor, true)[2:3]...
     end
-    false, COMPRESSOR_TO_ID[:ZlibCompressor], CodecZlib.ZlibCompressor()
+    false, COMPRESSOR_TO_ID[:ZlibCompressor], m.ZlibCompressor()
 end
 
 function get_decompressor(filter_id::UInt16)
