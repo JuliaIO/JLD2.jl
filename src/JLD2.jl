@@ -173,7 +173,7 @@ mutable struct JLDFile{T<:IO}
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
-    typemap::Dict{String, DataType}
+    typemap::Dict{String, Any}
     jlh5type::IdDict
     h5jltype::IdDict
     jloffset::Dict{RelOffset,WeakRef}
@@ -190,7 +190,7 @@ mutable struct JLDFile{T<:IO}
                         mmaparrays::Bool) where T
         f = new(io, path, writable, written, compress, mmaparrays, 1,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
-            JLDWriteSession(), Dict{String,DataType}(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
+            JLDWriteSession(), Dict{String,Any}(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + jlsizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS)
         finalizer(jld_finalizer, f)
@@ -246,7 +246,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                  fallback::Union{Type, Nothing} = FallbackType(iotype),
                  compress=false,
                  mmaparrays::Bool=false,
-                 typemap::Dict{String,DataType}=Dict{String,DataType}(),
+                 typemap::Dict{String}=Dict{String,Any}(),
                  ) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
     verify_compressor(compress)
