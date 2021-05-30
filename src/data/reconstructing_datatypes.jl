@@ -514,7 +514,7 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
         # For bits types, we should always inline, because otherwise we'll just
         # pass a lot of crap around in registers
         push!(args, Expr(:meta, :inline))
-    elseif T.mutable
+    elseif ismutabletype(T)
         push!(args, quote
             obj = $(Expr(:new, T))
             track_weakref!(f, header_offset, obj)
@@ -527,7 +527,7 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
         rtype = types[i]
         odr = odrs[i]
 
-        if !T.mutable
+        if !ismutabletype(T)
             fsym = Symbol("field_", fn[i])
             push!(fsyms, fsym)
         end
@@ -538,12 +538,12 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
             # Type is not stored or single instance
             if T.types[i] == Union{}
                 # This cannot be defined
-                @assert !T.mutable
+                @assert !ismutabletype(T)
                 push!(args, Expr(:return, Expr(:new, T, fsyms[1:i-1]...)))
                 return blk
             else
                 newi = Expr(:new, T.types[i])
-                if T.mutable
+                if ismutabletype(T)
                     fni = QuoteNode(fn[i])
                     push!(args, :(setfield!(obj, $fni, $newi)))
                 else
@@ -557,7 +557,7 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
                         $(if T <: Tuple || i <= T.ninitialized
                             # Reference must always be initialized
                             :(throw(UndefinedFieldException(T,$(QuoteNode(fn[i])))))
-                        elseif T.mutable
+                        elseif ismutabletype(T)
                             # Reference could be uninitialized
                             :(return obj)
                         else
@@ -574,7 +574,7 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
             else
                 ttype = T.types[i]
                 fni = QuoteNode(fn[i])
-                if T.mutable
+                if ismutabletype(T)
                     push!(args, :(setfield!(obj, $fni,
                                             convert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype)))
                 else
@@ -584,7 +584,7 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
         end
     end
 
-    push!(args, T.mutable ? (:obj) : T <: Tuple ? Expr(:tuple, fsyms...) : Expr(:new, T, fsyms...))
+    push!(args, ismutabletype(T) ? (:obj) : T <: Tuple ? Expr(:tuple, fsyms...) : Expr(:new, T, fsyms...))
 
     blk
 end
