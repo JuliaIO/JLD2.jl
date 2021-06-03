@@ -30,7 +30,7 @@ end
 
     # Borrowed from julia base
     function ismutabletype(@nospecialize(t::Type))
-        t = unwrap_unionall(t)
+        t = Base.unwrap_unionall(t)
         # TODO: what to do for `Union`?
         return isa(t, DataType) && t.mutable
     end
