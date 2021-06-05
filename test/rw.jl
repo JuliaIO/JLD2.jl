@@ -59,6 +59,7 @@ sym = :TestSymbol
 syms = [:a, :b]
 d = Dict([(syms[1],"aardvark"), (syms[2], "banana")])
 oidd = IdDict([(syms[1],"aardvark"), (syms[2], "banana")])
+imdd = Base.ImmutableDict(syms[1]=>"aardvark", syms[2]=>"banana")
 ex = quote
     function incrementby1(x::Int)
         x+1
@@ -383,6 +384,7 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @write fid syms
     @write fid d
     @write fid oidd
+    @write fid imdd
     @write fid ex
     @write fid T
     @write fid Tarr
@@ -498,6 +500,7 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @check fidr syms
     @check fidr d
     @check fidr oidd
+    @check fidr imdd
     exr = read(fidr, "ex")   # line numbers are stripped, don't expect equality
     checkexpr(ex, exr)
     @check fidr T

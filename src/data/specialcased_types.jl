@@ -178,3 +178,12 @@ function rconvert(::Type{T}, x::Vector{Pair{K,V}}) where {T<:AbstractDict,K,V}
     end
     d
 end
+
+function rconvert(::Type{<:Base.ImmutableDict}, x::Vector{Pair{K,V}}) where {K,V}
+    @assert !isempty(x)
+    d = Base.ImmutableDict(x[1])
+    for p in (@view x[2:end])
+        d = Base.ImmutableDict(d, p)
+    end
+    d
+end

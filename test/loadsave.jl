@@ -92,13 +92,8 @@ jldopen(fn, "r") do f
 end
 
 # Test Dict save/load
-for D in [Dict, IdDict, Base.ImmutableDict]
-    dd = D("the"=>"quick", "brown"=>"fox", "stuff"=>reshape(1:4, (2, 2)))
-    save(format"JLD2", fn, dd)
-    ld = load(fn)
-    @test ld == dd
-    @test typeof(ld) == typeof(dd)
-end
+save(format"JLD2", fn, Dict("the"=>"quick", "brown"=>"fox", "stuff"=>reshape(1:4, (2, 2))))
+@test load(fn) == Dict("the"=>"quick", "brown"=>"fox", "stuff"=>reshape(1:4, (2, 2)))
 
 # Test load/save with pairs
 save(format"JLD2", fn, "jumps", "over", "the", "lazy", "dog", reshape(1:4, (2, 2)))
