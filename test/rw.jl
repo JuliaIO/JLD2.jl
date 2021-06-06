@@ -59,7 +59,9 @@ sym = :TestSymbol
 syms = [:a, :b]
 d = Dict([(syms[1],"aardvark"), (syms[2], "banana")])
 oidd = IdDict([(syms[1],"aardvark"), (syms[2], "banana")])
-imdd = Base.ImmutableDict(syms[1]=>"aardvark", syms[2]=>"banana")
+# imdd = Base.ImmutableDict(syms[1]=>"aardvark", syms[2]=>"banana")
+# Incremental construction due to lacking constructor method in v1.0
+imdd = Base.ImmutableDict(Base.ImmutableDict(syms[1]=>"aardvark"), syms[2]=>"banana")
 ex = quote
     function incrementby1(x::Int)
         x+1
