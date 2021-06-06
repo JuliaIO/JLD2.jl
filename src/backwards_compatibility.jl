@@ -24,13 +24,13 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
 end
 
 
-@static if VERSION < v"1.7"
+@static if VERSION < v"1.7.0-A"
     # Location of `mutable` flag is moved from datatype to typename in julia v1.7
     # Switch to using accessor function added in v1.7
 
     # Borrowed from julia base
     function ismutabletype(@nospecialize(t::Type))
-        t = unwrap_unionall(t)
+        t = Base.unwrap_unionall(t)
         # TODO: what to do for `Union`?
         return isa(t, DataType) && t.mutable
     end
