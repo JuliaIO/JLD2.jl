@@ -168,12 +168,22 @@ rconvert(::Type{Core.SimpleVector}, x::Vector{Any}) = Core.svec(x...)
 
 writeas(::Type{Dict{K,V}}) where {K,V} = Vector{Pair{K,V}}
 writeas(::Type{IdDict}) = Vector{Pair{Any,Any}}
+writeas(::Type{Base.ImmutableDict{K,V}}) where {K,V} = Vector{Pair{K,V}}
 wconvert(::Type{Vector{Pair{K,V}}}, x::AbstractDict{K,V}) where {K,V} = collect(x)
 function rconvert(::Type{T}, x::Vector{Pair{K,V}}) where {T<:AbstractDict,K,V}
     d = T()
     isa(d, Dict) && sizehint!(d::Dict, length(x))
     for (k,v) in x
         d[k] = v
+    end
+    d
+end
+
+function rconvert(::Type{<:Base.ImmutableDict}, x::Vector{Pair{K,V}}) where {K,V}
+    @assert !isempty(x)
+    d = Base.ImmutableDict(x[1])
+    for p in (@view x[2:end])
+        d = Base.ImmutableDict(d, p)
     end
     d
 end
