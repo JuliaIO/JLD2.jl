@@ -576,9 +576,9 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
                 fni = QuoteNode(fn[i])
                 if ismutabletype(T)
                     push!(args, :(setfield!(obj, $fni,
-                                            convert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype)))
+                                            rconvert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype)))
                 else
-                    push!(args, :($fsym = convert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype))
+                    push!(args, :($fsym = rconvert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype))
                 end
             end
         end
