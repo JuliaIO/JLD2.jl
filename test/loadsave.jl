@@ -370,3 +370,19 @@ end
         @test !haskey(f, "g")
     end
 end
+
+## Test for Issue #329
+
+struct SingleUnionallField
+    x::IdDict
+end
+
+@testset "Issue #329" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+    jldsave(fn; a = SingleUnionallField(IdDict()))
+    # Shouldn't throw
+    a = load(fn, "a")
+    @test a isa SingleUnionallField
+    @test a.x isa IdDict{Any,Any}
+end
+ 
