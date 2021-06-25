@@ -554,7 +554,7 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
             if jlconvert_canbeuninitialized(rr)
                 push!(args, quote
                     if !jlconvert_isinitialized($rr, ptr+$offset)
-                        $(if T <: Tuple || i <= T.ninitialized
+                        $(if T <: Tuple || i <= ninitialized(T)
                             # Reference must always be initialized
                             :(throw(UndefinedFieldException(T,$(QuoteNode(fn[i])))))
                         elseif ismutabletype(T)
