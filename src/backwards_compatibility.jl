@@ -36,7 +36,7 @@ end
     end
 end
 
-@static if :ninitialized in fieldnames(Tuple{})
+@static if :ninitialized in fieldnames(DataType)
     # https://github.com/JuliaIO/JLD2.jl/issues/327
     function ninitialized(@nospecialize(T::Type))::Int
         T.ninitialized
