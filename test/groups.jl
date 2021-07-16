@@ -147,3 +147,35 @@ end
         end
     end
 end
+
+# Test show method
+@testset "Show a group / file" begin
+    fn = joinpath(mktempdir(), "test.jld2")   
+    f = jldopen(fn, "w")
+    f["a"] = 1
+    f["b"] = 2
+
+    filestr = let
+        io = IOBuffer()
+        show(io, f)
+        String(take!(io))
+    end
+    @test !(match(r"^JLDFile.*\(read/write\)$", filestr) === nothing)
+
+    groupstr = let
+        io = IOBuffer()
+        show(io, f.root_group)
+        String(take!(io))
+    end
+    @test groupstr == "JLD2.Group"
+
+
+    groupstr = let
+        io = IOBuffer()
+        show(io, MIME("text/plain"), f.root_group)
+        String(take!(io))
+    end
+    @test groupstr == "JLD2.Group\n ├─🔢 a\n └─🔢 b"
+
+    close(f)
+end

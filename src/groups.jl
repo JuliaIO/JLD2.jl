@@ -613,7 +613,14 @@ function show_group(io::IO, g::Group, maxnumlines::Int=10, prefix::String=" ", s
     return maxnumlines
 end
 
-function Base.show(io::IO, g::Group)
-    println(io, "JLD2.Group")
-    show_group(io, g, 10, " ", false)
+Base.show(io::IO, g::Group) = print(io, "JLD2.Group")
+
+function Base.show(io::IO, ::MIME"text/plain", g::Group)
+    print(io, "JLD2.Group") 
+    if get(io, :compact, false)
+        return
+    else
+        print(io, "\n")
+        show_group(io, g, 10, " ", false)
+    end
 end
