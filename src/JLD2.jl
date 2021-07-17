@@ -173,6 +173,7 @@ mutable struct JLDFile{T<:IO}
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
+    typemap::Dict{String, Any}
     jlh5type::IdDict
     h5jltype::IdDict
     jloffset::Dict{RelOffset,WeakRef}
@@ -189,7 +190,7 @@ mutable struct JLDFile{T<:IO}
                         mmaparrays::Bool) where T
         f = new(io, path, writable, written, compress, mmaparrays, 1,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
-            JLDWriteSession(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
+            JLDWriteSession(), Dict{String,Any}(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + jlsizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS)
         finalizer(jld_finalizer, f)
@@ -244,7 +245,8 @@ const OPEN_FILES_LOCK = ReentrantLock()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
                  fallback::Union{Type, Nothing} = FallbackType(iotype),
                  compress=false,
-                 mmaparrays::Bool=false
+                 mmaparrays::Bool=false,
+                 typemap::Dict{String}=Dict{String,Any}(),
                  ) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
     verify_compressor(compress)
@@ -318,7 +320,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
             f.types_group = Group{typeof(f)}(f)
         end
     end
-
+    merge!(f.typemap, typemap)
     f
 end
 
@@ -508,6 +510,7 @@ include("global_heaps.jl")
 include("data/type_defs.jl")
 include("data/specialcased_types.jl")
 include("data/number_types.jl")
+include("data/anonymous_functions.jl")
 include("data/custom_serialization.jl")
 include("data/writing_datatypes.jl")
 include("data/reconstructing_datatypes.jl")
