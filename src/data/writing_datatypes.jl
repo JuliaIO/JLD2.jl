@@ -21,7 +21,7 @@ odr_sizeof(::ReadRepresentation{T,S}) where {T,S} = odr_sizeof(S)
     T = T::DataType
     T in encounteredtypes && return true
     push!(encounteredtypes, T)
-    (T.mutable || T <: Type) && return true
+    (ismutabletype(T) || T <: Type) && return true
     hasdata(T, encounteredtypes)
 end
 
@@ -68,7 +68,7 @@ fieldnames(@nospecialize x) = collect(Base.fieldnames(x))
         elseif isa(T, DataType)
             if isbitstype(T)
                 return :(odr(T))
-            elseif !T.mutable
+            elseif !ismutabletype(T)
                 return :(initialized ? odr(T) : RelOffset)
             end
         end
@@ -83,7 +83,7 @@ end
     if isconcretetype(T)
         if !hasfielddata(T)
             return nothing
-        elseif isbitstype(T) || (isa(initialized, Type{Type{Val{true}}}) && !T.mutable)
+        elseif isbitstype(T) || (isa(initialized, Type{Type{Val{true}}}) && !ismutabletype(T))
             return quote
                 @lookup_committed f T
                 $(if isempty(T.types)
@@ -529,7 +529,7 @@ end
 newstruct(T) = ccall(:jl_new_struct_uninit, Any, (Any,), T)
 
 function newstruct(T, fields)
-    if !T.mutable
+    if !ismutabletype(T)
         return ccall(:jl_new_structv, Any, (Any,Ptr{Cvoid},UInt32), T, fields, length(fields))
     else
         # Manual inline of newstruct! to work around bug

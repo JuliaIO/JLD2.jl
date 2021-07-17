@@ -1,5 +1,5 @@
 module JLD2
-using DataStructures, Requires, Reexport
+using DataStructures, Reexport
 import Base.sizeof
 using MacroTools
 using Printf
@@ -15,16 +15,16 @@ const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 # Currently we specify that all offsets and lengths are 8 bytes
 const Length = UInt64
 
-struct UnsupportedVersionException <: Exception 
+struct UnsupportedVersionException <: Exception
     msg::String
 end
-struct UnsupportedFeatureException <: Exception 
+struct UnsupportedFeatureException <: Exception
     msg::String
 end
-struct InvalidDataException <: Exception 
+struct InvalidDataException <: Exception
     msg::String
 end
-struct InternalError <: Exception 
+struct InternalError <: Exception
     msg::String
 end
 
@@ -146,7 +146,7 @@ mutable struct Group{T}
         OrderedDict{String,RelOffset}(), OrderedDict{String,Group}())
 
     Group{T}(f, last_chunk_start_offset, continuation_message_goes_here,
-             last_chunk_checksum_offset, next_link_offset, 
+             last_chunk_checksum_offset, next_link_offset,
              est_num_entries, est_link_name_len,
              unwritten_links, unwritten_child_groups,
              written_links) where T =

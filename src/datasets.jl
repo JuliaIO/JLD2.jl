@@ -512,8 +512,6 @@ define_packed(ContiguousStorageMessage)
         4, LC_CONTIGUOUS_STORAGE, offset, datasz
     )
 
-@Base.pure ismutabletype(x::DataType) = x.mutable
-
 @inline function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
     odr = objodr(x)
     write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
