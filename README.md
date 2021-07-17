@@ -1,7 +1,5 @@
 # JLD2
 
-**NOTE**: This package is now **actively maintained again**! It was not maintained for some time and there still is a backlog of outstanding issues that will be addressed in the near future. You are invited to test JLD2 and raise any issues you come across. However, tread with care as you may come across problems that can potentially cause data loss.
-
 | **Documentation**   |  **Tests**     | **CodeCov**  |
 |:--------:|:---------------:|:-------:|
 |[![](https://img.shields.io/badge/docs-online-blue.svg)](https://JuliaIO.github.io/JLD2.jl/dev)| [![CI](https://github.com/juliaio/JLD2.jl/workflows/CI/badge.svg?branch=master)](https://github.com/JuliaIO/JLD2.jl/actions) | [![codecov.io](https://codecov.io/github/JuliaIO/JLD2.jl/coverage.svg?branch=master)](https://codecov.io/github/JuliaIO/JLD2.jl?branch=master) |
@@ -187,8 +185,8 @@ storing to disk.
 ### Storing Anonymous Functions
 
 It is finally possible to store and load anonymous functions using JLD2!
-Please be aware that this is still very experimental. Do not use this 
-for important data.
+Please be aware that this is still very experimental and may break in future versions.
+Do not use this for important data. 
 
 ```
 using JLD2

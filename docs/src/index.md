@@ -143,8 +143,8 @@ or using slashes as path delimiters:
 ### Storing Anonymous Functions
 
 It is finally possible to store and load anonymous functions using JLD2!
-Please be aware that this is still very experimental. Do not use this 
-for important data.
+Please be aware that this is still very experimental and may break in future versions.
+Do not use this for important data. 
 
 ```
 using JLD2
