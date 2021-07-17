@@ -146,7 +146,7 @@ function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
         fieldty = types[i]
         fieldwrittenas = writeas(fieldty)
         !hasfielddata(fieldwrittenas) && continue
-        dtype = h5fieldtype(f, fieldwrittenas, fieldty, Val{i <= writtenas.ninitialized})
+        dtype = h5fieldtype(f, fieldwrittenas, fieldty, Val{i <= ninitialized(writtenas)})
         dtype === nothing && continue
         push!(h5names, names[i])
         if isa(dtype, CommittedDatatype)
@@ -254,7 +254,7 @@ h5convert!(out::Pointers, ::Type{T}, ::JLDFile, x, ::JLDWriteSession) where {T} 
 
         offset = Offsets[i]
         conv = :(h5convert!(out+$offset, $(member), file, convert($(types[i]), $getindex_fn(x, $i)), wsession))
-        if i > T.ninitialized && (!isconcretetype(x.types[i]) || !isbitstype(x.types[i]))
+        if i > ninitialized(T) && (!isconcretetype(x.types[i]) || !isbitstype(x.types[i]))
             push!(args, quote
                 if !isdefined(x, $i)
                     h5convert_uninitialized!(out+$offset, $(member))
@@ -572,8 +572,6 @@ function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
     return newstruct(T, fields)::T
 end
 
-
-
 # odr gives the on-disk representation of a given type, similar to
 # fieldodr, but actually encoding the data for things that odr stores
 # as references
@@ -593,7 +591,7 @@ function odr(::Type{T}) where T
     for i = 1:length(T.types)
         ty = T.types[i]
         writtenas = writeas(ty)
-        fodr = fieldodr(writtenas, i <= T.ninitialized)
+        fodr = fieldodr(writtenas, i <= ninitialized(T))
         if writtenas !== ty && fodr !== nothing
             odrs[i] = CustomSerialization{writtenas,fodr}
         else

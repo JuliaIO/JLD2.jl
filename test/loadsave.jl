@@ -277,7 +277,7 @@ end
     @load fn tup
 
     @test tup == (EmptyImmutable(), EmptyImmutable())
-    
+
     # Test for Recursively Empty struct
     @save fn tup=(EmptyII(EmptyImmutable()), EmptyImmutable())
     @load fn tup
@@ -293,7 +293,7 @@ end
     @load fn ptr
 
     @test ptr == Ptr{Float64}(0)
-    
+
     # Test for pointer inside structure
     @save fn tup=(; ptr = pointer(zeros(5)))
     @load fn tup
@@ -316,7 +316,7 @@ end
     jldopen(fn, "r") do f
         @test f["a"] == 1
         @test f["b"] == 2
-    end 
+    end
 end
 
 # Test for object deletion
@@ -369,4 +369,30 @@ end
     jldopen(fn, "r") do f
         @test !haskey(f, "g")
     end
+end
+
+## Test for Issue #329
+
+struct SingleUnionallField
+    x::IdDict
+end
+
+@testset "Issue #329" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+    jldsave(fn; a = SingleUnionallField(IdDict()))
+    # Shouldn't throw
+    a = load(fn, "a")
+    @test a isa SingleUnionallField
+    @test a.x isa IdDict{Any,Any}
+end
+
+@testset "Issue #327" begin
+    path = tempname()
+    x = (1,2)
+    JLD2.@save path x
+    @test load(path, "x") === (1,2)
+
+    D = Dict("a"=>"Hazel")
+    JLD2.@save path D
+    @test load(path, "D") == D
 end

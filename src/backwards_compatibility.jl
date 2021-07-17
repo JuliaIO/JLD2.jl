@@ -35,3 +35,14 @@ end
         return isa(t, DataType) && t.mutable
     end
 end
+
+if :ninitialized in fieldnames(DataType)
+    # https://github.com/JuliaIO/JLD2.jl/issues/327
+    function ninitialized(@nospecialize(T::Type))::Int
+        T.ninitialized
+    end
+else
+    function ninitialized(@nospecialize(T::Type))::Int
+        fieldcount(T) - T.name.n_uninitialized
+    end
+end
