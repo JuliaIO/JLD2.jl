@@ -9,9 +9,14 @@ odr_sizeof(::Nothing) = 0
 struct UnknownType{T}
     name::T
     parameters::Vector{Any}
+    fieldnames::Vector{String}
+    fieldtypes::Vector{Any}
 
     UnknownType{T}(name) where T = new(name)
     UnknownType{T}(name, parameters) where T = new(name, parameters)
+    UnknownType{T}(name, fieldnames, fieldtypes) where T = new(name, [], fieldnames, fieldtypes)
+    UnknownType{T}(name, parameters, fieldnames, fieldtypes) where T = new(name, parameters, fieldnames, fieldtypes)
+
 end
 UnknownType(name) = UnknownType{typeof(name)}(name)
 UnknownType(name, parameters) = UnknownType{typeof(name)}(name, parameters)

@@ -181,8 +181,14 @@ mutable struct JLDFile{T<:IO}
     global_heap::GlobalHeap
     loaded_groups::Dict{RelOffset,Group}
     root_group_offset::RelOffset
+    
+    juliatypes::Vector{Any}
+    juliatype_locations::OrderedDict{RelOffset,Any}
+    juliatype_locations_rev::OrderedDict{Any,RelOffset}
+
     root_group::Group
     types_group::Group
+    juliatypes_group::Group
 
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
                         compress,#::Union{Bool,Symbol},
@@ -191,7 +197,8 @@ mutable struct JLDFile{T<:IO}
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + jlsizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
-            GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS)
+            GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS,
+            [], OrderedDict{RelOffset,Any}(),OrderedDict{Any,RelOffset}())
         finalizer(jld_finalizer, f)
         f
     end
@@ -297,6 +304,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
     if f.written
         f.root_group = Group{typeof(f)}(f)
         f.types_group = Group{typeof(f)}(f)
+        f.juliatypes_group = Group{typeof(f)}(f)
     else
         verify_file_header(f)
 
@@ -316,6 +324,18 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
             resize!(f.datatypes, length(f.datatype_locations))
         else
             f.types_group = Group{typeof(f)}(f)
+        end
+
+        if haskey(f.root_group.written_links, "_juliatypes")
+            types_group_offset = f.root_group.written_links["_juliatypes"]
+            f.juliatypes_group = f.loaded_groups[types_group_offset] = load_group(f, types_group_offset)
+            i = 0
+            for offset in values(f.types_group.written_links)
+                f.juliatype_locations[offset] = CommittedDatatype(offset, i += 1)
+            end
+            resize!(f.juliatypes, length(f.juliatype_locations))
+        else
+            f.juliatypes_group = Group{typeof(f)}(f)
         end
     end
 
@@ -412,6 +432,8 @@ function Base.close(f::JLDFile)
         end
         if !isempty(f.types_group) && !haskey(f.root_group, "_types")
             f.root_group["_types"] = f.types_group
+            f.root_group["_juliatypes"] = f.juliatypes_group
+
         end
         res = save_group(f.root_group)
         if f.root_group_offset == UNDEFINED_ADDRESS

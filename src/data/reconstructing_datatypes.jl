@@ -26,9 +26,9 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     julia_type_attr = nothing
     written_type_attr = nothing
     for attr in attrs
-        if attr.name == :julia_type
+        if attr.name == :julia_type_ref || attr.name == :julia_type
             julia_type_attr = attr
-        elseif attr.name == :written_type
+        elseif attr.name == :written_type_ref
             written_type_attr = attr
         end
     end
@@ -313,14 +313,34 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     params = [p isa Union{Int64,Int32} ? Int(p) : p for p in params]
     hasparams = !isempty(params)
     mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
+
     m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
-    m isa UnknownType && return m
+    #m isa UnknownType && return m
+
+    if m isa UnknownType
+        dataptr= ptr+odr_sizeof(Vlen{UInt8})+odr_sizeof(Vlen{RelOffset})
+        if jlconvert_isinitialized(ReadRepresentation{String,Vlen{String}}(), dataptr)
+            fieldnames = jlconvert(ReadRepresentation{String, Vlen{Vlen{String}}}(), f, dataptr, NULL_REFERENCE)
+        else
+            fieldnames = String[]
+        end
+        fieldtypes, unknown_fields = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8})+odr_sizeof(Vlen{RelOffset})+odr_sizeof(Vlen{RelOffset}))
+        return UnknownType{String}(m.name, params, fieldnames, fieldtypes)
+    end
 
     if hasparams
         try
             m = m{params...}
         catch e
-            return UnknownType(m, params)
+            dataptr= ptr+odr_sizeof(Vlen{UInt8})+odr_sizeof(Vlen{RelOffset})
+            if jlconvert_isinitialized(ReadRepresentation{String,Vlen{String}}(), dataptr)
+                fieldnames = jlconvert(ReadRepresentation{String, Vlen{Vlen{String}}}(), f, dataptr, NULL_REFERENCE)
+            else
+                fieldnames = String[]
+            end
+            fieldtypes, unknown_fields = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8})+odr_sizeof(Vlen{RelOffset})+odr_sizeof(Vlen{RelOffset}))
+            return UnknownType{DataType}(m, params, fieldnames, fieldtypes)
+            #return UnknownType(m, params)          
         end
     elseif m === Tuple
         # Need to instantiate with no parameters, since Tuple is really

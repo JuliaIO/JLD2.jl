@@ -411,7 +411,7 @@ function write_dataset(
     h5offset(f, header_offset)
 end
 
-function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data, wsession::JLDWriteSession) where S
+function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data, wsession::JLDWriteSession) where S    
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
     psz = payload_size_without_storage_message(dataspace, datatype)
@@ -437,7 +437,7 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
         wsession.h5offset[objectid(data)] = h5offset(f, header_offset)
         push!(wsession.objects, data)
     end
-
+    
     cio = begin_checksum_write(io, fullsz - 4)
     write_object_header_and_dataspace_message(cio, f, psz, dataspace)
     write_datatype_message(cio, datatype)
@@ -459,6 +459,75 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
 
     h5offset(f, header_offset)
 end
+
+
+function write_dataset(f::JLDFile,
+    dataspace::WriteDataspace,
+    datatype::H5Datatype,
+    odr::S,
+    data::DataType,
+    wsession::JLDWriteSession) where S    
+    ref = get(f.juliatype_locations_rev, data, RelOffset(0))
+    if ref != RelOffset(0)
+        return ref
+    end
+    io = f.io
+    datasz = odr_sizeof(odr) * numel(dataspace)
+    psz = payload_size_without_storage_message(dataspace, datatype)
+
+    # The simplest CompactStorageMessage only supports data sets < 2^16
+    if datasz < typemax(UInt16)
+        layout_class = LC_COMPACT_STORAGE
+        storage_message = CompactStorageMessage
+        psz += jlsizeof(CompactStorageMessage) + datasz
+    else
+        layout_class = LC_CONTIGUOUS_STORAGE
+        storage_message = ContiguousStorageMessage
+        psz += jlsizeof(ContiguousStorageMessage)
+    end
+
+    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
+
+    header_offset = f.end_of_data
+    seek(io, header_offset)
+    f.end_of_data = header_offset + fullsz
+
+    if ismutabletype(typeof(data)) && !isa(wsession, JLDWriteSession{Union{}})
+        wsession.h5offset[objectid(data)] = h5offset(f, header_offset)
+        push!(wsession.objects, data)
+    end
+    #println("write_dataset: datatype=$(datatype), data=$(data), odr=$(odr)")
+    
+    cio = begin_checksum_write(io, fullsz - 4)
+    write_object_header_and_dataspace_message(cio, f, psz, dataspace)
+    write_datatype_message(cio, datatype)
+
+    # Data storage layout
+    if layout_class == LC_COMPACT_STORAGE
+        jlwrite(cio, CompactStorageMessage(datasz))
+        if datasz != 0
+            write_data(cio, f, data, odr, datamode(odr), wsession)
+        end
+        jlwrite(io, end_checksum(cio))
+    else
+        jlwrite(cio, ContiguousStorageMessage(datasz, h5offset(f, f.end_of_data)))
+        jlwrite(io, end_checksum(cio))
+
+        f.end_of_data += datasz
+        write_data(io, f, data, odr, datamode(odr), wsession)
+    end
+
+    ref = h5offset(f, header_offset)
+    id = length(f.juliatypes)+1
+    #println("Stored datatype to ref: ", ref)
+    #error("test")
+    f.juliatypes_group[@sprintf("%08d", id)] = ref
+    push!(f.juliatypes, data)
+    f.juliatype_locations[ref] = data
+    f.juliatype_locations_rev[data] = ref
+    ref
+end
+
 
 function write_object_header_and_dataspace_message(cio::IO, f::JLDFile, psz::Int, dataspace::WriteDataspace)
     jlwrite(cio, ObjectStart(size_flag(psz)))
