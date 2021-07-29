@@ -520,7 +520,7 @@ include("inlineunion.jl")
 include("fileio.jl")
 include("compression.jl")
 
-if Base.VERSION >= v"1.4.2"
+if Base.VERSION >= v"1.6.0"
     include("precompile.jl")
     _precompile_()
 end
