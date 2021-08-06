@@ -133,7 +133,7 @@ h5type(f::JLDFile, x) = h5type(f, writeas(typeof(x)), x)
 
 # Make a compound datatype from a set of names and types
 function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
-                         writtenas::DataType, readas::Type)
+                         @nospecialize(writtenas::DataType), @nospecialize(readas::Type))
     types = writtenas.types
     offsets = Int[]
     h5names = Symbol[]
@@ -177,7 +177,7 @@ function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
 end
 
 # Write an HDF5 datatype to the file
-function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::DataType,
+function commit(f::JLDFile, dtype::H5Datatype, @nospecialize(writeas::DataType), @nospecialize(readas::DataType),
                 attributes::WrittenAttribute...)
     io = f.io
 
@@ -194,18 +194,18 @@ function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::DataTy
     h5o = h5offset(f, offset)
     cdt = CommittedDatatype(h5o, id)
     f.datatype_locations[h5o] = cdt
-    f.jlh5type[readas] = cdt
-    push!(f.datatypes, dtype)
+    f.jlh5type[Base.inferencebarrier(readas)] = cdt
+    push!(f.datatypes, Base.inferencebarrier(dtype))
     f.types_group[@sprintf("%08d", id)] = h5o
 
     if writeas !== readas
         wrtypeattr = WrittenAttribute(:written_type,
                                       WriteDataspace(f, DataType, odr(DataType)),
                                       h5type(f, DataType, DataType), writeas)
-        f.h5jltype[cdt] = ReadRepresentation{readas,CustomSerialization{writeas, odr(writeas)}}()
+        f.h5jltype[Base.inferencebarrier(cdt)] = ReadRepresentation{readas,CustomSerialization{writeas, odr(writeas)}}()
         commit(f, dtype, tuple(typeattr, wrtypeattr, attributes...))
     else
-        f.h5jltype[cdt] = ReadRepresentation{writeas,odr(writeas)}()
+        f.h5jltype[Base.inferencebarrier(cdt)] = ReadRepresentation{writeas,odr(writeas)}()
         commit(f, dtype, tuple(typeattr, attributes...))
     end
 
@@ -341,7 +341,7 @@ const H5TYPE_DATATYPE = CompoundDatatype(
     [H5TYPE_VLEN_UTF8, VariableLengthDatatype(ReferenceDatatype())]
 )
 
-function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T<:DataType
+function h5fieldtype(f::JLDFile, @nospecialize(T::Type{<:DataType}), @nospecialize(readas::Type), ::Initialized)
     if !(readas <: DataType)
         @lookup_committed f readas
         return commit(f, H5TYPE_DATATYPE, DataType, readas)
@@ -428,13 +428,10 @@ const UnionTypeODR = OnDiskRepresentation{
       Tuple{String, Vector{Any}, Vector{Any}},
       Tuple{Vlen{String}, Vlen{RelOffset}, Vlen{RelOffset}}}
 
-function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type{S}, ::Initialized) where {T<:Union,S<:Union}
+function h5fieldtype(f::JLDFile, writeas::Type{<:Union}, readas::Type, ::Initialized)
+    @nospecialize writeas readas
     @lookup_committed f Union
-    commit(f, H5TYPE_UNION, Union, Union)
-end
-function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T<:Union
-    @lookup_committed f readas
-    commit(f, H5TYPE_UNION, Union, readas)
+    commit(f, H5TYPE_UNION, Union, isa(readas, Union) ? Union : readas)
 end
 
 fieldodr(::Type{T}, ::Bool) where {T<:Union} = UnionTypeODR()
@@ -557,7 +554,7 @@ end
 # odr gives the on-disk representation of a given type, similar to
 # fieldodr, but actually encoding the data for things that odr stores
 # as references
-function odr(::Type{T}) where T
+function odr(@nospecialize(T::Type))
     if !hasdata(T)
         # A pointer singleton or ghost. We need to write something, but we'll
         # just write a single byte.

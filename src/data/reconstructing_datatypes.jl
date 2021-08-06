@@ -17,10 +17,12 @@ function check_empty(attrs::Vector{ReadAttribute})
     false
 end
 
+struct NotACachedType end
 # jltype is the inverse of h5type, providing a ReadRepresentation for an
 # H5Datatype. We handle committed datatypes here, and other datatypes below.
-function jltype(f::JLDFile, cdt::CommittedDatatype)
-    haskey(f.h5jltype, cdt) && return f.h5jltype[cdt]::ReadRepresentation
+function jltype(f::JLDFile, @nospecialize(cdt::CommittedDatatype))
+    rr = get(f.h5jltype, Base.inferencebarrier(cdt), NotACachedType())
+    rr isa NotACachedType || return rr::ReadRepresentation
     dt, attrs = read_committed_datatype(f, cdt)
 
     julia_type_attr = nothing
@@ -75,7 +77,7 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
 
     canonical && (f.jlh5type[datatype] = cdt)
     f.datatypes[cdt.index] = dt
-    f.h5jltype[cdt] = rr
+    f.h5jltype[Base.inferencebarrier(cdt)] = rr
 end
 
 # Constructs a ReadRepresentation for a given opaque (bitstype) type

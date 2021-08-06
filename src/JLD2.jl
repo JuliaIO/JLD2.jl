@@ -115,6 +115,7 @@ end
 A type encoding both the Julia type `T` and the on-disk (HDF5) representation `ODR`.
 """
 struct ReadRepresentation{T,ODR} end
+Base.eltype(::Type{<:ReadRepresentation{T}}) where T = T
 
 """
     CustomSerialization{T,S}
@@ -173,16 +174,16 @@ mutable struct JLDFile{T<:IO}
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
-    jlh5type::IdDict
-    h5jltype::IdDict
+    jlh5type::IdDict{Any,Any}
+    h5jltype::IdDict{Any,Any}
     jloffset::Dict{RelOffset,WeakRef}
     end_of_data::Int64
     global_heaps::Dict{RelOffset,GlobalHeap}
     global_heap::GlobalHeap
-    loaded_groups::Dict{RelOffset,Group}
+    loaded_groups::Dict{RelOffset,Group{JLDFile{T}}}
     root_group_offset::RelOffset
-    root_group::Group
-    types_group::Group
+    root_group::Group{JLDFile{T}}
+    types_group::Group{JLDFile{T}}
 
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
                         compress,#::Union{Bool,Symbol},
@@ -191,7 +192,7 @@ mutable struct JLDFile{T<:IO}
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + jlsizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
-            GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS)
+            GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group{JLDFile{T}}}(), UNDEFINED_ADDRESS)
         finalizer(jld_finalizer, f)
         f
     end
@@ -519,10 +520,5 @@ include("backwards_compatibility.jl")
 include("inlineunion.jl")
 include("fileio.jl")
 include("compression.jl")
-
-if Base.VERSION >= v"1.6.0"
-    include("precompile.jl")
-    _precompile_()
-end
 
 end # module

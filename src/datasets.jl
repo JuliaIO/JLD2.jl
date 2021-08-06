@@ -160,7 +160,7 @@ end
 
 # Most types can only be scalars or arrays
 function read_data(f::JLDFile,
-     rr,
+     @nospecialize(rr),
      read_dataspace::Tuple{ReadDataspace,RelOffset,Int,UInt16},
      attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
 
@@ -177,7 +177,7 @@ end
 
 # Reference arrays can only be arrays or null dataspace (for Union{} case)
 function read_data(f::JLDFile,
-    rr::ReadRepresentation{Any,RelOffset},
+    @nospecialize(rr::ReadRepresentation{Any,RelOffset}),
     read_dataspace::Tuple{ReadDataspace,RelOffset,Int,UInt16},
     attributes::Vector{ReadAttribute})
 
@@ -215,6 +215,7 @@ function read_data(f::JLDFile,
                              ReadRepresentation{T,CustomSerialization{S,nothing}} where {S,T}},
                    read_dataspace::Tuple{ReadDataspace,RelOffset,Int,UInt16},
                    attributes::Vector{ReadAttribute})
+    @nospecialize rr
     dataspace, header_offset, data_length, filter_id = read_dataspace
     filter_id != 0 && throw(UnsupportedFeatureException())
     dataspace.dataspace_type == DS_NULL || throw(UnsupportedFeatureException())
@@ -252,8 +253,10 @@ function read_empty(rr::ReadRepresentation{T}, f::JLDFile,
     jlread(io, FixedPointDatatype) == h5fieldtype(f, Int64, Int64, Val{true}) || throw(UnsupportedFeatureException())
 
     seek(io, dimensions_attr.data_offset)
-    v = construct_array(io, T, ndims)
+    v = construct_array(io, T, ndims)::Array{T}
     if isconcretetype(T)
+        # Performance-wise, it would be better to move this to a separate function (if performance here matters) since inference can'T
+        # know the dimensionality of `v`
         for i = 1:length(v)
             @inbounds v[i] = jlconvert(rr, f, Ptr{Cvoid}(0), header_offset)
         end
@@ -283,12 +286,12 @@ function get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Vect
 end
 
 """
-    construct_array{T}(io::IO, ::Type{T}, ndims::Int)
+    construct_array{T}(io::IO, T::Type, ndims::Int)
 
 Construct array by reading `ndims` dimensions from `io`. Assumes `io` has already been
 seeked to the correct position.
 """
-function construct_array(io::IO, ::Type{T}, ndims::Int)::Array{T} where {T}
+function construct_array(io::IO, @nospecialize(T::Type), ndims::Int)
     if ndims == 1
         n = jlread(io, Int64)
         Vector{T}(undef, n)
@@ -309,15 +312,16 @@ end
 
 
 function read_array(f::JLDFile, dataspace::ReadDataspace,
-                    rr::ReadRepresentation{T,RR}, data_length::Int,
+                    @nospecialize(rr::ReadRepresentation), data_length::Int,
                     filter_id::UInt16, header_offset::RelOffset,
-                    attributes::Union{Vector{ReadAttribute},Nothing}) where {T,RR}
+                    attributes::Union{Vector{ReadAttribute},Nothing})
+    T = eltype(rr)
     io = f.io
     data_offset = position(io)
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
-    
+
     seek(io, offset)
-    v = construct_array(io, T, Int(ndims))
+    v = construct_array(io, T, Int(ndims))::Array{T}
     n = length(v)
     seek(io, data_offset)
     if filter_id !=0
@@ -341,21 +345,23 @@ end
 
 function write_dataset(
         f::JLDFile,
-        dataspace::WriteDataspace,
+        @nospecialize(dataspace::WriteDataspace),
         datatype::H5Datatype,
-        odr::S,
-        data::Array{T},
+        @nospecialize(odr),
+        @nospecialize(data::Array),
         wsession::JLDWriteSession,
         compress = f.compress,
-        ) where {T,S}
+        )
+    T = eltype(data)
+
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
     #layout_class
-    if datasz < 8192 
+    if datasz < 8192
         layout_class = LC_COMPACT_STORAGE
-    elseif compress != false 
-        layout_class = LC_CHUNKED_STORAGE 
-    else 
+    elseif compress != false
+        layout_class = LC_CHUNKED_STORAGE
+    else
         layout_class = LC_CONTIGUOUS_STORAGE
     end
     psz = payload_size_without_storage_message(dataspace, datatype)
@@ -411,9 +417,9 @@ function write_dataset(
     h5offset(f, header_offset)
 end
 
-function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data, wsession::JLDWriteSession) where S
+function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, @nospecialize(odr), data, wsession::JLDWriteSession)
     io = f.io
-    datasz = odr_sizeof(odr) * numel(dataspace)
+    datasz = odr_sizeof(odr)::Int * numel(dataspace)
     psz = payload_size_without_storage_message(dataspace, datatype)
 
     # The simplest CompactStorageMessage only supports data sets < 2^16
@@ -512,17 +518,17 @@ define_packed(ContiguousStorageMessage)
         4, LC_CONTIGUOUS_STORAGE, offset, datasz
     )
 
-@inline function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
+function write_dataset(f::JLDFile, @nospecialize(x), wsession::JLDWriteSession)
     odr = objodr(x)
     write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
 end
 
-@inline function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
+function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
     offset = get(wsession.h5offset, objectid(x), RelOffset(0))
     offset != RelOffset(0) ? offset : write_dataset(f, x, wsession)::RelOffset
 end
 
-@inline write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession{Union{}}) =
+write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession{Union{}}) =
     write_dataset(f, x, wsession)
 
 function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
@@ -565,7 +571,7 @@ function Base.delete!(g::Group, name::AbstractString)
 
     # Dataset must already exist in the file
     # Retrieve offset of group in file
-    offset = group_offset(g)    
+    offset = group_offset(g)
     offset == NULL_REFERENCE && throw(InternalError("Group could not be found."))
     delete_written_link!(g.f, offset, name)
     delete!(g.written_links, name)
@@ -615,7 +621,7 @@ function delete_written_link!(f::JLDFile, roffset::RelOffset, name::AbstractStri
         while (curpos = position(io)) <= chunk_checksum_offset - 4
             msg = jlread(io, HeaderMessage)
             endpos = curpos + jlsizeof(HeaderMessage) + msg.size
-            
+
             if msg.msg_type == HM_LINK_MESSAGE
                 dataset_name, loffset = read_link(io)
                 if dataset_name == name

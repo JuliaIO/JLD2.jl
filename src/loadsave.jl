@@ -1,4 +1,4 @@
-function jldopen(f::Function, args...; kws...)
+function jldopen(@nospecialize(f::Function), args...; kws...)
     jld = jldopen(args...; kws...)
     try
         return f(jld)
@@ -223,7 +223,7 @@ Creates a JLD2 file at `filename` and stores the variables given as keyword argu
 # Examples
 
     jldsave("example.jld2"; a=1, b=2, c)
-    
+
 is equivalent to
 
     jldopen("example.jld2, "w") do f
@@ -233,10 +233,10 @@ is equivalent to
     end
 
 
-To choose the io type `IOStream` instead of the default `MmapIO` use 
+To choose the io type `IOStream` instead of the default `MmapIO` use
 `jldsave{IOStream}(fn; kwargs...)`.
 """
-function jldsave(filename::AbstractString, compress=false, iotype::T=MmapIO; 
+function jldsave(filename::AbstractString, compress=false, iotype::T=MmapIO;
                     kwargs...
                     ) where T<:Union{Type{IOStream},Type{MmapIO}}
     jldopen(filename, "w"; compress=compress, iotype=iotype) do f
@@ -247,5 +247,5 @@ function jldsave(filename::AbstractString, compress=false, iotype::T=MmapIO;
     end
 end
 
-jldsave(filename::AbstractString, iotype::Union{Type{IOStream},Type{MmapIO}}; kwargs...) = 
+jldsave(filename::AbstractString, iotype::Union{Type{IOStream},Type{MmapIO}}; kwargs...) =
     jldsave(filename, false, iotype; kwargs...)

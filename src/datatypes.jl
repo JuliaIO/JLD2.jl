@@ -284,7 +284,7 @@ function commit(f::JLDFile, dt::H5Datatype, attrs::Tuple{Vararg{WrittenAttribute
 end
 
 # Read the actual datatype for a committed datatype
-function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
+function read_committed_datatype(f::JLDFile, @nospecialize(cdt::CommittedDatatype))
     io = f.io
     seek(io, fileoffset(f, cdt.header_offset))
     cio = begin_checksum_read(io)

@@ -23,7 +23,7 @@ function verify_compressor(compressor)
         "\n\t"*string(val[1])*"."*string(val[2])
     end
 
-    
+
     throw(ArgumentError("""Unsupported Compressor
     Supported Compressors are $(crs...)"""))
 end
@@ -68,15 +68,15 @@ end
 #############################################################################################################
 
 # jld2.jl 341
-Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession(); compress=nothing) =
-    write(f.root_group, name, obj, wsession; compress=compress)
+Base.write(f::JLDFile, name::AbstractString, @nospecialize(obj), wsession::JLDWriteSession=JLDWriteSession(); compress=nothing) =
+    write(f.root_group, name, Base.inferencebarrier(obj), wsession; compress=compress)
 
 # groups.jl 112
-function Base.write(g::Group, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession(); compress=nothing)
+function Base.write(g::Group, name::AbstractString, @nospecialize(obj), wsession::JLDWriteSession=JLDWriteSession(); compress=nothing)
     f = g.f
     prewrite(f)
     (g, name) = pathize(g, name, true)
-    if !(compress === nothing) 
+    if !(compress === nothing)
         verify_compressor(compress)
         if obj isa Array
             g[name] = write_dataset(f, obj, wsession, compress)
@@ -91,7 +91,7 @@ end
 
 get_compressor(compressor) = false, COMPRESSOR_TO_ID[nameof(typeof(compressor))], compressor
 
-function get_compressor(::Bool) 
+function get_compressor(::Bool)
    call_again, m = checked_import(:CodecZlib)
     if call_again
         return true, Base.invokelatest(get_compressor, true)[2:3]...
@@ -117,9 +117,9 @@ function write_filter_pipeline_message(io, filter_id::UInt16)
     jlwrite(io, UInt8(2))                 # Version
     jlwrite(io, UInt8(1))                 # Number of Filters
     jlwrite(io, filter_id)                # Filter Identification Value
-    filter_id > 255 && jlwrite(io, UInt16(length(filter_name))) 
+    filter_id > 255 && jlwrite(io, UInt16(length(filter_name)))
                                         # Length of Filter Name
-    jlwrite(io, UInt16(0))                # Flags 
+    jlwrite(io, UInt16(0))                # Flags
     jlwrite(io, UInt16(1))                # Number of Client Data Values
     filter_id > 255 && jlwrite(io, filter_name) # Filter Name
     jlwrite(io, UInt32(5))                # Client Data (Compression Level)
@@ -176,7 +176,7 @@ function write_compressed_data(cio, f, data, odr, wsession, filter_id, compresso
 
     write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
     jlwrite(f.io, end_checksum(cio))
-   
+
     f.end_of_data += length(deflated)
     jlwrite(f.io, deflated)
 end
@@ -192,7 +192,7 @@ function read_compressed_array!(v::Array{T}, f::JLDFile{MmapIO},
     invoke_again, decompressor = get_decompressor(filter_id)
     if invoke_again
         return Base.invokelatest(read_compressed_array!, v, f, rr, data_length, filter_id)
-    end                                    
+    end
     io = f.io
     inptr = io.curptr
     TranscodingStreams.initialize(decompressor)

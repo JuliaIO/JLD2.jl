@@ -31,7 +31,7 @@ function read_compressed_array! end
 # Cutoff for using ordinary IO instead of copying into mmapped region
 const MMAP_CUTOFF = 1048576
 
-@inline function read_scalar(f::JLDFile{MmapIO}, rr, header_offset::RelOffset)
+function read_scalar(f::JLDFile{MmapIO}, @nospecialize(rr), header_offset::RelOffset)
     io = f.io
     inptr = io.curptr
     obj = jlconvert(rr, f, inptr, header_offset)
@@ -39,7 +39,7 @@ const MMAP_CUTOFF = 1048576
     obj
 end
 
-@inline function read_array!(v::Array{T}, f::JLDFile{MmapIO},
+function read_array!(v::Array{T}, f::JLDFile{MmapIO},
                              rr::ReadRepresentation{T,T}) where T
     io = f.io
     inptr = io.curptr
@@ -60,7 +60,7 @@ end
     v
 end
 
-@inline function read_array!(v::Array{T}, f::JLDFile{MmapIO},
+function read_array!(v::Array{T}, f::JLDFile{MmapIO},
                              rr::ReadRepresentation{T,RR}) where {T,RR}
     io = f.io
     inptr = io.curptr
@@ -76,8 +76,8 @@ end
 end
 
 
-function write_data(io::MmapIO, f::JLDFile, data, odr::S, ::ReferenceFree,
-                    wsession::JLDWriteSession) where S
+function write_data(io::MmapIO, f::JLDFile, @nospecialize(data), @nospecialize(odr), ::ReferenceFree,
+                    wsession::JLDWriteSession)
     io = f.io
     ensureroom(io, odr_sizeof(odr))
     cp = io.curptr
@@ -87,7 +87,7 @@ function write_data(io::MmapIO, f::JLDFile, data, odr::S, ::ReferenceFree,
     nothing
 end
 
-function write_data(io::MmapIO, f::JLDFile, data, odr::S, ::HasReferences,
+function write_data(io::MmapIO, f::JLDFile, @nospecialize(data), @nospecialize(odr), ::HasReferences,
                     wsession::JLDWriteSession) where S
     io = f.io
     ensureroom(io, odr_sizeof(odr))

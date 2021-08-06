@@ -54,7 +54,7 @@ WriteDataspace(f::JLDFile, x::Array{T,N}, ::Type{RelOffset}) where {T,N} =
               (WrittenAttribute(f, :julia_type, write_ref(f, T, f.datatype_wsession)),))
 
 # isbitstype array
-WriteDataspace(f::JLDFile, x::Array, ::Any) =
+WriteDataspace(f::JLDFile, x::Array, @nospecialize(::Any)) =
     WriteDataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))), ())
 
 # Zero-dimensional arrays need an empty dimensions attribute
