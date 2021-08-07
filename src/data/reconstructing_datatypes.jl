@@ -50,9 +50,10 @@ function jltype(f::JLDFile, @nospecialize(cdt::CommittedDatatype))
 
                      You may need to update JLD to read this file.""")
         end
-        f.jlh5type[DataType] = cdt
+        f.jlh5type[DataType] = Base.inferencebarrier(cdt)
         f.datatypes[cdt.index] = dt
-        return (f.h5jltype[cdt] = ReadRepresentation{DataType, DataTypeODR()}())
+        rr = ReadRepresentation{DataType, DataTypeODR()}()
+        return (f.h5jltype[Base.inferencebarrier(cdt)] = Base.inferencebarrier(rr))
     end
 
     datatype = read_attr_data(f, julia_type_attr)
@@ -75,9 +76,9 @@ function jltype(f::JLDFile, @nospecialize(cdt::CommittedDatatype))
         rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
     end
 
-    canonical && (f.jlh5type[datatype] = cdt)
+    canonical && (f.jlh5type[Base.inferencebarrier(datatype)] = Base.inferencebarrier(cdt))
     f.datatypes[cdt.index] = dt
-    f.h5jltype[Base.inferencebarrier(cdt)] = rr
+    f.h5jltype[Base.inferencebarrier(cdt)] = Base.inferencebarrier(rr)
 end
 
 # Constructs a ReadRepresentation for a given opaque (bitstype) type

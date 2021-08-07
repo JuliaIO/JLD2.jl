@@ -194,7 +194,7 @@ function commit(f::JLDFile, dtype::H5Datatype, @nospecialize(writeas::DataType),
     h5o = h5offset(f, offset)
     cdt = CommittedDatatype(h5o, id)
     f.datatype_locations[h5o] = cdt
-    f.jlh5type[Base.inferencebarrier(readas)] = cdt
+    f.jlh5type[Base.inferencebarrier(readas)] = Base.inferencebarrier(cdt)
     push!(f.datatypes, Base.inferencebarrier(dtype))
     f.types_group[@sprintf("%08d", id)] = h5o
 
@@ -202,10 +202,10 @@ function commit(f::JLDFile, dtype::H5Datatype, @nospecialize(writeas::DataType),
         wrtypeattr = WrittenAttribute(:written_type,
                                       WriteDataspace(f, DataType, odr(DataType)),
                                       h5type(f, DataType, DataType), writeas)
-        f.h5jltype[Base.inferencebarrier(cdt)] = ReadRepresentation{readas,CustomSerialization{writeas, odr(writeas)}}()
+        f.h5jltype[Base.inferencebarrier(cdt)] = Base.inferencebarrier(ReadRepresentation{readas,CustomSerialization{writeas, odr(writeas)}}())
         commit(f, dtype, tuple(typeattr, wrtypeattr, attributes...))
     else
-        f.h5jltype[Base.inferencebarrier(cdt)] = ReadRepresentation{writeas,odr(writeas)}()
+        f.h5jltype[Base.inferencebarrier(cdt)] = Base.inferencebarrier(ReadRepresentation{writeas,odr(writeas)}())
         commit(f, dtype, tuple(typeattr, attributes...))
     end
 
@@ -356,8 +356,8 @@ function h5fieldtype(f::JLDFile, @nospecialize(T::Type{<:DataType}), @nospeciali
     h5o = h5offset(f, offset)
     cdt = CommittedDatatype(h5o, id)
     f.datatype_locations[h5o] = cdt
-    f.jlh5type[DataType] = cdt
-    f.h5jltype[cdt] = ReadRepresentation{DataType,DataTypeODR()}()
+    f.jlh5type[DataType] = Base.inferencebarrier(cdt)
+    f.h5jltype[Base.inferencebarrier(cdt)] = Base.inferencebarrier(ReadRepresentation{DataType,DataTypeODR()}())
     push!(f.datatypes, H5TYPE_DATATYPE)
     f.types_group[@sprintf("%08d", id)] = h5o
 
