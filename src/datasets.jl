@@ -471,6 +471,18 @@ function write_dataset(f::JLDFile,
     if ref != RelOffset(0)
         return ref
     end
+
+    header_offset = f.end_of_data
+    ref = h5offset(f, header_offset)
+    id = length(f.juliatypes)+1
+    #println("Stored datatype to ref: ", ref)
+    #error("test")
+    f.juliatypes_group[@sprintf("%08d", id)] = ref
+    push!(f.juliatypes, data)
+    f.juliatype_locations[ref] = data
+    f.juliatype_locations_rev[data] = ref
+
+
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
     psz = payload_size_without_storage_message(dataspace, datatype)
@@ -488,7 +500,6 @@ function write_dataset(f::JLDFile,
 
     fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
 
-    header_offset = f.end_of_data
     seek(io, header_offset)
     f.end_of_data = header_offset + fullsz
 
@@ -516,15 +527,6 @@ function write_dataset(f::JLDFile,
         f.end_of_data += datasz
         write_data(io, f, data, odr, datamode(odr), wsession)
     end
-
-    ref = h5offset(f, header_offset)
-    id = length(f.juliatypes)+1
-    #println("Stored datatype to ref: ", ref)
-    #error("test")
-    f.juliatypes_group[@sprintf("%08d", id)] = ref
-    push!(f.juliatypes, data)
-    f.juliatype_locations[ref] = data
-    f.juliatype_locations_rev[data] = ref
     ref
 end
 
