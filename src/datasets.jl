@@ -466,19 +466,19 @@ function write_dataset(f::JLDFile,
     datatype::H5Datatype,
     odr::S,
     data::DataType,
-    wsession::JLDWriteSession) where S    
+    wsession::JLDWriteSession) where S
+    # Ensure that all juliatypes are loaded    
+    load_all_juliatypes(f) 
     ref = get(f.juliatype_locations_rev, data, RelOffset(0))
-    if ref != RelOffset(0)
-        return ref
-    end
-
+    ref != RelOffset(0) && return ref
+  
     header_offset = f.end_of_data
     ref = h5offset(f, header_offset)
-    id = length(f.juliatypes)+1
-    #println("Stored datatype to ref: ", ref)
-    #error("test")
+
+    id = length(f.juliatypes_group)+1
     f.juliatypes_group[@sprintf("%08d", id)] = ref
-    push!(f.juliatypes, data)
+
+    track_weakref!(f, ref, data)
     f.juliatype_locations[ref] = data
     f.juliatype_locations_rev[data] = ref
 
@@ -502,12 +502,6 @@ function write_dataset(f::JLDFile,
 
     seek(io, header_offset)
     f.end_of_data = header_offset + fullsz
-
-    if ismutabletype(typeof(data)) && !isa(wsession, JLDWriteSession{Union{}})
-        wsession.h5offset[objectid(data)] = h5offset(f, header_offset)
-        push!(wsession.objects, data)
-    end
-    #println("write_dataset: datatype=$(datatype), data=$(data), odr=$(odr)")
     
     cio = begin_checksum_write(io, fullsz - 4)
     write_object_header_and_dataspace_message(cio, f, psz, dataspace)

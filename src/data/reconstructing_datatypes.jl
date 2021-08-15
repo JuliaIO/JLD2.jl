@@ -43,10 +43,13 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     if h5offset(f, julia_type_attr.datatype_offset) == cdt.header_offset
         # Verify that the datatype matches our expectations
         if dt != H5TYPE_DATATYPE
-            error("""The HDF5 datatype representing a Julia datatype does not match
+            @warn("""The HDF5 datatype representing a Julia datatype does not match
                      the expectations of this version of JLD.
 
                      You may need to update JLD to read this file.""")
+            f.jlh5type[DataType] = cdt
+            f.datatypes[cdt.index] = dt
+            return (f.h5jltype[cdt] = ReadRepresentation{DataType, OldDataTypeODR()}())
         end
         f.jlh5type[DataType] = cdt
         f.datatypes[cdt.index] = dt
@@ -234,12 +237,11 @@ end
 
 # Find types in modules
 # returns the result of searching for the type in the specified module m
-function _resolve_type_singlemodule(::ReadRepresentation{T,DataTypeODR()},
-                                    m,
+function _resolve_type_singlemodule(m,
                                     parts,
                                     mypath,
                                     hasparams::Bool,
-                                    params) where T
+                                    params)
     for part in parts
         sym = Symbol(part)
         if !isa(m, Module) || !isdefined(m, sym)
@@ -256,19 +258,18 @@ end
 _is_not_unknown_type(x::UnknownType) = false
 _is_not_unknown_type(x) = true
 
-function _resolve_type(rr::ReadRepresentation{T,DataTypeODR()},
+function _resolve_type(rr,
                        f::JLDFile,
                        ptr::Ptr,
                        header_offset::RelOffset,
                        mypath,
                        hasparams::Bool,
-                       params) where T
+                       params)
     parts = split(mypath, '.')
     modules = vcat([Main], collect(keys(Base.module_keys)), stdlibmodules(Main))
     unique!(modules)
     for mod in modules
-        resolution_attempt = _resolve_type_singlemodule(rr,
-                                                        mod,
+        resolution_attempt = _resolve_type_singlemodule(mod,
                                                         parts,
                                                         mypath,
                                                         hasparams,
@@ -351,9 +352,49 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     return m
 end
 
-constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute}) where {T<:DataType} =
-    dt == H5TYPE_DATATYPE ? (ReadRepresentation{DataType,DataTypeODR()}(), true) :
-                            throw(UnsupportedFeatureException())
+function jlconvert(rr::ReadRepresentation{T,OldDataTypeODR()},
+                   f::JLDFile,
+                   ptr::Ptr,
+                   header_offset::RelOffset) where T
+
+    params, unknown_params = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8}))
+    # For cross-platform compatibility convert integer type parameters to system precision
+    params = [p isa Union{Int64,Int32} ? Int(p) : p for p in params]
+    hasparams = !isempty(params)
+    mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
+
+    m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
+    #m isa UnknownType && return m
+
+    if m isa UnknownType
+        return UnknownType{String}(m.name, params, [], [])
+    end
+
+    if hasparams
+        try
+            m = m{params...}
+        catch            
+            return UnknownType{DataType}(m, params, [],[])
+            #return UnknownType(m, params)          
+        end
+    elseif m === Tuple
+        # Need to instantiate with no parameters, since Tuple is really
+        # Tuple{Vararg{Any}}
+        m = Tuple{}
+    end
+    track_weakref!(f, header_offset, m)
+    return m
+end
+
+function constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute}) where {T<:DataType}
+    if dt == H5TYPE_DATATYPE 
+        return ReadRepresentation{DataType,DataTypeODR()}(), true
+    elseif dt == H5TYPE_OLD_DATATYPE
+        return ReadRepresentation{DataType,OldDataTypeODR()}(), true
+    else
+        throw(UnsupportedFeatureException())
+    end
+end
 
 
 ## Type reconstruction
@@ -384,7 +425,7 @@ end
 function typestring(T::UnknownType)
     tn = IOBuffer()
     print(tn, T.name)
-    if isdefined(T, :parameters)
+    if isdefined(T, :parameters) && !isempty(T.parameters)
         write(tn, '{')
         for i = 1:length(T.parameters)
             x = T.parameters[i]

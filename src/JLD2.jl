@@ -173,16 +173,15 @@ mutable struct JLDFile{T<:IO}
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
-    jlh5type::IdDict
-    h5jltype::IdDict
-    jloffset::Dict{RelOffset,WeakRef}
+    jlh5type::IdDict # Julia Type → H5Type
+    h5jltype::IdDict # H5Type → Julia Type
+    jloffset::Dict{RelOffset,WeakRef} # Cache for (mutable) loaded objects
     end_of_data::Int64
     global_heaps::Dict{RelOffset,GlobalHeap}
     global_heap::GlobalHeap
     loaded_groups::Dict{RelOffset,Group}
     root_group_offset::RelOffset
     
-    juliatypes::Vector{Any}
     juliatype_locations::OrderedDict{RelOffset,Any}
     juliatype_locations_rev::OrderedDict{Any,RelOffset}
 
@@ -198,7 +197,7 @@ mutable struct JLDFile{T<:IO}
             JLDWriteSession(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + jlsizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS,
-            [], OrderedDict{RelOffset,Any}(),OrderedDict{Any,RelOffset}())
+            OrderedDict{RelOffset,Any}(), OrderedDict{Any,RelOffset}())
         finalizer(jld_finalizer, f)
         f
     end
@@ -329,11 +328,6 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         if haskey(f.root_group.written_links, "_juliatypes")
             types_group_offset = f.root_group.written_links["_juliatypes"]
             f.juliatypes_group = f.loaded_groups[types_group_offset] = load_group(f, types_group_offset)
-            i = 0
-            for offset in values(f.types_group.written_links)
-                f.juliatype_locations[offset] = CommittedDatatype(offset, i += 1)
-            end
-            resize!(f.juliatypes, length(f.juliatype_locations))
         else
             f.juliatypes_group = Group{typeof(f)}(f)
         end
@@ -379,6 +373,17 @@ function load_datatypes(f::JLDFile)
     end
 end
 
+function load_all_juliatypes(f::JLDFile)
+    length(f.juliatypes_group) == length(f.juliatype_locations_rev) && return
+    for offset in values(f.juliatypes_group.written_links)
+        dt = load_dataset(f, offset)
+        f.juliatype_locations[offset] = dt
+        f.juliatype_locations_rev[dt] = offset
+        track_weakref!(f, offset, dt)
+    end
+    return nothing
+end
+
 """
     prewrite(f::JLDFile)
 
@@ -400,7 +405,15 @@ Base.getindex(f::JLDFile, name::AbstractString) = f.root_group[name]
 Base.setindex!(f::JLDFile, obj, name::AbstractString) = (f.root_group[name] = obj; f)
 Base.haskey(f::JLDFile, name::AbstractString) = haskey(f.root_group, name)
 Base.isempty(f::JLDFile) = isempty(f.root_group)
-Base.keys(f::JLDFile) = filter!(x->x != "_types", keys(f.root_group))
+Base.keys(f::JLDFile) = filter!(x->x != "_types" && x != "_juliatypes", keys(f.root_group))
+
+function Base.length(g::JLDFile)
+    l = length(f.root_group)
+    haskey(f.root_group, "_types") && (l -= 1)
+    haskey(f.root_group, "_juliatypes") && (l -= 1)
+    return l
+end
+
 Base.get(default::Function, f::Union{JLDFile, Group}, name::AbstractString) =
     haskey(f, name) ? f[name] : default()
 Base.get(f::Union{JLDFile, Group}, name::AbstractString, default) =

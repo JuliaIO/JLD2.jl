@@ -1,15 +1,15 @@
 # The following block allows reading Union types written prior to v0.2
-const LEGACY_H5TYPE_UNION = VariableLengthDatatype(H5TYPE_DATATYPE)
+const LEGACY_H5TYPE_UNION = VariableLengthDatatype(H5TYPE_OLD_DATATYPE)
 
-function jlconvert(::ReadRepresentation{Union, Vlen{DataTypeODR()}}, f::JLDFile,
+function jlconvert(::ReadRepresentation{Union, Vlen{OldDataTypeODR()}}, f::JLDFile,
                    ptr::Ptr, header_offset::RelOffset)
-    v = Union{jlconvert(ReadRepresentation{DataType,Vlen{DataTypeODR()}}(), f, ptr, NULL_REFERENCE)...}
+    v = Union{jlconvert(ReadRepresentation{DataType,Vlen{OldDataTypeODR()}}(), f, ptr, NULL_REFERENCE)...}
     track_weakref!(f, header_offset, v)
     v
 end
 
 constructrr(::JLDFile, ::Type{T}, dt::VariableLengthDatatype, ::Vector{ReadAttribute}) where {T<:Union} =
-    dt == LEGACY_H5TYPE_UNION ? (ReadRepresentation{Union,Vlen{DataTypeODR()}}(), true) :
+    dt == LEGACY_H5TYPE_UNION ? (ReadRepresentation{Union,Vlen{OldDataTypeODR()}}(), true) :
                          throw(UnsupportedFeatureException())
 
 # The following definition is needed to correctly load Strings written

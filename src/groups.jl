@@ -200,6 +200,16 @@ function Base.keys(g::Group)
     ks
 end
 
+function Base.length(g::Group)
+    l = 0
+    if g.last_chunk_start_offset != -1
+        l += length(g.written_links)
+    end
+    l += length(g.unwritten_links)
+    l += length(g.unwritten_child_groups)
+    return l
+end
+
 struct LinkInfo
     version::UInt8
     flags::UInt8
@@ -573,7 +583,7 @@ function show_group(io::IO, g::Group, maxnumlines::Int=10, prefix::String=" ", s
     end
 
     ks = collect(keys(g))
-    skiptypes && filter!(x -> x != "_types", ks)
+    skiptypes && filter!(x -> x != "_types" && x != "_juliatypes", ks)
 
     if isempty(ks) && prefix == " "
         print(io, "  (no datasets)")

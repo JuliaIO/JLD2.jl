@@ -22,6 +22,8 @@ const DataTypeODR = OnDiskRepresentation{
         Vlen{RelOffset},
         Vlen{RelOffset}}}
 
+const OldDataTypeODR = OnDiskRepresentation{(0, odr_sizeof(Vlen{String})),Tuple{String,Vector{Any}},Tuple{Vlen{String},Vlen{RelOffset}}}
+
 const H5TYPE_DATATYPE = CompoundDatatype(
     odr_sizeof(Vlen{String})+odr_sizeof(Vlen{RelOffset})+odr_sizeof(Vlen{RelOffset})+odr_sizeof(Vlen{RelOffset}),
     [:name, :parameters, :fieldnames, :fieldtypes],
@@ -35,6 +37,14 @@ const H5TYPE_DATATYPE = CompoundDatatype(
     VariableLengthDatatype(ReferenceDatatype())]
 )
     
+const H5TYPE_OLD_DATATYPE = CompoundDatatype(
+    odr_sizeof(Vlen{String})+odr_sizeof(Vlen{RelOffset}),
+    [:name, :parameters],
+    [0, odr_sizeof(Vlen{String})],
+    [H5TYPE_VLEN_UTF8, VariableLengthDatatype(ReferenceDatatype())]
+)
+
+
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     t = typename(T)
     store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, t), f.datatype_wsession)
@@ -74,22 +84,20 @@ function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::Type{DataType},
     end
     out += odr_sizeof(Vlen{RelOffset})
     fieldnames = T.name.names
-    #if isempty(fieldnames)
+    if isempty(fieldnames)
         h5convert_uninitialized!(out, Vlen{String})
         out += odr_sizeof(Vlen{String})
         h5convert_uninitialized!(out, Vlen{RelOffset})
-    #else
-    #    store_vlen!(out, String, f, string.(fieldnames), wsession)
-    #    out += odr_sizeof(Vlen{String})
-    #    refs = refs_from_types(f, T.types, wsession)
-    #    store_vlen!(out, RelOffset, f, refs, f.datatype_wsession)
-    #end
+    else
+        store_vlen!(out, String, f, string.(fieldnames), wsession)
+        out += odr_sizeof(Vlen{String})
+        refs = refs_from_types(f, T.types, wsession)
+        store_vlen!(out, RelOffset, f, refs, f.datatype_wsession)
+    end
 
     nothing
 end
 
-
-#const DataTypeODR = RelOffset
 
 #=  function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     #= t = typename(T)
