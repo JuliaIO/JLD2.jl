@@ -1,11 +1,10 @@
-# New Julia DataType ODR
+# If datatype is defined in KNOWN_MODULES (e.g. Core)
+# then we don't want to write out fieldnames and fieldtypes
+# because (a) they will already be known and (b) because
+# they can introduce a long tail of further intrinsic types
+const KNOWN_MODULES = [Core, Base]
 
-# Generally written as a RelOffset ?
-#= NewDataTypeODR = OnDiskRepresentation{
-    (0, odr_sizeof(Vlen{String}), odr_sizeof(Vlen{RelOffset})),
-    Tuple{String, Vector{Any}, Vector{String}},
-    Tuple{Vlen{String},Vlen{RelOffset}, Vlen{String}}}
- =#
+# New Julia DataType ODR
 
 # Initial ODR for DataType
 const DataTypeODR = OnDiskRepresentation{
@@ -57,7 +56,11 @@ function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsess
     end
     out += odr_sizeof(Vlen{RelOffset})
     fieldnames = T.name.names
-    if isempty(fieldnames)
+    # If datatype is defined in KNOWN_MODULES (e.g. Core)
+    # then we don't want to write out fieldnames and fieldtypes
+    # because (a) they will already be known and (b) because
+    # they can introduce a long tail of further intrinsic types
+    if isempty(fieldnames) || T.name.module in KNOWN_MODULES
         h5convert_uninitialized!(out, Vlen{String})
         out += odr_sizeof(Vlen{String})
         h5convert_uninitialized!(out, Vlen{RelOffset})
@@ -70,90 +73,6 @@ function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsess
 
     nothing
 end
-
-
-function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::Type{DataType}, wsession::JLDWriteSession)
-    t = typename(T)
-    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, t), f.datatype_wsession)
-    out += odr_sizeof(Vlen{UInt8})
-    if isempty(T.parameters)
-        h5convert_uninitialized!(out, Vlen{UInt8})
-    else
-        refs = refs_from_types(f, T.parameters, wsession)
-        store_vlen!(out, RelOffset, f, refs, f.datatype_wsession)
-    end
-    out += odr_sizeof(Vlen{RelOffset})
-    fieldnames = T.name.names
-    if isempty(fieldnames)
-        h5convert_uninitialized!(out, Vlen{String})
-        out += odr_sizeof(Vlen{String})
-        h5convert_uninitialized!(out, Vlen{RelOffset})
-    else
-        store_vlen!(out, String, f, string.(fieldnames), wsession)
-        out += odr_sizeof(Vlen{String})
-        refs = refs_from_types(f, T.types, wsession)
-        store_vlen!(out, RelOffset, f, refs, f.datatype_wsession)
-    end
-
-    nothing
-end
-
-
-#=  function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
-    #= t = typename(T)
-    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, t), f.datatype_wsession)
-    if isempty(T.parameters)
-        h5convert_uninitialized!(out+odr_sizeof(Vlen{UInt8}), Vlen{UInt8})
-    else
-        refs = refs_from_types(f, T.parameters, wsession)
-        store_vlen!(out+odr_sizeof(Vlen{UInt8}), RelOffset, f, refs, f.datatype_wsession)
-    end
-    nothing =#
-    
-    # this is one level too low
-    # Is julia type already committed?
-    # If so, lookup offset and write offset
-    # If not, "commit" julia type and write offset
-    ref = get(f.juliatype_locations_rev, T, NULL_REFERENCE)
-
-    if ref != NULL_REFERENCE
-        jlunsafe_store!(convert(Ptr{RelOffset}, out), ref)
-        return nothing
-    end
-
-    #= offset = f.end_of_data
-    seek(io, offset) =#
-    #id = length(f.datatypes)+1
-    #h5o = h5offset(f, offset) #ref
-    #cdt = CommittedDatatype(h5o, id)
-    #= f.juliatype_locations[h5o] = T
-    f.juliatype_locations_rev[T] = h5o
-
-    push!(f.juliatypes, T)
-    f.juliatypes_group[@sprintf("%08d", id)] = h5o
-     =#
-    #= actually_write_dataype(f, T, wsession)
-    @inline function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
-        odr = objodr(x)
-        write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
-    end =#
-    odr = OldDataTypeODR()#odr(DataType)
-    ref = write_dataset(f, WriteDataspace(f, T, odr), h5type(f, T), odr, T, wsession)
-    id = length(f.juliatypes)+1
-    f.juliatype_locations[ref] = T
-    f.juliatype_locations_rev[T] = ref
-
-    push!(f.juliatypes, T)
-    println("Stored datatype to ref: ", ref)
-    #error("test")
-    f.juliatypes_group[@sprintf("%08d", id)] = ref
-
-    jlunsafe_store!(convert(Ptr{RelOffset}, out), ref)
-    nothing
-end =#
-
-
-
 
 
 const NULL_COMMITTED_DATATYPE = CommittedDatatype(RelOffset(0), 0)
@@ -347,7 +266,7 @@ function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::DataTy
     #typeattr = WrittenAttribute(
     #    :julia_type, WriteDataspace(f, DataType, odr(DataType)), h5type(f, DataType, DataType), readas)
     
-    typeattr = WrittenAttribute(f, :julia_type_ref, readasref)
+    typeattr = WrittenAttribute(f, :julia_type, readasref)
     offset = f.end_of_data
 
     seek(io, offset)
@@ -360,7 +279,7 @@ function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::DataTy
     f.types_group[@sprintf("%08d", id)] = h5o
 
     if writeas !== readas
-        wrtypeattr = WrittenAttribute(f, :written_type_ref, writeasref)
+        wrtypeattr = WrittenAttribute(f, :written_type, writeasref)
         f.h5jltype[cdt] = ReadRepresentation{readas,CustomSerialization{writeas, odr(writeas)}}()
         commit(f, dtype, tuple(typeattr, wrtypeattr, attributes...))
     else
@@ -494,12 +413,17 @@ jlconvert_isinitialized(::ReadRepresentation{T,Vlen{S}}, ptr::Ptr) where {T,S} =
 ## DataTypes
 
 function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T<:DataType
+    
     if !(readas <: DataType)
         @lookup_committed f readas
         return commit(f, H5TYPE_DATATYPE, DataType, readas)
     end
-
+    
     @lookup_committed f DataType
+    # Everything below here is purely for bootstrapping
+    # Commit an h5 datatype that descripes a datatype in h5 (H5TYPE_DATATYPE)
+    # and attach an instance `DataType` of H5TYPE_DATATYPE as an attribute
+    # This is the file level equivalent of `DataType isa DataType`
     io = f.io
     offset = f.end_of_data
 
@@ -513,11 +437,10 @@ function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T
     push!(f.datatypes, H5TYPE_DATATYPE)
     f.types_group[@sprintf("%08d", id)] = h5o
 
+    #ref = write_dataset(f, DataType, JLDWriteSession())
+    
     commit(f, H5TYPE_DATATYPE, (WrittenAttribute(:julia_type, WriteDataspace(f, DataType, odr(DataType)), cdt, DataType),))
-#=     commit(f, H5TYPE_DATATYPE, (
-        WrittenAttribute(:julia_type, WriteDataspace(f, DataType, odr(DataType)), cdt, DataType),
-        WrittenAttribute(f, :julia_type_ref, ref)))
- =#
+    #commit(f, H5TYPE_DATATYPE, (WrittenAttribute(f, :julia_type, f),))
     cdt
 end
 fieldodr(::Type{T}, ::Bool) where {T<:DataType} = DataTypeODR()
