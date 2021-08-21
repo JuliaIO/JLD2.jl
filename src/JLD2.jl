@@ -374,6 +374,8 @@ function load_datatypes(f::JLDFile)
 end
 
 function load_all_juliatypes(f::JLDFile)
+    #TODO: this function may not be needed at all.
+    #This could already be taken care of by `prewrite`
     length(f.juliatypes_group) == length(f.juliatype_locations_rev) && return
     for offset in values(f.juliatypes_group.written_links)
         dt = load_dataset(f, offset)

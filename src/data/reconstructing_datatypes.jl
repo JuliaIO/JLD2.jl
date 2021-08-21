@@ -42,18 +42,21 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     # datatype that describes a datatype
     if h5offset(f, julia_type_attr.datatype_offset) == cdt.header_offset
         # Verify that the datatype matches our expectations
-        if dt != H5TYPE_DATATYPE
-            @warn("""The HDF5 datatype representing a Julia datatype does not match
-                     the expectations of this version of JLD.
-
-                     You may need to update JLD to read this file.""")
+        if dt == H5TYPE_DATATYPE
+            f.jlh5type[DataType] = cdt
+            f.datatypes[cdt.index] = dt
+            return (f.h5jltype[cdt] = ReadRepresentation{DataType, DataTypeODR()}())
+        elseif dt == H5TYPE_OLD_DATATYPE
             f.jlh5type[DataType] = cdt
             f.datatypes[cdt.index] = dt
             return (f.h5jltype[cdt] = ReadRepresentation{DataType, OldDataTypeODR()}())
+        else
+            throw(UnsupportedVersionException(
+                """The HDF5 datatype representing a Julia datatype does not match
+                     the expectations of this version of JLD2.
+
+                     You may need to update JLD2 to read this file."""))
         end
-        f.jlh5type[DataType] = cdt
-        f.datatypes[cdt.index] = dt
-        return (f.h5jltype[cdt] = ReadRepresentation{DataType, DataTypeODR()}())
     end
 
     datatype = read_attr_data(f, julia_type_attr)
@@ -302,22 +305,25 @@ function types_from_refs(f::JLDFile, ptr::Ptr)
     return [], unknown_params
 end
 
+struct SelfReferentialPlaceholder end
+
 # Read a type. Returns an instance of UnknownType if the type or parameters
 # could not be resolved.
 function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
                    f::JLDFile,
                    ptr::Ptr,
                    header_offset::RelOffset) where T
+    mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
+
+    track_weakref!(f, header_offset, SelfReferentialPlaceholder())
 
     params, unknown_params = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8}))
     # For cross-platform compatibility convert integer type parameters to system precision
     params = [p isa Union{Int64,Int32} ? Int(p) : p for p in params]
     hasparams = !isempty(params)
-    mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
 
     m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
-    #m isa UnknownType && return m
-
+    
     if m isa UnknownType
         dataptr= ptr+odr_sizeof(Vlen{UInt8})+odr_sizeof(Vlen{RelOffset})
         if jlconvert_isinitialized(ReadRepresentation{String,Vlen{String}}(), dataptr)
@@ -326,7 +332,9 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
             fieldnames = String[]
         end
         fieldtypes, unknown_fields = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8})+odr_sizeof(Vlen{RelOffset})+odr_sizeof(Vlen{RelOffset}))
-        return UnknownType{String}(m.name, params, fieldnames, fieldtypes)
+        m = create_type(m.name, params, fieldnames, fieldtypes)
+        track_weakref!(f, header_offset, m)
+        return m
     end
 
     if hasparams
@@ -340,8 +348,9 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
                 fieldnames = String[]
             end
             fieldtypes, unknown_fields = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8})+odr_sizeof(Vlen{RelOffset})+odr_sizeof(Vlen{RelOffset}))
-            return UnknownType{DataType}(m, params, fieldnames, fieldtypes)
-            #return UnknownType(m, params)          
+            m = create_type(m.name, params, fieldnames, fieldtypes)
+            track_weakref!(f, header_offset, m)
+            return m        
         end
     elseif m === Tuple
         # Need to instantiate with no parameters, since Tuple is really
@@ -350,6 +359,27 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     end
     track_weakref!(f, header_offset, m)
     return m
+end
+
+function create_type(T, typeparams, fieldnames, fieldtypes)
+    # Now reconstruct the type
+    reconname = gensym(T)
+    @warn "Unable to match type $T. Reconstructing to $reconname"
+    #@info "with" typeparams fieldnames fieldtypes
+    typeparamnames = Symbol.(('A':'Z')[1:length(typeparams)])
+    fieldtypes = [(ft isa SelfReferentialPlaceholder ? reconname : ft) for ft in fieldtypes]
+    Core.eval(ReconstructedTypes,
+              Expr(:struct, false, :($reconname{$(typeparamnames...)}),
+                   Expr(:block, Any[ Expr(Symbol("::"), Symbol(fieldnames[i]), fieldtypes[i]) for i = 1:length(fieldtypes) ]...,
+                        # suppress default constructors, plus a bogus `new()` call to make sure
+                        # ninitialized is zero.
+                        Expr(:if, false, Expr(:call, :new)))))
+    T = getfield(ReconstructedTypes, reconname)
+    if !isempty(typeparams)
+        return T{typeparams...}
+    else
+        return T
+    end
 end
 
 function jlconvert(rr::ReadRepresentation{T,OldDataTypeODR()},
@@ -441,14 +471,16 @@ function typestring(T::UnknownType)
     String(take!(tn))
 end
 
+# This is for legacy only
 function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute})
     field_datatypes = read_field_datatypes(f, attrs)
     if unk.name == Tuple
         # For a tuple with unknown fields, we should reconstruct the fields
         rodr = reconstruct_odr(f, dt, field_datatypes)
+        
         # This is a "pseudo-RR" since the tuple is not fully parametrized, but
-        # the parameters must depend on the types actually encoded in the file
+        # the parameters must depend on the types actually encoded in the 
         (ReadRepresentation{Tuple,rodr}(), false)
     else
         @warn("read type $(typestring(unk)) was parametrized, but type " *
@@ -529,6 +561,61 @@ function reconstruct_odr(f::JLDFile, dt::CompoundDatatype,
     end
     return OnDiskRepresentation{(dt.offsets...,), Tuple{types...}, Tuple{h5types...}}()
 end
+
+#= function reconstruct_tuple_odr(f::JLDFile, dt::CompoundDatatype, typeparams,
+                         field_datatypes::Vector{RelOffset})
+    @info "Now in reconstruct_tuple_odr"
+    offsets = copy(dt.offsets)
+    types = Vector{Any}(undef, length(dt.names))
+    h5types = Vector{Any}(undef, length(dt.names))
+    for i = 1:length(dt.names)
+        if !isempty(field_datatypes) && (ref = field_datatypes[i]) != NULL_REFERENCE
+            dtrr = jltype(f, f.datatype_locations[ref])
+        else
+            dtrr = jltype(f, dt.members[i])
+        end
+        types[i], h5types[i] = typeof(dtrr).parameters
+    end
+
+    #@info "so far have $offsets $types $h5types"
+
+    if length(typeparams) > length(types)
+        for i = 1:length(typeparams)
+            if types[i] == typeparams[i]
+                continue
+            end
+            #h5t = f.jlh5type[typeparams[i]]
+            insert!(offsets, i, offsets[i])
+            insert!(h5types, i, nothing)
+            insert!(types, i, typeparams[i])
+        end
+    end
+#=     # Get the type and ODR information for each field
+    types = Vector{Any}(undef, length(typeparams))
+    h5types = Vector{Any}(undef, length(typeparams))
+    offsets = Vector{Int}(undef, length(typeparams))
+    #j = 1
+    for i = 1:length(typeparams)
+        types[i] = typeparams[i]
+        println("type = $(types[i])")
+        h5types[i] = f.jlh5type[typeparams[i]]
+        println("h5type = $(h5types[i])")
+#=         if !isempty(field_datatypes) && (ref = field_datatypes[i]) != NULL_REFERENCE
+            dtrr = jltype(f, f.datatype_locations[ref])
+        else
+            dtrr = jltype(f, dt.members[i])
+        end
+        types[i], h5types[i] = typeof(dtrr).parameters =#
+    end =#
+    @info "Now Have"
+    #println(dt)
+    #println(offsets, types, h5types, field_datatypes)
+    @info  offsets 
+    @info types
+    @info h5types
+    return OnDiskRepresentation{(offsets...,), Tuple{types...}, Tuple{h5types...}}()
+end =#
+
 
 # Reconstruct type that is a "lost cause": either we were not able to resolve
 # the name, or the workspace type has additional fields, or cannot convert

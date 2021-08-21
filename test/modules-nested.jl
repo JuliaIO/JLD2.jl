@@ -229,7 +229,7 @@ end
             include(joinpath(tmpdir, "mycustomload.jl"))
             using Test
             my_object_filename = "$(my_object_filename)"
-            my_object = @test_logs (:warn, "type Main.Baz does not exist in workspace; reconstructing") MyCustomLoad.load_my_object(my_object_filename)
+            my_object = MyCustomLoad.load_my_object(my_object_filename)
             @test my_object.x == 1
             @test my_object.y == 2
             @test my_object.z == 3
