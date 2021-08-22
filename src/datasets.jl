@@ -437,6 +437,12 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
         wsession.h5offset[objectid(data)] = h5offset(f, header_offset)
         push!(wsession.objects, data)
     end
+
+    if data isa Type
+        id = length(f.juliatypes_group)+1
+        f.juliatypes_group[@sprintf("%08d", id)] = h5offset(f, header_offset)
+        f.juliatype_locations[data] = h5offset(f, header_offset)
+    end
     
     cio = begin_checksum_write(io, fullsz - 4)
     write_object_header_and_dataspace_message(cio, f, psz, dataspace)
@@ -461,15 +467,16 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
 end
 
 
-function write_dataset(f::JLDFile,
+#= function write_dataset(f::JLDFile,
     dataspace::WriteDataspace,
     datatype::H5Datatype,
     odr::S,
     data::DataType,
     wsession::JLDWriteSession) where S
     # Ensure that all juliatypes are loaded    
-    load_all_juliatypes(f) 
-    ref = get(f.juliatype_locations_rev, data, RelOffset(0))
+    load_all_juliatypes(f)
+    ref = get(f.datatype_wsession.h5offset, objectid(data), RelOffset(0))    
+    #ref = get(f.juliatype_locations, data, RelOffset(0))
     ref != RelOffset(0) && return ref
   
     header_offset = f.end_of_data
@@ -478,10 +485,14 @@ function write_dataset(f::JLDFile,
     id = length(f.juliatypes_group)+1
     f.juliatypes_group[@sprintf("%08d", id)] = ref
 
+    # not needed when writing to a file
     track_weakref!(f, ref, data)
-    f.juliatype_locations[ref] = data
-    f.juliatype_locations_rev[data] = ref
-
+    # not needed if tracked inside datatype_wsession
+    f.juliatype_locations[data] = ref
+    if !isa(f.datatype_wsession, JLDWriteSession{Union{}})
+        f.datatype_wsession.h5offset[objectid(data)] = h5offset(f, header_offset)
+        push!(wsession.objects, data)
+    end
 
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
@@ -522,7 +533,7 @@ function write_dataset(f::JLDFile,
         write_data(io, f, data, odr, datamode(odr), wsession)
     end
     ref
-end
+end =#
 
 
 function write_object_header_and_dataspace_message(cio::IO, f::JLDFile, psz::Int, dataspace::WriteDataspace)
@@ -578,26 +589,20 @@ define_packed(ContiguousStorageMessage)
     )
 
 @inline function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
-    odr = objodr(x)
-    write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
-end
-
-@inline function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
     offset = get(wsession.h5offset, objectid(x), RelOffset(0))
-    offset != RelOffset(0) ? offset : write_dataset(f, x, wsession)::RelOffset
+    offset != RelOffset(0) && return offset
+    odr = objodr(x)
+    return write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
 end
 
-@inline write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession{Union{}}) =
-    write_dataset(f, x, wsession)
-
-function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
-    if ismutabletype(typeof(x))
-        write_ref_mutable(f, x, wsession)::RelOffset
-    else
-        write_dataset(f, x, wsession)::RelOffset
-    end
+function write_dataset(f::JLDFile, x::Type, wsession::JLDWriteSession)
+    offset = get(f.juliatype_locations, x, RelOffset(0))
+    offset != RelOffset(0) && return offset
+    odr = objodr(x)
+    return write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
 end
-write_ref(f::JLDFile, x::RelOffset, wsession::JLDWriteSession) = x
+
+write_dataset(f::JLDFile, x::RelOffset, wsession::JLDWriteSession) = x
 
 Base.delete!(f::JLDFile, x::AbstractString) = delete!(f.root_group, x)
 

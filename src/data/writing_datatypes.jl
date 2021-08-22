@@ -360,7 +360,7 @@ odr(::Type{RelOffset}) = RelOffset
 
 @inline function h5convert!(out::Pointers, odr::Type{RelOffset}, f::JLDFile, x::Any,
                             wsession::JLDWriteSession)
-    ref = write_ref(f, x, wsession)
+    ref = write_dataset(f, x, wsession)
     jlunsafe_store!(convert(Ptr{RelOffset}, out), ref)
     nothing
 end
@@ -470,10 +470,10 @@ function refs_from_types(f::JLDFile, types, wsession::JLDWriteSession)
             if isa(dt, CommittedDatatype)
                 (dt::CommittedDatatype).header_offset
             else
-                write_ref(f, x, wsession)
+                write_dataset(f, x, wsession)
             end
         else
-            write_ref(f, x, wsession)
+            write_dataset(f, x, wsession)
         end
     for x in types]
 end
@@ -528,7 +528,7 @@ function h5convert!(out::Pointers, ::UnionTypeODR, f::JLDFile, x::Union, wsessio
         h5convert_uninitialized!(out, Vlen{RelOffset})
     end
     if !isempty(uls)
-        refs = RelOffset[write_ref(f, x, wsession) for x in uls]
+        refs = RelOffset[write_dataset(f, x, wsession) for x in uls]
         store_vlen!(out+odr_sizeof(Vlen{RelOffset}), RelOffset, f, refs, f.datatype_wsession)
     else
         h5convert_uninitialized!(out+odr_sizeof(Vlen{RelOffset}), Vlen{RelOffset})

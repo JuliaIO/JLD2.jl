@@ -172,6 +172,8 @@ mutable struct JLDFile{T<:IO}
     n_times_opened::Int
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
+    # Protocol of written datatypes to avoid duplication
+    # points to location of committed datatype
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
     jlh5type::IdDict # Julia Type → H5Type
     h5jltype::IdDict # H5Type → Julia Type
@@ -181,11 +183,16 @@ mutable struct JLDFile{T<:IO}
     global_heap::GlobalHeap
     loaded_groups::Dict{RelOffset,Group}
     root_group_offset::RelOffset
-    
-    juliatype_locations::OrderedDict{RelOffset,Any}
-    juliatype_locations_rev::OrderedDict{Any,RelOffset}
+
+    # Mapping between julia datatypes that (also) exist in the file 
+    # and the location in the file. Similir to datatype_wsession
+    # but for julia types, not HDF5 types
+    juliatype_locations::IdDict{Any,RelOffset}#OrderedDict{Any, RelOffset}
 
     root_group::Group
+
+    # Central place in the file where hdf5/julia types are referenced
+    # to recreate mapping in loaded files.
     types_group::Group
     juliatypes_group::Group
 
@@ -197,7 +204,7 @@ mutable struct JLDFile{T<:IO}
             JLDWriteSession(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + jlsizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS,
-            OrderedDict{RelOffset,Any}(), OrderedDict{Any,RelOffset}())
+            IdDict{Any, RelOffset}())
         finalizer(jld_finalizer, f)
         f
     end
@@ -361,6 +368,7 @@ end
 
 Populate f.datatypes and f.jlh5types with all of the committed datatypes from a file. We
 need to do this before writing to make sure we reuse written datatypes.
+Additionally match all written julia types in case more need to be written.
 """
 function load_datatypes(f::JLDFile)
     dts = f.datatypes
@@ -371,20 +379,16 @@ function load_datatypes(f::JLDFile)
         !isassigned(dts, i) && jltype(f, cdt)
         i += 1
     end
-end
-
-function load_all_juliatypes(f::JLDFile)
-    #TODO: this function may not be needed at all.
-    #This could already be taken care of by `prewrite`
-    length(f.juliatypes_group) == length(f.juliatype_locations_rev) && return
-    for offset in values(f.juliatypes_group.written_links)
-        dt = load_dataset(f, offset)
-        f.juliatype_locations[offset] = dt
-        f.juliatype_locations_rev[dt] = offset
-        track_weakref!(f, offset, dt)
+    if f.juliatypes_group.last_chunk_start_offset != -1
+        for offset in values(f.juliatypes_group.written_links)
+            dt = load_dataset(f, offset)
+            f.juliatype_locations[dt] = offset
+            track_weakref!(f, offset, dt)
+        end
     end
     return nothing
 end
+
 
 """
     prewrite(f::JLDFile)
