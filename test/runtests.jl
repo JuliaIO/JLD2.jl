@@ -1,6 +1,22 @@
 using JLD2, FileIO
 using Test
 
+# Utility function that runs a command (e.g. separate julia session)
+# and prints errors in case there are any
+function better_success(cmd)
+    fn1, _ = mktemp()
+    fn2, _ = mktemp()
+    try
+       run(pipeline(cmd, stdout=fn1, stderr=fn2))
+    catch
+        println(String(read(fn1)))
+        println(String(read(fn2)))
+        return false
+    end
+    return true
+end
+
+
 include("bufferedreader.jl")
 include("lookup3.jl")
 include("internal.jl")

@@ -396,3 +396,64 @@ end
     JLD2.@save path D
     @test load(path, "D") == D
 end
+
+
+## Test for Issue #37
+@testset "Unknown datatypes (e.g. anon funcs)" begin
+    tmpdir = mktempdir()
+    atexit(() -> rm(tmpdir; force = true, recursive = true))
+
+    my_object_filename = joinpath(tmpdir, "my_object.jld2")
+    saving_filename = joinpath(tmpdir, "saving.jl")
+    loading_filename = joinpath(tmpdir, "loading.jl")
+
+    saving_contents = """
+        append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
+        unique!(Base.LOAD_PATH)
+        using JLD2
+        myfun = () -> (x -> x)
+        my_object = (typeof(myfun()),)
+        my_object_filename = "$(my_object_filename)"
+        rm(my_object_filename; force = true, recursive = true)
+        save(my_object_filename, Dict("my_object" => my_object))
+    """
+
+    loading_contents = """
+        append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
+        unique!(Base.LOAD_PATH)
+        tmpdir = "$(tmpdir)"
+        using JLD2, Test
+        my_object_filename = "$(my_object_filename)"
+
+        my_object = load(my_object_filename, "my_object")
+        @test my_object isa Tuple
+        @test length(my_object) == 1
+        @test my_object[1] isa DataType
+    """
+
+    rm(my_object_filename; force = true, recursive = true)
+    rm(saving_filename; force = true, recursive = true)
+    rm(loading_filename; force = true, recursive = true)
+
+    if Sys.iswindows()
+        saving_contents = replace(saving_contents, '\\' => "\\\\")
+        loading_contents = replace(loading_contents, '\\' => "\\\\")
+    end
+
+    open(saving_filename, "w") do io
+        println(io, saving_contents)
+    end
+    open(loading_filename, "w") do io
+        println(io, loading_contents)
+    end
+
+    saving_cmd = `$(Base.julia_cmd()) $(saving_filename)`
+    loading_cmd = `$(Base.julia_cmd()) $(loading_filename)`
+
+    rm(my_object_filename; force = true, recursive = true)
+
+    @test better_success(saving_cmd)
+    @test better_success(loading_cmd)
+
+    rm(tmpdir; force = true, recursive = true)
+end
