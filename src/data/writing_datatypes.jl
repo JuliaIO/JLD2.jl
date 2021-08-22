@@ -541,8 +541,8 @@ function jlconvert(::ReadRepresentation{Union, UnionTypeODR()}, f::JLDFile,
     ptr += odr_sizeof(Vlen{String})
     # Reconstruct a Union by reading a list of DataTypes and UnionAlls
     # Lookup of RelOffsets is taken from jlconvert of DataTypes
-    datatypes, = types_from_refs(f, ptr)
-    unionalls, = types_from_refs(f, ptr+odr_sizeof(Vlen{RelOffset}))
+    datatypes = types_from_refs(f, ptr)
+    unionalls = types_from_refs(f, ptr+odr_sizeof(Vlen{RelOffset}))
 
     v = Union{datatypes..., unionalls...}
     track_weakref!(f, header_offset, v)
