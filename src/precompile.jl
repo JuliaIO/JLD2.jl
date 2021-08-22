@@ -51,16 +51,13 @@ function _precompile_()
     Base.precompile(Tuple{typeof(write_dataset),JLDFile{MmapIO},WriteDataspace{0, Tuple{}},CommittedDatatype,OnDiskRepresentation{(0, 8), Tuple{TypeVar, Any}, Tuple{RelOffset, RelOffset}},Type,JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0697
     Base.precompile(Tuple{Core.kwftype(typeof(write)),NamedTuple{(:compress,), Tuple{Nothing}},typeof(write),Group{JLDFile{MmapIO}},String,Dict{Symbol, String},JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0691246
     Base.precompile(Tuple{typeof(write),JLDFile{MmapIO},String,SubArray{Int, 1, Vector{Int}, Tuple{UnitRange{Int}}, true}})   # time: 0.0687224
-    Base.precompile(Tuple{typeof(write_ref),JLDFile{IOStream},Vector{Int},JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0681966
     Base.precompile(Tuple{typeof(write),JLDFile{MmapIO},String,Base.ReshapedArray{Int, 4, UnitRange{Int}, Tuple{}}})   # time: 0.068107
     Base.precompile(Tuple{typeof(setindex!),JLDFile{MmapIO},Vector{Union{Float64, Int}},String})   # time: 0.0679686
-    Base.precompile(Tuple{typeof(write_ref),JLDFile{MmapIO},LineNumberNode,JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0676823
     Base.precompile(Tuple{typeof(read_array),JLDFile{MmapIO},ReadDataspace,ReadRepresentation{Union{Int, Vector}, RelOffset},Int,UInt16,RelOffset,Vector{ReadAttribute}})   # time: 0.0675551
     Base.precompile(Tuple{typeof(setindex!),JLDFile{MmapIO},Vector{Union{Missing, Float32, Float64, Int32}},String})   # time: 0.0671966
     Base.precompile(Tuple{typeof(write),JLDFile{MmapIO},String,Vector{Union{Nothing, Int}}})   # time: 0.0671739
     Base.precompile(Tuple{typeof(setindex!),JLDFile{MmapIO},Vector{Union{Int, Vector}},String})   # time: 0.0666241
     Base.precompile(Tuple{typeof(write),JLDFile{MmapIO},String,Complex{Int}})   # time: 0.066388
-    Base.precompile(Tuple{typeof(write_ref),JLDFile{MmapIO},Tuple{Symbol},JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0653194
     Base.precompile(Tuple{typeof(write),JLDFile{MmapIO},String,Base.GitVersionInfo})   # time: 0.0652343
     Base.precompile(Tuple{typeof(write),JLDFile{IOStream},String,Vector{Char}})   # time: 0.0641642
     Base.precompile(Tuple{Core.kwftype(typeof(write)),NamedTuple{(:compress,), Tuple{Nothing}},typeof(write),Group{JLDFile{MmapIO}},String,NamedTuple{(:ptr,), Tuple{Ptr{Float64}}},JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0624435
@@ -69,17 +66,14 @@ function _precompile_()
     Base.precompile(Tuple{typeof(write),JLDFile{MmapIO},String,Expr})   # time: 0.0613437
     Base.precompile(Tuple{typeof(write),JLDFile{MmapIO},String,NamedTuple{(:ptr,), Tuple{Ptr{Float64}}},JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0605991
     Base.precompile(Tuple{Core.kwftype(typeof(write)),NamedTuple{(:compress,), Tuple{Nothing}},typeof(write),Group{JLDFile{IOStream}},String,Tuple{Int, Int, Tuple{Int, Int, Vector{Int}}, Vector{Int}},JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0597551
-    Base.precompile(Tuple{typeof(write_ref_mutable),JLDFile{IOStream},Matrix{Int},JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0595954
     Base.precompile(Tuple{Core.kwftype(typeof(write)),NamedTuple{(:compress,), Tuple{Nothing}},typeof(write),Group{JLDFile{IOStream}},String,Vector{Vector{U} where U<:Integer},JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0593596
     Base.precompile(Tuple{Core.kwftype(typeof(write)),NamedTuple{(:compress,), Tuple{Nothing}},typeof(write),Group{JLDFile{IOStream}},String,Vector{Tuple{}},JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0589484
     Base.precompile(Tuple{typeof(read_data),JLDFile{MmapIO},ReadRepresentation{ComplexF32, ComplexF32},Tuple{ReadDataspace, RelOffset, Int, UInt16},Vector{ReadAttribute}})   # time: 0.0588968
     Base.precompile(Tuple{Core.kwftype(typeof(write)),NamedTuple{(:compress,), Tuple{Nothing}},typeof(write),Group{JLDFile{IOStream}},String,Base.ReshapedArray{ComplexF64, 1, Base.ReinterpretArray{ComplexF64, 2, Float64, Matrix{Float64}, false}, Tuple{}},JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0586527
     Base.precompile(Tuple{typeof(write),JLDFile{MmapIO},String,Matrix{Int}})   # time: 0.058283
     Base.precompile(Tuple{typeof(setindex!),JLDFile{IOStream},Vector{UInt8},String})   # time: 0.058052
-    Base.precompile(Tuple{typeof(write_ref),JLDFile{IOStream},LineNumberNode,JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0580383
     Base.precompile(Tuple{typeof(constructrr),JLDFile{IOStream},DataType,CompoundDatatype,Vector{ReadAttribute}})   # time: 0.0569429
     Base.precompile(Tuple{typeof(write_heap_object),JLDFile{IOStream},Type,Vector{RelOffset},JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.056889
-    Base.precompile(Tuple{typeof(write_ref),JLDFile{MmapIO},Matrix{Float64},JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0561273
     Base.precompile(Tuple{typeof(write),JLDFile{MmapIO},String,Array{Int, 0}})   # time: 0.0560988
     Base.precompile(Tuple{Core.kwftype(typeof(write)),NamedTuple{(:compress,), Tuple{Nothing}},typeof(write),Group{JLDFile{IOStream}},String,Float64,JLDWriteSession{Dict{UInt, RelOffset}}})   # time: 0.0560133
     Base.precompile(Tuple{typeof(write),JLDFile{MmapIO},String,Vector{Vector{U} where U>:Int}})   # time: 0.0542099
