@@ -413,7 +413,7 @@ Base.haskey(f::JLDFile, name::AbstractString) = haskey(f.root_group, name)
 Base.isempty(f::JLDFile) = isempty(f.root_group)
 Base.keys(f::JLDFile) = filter!(x->x != "_types" && x != "_juliatypes", keys(f.root_group))
 
-function Base.length(g::JLDFile)
+function Base.length(f::JLDFile)
     l = length(f.root_group)
     haskey(f.root_group, "_types") && (l -= 1)
     haskey(f.root_group, "_juliatypes") && (l -= 1)

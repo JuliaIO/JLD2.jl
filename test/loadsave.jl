@@ -320,7 +320,7 @@ end
 end
 
 # Test for object deletion
-@testset "Object Deletion" begin
+@testset "Object Deletion / Base.length" begin
     fn = joinpath(mktempdir(), "test.jld2")
     # To hit all code paths, need to write sufficiently many entries
     jldopen(fn, "w") do f
@@ -339,6 +339,13 @@ end
         write(f, "h", 6)
         write(f, "i", 7)
         write(f, "j", 9)
+        # Testing deletion directly after writing
+        write(f, "l", 42)
+        write(f, "m/n", 84)
+        delete!(f, "l")
+        delete!(f, "m")
+        @test length(f) == 10
+        @test length(f.root_group) == 10
     end
 
 
@@ -352,14 +359,23 @@ end
 
     # test delete and write again
     jldopen(fn, "a") do f
-        @test haskey(f, "g")
-        delete!(f, "g")
-        @test !haskey(f, "g")
+        @test haskey(f, "h")
+        delete!(f, "h")
+        @test !haskey(f, "h")
+        @test_logs (:warn, "No entry named h was found") delete!(f, "h")
     end
     jldopen(fn, "a") do f
-        @test !haskey(f, "g")
-        write(f, "g", 10)
-        @test haskey(f, "g")
+        @test !haskey(f, "h")
+        write(f, "h", 10)
+        @test haskey(f, "h")
+    end
+
+    # test delete element in a group
+    jldopen(fn, "a") do f
+        @test haskey(f, "g/a")
+        delete!(f, "g/a")
+        delete!(f, "/i")
+        @test !haskey(f, "g/a")
     end
 
     # test delete of group
