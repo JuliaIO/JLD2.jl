@@ -2,18 +2,51 @@
 
 module ReconstructedTypes end
 
+
+
+symbolify_typevars(type::TypeVar) = type.name
+symbolify_typevars(T) = T
+
+function symbolify_typevars(T::Type)
+    if !isempty(T.parameters)
+        #ex = Expr(:curly, Symbol(T.name.wrapper), symbolify_typevars.(T.parameters)...)
+        ex = :($(Symbol(T.name.wrapper)){$(symbolify_typevars.(T.parameters)...)})
+        println(ex)
+        return ex
+    else
+        return T
+    end
+end
+
+
+
 # Construct a datatype from type parameters, field names, and field types
 function create_type(T, typeparams, fieldnames, fieldtypes)
     reconname = gensym(T)
     @warn "Unable to match type $T. Reconstructing to $reconname"
-    typeparamnames = Symbol.(('A':'Z')[1:length(typeparams)])
-    fieldtypes = [(ft isa SelfReferentialPlaceholder ? reconname : ft) for ft in fieldtypes]
-    Core.eval(ReconstructedTypes,
-              Expr(:struct, false, :($reconname{$(typeparamnames...)}),
-                   Expr(:block, Any[ Expr(Symbol("::"), Symbol(fieldnames[i]), fieldtypes[i]) for i = 1:length(fieldtypes) ]...,
-                        # suppress default constructors, plus a bogus `new()` call to make sure
-                        # ninitialized is zero.
-                        Expr(:if, false, Expr(:call, :new)))))
+    typeparamnames = map(1:length(typeparams)) do n
+        tp = typeparams[n]
+        if tp isa TypeVar
+            # We can even return the sub typing relationships
+            # However, some types are already unknown.
+            # If field types need to be reconstructed, 
+            # things would break again.
+            #return :($(tp.name) <: $(tp.ub))
+            return tp.name
+        else
+            return gensym(:T)
+        end    
+    end
+    fieldtypes = Any[
+            (ft isa SelfReferentialPlaceholder ? reconname : symbolify_typevars(ft))
+            for ft in fieldtypes]
+    ex = Expr(:struct, false, :($reconname{$(typeparamnames...)}),
+            Expr(:block, Any[ 
+                Expr(Symbol("::"), Symbol(fieldnames[i]), fieldtypes[i])
+                 for i = 1:length(fieldtypes) ]...,))
+    println(ex)
+    Core.eval(ReconstructedTypes, ex
+              )
     T = getfield(ReconstructedTypes, reconname)
     if !isempty(typeparams)
         return T{typeparams...}

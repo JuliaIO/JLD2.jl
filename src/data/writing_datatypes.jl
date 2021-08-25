@@ -11,29 +11,40 @@ const DataTypeODR = OnDiskRepresentation{
     (0,
     odr_sizeof(Vlen{String}),
     odr_sizeof(Vlen{String})+odr_sizeof(Vlen{RelOffset}),
-    odr_sizeof(Vlen{String})+2*odr_sizeof(Vlen{RelOffset})),
+    odr_sizeof(Vlen{String})+odr_sizeof(RelOffset)+odr_sizeof(Vlen{RelOffset}),
+    odr_sizeof(Vlen{String})+odr_sizeof(RelOffset)+2*odr_sizeof(Vlen{RelOffset}),
+    odr_sizeof(Vlen{String})+odr_sizeof(RelOffset)+3*odr_sizeof(Vlen{RelOffset})),
     Tuple{String,
         Vector{Any},
+        Any,
         Vector{String},
-        Vector{Any}},
+        Vector{Any},
+        String},
     Tuple{Vlen{String},
         Vlen{RelOffset},
+        RelOffset,
         Vlen{RelOffset},
-        Vlen{RelOffset}}}
+        Vlen{RelOffset},
+        Vlen{String}}}
 
 const OldDataTypeODR = OnDiskRepresentation{(0, odr_sizeof(Vlen{String})),Tuple{String,Vector{Any}},Tuple{Vlen{String},Vlen{RelOffset}}}
 
 const H5TYPE_DATATYPE = CompoundDatatype(
-    odr_sizeof(Vlen{String})+odr_sizeof(Vlen{RelOffset})+odr_sizeof(Vlen{RelOffset})+odr_sizeof(Vlen{RelOffset}),
-    [:name, :parameters, :fieldnames, :fieldtypes],
+    2*odr_sizeof(Vlen{String})+odr_sizeof(RelOffset)+3*odr_sizeof(Vlen{RelOffset}),
+    [:name, :parameters, :typedef, :fieldnames, :fieldtypes, :debuginfo],
     [0,
      odr_sizeof(Vlen{String}),
      odr_sizeof(Vlen{String})+odr_sizeof(Vlen{RelOffset}),
-     odr_sizeof(Vlen{String})+2*odr_sizeof(Vlen{RelOffset})],
+     odr_sizeof(Vlen{String})+odr_sizeof(RelOffset)+ odr_sizeof(Vlen{RelOffset}),
+     odr_sizeof(Vlen{String})+odr_sizeof(RelOffset)+2*odr_sizeof(Vlen{RelOffset}),
+     odr_sizeof(Vlen{String})+odr_sizeof(RelOffset)+3*odr_sizeof(Vlen{RelOffset})],
     [H5TYPE_VLEN_UTF8,
     VariableLengthDatatype(ReferenceDatatype()),
+    ReferenceDatatype(),
     VariableLengthDatatype(H5TYPE_VLEN_UTF8),
-    VariableLengthDatatype(ReferenceDatatype())]
+    VariableLengthDatatype(ReferenceDatatype()),
+    H5TYPE_VLEN_UTF8
+    ]
 )
     
 const H5TYPE_OLD_DATATYPE = CompoundDatatype(
@@ -45,31 +56,57 @@ const H5TYPE_OLD_DATATYPE = CompoundDatatype(
 
 
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
-    t = typename(T)
-    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, t), f.datatype_wsession)
-    out += odr_sizeof(Vlen{UInt8})
-    if isempty(T.parameters)
-        h5convert_uninitialized!(out, Vlen{UInt8})
-    else
-        refs = refs_from_types(f, T.parameters, wsession)
-        store_vlen!(out, RelOffset, f, refs, f.datatype_wsession)
-    end
-    out += odr_sizeof(Vlen{RelOffset})
-    fieldnames = T.name.names
+    # Figure out basic stuff
+    hasparams = !isempty(T.parameters)
+    # Is this a regular parametric datatype ?
+    # Has type parameters and none of them are TypeVars
+    regularparametric = hasparams && !any(isa.(T.parameters, TypeVar))
+    # Should fieldtypes and field names be recorded?
     # If datatype is defined in KNOWN_MODULES (e.g. Core)
     # then we don't want to write out fieldnames and fieldtypes
     # because (a) they will already be known and (b) because
     # they can introduce a long tail of further intrinsic types
-    if isempty(fieldnames) || T.name.module in KNOWN_MODULES
-        h5convert_uninitialized!(out, Vlen{String})
-        out += odr_sizeof(Vlen{String})
-        h5convert_uninitialized!(out, Vlen{RelOffset})
+    fieldnames = T.name.names
+    writefields = !isempty(fieldnames) && T.name.module ∉ KNOWN_MODULES
+    # If this is a regular parametric type then the types should
+    # be extracted from the parametric type def
+    writefields = writefields && !regularparametric
+
+    t = typename(T)
+    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, t), f.datatype_wsession)
+    out += odr_sizeof(Vlen{UInt8})
+    if hasparams
+        refs = refs_from_types(f, T.parameters, wsession)
+        store_vlen!(out, RelOffset, f, refs, f.datatype_wsession)
     else
+        h5convert_uninitialized!(out, Vlen{RelOffset})
+    end
+    out += odr_sizeof(Vlen{RelOffset})
+    
+    if regularparametric
+        t = T.name.wrapper
+        while t isa UnionAll
+            t = t.body
+        end
+        h5convert!(out, RelOffset, f, t, f.datatype_wsession)
+    else
+        h5convert_uninitialized!(out, RelOffset)
+    end
+    out += odr_sizeof(RelOffset)
+
+    
+    if writefields
         store_vlen!(out, Vlen{String}, f, string.(fieldnames), wsession)
         out += odr_sizeof(Vlen{String})
         refs = refs_from_types(f, T.types, wsession)
         store_vlen!(out, RelOffset, f, refs, f.datatype_wsession)
+    else
+        h5convert_uninitialized!(out, Vlen{String})
+        out += odr_sizeof(Vlen{String})
+        h5convert_uninitialized!(out, Vlen{RelOffset})
     end
+    out += odr_sizeof(Vlen{RelOffset})
+    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, string(T)), f.datatype_wsession)
 
     nothing
 end

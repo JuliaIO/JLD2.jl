@@ -305,18 +305,18 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
                    ptr::Ptr,
                    header_offset::RelOffset) where T
     mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
-
+    ptr += odr_sizeof(Vlen{UInt8})
     track_weakref!(f, header_offset, SelfReferentialPlaceholder())
 
-    params = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8}))
+    params = types_from_refs(f, ptr)
+    ptr += odr_sizeof(Vlen{RelOffset})
     # For cross-platform compatibility convert integer type parameters to system precision
     params = [p isa Union{Int64,Int32} ? Int(p) : p for p in params]
-    hasparams = !isempty(params)
 
     m = _resolve_type(mypath, params)
     
     reconstruct = m isa UnknownType
-    if !reconstruct && hasparams
+    if !reconstruct && !isempty(params)
         try
             m = m{params...}
         catch e
@@ -329,14 +329,24 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     end
 
     if reconstruct
-        dataptr= ptr+odr_sizeof(Vlen{UInt8})+odr_sizeof(Vlen{RelOffset})
-        if jlconvert_isinitialized(ReadRepresentation{String,Vlen{String}}(), dataptr)
-            fieldnames = jlconvert(ReadRepresentation{String, Vlen{Vlen{String}}}(), f, dataptr, NULL_REFERENCE)
+        if jlconvert_isinitialized(ReadRepresentation{DataType, RelOffset}(), ptr)
+            # There exists a parametric type definition
+            pt = jlconvert(ReadRepresentation{DataType, RelOffset}(), f, ptr, NULL_REFERENCE)
+            # Instantiating with the (reconstructed) parametric type works
+            m = pt.name.wrapper{params...}
         else
-            fieldnames = String[]
+            ptr += odr_sizeof(RelOffset)
+            # Load fieldnames if they exist
+            if jlconvert_isinitialized(ReadRepresentation{String,Vlen{Vlen{String}}}(), ptr)
+                fieldnames = jlconvert(ReadRepresentation{String, Vlen{Vlen{String}}}(), f, ptr, NULL_REFERENCE)
+            else
+                fieldnames = String[]
+            end
+            ptr += odr_sizeof(Vlen{String})
+            fieldtypes = types_from_refs(f, ptr)
+            # Construct a new (nonparametric) type using fields
+            m = create_type(m.name, params, fieldnames, fieldtypes)
         end
-        fieldtypes = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8})+odr_sizeof(Vlen{RelOffset})+odr_sizeof(Vlen{RelOffset}))
-        m = create_type(m.name, params, fieldnames, fieldtypes)
     end
     track_weakref!(f, header_offset, m)
     return m

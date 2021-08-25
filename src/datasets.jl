@@ -438,7 +438,7 @@ function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Dataty
         push!(wsession.objects, data)
     end
 
-    if data isa Type
+    if data isa DataType
         id = length(f.juliatypes_group)+1
         f.juliatypes_group[@sprintf("%08d", id)] = h5offset(f, header_offset)
         f.juliatype_locations[data] = h5offset(f, header_offset)
