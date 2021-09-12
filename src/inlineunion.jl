@@ -56,7 +56,6 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
     seek(io, offset)
     v = construct_array(io, InlineUnionEl{T1,T2}, Int(ndims))
-    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
     n = length(v)
     seek(io, data_offset)
     if !iszero(filter_id)
@@ -67,5 +66,7 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
 
     # Union{T1, T2}[v;]
     # The above syntax is not compatible to julia v1.0
-    Union{T1, T2}[convert2union.(v);]
+    u = Union{T1, T2}[convert2union.(v);]
+    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(u))
+    return u
 end

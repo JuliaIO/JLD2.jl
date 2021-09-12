@@ -9,6 +9,13 @@ struct Bparam{T}; x::T; end
     u = Union{Int,Float64}[1, 2.5, 3, 4.5]
     save(fn, "u", u)
     @test all(skipmissing(u) .== skipmissing(load(fn, "u")))
+    
+    jldopen(fn, "r") do f
+        @test u == f["u"]
+        # Test again to verify that the correct object was cached
+        # See issue #348
+        @test u == f["u"]
+    end
 
     u = Union{Float64, Missing}[1.0, missing, 2.0, 10.5, missing]
     save(fn, "u", u; compress=true)
