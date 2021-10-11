@@ -147,3 +147,12 @@ end
         end
     end
 end
+
+# Test for Base.keytype
+@testset "Base.keytype" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+    jldopen(fn, "w") do f
+        @test Base.keytype(f) == String
+        @test Base.keytype(f.root_group) == String
+    end
+end

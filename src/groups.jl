@@ -200,6 +200,8 @@ function Base.keys(g::Group)
     ks
 end
 
+Base.keytype(f::Group) = String
+                
 struct LinkInfo
     version::UInt8
     flags::UInt8
