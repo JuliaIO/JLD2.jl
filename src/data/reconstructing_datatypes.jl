@@ -180,7 +180,13 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
             # The on disk representation of T can only be the same as in memory
             # if the offsets are the same, field type on disk (readtype) and in memory (wstype)
             # are the same and if no CustomSerialization is involved
-            samelayout = samelayout && offsets[i] == fieldoffset(T, i) && types[i] === wstype && !(odrs[i] <: CustomSerialization)
+            samelayout = samelayout && 
+                offsets[i] == fieldoffset(T, i) && 
+                types[i] === wstype && 
+                # An OnDiskRepresentation as odr means that something "fixable" went wrong
+                # for this field
+                !(odrs[i] isa OnDiskRepresentation) && 
+                !(odrs[i] <: CustomSerialization)
 
             mapped[dtindex] = true
         end

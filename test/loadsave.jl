@@ -396,3 +396,67 @@ end
     JLD2.@save path D
     @test load(path, "D") == D
 end
+
+
+@testset "Recoverable changes in structs, Issue #354" begin
+    tmpdir = mktempdir()
+    atexit(() -> rm(tmpdir; force = true, recursive = true))
+
+    my_object_filename = joinpath(tmpdir, "my_object.jld2")
+    saving_filename = joinpath(tmpdir, "saving.jl")
+    loading_filename = joinpath(tmpdir, "loading.jl")
+
+    saving_contents = """
+        append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
+        unique!(Base.LOAD_PATH)
+        using JLD2
+        struct A; x::Int; end
+        struct B; a::A; end
+
+        struct C; x::Int; end
+        struct D; c::C; end
+        jldsave("$(my_object_filename)"; b=B(A(42)), d=D(C(42)))
+    """
+
+    loading_contents = """
+        append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
+        unique!(Base.LOAD_PATH)
+        using JLD2, Test
+        struct A; x::Float64; end
+        struct B; a::A; end
+        b = load("$(my_object_filename)", "b")
+        @test b == B(A(42.0))
+
+        struct C; x::Tuple{Int,Int}; end
+        struct D; c::C; end
+        d = load("$(my_object_filename)", "d")
+        # Reconstructed type has correct value
+        @test d.c.x == 42
+        Base.convert(::Type{Tuple{Int,Int}}, x::Int) = (x, 2x)
+
+        d = load("$(my_object_filename)", "d")
+        @test d.c.x == (42, 84)
+    """
+
+    rm(my_object_filename; force = true, recursive = true)
+    rm(saving_filename; force = true, recursive = true)
+    rm(loading_filename; force = true, recursive = true)
+
+    if Sys.iswindows()
+        saving_contents = replace(saving_contents, '\\' => "\\\\")
+        loading_contents = replace(loading_contents, '\\' => "\\\\")
+    end
+
+    write(saving_filename, saving_contents)
+    write(loading_filename, loading_contents)
+
+    saving_cmd = `$(Base.julia_cmd()) $(saving_filename)`
+    loading_cmd = `$(Base.julia_cmd()) $(loading_filename)`
+
+    rm(my_object_filename; force = true, recursive = true)
+
+    @test better_success(saving_cmd)
+    @test better_success(loading_cmd)
+
+    rm(tmpdir; force = true, recursive = true)
+end
