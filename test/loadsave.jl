@@ -95,6 +95,10 @@ end
 save(format"JLD2", fn, Dict("the"=>"quick", "brown"=>"fox", "stuff"=>reshape(1:4, (2, 2))))
 @test load(fn) == Dict("the"=>"quick", "brown"=>"fox", "stuff"=>reshape(1:4, (2, 2)))
 
+# Test Dict/save load with symbol keys
+save(format"JLD2", fn, Dict(:the=>"quick", :brown=>"fox", :stuff=>reshape(1:4, (2, 2))))
+@test load(fn) == Dict("the"=>"quick", "brown"=>"fox", "stuff"=>reshape(1:4, (2, 2)))
+
 # Test load/save with pairs
 save(format"JLD2", fn, "jumps", "over", "the", "lazy", "dog", reshape(1:4, (2, 2)))
 @test load(fn, "jumps", "the", "dog") == ("over", "lazy", reshape(1:4, (2, 2)))
