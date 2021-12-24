@@ -6,7 +6,9 @@ function fileio_save(f::File{format"JLD2"}, dict::AbstractDict; kwargs...)
     jldopen(FileIO.filename(f), "w"; kwargs...) do file
         wsession = JLDWriteSession()
         for (k,v) in dict
-            if !isa(k, AbstractString)
+            if isa(k, Symbol)
+                @warn "you passed a key as a symbol instead of a string, it has been automatically converted"
+            elseif !isa(k, AbstractString)
                 throw(ArgumentError("keys must be strings (the names of variables), got $k"))
             end
             write(file, String(k), v, wsession)
