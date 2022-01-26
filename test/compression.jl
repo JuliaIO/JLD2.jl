@@ -1,5 +1,5 @@
 using JLD2, Test, FileIO
-
+using Pkg: Pkg
 using CodecZlib, CodecBzip2, CodecLz4
 
 
