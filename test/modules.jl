@@ -1,6 +1,4 @@
 push!(LOAD_PATH, joinpath(pwd(),"testmodules/"))
-println(LOAD_PATH)
-
 module TestModule
 
 using A
