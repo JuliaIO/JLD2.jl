@@ -197,11 +197,11 @@ end
 # convert to an array instead.
 const NTUPLE_INLINE_THRESHOLD = 10
 
-function writeas(::Type{NTuple{N,T}}) where {N,T}
+function writeas(NT::Type{NTuple{N,T}}) where {N,T}
     if N > NTUPLE_INLINE_THRESHOLD
         return Vector{T}
     else
-        return NTuple{N,T}
+        return NT
     end
 end
 
