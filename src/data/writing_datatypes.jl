@@ -413,6 +413,17 @@ function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsess
 end
 
 
+# This is a trick to compactly write long NTuple
+# This uses that NTuple{N,T} == Tuple{T,T,T,T,...,T}
+function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::Type{NTuple{N,ET}}, wsession::JLDWriteSession) where {N,ET}
+    store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, "NTuple"), f.datatype_wsession)
+    refs = refs_from_types(f, Any[N,ET], wsession)
+    store_vlen!(out+odr_sizeof(Vlen{UInt8}), RelOffset, f, refs, f.datatype_wsession)
+    nothing
+end
+
+
+
 ## Union Types
 
 const H5TYPE_UNION = CompoundDatatype(
