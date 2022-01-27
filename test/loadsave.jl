@@ -464,3 +464,12 @@ end
 
     rm(tmpdir; force = true, recursive = true)
 end
+
+# Test for saving long NTuples
+@testset "Long NTuples" begin
+    cd(mktempdir()) do
+        tup = ntuple(i->i^2, 5000)
+        jldsave("test.jld2"; tup)
+        @test tup == load_object("test.jld2")
+    end
+end

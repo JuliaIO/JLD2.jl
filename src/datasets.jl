@@ -160,7 +160,7 @@ end
 
 # Most types can only be scalars or arrays
 function read_data(f::JLDFile,
-     rr,
+     @nospecialize(rr),
      read_dataspace::Tuple{ReadDataspace,RelOffset,Int,UInt16},
      attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
 
@@ -315,7 +315,7 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     io = f.io
     data_offset = position(io)
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
-    
+
     seek(io, offset)
     v = construct_array(io, T, Int(ndims))
     n = length(v)
@@ -351,11 +351,11 @@ function write_dataset(
     io = f.io
     datasz = odr_sizeof(odr) * numel(dataspace)
     #layout_class
-    if datasz < 8192 
+    if datasz < 8192
         layout_class = LC_COMPACT_STORAGE
-    elseif compress != false 
-        layout_class = LC_CHUNKED_STORAGE 
-    else 
+    elseif compress != false
+        layout_class = LC_CHUNKED_STORAGE
+    else
         layout_class = LC_CONTIGUOUS_STORAGE
     end
     psz = payload_size_without_storage_message(dataspace, datatype)
@@ -565,7 +565,7 @@ function Base.delete!(g::Group, name::AbstractString)
 
     # Dataset must already exist in the file
     # Retrieve offset of group in file
-    offset = group_offset(g)    
+    offset = group_offset(g)
     offset == NULL_REFERENCE && throw(InternalError("Group could not be found."))
     delete_written_link!(g.f, offset, name)
     delete!(g.written_links, name)
@@ -615,7 +615,7 @@ function delete_written_link!(f::JLDFile, roffset::RelOffset, name::AbstractStri
         while (curpos = position(io)) <= chunk_checksum_offset - 4
             msg = jlread(io, HeaderMessage)
             endpos = curpos + jlsizeof(HeaderMessage) + msg.size
-            
+
             if msg.msg_type == HM_LINK_MESSAGE
                 dataset_name, loffset = read_link(io)
                 if dataset_name == name

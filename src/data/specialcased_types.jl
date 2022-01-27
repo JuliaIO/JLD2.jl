@@ -104,7 +104,7 @@ rconvert(::Type{BigFloat}, x::String) = parse(BigFloat, x)
 
 # Previously it was disallowed to serialize pointers.
 # Due to popular demand and in particular to not error on serializing complex structures
-# that contain non-essential pointers this has been changed to instead 
+# that contain non-essential pointers this has been changed to instead
 # return null pointers.
 writeas(::Type{Ptr{T}}) where {T} = Nothing
 rconvert(::Type{Ptr{T}}, ::Nothing) where {T} = Ptr{T}(0)
@@ -187,3 +187,23 @@ function rconvert(::Type{<:Base.ImmutableDict}, x::Vector{Pair{K,V}}) where {K,V
     end
     d
 end
+
+## NTuples
+# Immutable objects are stored as HDF5 structs and inlined into
+# parent structures. HDF5 only allows typemax(Unt16) bytes
+# for struct description. NTuples are the most common offender for
+# exploding struct size. (e.g. in the form of large StaticArrays)
+# The definitions below prevent inlining of large NTuples and
+# convert to an array instead.
+const NTUPLE_INLINE_THRESHOLD = 10
+
+function writeas(NT::Type{NTuple{N,T}}) where {N,T}
+    if N > NTUPLE_INLINE_THRESHOLD
+        return Vector{T}
+    else
+        return NT
+    end
+end
+
+wconvert(::Type{Vector{T}}, x::NTuple{N,T}) where {N,T} = collect(x)
+rconvert(::Type{NTuple{N,T}}, x::Vector{T}) where {N,T} = NTuple{N,T}(x)
