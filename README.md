@@ -68,7 +68,7 @@ jldsave("example.jld2"; x, a=y, z)
 jldsave("example.jld2"; z=x, x=y, y=z)
 ```
 
-Compression and non-default IO types may be set via positional arguments.
+In the above examples, `;` after the filename is important.Compression and non-default IO types may be set via positional arguments.
 
 ### File interface
 
