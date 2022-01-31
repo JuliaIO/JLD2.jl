@@ -55,7 +55,7 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     data_offset = position(io)
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
     seek(io, offset)
-    v = construct_array(io, InlineUnionEl{T1,T2}, Int(ndims))
+    v = construct_array(io, InlineUnionEl{T1,T2}, Val(Int(ndims)))
     n = length(v)
     seek(io, data_offset)
     if !iszero(filter_id)
