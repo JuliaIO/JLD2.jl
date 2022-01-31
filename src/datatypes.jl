@@ -156,7 +156,7 @@ function jlsizeof(dt::CompoundDatatype)
         # Extra byte for null padding of name
         sz += symbol_length(dt.names[i]) + 1 + jlsizeof(dt.members[i])
     end
-    sz
+    sz::Int
 end
 
 function jlwrite(io::IO, dt::CompoundDatatype)

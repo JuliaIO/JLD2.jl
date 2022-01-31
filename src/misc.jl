@@ -19,7 +19,7 @@ function define_packed(ty::DataType)
                 $(Expr(:new, ty, [:(jlunsafe_load(convert(Ptr{$(ty.types[i])}, p+$(packed_offsets[i]))))
                                    for i = 1:length(packed_offsets)]...))
             end
-            jlsizeof(::Union{$ty,Type{$ty}}) = $sz
+            jlsizeof(::Union{$ty,Type{$ty}}) = $(Int(sz))::Int
         end
     end
 

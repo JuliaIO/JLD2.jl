@@ -167,7 +167,7 @@ rconvert(::Type{Core.SimpleVector}, x::Vector{Any}) = Core.svec(x...)
 ## Dicts
 
 writeas(::Type{Dict{K,V}}) where {K,V} = Vector{Pair{K,V}}
-writeas(::Type{IdDict}) = Vector{Pair{Any,Any}}
+writeas(::Type{IdDict{Any,Any}}) = Vector{Pair{Any,Any}}
 writeas(::Type{Base.ImmutableDict{K,V}}) where {K,V} = Vector{Pair{K,V}}
 wconvert(::Type{Vector{Pair{K,V}}}, x::AbstractDict{K,V}) where {K,V} = collect(x)
 function rconvert(::Type{T}, x::Vector{Pair{K,V}}) where {T<:AbstractDict,K,V}

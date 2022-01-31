@@ -512,17 +512,17 @@ define_packed(ContiguousStorageMessage)
         4, LC_CONTIGUOUS_STORAGE, offset, datasz
     )
 
-@inline function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
+function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
     odr = objodr(x)
-    write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
+    write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)::RelOffset
 end
 
-@inline function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
+function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
     offset = get(wsession.h5offset, objectid(x), RelOffset(0))
     offset != RelOffset(0) ? offset : write_dataset(f, x, wsession)::RelOffset
 end
 
-@inline write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession{Union{}}) =
+write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession{Union{}}) =
     write_dataset(f, x, wsession)
 
 function write_ref(f::JLDFile, x, wsession::JLDWriteSession)

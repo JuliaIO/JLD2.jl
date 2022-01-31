@@ -22,7 +22,7 @@ struct InlineUnionEl{T1,T2}
     InlineUnionEl{T1,T2}(x::T2) where {T1,T2} = new{T1,T2}(UInt8(255), allzeros(T1), x)
 end
 
-Base.convert(::Union, x::InlineUnionEl) = iszero(x.mask) ? x.t1 : x.t2
+#convert2union(::Union, x::InlineUnionEl) = iszero(x.mask) ? x.t1 : x.t2
 # The above convert method is ambiguous for Union{Nothing, Int}
 # in julia v1.0
 convert2union(x::InlineUnionEl) = iszero(x.mask) ? x.t1 : x.t2
@@ -41,7 +41,7 @@ function write_dataset(f::JLDFile, x::Array{T}, wsession::JLDWriteSession, compr
         y = x
     end
     odr = objodr(y)
-    write_dataset(f, WriteDataspace(f, y, odr), h5type(f, y), odr, y, wsession, compress)
+    write_dataset(f, WriteDataspace(f, y, odr), h5type(f, y), odr, y, wsession, compress)::RelOffset
 end
 
 # This function is identical to the one in data.jl
