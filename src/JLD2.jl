@@ -115,6 +115,7 @@ end
 A type encoding both the Julia type `T` and the on-disk (HDF5) representation `ODR`.
 """
 struct ReadRepresentation{T,ODR} end
+Base.eltype(::Type{<:ReadRepresentation{T}}) where T = T
 
 """
     CustomSerialization{T,S}
@@ -173,16 +174,16 @@ mutable struct JLDFile{T<:IO}
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
-    jlh5type::IdDict
-    h5jltype::IdDict
+    jlh5type::IdDict{Any,Any}
+    h5jltype::IdDict{Any,Any}
     jloffset::Dict{RelOffset,WeakRef}
     end_of_data::Int64
     global_heaps::Dict{RelOffset,GlobalHeap}
     global_heap::GlobalHeap
-    loaded_groups::Dict{RelOffset,Group}
+    loaded_groups::Dict{RelOffset,Group{JLDFile{T}}}
     root_group_offset::RelOffset
-    root_group::Group
-    types_group::Group
+    root_group::Group{JLDFile{T}}
+    types_group::Group{JLDFile{T}}
 
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
                         compress,#::Union{Bool,Symbol},
@@ -191,7 +192,7 @@ mutable struct JLDFile{T<:IO}
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             Int64(FILE_HEADER_LENGTH + jlsizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
-            GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group}(), UNDEFINED_ADDRESS)
+            GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group{JLDFile{T}}}(), UNDEFINED_ADDRESS)
         finalizer(jld_finalizer, f)
         f
     end
@@ -261,7 +262,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
             if haskey(OPEN_FILES, rname)
                 ref = OPEN_FILES[rname]
                 f = ref.value
-                if ref.value !== nothing
+                if !isnothing(f)
                     if truncate
                         throw(ArgumentError("attempted to truncate a file that was already open"))
                     elseif !isa(f, JLDFile{iotype})
@@ -295,31 +296,40 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         unlock(OPEN_FILES_LOCK)
     end
     if f.written
-        f.root_group = Group{typeof(f)}(f)
-        f.types_group = Group{typeof(f)}(f)
-    else
-        verify_file_header(f)
-
-        seek(f.io, FILE_HEADER_LENGTH)
-        superblock = jlread(f.io, Superblock)
-        f.end_of_data = superblock.end_of_file_address
-        f.root_group_offset = superblock.root_group_object_header_address
-        f.root_group = load_group(f, superblock.root_group_object_header_address)
-
-        if haskey(f.root_group.written_links, "_types")
-            types_group_offset = f.root_group.written_links["_types"]
-            f.types_group = f.loaded_groups[types_group_offset] = load_group(f, types_group_offset)
-            i = 0
-            for offset in values(f.types_group.written_links)
-                f.datatype_locations[offset] = CommittedDatatype(offset, i += 1)
-            end
-            resize!(f.datatypes, length(f.datatype_locations))
-        else
-            f.types_group = Group{typeof(f)}(f)
+        if f isa JLDFile{MmapIO}
+            f.root_group = Group{JLDFile{MmapIO}}(f)
+            f.types_group =  Group{JLDFile{MmapIO}}(f)
+        elseif f isa JLDFile{IOStream}
+            f.root_group =  Group{JLDFile{IOStream}}(f)
+            f.types_group = Group{JLDFile{IOStream}}(f)
         end
+    else
+        load_file_metadata!(f)
     end
+    return f
+end
 
-    f
+function load_file_metadata!(f)
+    verify_file_header(f)
+
+    seek(f.io, FILE_HEADER_LENGTH)
+    superblock = jlread(f.io, Superblock)
+    f.end_of_data = superblock.end_of_file_address
+    f.root_group_offset = superblock.root_group_object_header_address
+    f.root_group = load_group(f, superblock.root_group_object_header_address)
+
+    if haskey(f.root_group.written_links, "_types")
+        types_group_offset = f.root_group.written_links["_types"]::RelOffset
+        f.types_group = f.loaded_groups[types_group_offset] = load_group(f, types_group_offset)
+        i = 0
+        for (offset::RelOffset) in values(f.types_group.written_links)
+            f.datatype_locations[offset] = CommittedDatatype(offset, i += 1)
+        end
+        resize!(f.datatypes, length(f.datatype_locations))
+    else
+        f.types_group = Group{typeof(f)}(f)
+    end
+    nothing
 end
 
 """
@@ -522,8 +532,12 @@ include("fileio.jl")
 include("compression.jl")
 
 #= if Base.VERSION >= v"1.6.0"
-    include("precompile.jl")
-    _precompile_()
-end =#
+#    include("precompile.jl")
+#    _precompile_()
+#end =#
+#= 
+#if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
+#    include("precompile.jl")
+#end =#
 
 end # module
