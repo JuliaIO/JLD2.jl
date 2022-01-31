@@ -42,7 +42,7 @@ jlsizeof(x) = Base.sizeof(x)
 jlunsafe_store!(p, x) = Base.unsafe_store!(p, x)
 jlunsafe_load(p) = Base.unsafe_load(p)
 
-
+include("julia_compat.jl")
 include("file_header.jl")
 include("Lookup3.jl")
 include("mmapio.jl")
