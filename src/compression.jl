@@ -196,7 +196,7 @@ function read_compressed_array!(v::Array{T}, f::JLDFile{MmapIO},
 
     invoke_again, decompressor = get_decompressor(filter_id)
     if invoke_again
-        return Base.invokelatest(read_compressed_array!, v, f, rr, data_length, filter_id)
+        return Base.invokelatest(read_compressed_array!, v, f, rr, data_length, filter_id)::typeof(v)
     end
     io = f.io
     inptr = io.curptr
@@ -220,7 +220,7 @@ function read_compressed_array!(v::Array{T}, f::JLDFile{IOStream},
                                 ) where {T,RR}
     invoke_again, decompressor = get_decompressor(filter_id)
     if invoke_again
-        return Base.invokelatest(read_compressed_array!, v, f, rr, data_length, filter_id)
+        return Base.invokelatest(read_compressed_array!, v, f, rr, data_length, filter_id)::typeof(v)
     end
     io = f.io
     data_offset = position(io)
