@@ -139,12 +139,12 @@ mutable struct Group{T}
     est_num_entries::Int
     est_link_name_len::Int
     unwritten_links::OrderedDict{String,RelOffset}
-    unwritten_child_groups::OrderedDict{String,Group}
+    unwritten_child_groups::OrderedDict{String,Group{T}}
     written_links::OrderedDict{String,RelOffset}
 
     Group{T}(f; est_num_entries::Int=4, est_link_name_len::Int=8) where T =
         new(f, -1, -1, -1, -1, est_num_entries, est_link_name_len,
-        OrderedDict{String,RelOffset}(), OrderedDict{String,Group}())
+        OrderedDict{String,RelOffset}(), OrderedDict{String,Group{T}}())
 
     Group{T}(f, last_chunk_start_offset, continuation_message_goes_here,
              last_chunk_checksum_offset, next_link_offset,
