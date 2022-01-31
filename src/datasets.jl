@@ -334,9 +334,9 @@ end
 
 
 function payload_size_without_storage_message(dataspace::WriteDataspace, datatype::H5Datatype)
-    sz = 6 + 4 + jlsizeof(dataspace) + 4 + jlsizeof(datatype) + length(dataspace.attributes)*jlsizeof(HeaderMessage)
+    sz = 6 + 4 + jlsizeof(dataspace)::Int + 4 + jlsizeof(datatype) + length(dataspace.attributes)*jlsizeof(HeaderMessage)
     for attr in dataspace.attributes
-        sz += jlsizeof(attr)
+        sz += jlsizeof(attr)::Int
     end
     sz
 end
@@ -352,7 +352,7 @@ function write_dataset(
         compress = f.compress,
         ) where {T,S}
     io = f.io
-    datasz = odr_sizeof(odr) * numel(dataspace)
+    datasz = odr_sizeof(odr)::Int * numel(dataspace)::Int
     #layout_class
     if datasz < 8192
         layout_class = LC_COMPACT_STORAGE
@@ -361,7 +361,7 @@ function write_dataset(
     else
         layout_class = LC_CONTIGUOUS_STORAGE
     end
-    psz = payload_size_without_storage_message(dataspace, datatype)
+    psz = payload_size_without_storage_message(dataspace, datatype)::Int
     if datasz < 8192
         layout_class = LC_COMPACT_STORAGE
         psz += jlsizeof(CompactStorageMessage) + datasz
@@ -369,10 +369,10 @@ function write_dataset(
         # Only now figure out if the compression argument is valid
         invoke_again, filter_id, compressor = get_compressor(compress)
         if invoke_again
-            return Base.invokelatest(write_dataset, f, dataspace, datatype, odr, data, wsession, compress)
+            return Base.invokelatest(write_dataset, f, dataspace, datatype, odr, data, wsession, compress)::RelOffset
         end
         layout_class = LC_CHUNKED_STORAGE
-        psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(filter_id)
+        psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(filter_id::UInt16)
     else
         layout_class = LC_CONTIGUOUS_STORAGE
         psz += jlsizeof(ContiguousStorageMessage)
@@ -416,7 +416,7 @@ end
 
 function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data, wsession::JLDWriteSession) where S
     io = f.io
-    datasz = odr_sizeof(odr) * numel(dataspace)
+    datasz = (odr_sizeof(odr)::Int * numel(dataspace))
     psz = payload_size_without_storage_message(dataspace, datatype)
 
     # The simplest CompactStorageMessage only supports data sets < 2^16
@@ -500,7 +500,7 @@ define_packed(CompactStorageMessage)
             HeaderMessage(HM_DATA_LAYOUT, jlsizeof(CompactStorageMessage) - jlsizeof(HeaderMessage) + datasz, 0),
             4, LC_COMPACT_STORAGE, datasz
     )
-
+    
 struct ContiguousStorageMessage
     hm::HeaderMessage
     version::UInt8

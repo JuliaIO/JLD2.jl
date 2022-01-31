@@ -177,8 +177,11 @@ function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
 end
 
 # Write an HDF5 datatype to the file
-function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::DataType,
-                attributes::WrittenAttribute...)
+function commit(f::JLDFile,
+        @nospecialize(dtype),#::H5Datatype,
+        @nospecialize(writeas::DataType),
+        @nospecialize(readas::DataType),
+        attributes::WrittenAttribute...)
     io = f.io
 
     # This needs to be written this way or type inference gets unhappy...

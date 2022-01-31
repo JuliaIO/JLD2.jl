@@ -99,7 +99,9 @@ function get_compressor(::Bool)
         # - we didn't just load it but the constructor is still not `applicable`.
         #   This happens when a save call wants to compress multiple datasets
         #   and loaded CodecZlib for the first one.
-        return true, Base.invokelatest(get_compressor, true)[2:3]...
+        _, filter_id, compressor = Base.invokelatest(get_compressor, true)
+        filter_id::UInt16
+        return true, filter_id, compressor
     end
     false, COMPRESSOR_TO_ID[:ZlibCompressor], m.ZlibCompressor()
 end
