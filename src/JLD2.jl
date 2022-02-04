@@ -531,13 +531,8 @@ include("inlineunion.jl")
 include("fileio.jl")
 include("compression.jl")
 
-#= if Base.VERSION >= v"1.6.0"
-#    include("precompile.jl")
-#    _precompile_()
-#end =#
-#= 
-#if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
-#    include("precompile.jl")
-#end =#
+if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
+    include("precompile.jl")
+end
 
 end # module
