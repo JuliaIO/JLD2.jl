@@ -252,7 +252,7 @@ function read_empty(rr::ReadRepresentation{T}, f::JLDFile,
     jlread(io, FixedPointDatatype) == h5fieldtype(f, Int64, Int64, Val{true}) || throw(UnsupportedFeatureException())
 
     seek(io, dimensions_attr.data_offset)
-    v = construct_array(io, T, ndims)
+    v = construct_array(io, T, Val(ndims))
     if isconcretetype(T)
         for i = 1:length(v)
             @inbounds v[i] = jlconvert(rr, f, Ptr{Cvoid}(0), header_offset)
@@ -283,30 +283,33 @@ function get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Vect
 end
 
 """
-    construct_array{T}(io::IO, ::Type{T}, ndims::Int)
+    construct_array{T}(io::IO, ::Type{T}, ::Val{ndims})
 
 Construct array by reading `ndims` dimensions from `io`. Assumes `io` has already been
 seeked to the correct position.
 """
-function construct_array(io::IO, ::Type{T}, ndims::Int)::Array{T} where {T}
-    if ndims == 1
-        n = jlread(io, Int64)
-        Vector{T}(undef, n)
-    elseif ndims == 2
-        d2 = jlread(io, Int64)
-        d1 = jlread(io, Int64)
-        Matrix{T}(undef, d1, d2)
-    elseif ndims == 3
-        d3 = jlread(io, Int64)
-        d2 = jlread(io, Int64)
-        d1 = jlread(io, Int64)
-        Array{T,3}(undef, d1, d2, d3)
-    else
-        ds = reverse!(read!(io, Vector{Int64}(undef, ndims)))
-        Array{T}(undef, tuple(ds...))
-    end
+function construct_array(io::IO, ::Type{T}, ::Val{1}) where {T}
+    n = jlread(io, Int64)
+    Vector{T}(undef, n)
 end
 
+function construct_array(io::IO, ::Type{T}, ::Val{2}) where {T}
+    d2 = jlread(io, Int64)
+    d1 = jlread(io, Int64)
+    Matrix{T}(undef, d1, d2)
+end
+
+function construct_array(io::IO, ::Type{T}, ::Val{3}) where {T}
+    d3 = jlread(io, Int64)
+    d2 = jlread(io, Int64)
+    d1 = jlread(io, Int64)
+    Array{T,3}(undef, d1, d2, d3)
+end        
+
+function construct_array(io::IO, ::Type{T}, ::Val{N})::Array{T,N} where {T,N}
+    ds = reverse(ntuple(i->jlread(io, Int64), Val(N)))
+    Array{T,N}(undef, ds...)
+end
 
 function read_array(f::JLDFile, dataspace::ReadDataspace,
                     rr::ReadRepresentation{T,RR}, data_length::Int,
@@ -317,7 +320,7 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
 
     seek(io, offset)
-    v = construct_array(io, T, Int(ndims))
+    v = construct_array(io, T, Val(Int(ndims)))
     n = length(v)
     seek(io, data_offset)
     if filter_id !=0
@@ -331,9 +334,9 @@ end
 
 
 function payload_size_without_storage_message(dataspace::WriteDataspace, datatype::H5Datatype)
-    sz = 6 + 4 + jlsizeof(dataspace) + 4 + jlsizeof(datatype) + length(dataspace.attributes)*jlsizeof(HeaderMessage)
+    sz = 6 + 4 + jlsizeof(dataspace)::Int + 4 + jlsizeof(datatype) + length(dataspace.attributes)*jlsizeof(HeaderMessage)
     for attr in dataspace.attributes
-        sz += jlsizeof(attr)
+        sz += jlsizeof(attr)::Int
     end
     sz
 end
@@ -349,7 +352,7 @@ function write_dataset(
         compress = f.compress,
         ) where {T,S}
     io = f.io
-    datasz = odr_sizeof(odr) * numel(dataspace)
+    datasz = odr_sizeof(odr)::Int * numel(dataspace)::Int
     #layout_class
     if datasz < 8192
         layout_class = LC_COMPACT_STORAGE
@@ -358,7 +361,7 @@ function write_dataset(
     else
         layout_class = LC_CONTIGUOUS_STORAGE
     end
-    psz = payload_size_without_storage_message(dataspace, datatype)
+    psz = payload_size_without_storage_message(dataspace, datatype)::Int
     if datasz < 8192
         layout_class = LC_COMPACT_STORAGE
         psz += jlsizeof(CompactStorageMessage) + datasz
@@ -366,10 +369,10 @@ function write_dataset(
         # Only now figure out if the compression argument is valid
         invoke_again, filter_id, compressor = get_compressor(compress)
         if invoke_again
-            return Base.invokelatest(write_dataset, f, dataspace, datatype, odr, data, wsession, compress)
+            return Base.invokelatest(write_dataset, f, dataspace, datatype, odr, data, wsession, compress)::RelOffset
         end
         layout_class = LC_CHUNKED_STORAGE
-        psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(filter_id)
+        psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(filter_id::UInt16)
     else
         layout_class = LC_CONTIGUOUS_STORAGE
         psz += jlsizeof(ContiguousStorageMessage)
@@ -413,7 +416,7 @@ end
 
 function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data, wsession::JLDWriteSession) where S
     io = f.io
-    datasz = odr_sizeof(odr) * numel(dataspace)
+    datasz = (odr_sizeof(odr)::Int * numel(dataspace))
     psz = payload_size_without_storage_message(dataspace, datatype)
 
     # The simplest CompactStorageMessage only supports data sets < 2^16
@@ -497,7 +500,7 @@ define_packed(CompactStorageMessage)
             HeaderMessage(HM_DATA_LAYOUT, jlsizeof(CompactStorageMessage) - jlsizeof(HeaderMessage) + datasz, 0),
             4, LC_COMPACT_STORAGE, datasz
     )
-
+    
 struct ContiguousStorageMessage
     hm::HeaderMessage
     version::UInt8
@@ -512,17 +515,17 @@ define_packed(ContiguousStorageMessage)
         4, LC_CONTIGUOUS_STORAGE, offset, datasz
     )
 
-@inline function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
+function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
     odr = objodr(x)
-    write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)
+    write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)::RelOffset
 end
 
-@inline function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
+function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
     offset = get(wsession.h5offset, objectid(x), RelOffset(0))
     offset != RelOffset(0) ? offset : write_dataset(f, x, wsession)::RelOffset
 end
 
-@inline write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession{Union{}}) =
+write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession{Union{}}) =
     write_dataset(f, x, wsession)
 
 function write_ref(f::JLDFile, x, wsession::JLDWriteSession)

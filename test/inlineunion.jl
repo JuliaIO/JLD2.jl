@@ -40,14 +40,4 @@ struct Bparam{T}; x::T; end
     u = Union{Float32, Missing}[rand(5,5);]
     save(fn, "u", u)
     @test u == load(fn, "u")
-
-
-
-    # These are tested throughout the regular test suite.
-    # Just adding some more tests to make codecov happy
-
-    iuel = JLD2.InlineUnionEl{Int, Float64}(UInt8(255), 10, 2.0)
-
-    @test 2.0 == convert(Union{Int, Float64}, iuel)
-
 end
