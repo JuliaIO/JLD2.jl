@@ -1,5 +1,6 @@
 module JLD2
-using DataStructures, Reexport
+using OrderedCollections: OrderedDict
+using Reexport
 import Base.sizeof
 using MacroTools
 using Printf
