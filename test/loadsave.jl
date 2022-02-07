@@ -473,3 +473,25 @@ end
         @test tup == load_object("test.jld2")
     end
 end
+
+
+# Test for explicit type remapping
+struct A1
+    x::Int
+end
+
+struct A2
+    x::Int
+end
+
+@testset "Explicit Type remapping" begin
+    cd(mktempdir()) do
+        jldsave("test.jld2", a=A1(42))
+        @test A1(42) == load("test.jld2", "a")
+        @test A2(42) == load("test.jld2", "a"; typemap=Dict("Main.A1" => A2))
+
+        jldsave("test.jld2", a=(A1(42),))
+        @test Tuple{A1} == typeof(load("test.jld2", "a"))
+        @test Tuple{A2} == typeof(load("test.jld2", "a"; typemap=Dict("Main.A1" => A2)))
+    end
+end
