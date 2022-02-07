@@ -302,7 +302,7 @@ jlconvert_canbeuninitialized(::ReadRepresentation{RelOffset,RelOffset}) = false
 @inline function jlconvert(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr,
                            ::RelOffset) where T
     x = load_dataset(f, jlunsafe_load(convert(Ptr{RelOffset}, ptr)))
-    (isa(x, T) ? x : convert(T, x))::T
+    (isa(x, T) ? x : rconvert(T, x))::T
 end
 jlconvert_canbeuninitialized(::ReadRepresentation{T,RelOffset}) where {T} = true
 jlconvert_isinitialized(::ReadRepresentation{T,RelOffset}, ptr::Ptr) where {T} =
