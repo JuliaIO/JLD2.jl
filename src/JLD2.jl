@@ -7,6 +7,7 @@ using FileIO: load, save
 export load, save
 using Requires: @require
 using PrecompileTools: @setup_workload, @compile_workload
+using Serialization: Serialization
 
 export jldopen, @load, @save, save_object, load_object, printtoc
 export jldsave
@@ -506,6 +507,8 @@ include("fileio.jl")
 include("compression.jl")
 include("explicit_datasets.jl")
 include("committed_datatype_introspection.jl")
+include("metadata.jl")
+include("write_blob.jl")
 
 
 if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
