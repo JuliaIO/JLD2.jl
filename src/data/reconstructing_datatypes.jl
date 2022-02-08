@@ -319,8 +319,13 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     params = [p isa Union{Int64,Int32} ? Int(p) : p for p in params]
     hasparams = !isempty(params)
     mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
-    m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
-    m isa UnknownType && return m
+
+    if mypath in keys(f.typemap)
+        m = f.typemap[mypath]
+    else
+        m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
+        m isa UnknownType && return m
+    end
 
     if hasparams
         try
