@@ -495,3 +495,22 @@ end
         @test Tuple{A2} == typeof(load("test.jld2", "a"; typemap=Dict("Main.A1" => A2)))
     end
 end
+
+
+# Not fully initialized mutable types
+mutable struct FirstUninitialized
+    x::Any
+    y::Int
+    FirstUninitialized(y) = (fu=new(); fu.y=y; fu)
+end
+
+@testset "Load incomplete mutable types" begin
+    mktempdir() do folder
+        fu = FirstUninitialized(42)
+        jldsave(joinpath(folder,"test.jld2"); fu)
+        fu_loaded = load(joinpath(folder,"test.jld2"), "fu")
+        @test fu.y == fu_loaded.y
+        @test_throws UndefRefError fu.x
+
+    end
+end
