@@ -59,3 +59,7 @@ This can be useful for performance when one expects to append many additional da
 ## JLD2DebugTools
 
 There is an experimental repository [JLD2DebugTools.jl](https://github.com/JonasIsensee/JLD2DebugTools.jl) that may help with debugging files.
+
+
+## Fallback Behaviour
+By default JLD2 will attempt to open files using the `MmapIO` backend. If that fails, it retries using `IOStream`.
