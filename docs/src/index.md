@@ -174,3 +174,8 @@ julia> f["a"] # a new copy is loaded from the file
  0.0
  0.0
 ```
+
+### Cross-compatibility
+JLD2 tries to write files in a way that allows you to load them on different operating systems and in particular both on 32bit and 64bit systems.
+However, many julia structs may be inherently different on different architectures making this task impossible.
+In particular, moving data from a 64bit system to a 32bit system is only guaranteed to work for basic datatypes.
