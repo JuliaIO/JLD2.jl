@@ -139,3 +139,38 @@ or using slashes as path delimiters:
 ```julia
 @assert load("example.jld2", "mygroup/mystuff") == 42
 ```
+
+
+## Gotchas
+
+### Objects are cached during loading
+JLD2 caches objects during loading. It may give you the same object twice.
+This can lead to surprising results if you edit loaded arrays. Note, the underlying file is not being edited!
+```
+julia> jldsave("demo.jld2", a=zeros(2))
+
+julia> f = jldopen("demo.jld2")
+JLDFile /home/isensee/demo.jld2 (read-only)
+ └─🔢 a
+
+julia> a = f["a"] # bind loaded array to name `a`
+2-element Vector{Float64}:
+ 0.0
+ 0.0
+
+julia> a[1] = 42; # editing the underlying array
+
+julia> f["a"]
+2-element Vector{Float64}:
+ 42.0
+  0.0
+
+julia> a=nothing # remove all references to the loaded array
+
+julia> GC.gc(true) # call GC to remove the cache
+
+julia> f["a"] # a new copy is loaded from the file
+2-element Vector{Float64}:
+ 0.0
+ 0.0
+```
