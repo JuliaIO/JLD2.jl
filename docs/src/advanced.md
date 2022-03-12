@@ -42,3 +42,20 @@ JLDFile /home/jonas/.julia/dev/JLD2/example.jld2 (read-only)
 julia> f["a"]
 A_old(42)
 ```
+
+## Groups - Appending to files
+
+
+Group objects can be constructed with two optional keyword arguments:
+```julia
+g = Group(file;
+          est_num_entries=4
+          est_link_name_len=8)
+```
+
+These determine how much (additional) empty space should be allocated for the group description. (list of entries)
+This can be useful for performance when one expects to append many additional datasets after first writing the file.
+
+## JLD2DebugTools
+
+There is an experimental repository [JLD2DebugTools.jl](https://github.com/JonasIsensee/JLD2DebugTools.jl) that may help with debugging files.
