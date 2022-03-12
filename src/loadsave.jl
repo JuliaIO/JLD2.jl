@@ -82,7 +82,7 @@ macro save(filename, vars...)
                     for vname in names(m; all=true)
                         s = string(vname)
                         if !occursin(r"^_+[0-9]*$", s) # skip IJulia history vars
-                            (s == "##meta#51" || s == "ans") && continue # some docstring container
+                            (startswith(s, "##") || s == "ans") && continue
                             v = getfield(m, vname)
                             if !isa(v, Module)
                                 try
