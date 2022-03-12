@@ -1,4 +1,4 @@
-# Internal & Design
+# Internals & Design
 
 ```@autodocs
 Modules = [JLD2]
