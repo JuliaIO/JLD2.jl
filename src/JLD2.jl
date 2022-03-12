@@ -127,9 +127,16 @@ read as type `S`.
 struct CustomSerialization{T,S} end
 
 """
-    Group{T}
+    Group(file)
 
-JLD group object.
+JLD2 group object. 
+
+## Advanced Usage
+Takes two optional keyword arguments:
+    est_num_entries::Int=4
+    est_link_name_len::Int=8
+These determine how much (additional) empty space should be allocated for the group description. (list of entries)
+This can be useful for performance when one expects to append many additional datasets after first writing the file.
 """
 mutable struct Group{T}
     f::T
@@ -395,7 +402,9 @@ Base.setindex!(f::JLDFile, obj, name::AbstractString) = (f.root_group[name] = ob
 Base.haskey(f::JLDFile, name::AbstractString) = haskey(f.root_group, name)
 Base.isempty(f::JLDFile) = isempty(f.root_group)
 Base.keys(f::JLDFile) = filter!(x->x != "_types", keys(f.root_group))
-Base.keytype(f::JLD2.JLDFile) = String
+Base.keytype(f::JLDFile) = String
+Base.length(f::Union{JLDFile, Group}) = length(keys(f))
+
 Base.get(default::Function, f::Union{JLDFile, Group}, name::AbstractString) =
     haskey(f, name) ? f[name] : default()
 Base.get(f::Union{JLDFile, Group}, name::AbstractString, default) =
