@@ -15,9 +15,9 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.0'
-          - '1.5'
+          - '1.6'
           - '1'
+          - 'nightly'
         os:  [ubuntu-latest, windows-latest, macos-latest] # adjust according to need, e.g. os: [ubuntu-latest] if testing only on linux
         arch:
           - x64
@@ -25,9 +25,6 @@ jobs:
           - os: ubuntu-latest
             version: '1'
             arch: x86
-        exclude:
-          - os: macos-latest
-            version: '1.0'
     steps:
       # Cancel ongoing CI test runs if pushing to branch again before the previous tests
       # have finished

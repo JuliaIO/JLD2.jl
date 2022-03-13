@@ -95,6 +95,10 @@ end
 save(format"JLD2", fn, Dict("the"=>"quick", "brown"=>"fox", "stuff"=>reshape(1:4, (2, 2))))
 @test load(fn) == Dict("the"=>"quick", "brown"=>"fox", "stuff"=>reshape(1:4, (2, 2)))
 
+# Test Dict/save load with symbol keys
+save(format"JLD2", fn, Dict(:the=>"quick", :brown=>"fox", :stuff=>reshape(1:4, (2, 2))))
+@test load(fn) == Dict("the"=>"quick", "brown"=>"fox", "stuff"=>reshape(1:4, (2, 2)))
+
 # Test load/save with pairs
 save(format"JLD2", fn, "jumps", "over", "the", "lazy", "dog", reshape(1:4, (2, 2)))
 @test load(fn, "jumps", "the", "dog") == ("over", "lazy", reshape(1:4, (2, 2)))
@@ -277,7 +281,7 @@ end
     @load fn tup
 
     @test tup == (EmptyImmutable(), EmptyImmutable())
-    
+
     # Test for Recursively Empty struct
     @save fn tup=(EmptyII(EmptyImmutable()), EmptyImmutable())
     @load fn tup
@@ -293,7 +297,7 @@ end
     @load fn ptr
 
     @test ptr == Ptr{Float64}(0)
-    
+
     # Test for pointer inside structure
     @save fn tup=(; ptr = pointer(zeros(5)))
     @load fn tup
@@ -316,7 +320,7 @@ end
     jldopen(fn, "r") do f
         @test f["a"] == 1
         @test f["b"] == 2
-    end 
+    end
 end
 
 # Test for object deletion
@@ -368,5 +372,145 @@ end
     end
     jldopen(fn, "r") do f
         @test !haskey(f, "g")
+    end
+end
+
+## Test for Issue #329
+
+struct SingleUnionallField
+    x::IdDict
+end
+
+@testset "Issue #329" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+    jldsave(fn; a = SingleUnionallField(IdDict()))
+    # Shouldn't throw
+    a = load(fn, "a")
+    @test a isa SingleUnionallField
+    @test a.x isa IdDict{Any,Any}
+end
+
+@testset "Issue #327" begin
+    path = tempname()
+    x = (1,2)
+    JLD2.@save path x
+    @test load(path, "x") === (1,2)
+
+    D = Dict("a"=>"Hazel")
+    JLD2.@save path D
+    @test load(path, "D") == D
+end
+
+
+@testset "Recoverable changes in structs, Issue #354" begin
+    tmpdir = mktempdir()
+    atexit(() -> rm(tmpdir; force = true, recursive = true))
+
+    my_object_filename = joinpath(tmpdir, "my_object.jld2")
+    saving_filename = joinpath(tmpdir, "saving.jl")
+    loading_filename = joinpath(tmpdir, "loading.jl")
+
+    saving_contents = """
+        append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
+        unique!(Base.LOAD_PATH)
+        using JLD2
+        struct A; x::Int; end
+        struct B; a::A; end
+
+        struct C; x::Int; end
+        struct D; c::C; end
+        jldsave("$(my_object_filename)"; b=B(A(42)), d=D(C(42)))
+    """
+
+    loading_contents = """
+        append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
+        unique!(Base.LOAD_PATH)
+        using JLD2, Test
+        struct A; x::Float64; end
+        struct B; a::A; end
+        b = load("$(my_object_filename)", "b")
+        @test b == B(A(42.0))
+
+        struct C; x::Tuple{Int,Int}; end
+        struct D; c::C; end
+        d = load("$(my_object_filename)", "d")
+        # Reconstructed type has correct value
+        @test d.c.x == 42
+        Base.convert(::Type{Tuple{Int,Int}}, x::Int) = (x, 2x)
+
+        d = load("$(my_object_filename)", "d")
+        @test d.c.x == (42, 84)
+    """
+
+    rm(my_object_filename; force = true, recursive = true)
+    rm(saving_filename; force = true, recursive = true)
+    rm(loading_filename; force = true, recursive = true)
+
+    if Sys.iswindows()
+        saving_contents = replace(saving_contents, '\\' => "\\\\")
+        loading_contents = replace(loading_contents, '\\' => "\\\\")
+    end
+
+    write(saving_filename, saving_contents)
+    write(loading_filename, loading_contents)
+
+    saving_cmd = `$(Base.julia_cmd()) $(saving_filename)`
+    loading_cmd = `$(Base.julia_cmd()) $(loading_filename)`
+
+    rm(my_object_filename; force = true, recursive = true)
+
+    @test better_success(saving_cmd)
+    @test better_success(loading_cmd)
+
+    rm(tmpdir; force = true, recursive = true)
+end
+
+# Test for saving long NTuples
+@testset "Long NTuples" begin
+    cd(mktempdir()) do
+        tup = ntuple(i->i^2, 5000)
+        jldsave("test.jld2"; tup)
+        @test tup == load_object("test.jld2")
+    end
+end
+
+
+# Test for explicit type remapping
+struct A1
+    x::Int
+end
+
+struct A2
+    x::Int
+end
+
+@testset "Explicit Type remapping" begin
+    cd(mktempdir()) do
+        jldsave("test.jld2", a=A1(42))
+        @test A1(42) == load("test.jld2", "a")
+        @test A2(42) == load("test.jld2", "a"; typemap=Dict("Main.A1" => A2))
+
+        jldsave("test.jld2", a=(A1(42),))
+        @test Tuple{A1} == typeof(load("test.jld2", "a"))
+        @test Tuple{A2} == typeof(load("test.jld2", "a"; typemap=Dict("Main.A1" => A2)))
+    end
+end
+
+
+# Not fully initialized mutable types
+mutable struct FirstUninitialized
+    x::Any
+    y::Int
+    FirstUninitialized(y) = (fu=new(); fu.y=y; fu)
+end
+
+@testset "Load incomplete mutable types" begin
+    mktempdir() do folder
+        fu = FirstUninitialized(42)
+        jldsave(joinpath(folder,"test.jld2"); fu)
+        fu_loaded = load(joinpath(folder,"test.jld2"), "fu")
+        @test fu.y == fu_loaded.y
+        @test_throws UndefRefError fu.x
+
     end
 end

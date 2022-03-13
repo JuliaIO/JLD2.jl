@@ -38,13 +38,14 @@ Converts a path to a group and name object. If `create` is true, any intermediat
 will be created, and the dataset name will be checked for uniqueness with existing names.
 """
 function pathize(g::Group, name::AbstractString, create::Bool)
+    G = typeof(g)
     if '/' in name
         f = g.f
         dirs = split(name, '/')
 
         # Handles the absolute path case where the name starts with /
         if isempty(first(dirs))
-            g = g.f.root_group
+            g = g.f.root_group::G
             start = 2
         else
             start = 1
@@ -63,18 +64,18 @@ function pathize(g::Group, name::AbstractString, create::Bool)
                     g = g.unwritten_child_groups[dir]
                 elseif create
                     # No group exists, so create a new group
-                    newg = Group{typeof(f)}(f)
+                    newg = G(f)
                     g.unwritten_child_groups[dir] = newg
                     g = newg
                 else
                     throw(KeyError(join(dirs[1:i], '/')))
                 end
             elseif haskey(f.loaded_groups, offset)
-                g = f.loaded_groups[offset]
+                g = f.loaded_groups[offset]::G
             elseif !isgroup(f, offset)
                 throw(ArgumentError("path $(join(dirs[1:i], '/')) points to a dataset, not a group"))
             else
-                g = f.loaded_groups[offset] = load_group(f, offset)
+                g = f.loaded_groups[offset] = load_group(f, offset)::G
             end
         end
 
@@ -85,7 +86,7 @@ function pathize(g::Group, name::AbstractString, create::Bool)
         throw(ArgumentError("a group or dataset named $name is already present within this group"))
     end
 
-    return (g, name)
+    return (g::G, name)
 end
 
 function Base.getindex(g::Group, name::AbstractString)
@@ -145,13 +146,14 @@ function Base.setindex!(g::Group, offset::RelOffset, name::AbstractString)
 end
 
 function Base.haskey(g::Group, name::AbstractString)
+    G = typeof(g)
     if '/' in name
         f = g.f
         dirs = split(name, '/')
 
         # Handles the absolute path case where the name starts with /
         if isempty(first(dirs))
-            g = f.root_group
+            g = f.root_group::G
             start = 2
         else
             start = 1
@@ -167,16 +169,16 @@ function Base.haskey(g::Group, name::AbstractString)
                 if haskey(g.unwritten_child_groups, dir)
                     # It's possible that lookup_offset fails because the group has not yet
                     # been written to the file
-                    g = g.unwritten_child_groups[dir]
+                    g = g.unwritten_child_groups[dir]::G
                 else
                     return false
                 end
             elseif haskey(f.loaded_groups, offset)
-                g = f.loaded_groups[offset]
+                g = f.loaded_groups[offset]::G
             elseif !isgroup(f, offset)
                 return false
             else
-                g = f.loaded_groups[offset] = load_group(f, offset)
+                g = f.loaded_groups[offset] = load_group(f, offset)::G
             end
         end
 
@@ -200,6 +202,8 @@ function Base.keys(g::Group)
     ks
 end
 
+Base.keytype(f::Group) = String
+                
 struct LinkInfo
     version::UInt8
     flags::UInt8

@@ -1,18 +1,3 @@
-function better_success(cmd)
-    fn1, _ = mktemp()
-    fn2, _ = mktemp()
-    try
-       run(pipeline(cmd, stdout=fn1, stderr=fn2))
-    catch
-        println(String(read(fn1)))
-        println(String(read(fn2)))
-        return false
-    end
-    return true
-end
-
-
-
 @testset "Nested modules" begin
     @testset "issue #112 - Random.DSFMT" begin
         tmpdir = mktempdir()
@@ -268,13 +253,6 @@ end
         rm(tmpdir; force = true, recursive = true)
     end
     @testset "issue #154 - type exists in child module but not in parent module" begin
-        original_directory = pwd()
-        tmpdir = mktempdir()
-        atexit(() -> rm(tmpdir; force = true, recursive = true))
-
-        cd(tmpdir)
-        rm("test.jld"; force = true, recursive = true)
-
         code = """
         using JLD2
 
@@ -340,11 +318,9 @@ end
         Test.@test result[1] isa LinearAlgebra.Symmetric{Float64,Array{Float64,2}}
         Test.@test result[2] isa Pkg.Types.PackageSpec
         """
-
-        my_cmd = `$(Base.julia_cmd()) -e $(code)`
-        @test better_success(my_cmd)
-
-        cd(original_directory)
-        rm(tmpdir; force = true, recursive = true)
+        my_cmd = `$(Base.julia_cmd()) --project=$(pwd()) -e $(code)`
+        cd(mktempdir()) do
+            @test better_success(my_cmd)
+        end
     end
 end

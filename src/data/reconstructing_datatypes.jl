@@ -180,7 +180,13 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
             # The on disk representation of T can only be the same as in memory
             # if the offsets are the same, field type on disk (readtype) and in memory (wstype)
             # are the same and if no CustomSerialization is involved
-            samelayout = samelayout && offsets[i] == fieldoffset(T, i) && types[i] === wstype && !(odrs[i] <: CustomSerialization)
+            samelayout = samelayout && 
+                offsets[i] == fieldoffset(T, i) && 
+                types[i] === wstype && 
+                # An OnDiskRepresentation as odr means that something "fixable" went wrong
+                # for this field
+                !(odrs[i] isa OnDiskRepresentation) && 
+                !(odrs[i] <: CustomSerialization)
 
             mapped[dtindex] = true
         end
@@ -313,8 +319,13 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     params = [p isa Union{Int64,Int32} ? Int(p) : p for p in params]
     hasparams = !isempty(params)
     mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
-    m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
-    m isa UnknownType && return m
+
+    if mypath in keys(f.typemap)
+        m = f.typemap[mypath]
+    else
+        m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
+        m isa UnknownType && return m
+    end
 
     if hasparams
         try
@@ -510,15 +521,43 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
 
     blk = Expr(:block)
     args = blk.args
-    if isbitstype(T)
-        # For bits types, we should always inline, because otherwise we'll just
-        # pass a lot of crap around in registers
-        push!(args, Expr(:meta, :inline))
-    elseif T.mutable
+    # Separate treatment for mutable structs for better readability
+    if ismutabletype(T)
         push!(args, quote
             obj = $(Expr(:new, T))
             track_weakref!(f, header_offset, obj)
         end)
+        fn = fieldnames(T)
+        for i = 1:length(types)
+            offset = offsets[i]
+            rtype = types[i]
+            odr = odrs[i]
+    
+            rr = ReadRepresentation{rtype,odr}()
+    
+            fni = QuoteNode(fn[i])
+            ttype = T.types[i]
+            if odr === nothing
+                # Type is not stored or single instance
+                newi = Expr(:new, ttype)
+                push!(args, :(setfield!(obj, $fni, $newi)))                    
+            else
+                loadfield = :(setfield!(obj, $fni, rconvert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype))
+                if jlconvert_canbeuninitialized(rr)
+                    push!(args, :(jlconvert_isinitialized($rr, ptr+$offset) && $(loadfield)))
+                else
+                    push!(args, loadfield)
+                end
+            end
+        end
+    
+        push!(args, (:obj))    
+        return blk
+    end
+    if isbitstype(T)
+        # For bits types, we should always inline, because otherwise we'll just
+        # pass a lot of crap around in registers
+        push!(args, Expr(:meta, :inline))
     end
     fsyms = []
     fn = T === Tuple ? [Symbol(i) for i = 1:length(types)] : fieldnames(T)
@@ -527,10 +566,8 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
         rtype = types[i]
         odr = odrs[i]
 
-        if !T.mutable
-            fsym = Symbol("field_", fn[i])
-            push!(fsyms, fsym)
-        end
+        fsym = Symbol("field_", fn[i])
+        push!(fsyms, fsym)
 
         rr = ReadRepresentation{rtype,odr}()
 
@@ -538,53 +575,38 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
             # Type is not stored or single instance
             if T.types[i] == Union{}
                 # This cannot be defined
-                @assert !T.mutable
+                @assert !ismutabletype(T)
                 push!(args, Expr(:return, Expr(:new, T, fsyms[1:i-1]...)))
                 return blk
             else
                 newi = Expr(:new, T.types[i])
-                if T.mutable
-                    fni = QuoteNode(fn[i])
-                    push!(args, :(setfield!(obj, $fni, $newi)))
-                else
-                    push!(args, :($fsym = $newi))
-                end
+                push!(args, :($fsym = $newi))
             end
         else
             if jlconvert_canbeuninitialized(rr)
                 push!(args, quote
                     if !jlconvert_isinitialized($rr, ptr+$offset)
-                        $(if T <: Tuple || i <= T.ninitialized
+                        $(if T <: Tuple || i <= ninitialized(T)
                             # Reference must always be initialized
                             :(throw(UndefinedFieldException(T,$(QuoteNode(fn[i])))))
-                        elseif T.mutable
-                            # Reference could be uninitialized
-                            :(return obj)
                         else
                             Expr(:return, Expr(:new, T, fsyms[1:i-1]...))
                         end)
                     end
                 end)
             end
-
             if T === Tuple
                 # Special case for reconstructed tuples, where we don't know the
                 # field types in advance
                 push!(args, :($fsym = jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype))
             else
                 ttype = T.types[i]
-                fni = QuoteNode(fn[i])
-                if T.mutable
-                    push!(args, :(setfield!(obj, $fni,
-                                            convert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype)))
-                else
-                    push!(args, :($fsym = convert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype))
-                end
+                push!(args, :($fsym = rconvert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype))
             end
         end
     end
 
-    push!(args, T.mutable ? (:obj) : T <: Tuple ? Expr(:tuple, fsyms...) : Expr(:new, T, fsyms...))
+    push!(args, T <: Tuple ? Expr(:tuple, fsyms...) : Expr(:new, T, fsyms...))
 
     blk
 end

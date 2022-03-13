@@ -1,4 +1,4 @@
-function jldopen(f::Function, args...; kws...)
+function jldopen(@nospecialize(f::Function), args...; kws...)
     jld = jldopen(args...; kws...)
     try
         return f(jld)
@@ -82,6 +82,7 @@ macro save(filename, vars...)
                     for vname in names(m; all=true)
                         s = string(vname)
                         if !occursin(r"^_+[0-9]*$", s) # skip IJulia history vars
+                            (startswith(s, "##") || s == "ans") && continue
                             v = getfield(m, vname)
                             if !isa(v, Module)
                                 try
@@ -203,7 +204,7 @@ To load the only object from the JLD2 file example.jld2:
 
     hello = "world"
     save_object("example.jld2", hello)
-    hello_loaded = load_object("example.jl2")
+    hello_loaded = load_object("example.jld2")
 """
 function load_object(filename)
   jldopen(filename, "r") do file

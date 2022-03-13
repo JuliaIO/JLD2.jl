@@ -21,7 +21,7 @@ odr_sizeof(::ReadRepresentation{T,S}) where {T,S} = odr_sizeof(S)
     T = T::DataType
     T in encounteredtypes && return true
     push!(encounteredtypes, T)
-    (T.mutable || T <: Type) && return true
+    (ismutabletype(T) || T <: Type) && return true
     hasdata(T, encounteredtypes)
 end
 
@@ -68,7 +68,7 @@ fieldnames(@nospecialize x) = collect(Base.fieldnames(x))
         elseif isa(T, DataType)
             if isbitstype(T)
                 return :(odr(T))
-            elseif !T.mutable
+            elseif !ismutabletype(T)
                 return :(initialized ? odr(T) : RelOffset)
             end
         end
@@ -83,7 +83,7 @@ end
     if isconcretetype(T)
         if !hasfielddata(T)
             return nothing
-        elseif isbitstype(T) || (isa(initialized, Type{Type{Val{true}}}) && !T.mutable)
+        elseif isbitstype(T) || (isa(initialized, Type{Type{Val{true}}}) && !ismutabletype(T))
             return quote
                 @lookup_committed f T
                 $(if isempty(T.types)
@@ -146,7 +146,7 @@ function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
         fieldty = types[i]
         fieldwrittenas = writeas(fieldty)
         !hasfielddata(fieldwrittenas) && continue
-        dtype = h5fieldtype(f, fieldwrittenas, fieldty, Val{i <= writtenas.ninitialized})
+        dtype = h5fieldtype(f, fieldwrittenas, fieldty, Val{i <= ninitialized(writtenas)})
         dtype === nothing && continue
         push!(h5names, names[i])
         if isa(dtype, CommittedDatatype)
@@ -177,8 +177,11 @@ function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
 end
 
 # Write an HDF5 datatype to the file
-function commit(f::JLDFile, dtype::H5Datatype, writeas::DataType, readas::DataType,
-                attributes::WrittenAttribute...)
+function commit(f::JLDFile,
+        @nospecialize(dtype),#::H5Datatype,
+        @nospecialize(writeas::DataType),
+        @nospecialize(readas::DataType),
+        attributes::WrittenAttribute...)
     io = f.io
 
     # This needs to be written this way or type inference gets unhappy...
@@ -237,7 +240,7 @@ h5convert!(out::Pointers, ::Type{T}, ::JLDFile, x, ::JLDWriteSession) where {T} 
 
         offset = Offsets[i]
         conv = :(h5convert!(out+$offset, $(member), file, convert($(types[i]), $getindex_fn(x, $i)), wsession))
-        if i > T.ninitialized && (!isconcretetype(x.types[i]) || !isbitstype(x.types[i]))
+        if i > ninitialized(T) && (!isconcretetype(x.types[i]) || !isbitstype(x.types[i]))
             push!(args, quote
                 if !isdefined(x, $i)
                     h5convert_uninitialized!(out+$offset, $(member))
@@ -299,7 +302,7 @@ jlconvert_canbeuninitialized(::ReadRepresentation{RelOffset,RelOffset}) = false
 @inline function jlconvert(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr,
                            ::RelOffset) where T
     x = load_dataset(f, jlunsafe_load(convert(Ptr{RelOffset}, ptr)))
-    (isa(x, T) ? x : convert(T, x))::T
+    (isa(x, T) ? x : rconvert(T, x))::T
 end
 jlconvert_canbeuninitialized(::ReadRepresentation{T,RelOffset}) where {T} = true
 jlconvert_isinitialized(::ReadRepresentation{T,RelOffset}, ptr::Ptr) where {T} =
@@ -413,6 +416,22 @@ function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsess
 end
 
 
+# This is a trick to compactly write long NTuple
+# This uses that NTuple{N,T} == Tuple{T,T,T,T,...,T}
+function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::Type{NTuple{N,ET}}, wsession::JLDWriteSession) where {N,ET}
+    if isempty(T.parameters)
+        store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, "Tuple"), f.datatype_wsession)
+        h5convert_uninitialized!(out+odr_sizeof(Vlen{UInt8}), Vlen{UInt8})
+    else
+        store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, "NTuple"), f.datatype_wsession)
+        refs = refs_from_types(f, Any[N,ET], wsession)
+        store_vlen!(out+odr_sizeof(Vlen{UInt8}), RelOffset, f, refs, f.datatype_wsession)
+    end
+    nothing
+end
+
+
+
 ## Union Types
 
 const H5TYPE_UNION = CompoundDatatype(
@@ -511,7 +530,7 @@ end
 newstruct(T) = ccall(:jl_new_struct_uninit, Any, (Any,), T)
 
 function newstruct(T, fields)
-    if !T.mutable
+    if !ismutabletype(T)
         return ccall(:jl_new_structv, Any, (Any,Ptr{Cvoid},UInt32), T, fields, length(fields))
     else
         # Manual inline of newstruct! to work around bug
@@ -554,8 +573,6 @@ function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
     return newstruct(T, fields)::T
 end
 
-
-
 # odr gives the on-disk representation of a given type, similar to
 # fieldodr, but actually encoding the data for things that odr stores
 # as references
@@ -575,7 +592,7 @@ function odr(::Type{T}) where T
     for i = 1:length(T.types)
         ty = T.types[i]
         writtenas = writeas(ty)
-        fodr = fieldodr(writtenas, i <= T.ninitialized)
+        fodr = fieldodr(writtenas, i <= ninitialized(T))
         if writtenas !== ty && fodr !== nothing
             odrs[i] = CustomSerialization{writtenas,fodr}
         else

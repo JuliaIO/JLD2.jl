@@ -22,7 +22,7 @@ struct InlineUnionEl{T1,T2}
     InlineUnionEl{T1,T2}(x::T2) where {T1,T2} = new{T1,T2}(UInt8(255), allzeros(T1), x)
 end
 
-Base.convert(::Union, x::InlineUnionEl) = iszero(x.mask) ? x.t1 : x.t2
+#convert2union(::Union, x::InlineUnionEl) = iszero(x.mask) ? x.t1 : x.t2
 # The above convert method is ambiguous for Union{Nothing, Int}
 # in julia v1.0
 convert2union(x::InlineUnionEl) = iszero(x.mask) ? x.t1 : x.t2
@@ -41,7 +41,7 @@ function write_dataset(f::JLDFile, x::Array{T}, wsession::JLDWriteSession, compr
         y = x
     end
     odr = objodr(y)
-    write_dataset(f, WriteDataspace(f, y, odr), h5type(f, y), odr, y, wsession, compress)
+    write_dataset(f, WriteDataspace(f, y, odr), h5type(f, y), odr, y, wsession, compress)::RelOffset
 end
 
 # This function is identical to the one in data.jl
@@ -55,8 +55,7 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     data_offset = position(io)
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
     seek(io, offset)
-    v = construct_array(io, InlineUnionEl{T1,T2}, Int(ndims))
-    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
+    v = construct_array(io, InlineUnionEl{T1,T2}, Val(Int(ndims)))
     n = length(v)
     seek(io, data_offset)
     if !iszero(filter_id)
@@ -67,5 +66,7 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
 
     # Union{T1, T2}[v;]
     # The above syntax is not compatible to julia v1.0
-    Union{T1, T2}[convert2union.(v);]
+    u = Union{T1, T2}[convert2union.(v);]
+    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(u))
+    return u
 end

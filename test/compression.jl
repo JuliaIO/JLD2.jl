@@ -1,5 +1,5 @@
 using JLD2, Test, FileIO
-
+using Pkg: Pkg
 using CodecZlib, CodecBzip2, CodecLz4
 
 
@@ -40,7 +40,7 @@ end
 
     randomdata = repeat(rand(2000), 10)
     @save fn {compress=LZ4FrameCompressor()} randomdata
-    
+
     r = jldopen(f -> f["randomdata"], fn, "r")
     @test r == randomdata
 end
@@ -52,5 +52,23 @@ end
 
     jldopen(fn, "w") do f
         @test_throws ArgumentError write(f, "x", zeros(10); compress = π)
+    end
+end
+
+
+@testset "issue #368 - dynamically loaded CodecZlib" begin
+    testprojectpath = Pkg.project().path
+    # Simply test if this fails
+    code = """
+    using JLD2
+
+    N = 100
+    a = (rand(N, N), rand(N, N))
+    save("test.jld2", "a", a; compress = true)
+    """
+
+    cd(mktempdir()) do
+        my_cmd = `$(Base.julia_cmd()) --project=$(testprojectpath) -e $(code)`
+        @test better_success(my_cmd)
     end
 end

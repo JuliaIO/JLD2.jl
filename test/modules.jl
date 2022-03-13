@@ -1,5 +1,4 @@
-push!(LOAD_PATH, pwd())
-
+push!(LOAD_PATH, joinpath(pwd(),"testmodules/"))
 module TestModule
 
 using A
@@ -14,7 +13,7 @@ S = BType(x)
 @testset "save and load" begin
 	T = deepcopy(S)
 	@test T == S
-	fn = joinpath(mktempdir(), "test_out.jld")	
+	fn = joinpath(mktempdir(), "test_out.jld")
 	@save fn T
 	T = nothing
 	@load fn T

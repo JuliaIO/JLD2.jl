@@ -16,6 +16,7 @@ makedocs(;
     "Compression" => "compression.md",
 	"Internals & Design" => "internals.md",
 	"HDF5 Compatibility" => "hdf5compat.md",
+    "Advanced Usage" => "advanced.md",
     "Legacy" => "legacy.md",
     	],
     )
