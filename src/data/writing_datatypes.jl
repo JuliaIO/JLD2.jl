@@ -508,7 +508,7 @@ end
 
 ## UnionAll
 
-const UnionAllODR = OnDiskRepresentation{(0, 8),Tuple{TypeVar,Any},Tuple{JLD2.RelOffset,JLD2.RelOffset}}
+const UnionAllODR = OnDiskRepresentation{(0, 8),Tuple{TypeVar,Any},Tuple{RelOffset,RelOffset}}
 
 # This needs its own h5convert! method, since otherwise we will attempt to specialize the
 # generic h5convert! method for the specific UnionAll type rather than for UnionAll

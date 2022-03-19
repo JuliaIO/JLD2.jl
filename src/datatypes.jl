@@ -2,6 +2,9 @@
 # Datatypes
 #
 
+# Datatype is encoded in the lower four bytes (0-10)
+# upper four bytes encode variant used. JLD2 always uses variant 3
+# detail in the hdf5 format spec
 const DT_FIXED_POINT = UInt8(0) | (UInt8(3) << 4)
 const DT_FLOATING_POINT = UInt8(1) | (UInt8(3) << 4)
 const DT_TIME = UInt8(2) | (UInt8(3) << 4)
@@ -13,6 +16,19 @@ const DT_REFERENCE = UInt8(7) | (UInt8(3) << 4)
 const DT_ENUMERATED = UInt8(8) | (UInt8(3) << 4)
 const DT_VARIABLE_LENGTH = UInt8(9) | (UInt8(3) << 4)
 const DT_ARRAY = UInt8(10) | (UInt8(3) << 4)
+
+const DATATYPES = Dict{UInt8, String}(
+    0 => "DT_FIXED_POINT",
+    1 => "DT_FLOATING_POINT",
+    2 => "DT_TIME",
+    3 => "DT_STRING",
+    4 => "DT_BITFIELD",
+    5 => "DT_OPAQUE",
+    6 => "DT_COMPOUND",
+    7 => "DT_REFERENCE",
+    8 => "DT_ENUMERATED",
+    9 => "DT_VARIABLE_LENGTH",
+    10=> "DT_ARRAY")
 
 # This is the description for:
 #    Strings
@@ -33,6 +49,15 @@ OpaqueDatatype(size::Integer) =
 ReferenceDatatype() =
     BasicDatatype(DT_REFERENCE, 0x00, 0x00, 0x00, jlsizeof(RelOffset))
 
+function Base.:(==)(dt1::BasicDatatype, dt2::BasicDatatype)
+    ret = true
+    ret &= (dt1.class << 4) == (dt2.class << 4)
+    ret &= dt1.bitfield1 == dt2.bitfield1
+    ret &= dt1.bitfield2 == dt2.bitfield2
+    ret &= dt1.bitfield3 == dt2.bitfield3
+    ret &= dt1.size == dt2.size
+    ret
+end
 # Reads a datatype message and returns a (offset::RelOffset, class::UInt8)
 # tuple. If the datatype is committed, the offset is the offset of the
 # committed datatype and the class is typemax(UInt8). Otherwise, the
@@ -46,7 +71,8 @@ function read_datatype_message(io::IO, f::JLDFile, committed)
         (typemax(UInt8), Int64(fileoffset(f, jlread(io, RelOffset))))
     else
         # Datatype stored here
-        (jlread(io, UInt8), Int64(position(io)-1))
+        class = jlread(io, UInt8)
+        (class, Int64(position(io)-1))
     end
 end
 
@@ -81,7 +107,7 @@ macro read_datatype(io, datatype_class, datatype, then)
         elseif $datatype_class == DT_BITFIELD
             $(replace_expr(then, datatype, :(jlread($io, BitFieldDatatype))))
         else
-            throw(UnsupportedFeatureException())
+            throw(UnsupportedFeatureException("invalid datatype class $datatype_class"))
         end
     end)
 end
@@ -130,6 +156,23 @@ end
 define_packed(FloatingPointDatatype)
 
 class(dt::Union{BasicDatatype,FixedPointDatatype,FloatingPointDatatype}) = dt.class
+
+function Base.:(==)(fp1::FloatingPointDatatype, fp2::FloatingPointDatatype)
+    ret = true
+    ret &= (fp1.class << 4) == (fp2.class << 4) # compare only class and not version
+    ret &= fp1.bitfield1 == fp2.bitfield1
+    ret &= fp1.bitfield2 == fp2.bitfield2
+    ret &= fp1.bitfield3 == fp2.bitfield3
+    ret &= fp1.size == fp2.size
+    ret &= fp1.bitoffset == fp2.bitoffset
+    ret &= fp1.bitprecision == fp2.bitprecision
+    ret &= fp1.exponentlocation == fp2.exponentlocation
+    ret &= fp1.exponentsize == fp2.exponentsize
+    ret &= fp1.mantissalocation == fp2.mantissalocation
+    ret &= fp1.mantissasize == fp2.mantissasize
+    ret &= fp1.exponentbias == fp2.exponentbias
+    ret
+end
 
 struct CompoundDatatype <: H5Datatype
     size::UInt32
@@ -290,7 +333,7 @@ function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
     io = f.io
     seek(io, fileoffset(f, cdt.header_offset))
     cio = begin_checksum_read(io)
-    sz = read_obj_start(cio)
+    sz, = read_obj_start(cio)
     pmax = position(cio) + sz
 
     # Messages

@@ -25,15 +25,15 @@ odr(::Type{String}) = fieldodr(String, true)
 objodr(x::String) = FixedLengthString{String}(jlsizeof(x))
 
 function jltype(f::JLDFile, dt::BasicDatatype)
-    if dt.class == DT_STRING
+    if dt.class << 4 == DT_STRING  << 4
         if (dt.bitfield1 == 0x01 || dt.bitfield1 == 0x11) && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
             return FixedLengthString{String}(dt.size)
         else
             throw(UnsupportedFeatureException())
         end
-    elseif dt.class == DT_OPAQUE
+    elseif dt.class << 4 == DT_OPAQUE  << 4
         error("attempted to read a bare (non-committed) opaque datatype")
-    elseif dt.class == DT_REFERENCE
+    elseif dt.class << 4 == DT_REFERENCE  << 4
         return ReadRepresentation{Any,RelOffset}()
     else
         throw(UnsupportedFeatureException())

@@ -49,13 +49,13 @@ include("Lookup3.jl")
 include("mmapio.jl")
 include("bufferedio.jl")
 include("misc.jl")
+include("superblock.jl")
 
 """
     RelOffset
 
 Represents an HDF5 relative offset. This differs from a file offset (used elsewhere) in
-that it is relative to the superblock base address. In practice, this means that
-`FILE_HEADER_LENGTH `has been subtracted. `fileoffset` and `h5offset` convert between
+that it is relative to the superblock base address. `fileoffset` and `h5offset` convert between
 `RelOffsets` and file offsets.
 """
 struct RelOffset
@@ -64,6 +64,7 @@ end
 define_packed(RelOffset)
 Base.:(==)(x::RelOffset, y::RelOffset) = x === y
 Base.hash(x::RelOffset) = hash(x.offset)
+Base.:(+)(x::RelOffset, y::Integer) = RelOffset(UInt64(x.offset + y))
 
 const UNDEFINED_ADDRESS = RelOffset(0xffffffffffffffff)
 const NULL_REFERENCE = RelOffset(0)
@@ -166,6 +167,8 @@ mutable struct Group{T}
             written_links)
 end
 
+
+
 """
     JLDFile{T<:IO}
 
@@ -193,6 +196,7 @@ mutable struct JLDFile{T<:IO}
     root_group_offset::RelOffset
     root_group::Group{JLDFile{T}}
     types_group::Group{JLDFile{T}}
+    base_address::UInt64
 
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
                         compress,#::Union{Bool,Symbol},
@@ -200,7 +204,7 @@ mutable struct JLDFile{T<:IO}
         f = new(io, path, writable, written, compress, mmaparrays, 1,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), Dict{String,Any}(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
-            Int64(FILE_HEADER_LENGTH + jlsizeof(Superblock)), Dict{RelOffset,GlobalHeap}(),
+            DATA_START, Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group{JLDFile{T}}}(), UNDEFINED_ADDRESS)
         finalizer(jld_finalizer, f)
         f
@@ -214,14 +218,14 @@ JLDFile(io::IO, path::AbstractString, writable::Bool, written::Bool, compress, m
 
 Converts an offset `x` relative to the superblock of file `f` to an absolute offset.
 """
-fileoffset(f::JLDFile, x::RelOffset) = Int64(x.offset + FILE_HEADER_LENGTH)
+fileoffset(f::JLDFile, x::RelOffset) = Int64(x.offset + f.base_address)
 
 """
-    h5offset(f::JLDFile, x::RelOffset)
+    h5offset(f::JLDFile, x::Integer)
 
 Converts an absolute file offset `x` to an offset relative to the superblock of file `f`.
 """
-h5offset(f::JLDFile, x::Int64) = RelOffset(x - FILE_HEADER_LENGTH)
+h5offset(f::JLDFile, x::Integer) = RelOffset(Int(x - f.base_address))
 
 #
 # File
@@ -306,6 +310,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         unlock(OPEN_FILES_LOCK)
     end
     if f.written
+        f.base_address = 512
         if f isa JLDFile{MmapIO}
             f.root_group = Group{JLDFile{MmapIO}}(f)
             f.types_group =  Group{JLDFile{MmapIO}}(f)
@@ -321,13 +326,20 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
 end
 
 function load_file_metadata!(f)
-    verify_file_header(f)
-
-    seek(f.io, FILE_HEADER_LENGTH)
-    superblock = jlread(f.io, Superblock)
+    superblock = find_superblock(f)
     f.end_of_data = superblock.end_of_file_address
+    f.base_address = superblock.base_address
     f.root_group_offset = superblock.root_group_object_header_address
-    f.root_group = load_group(f, superblock.root_group_object_header_address)
+    if superblock.version >= 2
+        verify_file_header(f)
+    else
+        @warn "This file was not written with JLD2. Some things may not work."
+        if f.writable
+            close(f)
+            throw(UnsupportedVersionException("This file can not be edited by JLD2. Please open in read-only mode."))
+        end
+    end
+    f.root_group = load_group(f, f.root_group_offset)
 
     if haskey(f.root_group.written_links, "_types")
         types_group_offset = f.root_group.written_links["_types"]::RelOffset
@@ -442,15 +454,7 @@ function Base.close(f::JLDFile)
             f.root_group_offset = res
         end
 
-        # Write JLD2 header
-        seek(io, 0)
-        jlwrite(io, FILE_HEADER)
-
-        # Write superblock
-        seek(io, FILE_HEADER_LENGTH)
-        jlwrite(io, Superblock(0, FILE_HEADER_LENGTH, UNDEFINED_ADDRESS,
-              f.end_of_data, f.root_group_offset))
-
+        write_file_header(f)
         truncate_and_close(io, f.end_of_data)
     else
         close(io)
@@ -520,7 +524,6 @@ printtoc(io::IO, f::JLDFile; numlines = typemax(Int64)) =
 
 
 
-include("superblock.jl")
 include("object_headers.jl")
 include("groups.jl")
 include("dataspaces.jl")
@@ -528,6 +531,7 @@ include("attributes.jl")
 include("datatypes.jl")
 include("datasets.jl")
 include("global_heaps.jl")
+include("fractal_heaps.jl")
 
 include("data/type_defs.jl")
 include("data/specialcased_types.jl")
@@ -548,4 +552,4 @@ if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the pac
     include("precompile.jl")
 end
 
-end # module
+end

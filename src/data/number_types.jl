@@ -21,7 +21,7 @@ end
 
 
 function jltype(f::JLDFile, dt::FixedPointDatatype)
-    signed = dt.bitfield1 == 0x08 ? true : dt.bitfield1 == 0x00 ? false : throw(UnsupportedFeatureException())
+    signed = dt.bitfield1 == 0x08 ? true : dt.bitfield1 == 0x00 ? false : throw(UnsupportedFeatureException("Invalid Bit field 1"))
     ((dt.bitfield2 == 0x00) & (dt.bitfield3 == 0x00) & (dt.bitoffset == 0) & (dt.bitprecision == dt.size*8)) ||
         throw(UnsupportedFeatureException())
     if dt.size == 8

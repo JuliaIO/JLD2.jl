@@ -19,6 +19,10 @@ const LEGACY_REQUIRED_FILE_HEADER = "Julia data file (HDF5), version 0.2.0"
 function verify_file_header(f)
     io = f.io
     fname = f.path
+    if f.base_address != FILE_HEADER_LENGTH
+        @warn "File likely not written by JLD2. Skipping header verification."
+        return
+    end
     seek(io, 0)
     headermsg = String(read!(io, Vector{UInt8}(undef, length(REQUIRED_FILE_HEADER))))
     if headermsg != REQUIRED_FILE_HEADER
@@ -39,4 +43,16 @@ function verify_file_header(f)
         @warn("""This file was written with a different version of JLD2 that may not be compatible.
          Attempting to load data.""", maxlog=1)
     end
+end
+
+function write_file_header(f)
+    io = f.io
+    if f.base_address >= FILE_HEADER_LENGTH
+        seek(io, f.base_address - FILE_HEADER_LENGTH)
+        jlwrite(io, FILE_HEADER)
+    end
+    # Write superblock
+    seek(io, f.base_address)
+    write_superblock(io,f)
+    return nothing
 end

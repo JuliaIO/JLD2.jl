@@ -16,9 +16,20 @@ function load_dataset(f::JLDFile, offset::RelOffset)
 
     io = f.io
     seek(io, fileoffset(f, offset))
-    cio = begin_checksum_read(io)
-    sz = read_obj_start(cio)
-    pmax = position(cio) + sz
+     # Version 1 object header have no signature and start with version
+    header_version = jlread(io, UInt8)
+    seek(io, fileoffset(f, offset))
+    if header_version == 1
+        cio = io
+        sz, = read_obj_start(cio)
+        chunk_end = position(cio) + obj_header_size
+        # Skip to nearest 8byte aligned position
+        skip_to_aligned!(cio, fileoffset(f, offset))
+    else
+        cio = begin_checksum_read(io)
+        sz, = read_obj_start(cio)
+        chunk_end = position(cio) + sz #- 4
+    end
 
     # Messages
     dataspace = ReadDataspace()
@@ -29,39 +40,55 @@ function load_dataset(f::JLDFile, offset::RelOffset)
     data_length::Int = -1
     chunked_storage::Bool = false
     filter_id::UInt16 = 0
-    while position(cio) <= pmax-4
-        msg = jlread(cio, HeaderMessage)
-        endpos = position(cio) + msg.size
+    while position(cio) <= chunk_end-4
+        if header_version == 1
+            # Message start 8byte aligned relative to object start
+            skip_to_aligned!(cio, fileoffset(f, offset))
+            # Version 1 header message is padded
+            skip(cio, 1) # first byte strictly part of of msg_type but always zero
+            msg = jlread(cio, HeaderMessage)
+            skip(cio, 3)
+            endpos = position(cio) + msg.size
+        else # header_version == 2
+            msg = jlread(cio, HeaderMessage)
+            endpos = position(cio) + msg.size
+        end
         if msg.msg_type == HM_DATASPACE
             dataspace = read_dataspace_message(cio)
         elseif msg.msg_type == HM_DATATYPE
             datatype_class, datatype_offset = read_datatype_message(cio, f, (msg.flags & 2) == 2)
+        elseif msg.msg_type == HM_FILL_VALUE_OLD
+            # don't know what to do with these
+            # ignore for now
         elseif msg.msg_type == HM_FILL_VALUE
-            (jlread(cio, UInt8) == 3 && jlread(cio, UInt8) == 0x09) || throw(UnsupportedFeatureException())
+            # don't know what to do with these
+            # ignore for now
         elseif msg.msg_type == HM_DATA_LAYOUT
-            jlread(cio, UInt8) == 4 || throw(UnsupportedVersionException())
-            storage_type = jlread(cio, UInt8)
-            if storage_type == LC_COMPACT_STORAGE
-                data_length = jlread(cio, UInt16)
-                data_offset = position(cio)
-            elseif storage_type == LC_CONTIGUOUS_STORAGE
-                data_offset = fileoffset(f, jlread(cio, RelOffset))
-                data_length = jlread(cio, Length)
-            elseif storage_type == LC_CHUNKED_STORAGE
-                # TODO: validate this
-                flags = jlread(cio, UInt8)
-                dimensionality = jlread(cio, UInt8)
-                dimensionality_size = jlread(cio, UInt8)
-                skip(cio, Int(dimensionality)*Int(dimensionality_size))
+            version = jlread(cio, UInt8)
+            if version == 4 || version == 3
+                storage_type = jlread(cio, UInt8)
+                if storage_type == LC_COMPACT_STORAGE
+                    data_length = jlread(cio, UInt16)
+                    data_offset = position(cio)
+                elseif storage_type == LC_CONTIGUOUS_STORAGE
+                    data_offset = fileoffset(f, jlread(cio, RelOffset))
+                    data_length = jlread(cio, Length)
+                elseif storage_type == LC_CHUNKED_STORAGE
+                    # TODO: validate this
+                    flags = jlread(cio, UInt8)
+                    dimensionality = jlread(cio, UInt8)
+                    dimensionality_size = jlread(cio, UInt8)
+                    skip(cio, Int(dimensionality)*Int(dimensionality_size))
 
-                chunk_indexing_type = jlread(cio, UInt8)
-                chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
-                data_length = jlread(cio, Length)
-                jlread(cio, UInt32)
-                data_offset = fileoffset(f, jlread(cio, RelOffset))
-                chunked_storage = true
-            else
-                throw(UnsupportedFeatureException("Unknown data layout"))
+                    chunk_indexing_type = jlread(cio, UInt8)
+                    chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
+                    data_length = jlread(cio, Length)
+                    jlread(cio, UInt32)
+                    data_offset = fileoffset(f, jlread(cio, RelOffset))
+                    chunked_storage = true
+                else
+                    throw(UnsupportedFeatureException("Unknown data layout"))
+                end
             end
         elseif msg.msg_type == HM_FILTER_PIPELINE
             version = jlread(cio, UInt8)
@@ -81,13 +108,13 @@ function load_dataset(f::JLDFile, offset::RelOffset)
         end
         seek(cio, endpos)
     end
-    seek(cio, pmax)
+    seek(cio, chunk_end)
 
     filter_id != 0 && !chunked_storage && throw(InvalidDataException("Compressed data must be chunked"))
-
-    # Checksum
-    end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException("Invalid Checksum"))
-
+    if header_version == 2
+        # Checksum
+        end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException("Invalid Checksum"))
+    end
     # TODO verify that data length matches
     val = read_data(f, dataspace, datatype_class, datatype_offset, data_offset, data_length,
                     filter_id, offset, attrs)
@@ -114,7 +141,7 @@ better type stability while simultaneously validating the data.
 function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
                         rr::ReadRepresentation)
     io = f.io
-    if attr.datatype_class == class(expected_datatype)
+    if (attr.datatype_class << 4) == (class(expected_datatype) << 4)
         seek(io, attr.datatype_offset)
         dt = jlread(io, typeof(expected_datatype))
         if dt == expected_datatype
@@ -169,6 +196,10 @@ function read_data(f::JLDFile,
         filter_id != 0 && throw(UnsupportedFeatureException())
         read_scalar(f, rr, header_offset)
     elseif dataspace.dataspace_type == DS_SIMPLE
+        read_array(f, dataspace, rr, data_length, filter_id, header_offset, attributes)
+    elseif dataspace.dataspace_type == DS_V1 && dataspace.dimensionality == 0
+        read_scalar(f, rr, header_offset)
+    elseif dataspace.dataspace_type == DS_V1
         read_array(f, dataspace, rr, data_length, filter_id, header_offset, attributes)
     else
         throw(UnsupportedFeatureException())
@@ -600,7 +631,7 @@ function delete_written_link!(f::JLDFile, roffset::RelOffset, name::AbstractStri
     chunk_start_offset::Int64 = fileoffset(f, roffset)
     seek(io, chunk_start_offset)
 
-    sz = read_obj_start(io)
+    sz, = read_obj_start(io)
     chunk_checksum_offset::Int64 = position(io) + sz
 
     continuation_offset::Int64 = -1
