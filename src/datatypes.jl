@@ -94,18 +94,24 @@ end
 # dispatch for all but variable length types
 macro read_datatype(io, datatype_class, datatype, then)
     esc(quote
-        if $datatype_class == DT_FIXED_POINT
+        if $datatype_class << 4 == DT_FIXED_POINT << 4
             $(replace_expr(then, datatype, :(jlread($io, FixedPointDatatype))))
-        elseif $datatype_class == DT_FLOATING_POINT
+        elseif $datatype_class << 4 == DT_FLOATING_POINT << 4
             $(replace_expr(then, datatype, :(jlread($io, FloatingPointDatatype))))
-        elseif $datatype_class == DT_STRING || $datatype_class == DT_OPAQUE || $datatype_class == DT_REFERENCE
+        elseif $datatype_class << 4 == DT_STRING << 4 || $datatype_class << 4 == DT_OPAQUE << 4 || $datatype_class << 4 == DT_REFERENCE << 4
             $(replace_expr(then, datatype, :(jlread($io, BasicDatatype))))
-        elseif $datatype_class == DT_COMPOUND
+        elseif $datatype_class << 4 == DT_COMPOUND << 4
             $(replace_expr(then, datatype, :(jlread($io, CompoundDatatype))))
-        elseif $datatype_class == DT_VARIABLE_LENGTH
+        elseif $datatype_class << 4 == DT_VARIABLE_LENGTH << 4
             $(replace_expr(then, datatype, :(jlread($io, VariableLengthDatatype))))
-        elseif $datatype_class == DT_BITFIELD
+        elseif $datatype_class << 4 == DT_BITFIELD << 4
             $(replace_expr(then, datatype, :(jlread($io, BitFieldDatatype))))
+        elseif $datatype_class << 4 == DT_TIME << 4
+            $(replace_expr(then, datatype, :(jlread($io, TimeDatatype))))
+        elseif $datatype_class << 4 == DT_ARRAY << 4
+            $(replace_expr(then, datatype, :(jlread($io, ArrayDatatype))))
+        elseif $datatype_class << 4 == DT_ENUMERATED << 4
+            $(replace_expr(then, datatype, :(jlread($io, EnumerationDatatype))))
         else
             throw(UnsupportedFeatureException("invalid datatype class $datatype_class"))
         end
@@ -187,6 +193,12 @@ struct CompoundDatatype <: H5Datatype
     end
 end
 
+function jltype(f::JLDFile, dt::CompoundDatatype)
+    odr = reconstruct_odr(f, dt, RelOffset[])
+    T = NamedTuple{tuple(dt.names...), typeof(odr).parameters[2]}
+    return ReadRepresentation{T, odr}()    
+end
+
 Base.:(==)(x::CompoundDatatype, y::CompoundDatatype) =
     x.size == y.size && x.names == y.names && x.offsets == y.offsets &&
     x.members == y.members
@@ -227,6 +239,7 @@ end
 
 function jlread(io::IO, ::Type{CompoundDatatype})
     dt = jlread(io, BasicDatatype)
+    version = dt.class >> 4
     nfields = UInt16(dt.bitfield1) | UInt16(dt.bitfield2 << 8)
     dt.bitfield3 == 0 || throw(UnsupportedFeatureException())
 
@@ -236,9 +249,12 @@ function jlread(io::IO, ::Type{CompoundDatatype})
     for i = 1:nfields
         # Name
         names[i] = Symbol(read_bytestring(io))
-
+        
         # Byte offset of member
-        if dt.size <= typemax(UInt8)
+        if version == 2
+            skip(io, 8-mod1(sizeof(names[i]),8)-1)
+            offsets[i] = jlread(io, UInt32)
+        elseif dt.size <= typemax(UInt8)
             offsets[i] = jlread(io, UInt8)
         elseif dt.size <= typemax(UInt16)
             offsets[i] = jlread(io, UInt16)
@@ -367,3 +383,88 @@ end
 struct FixedLengthString{T<:AbstractString}
     length::Int
 end
+
+
+struct ArrayDatatype <: H5Datatype
+    class::UInt8
+    bitfield1::UInt8
+    bitfield2::UInt8
+    bitfield3::UInt8
+    dimensionality::UInt8
+    dims::Vector{UInt32}
+    base_type::H5Datatype
+end
+
+function jlread(io::IO, ::Type{ArrayDatatype})
+    dt = jlread(io, BasicDatatype)
+    version = dt.class >> 4
+    dimensionality = jlread(io, UInt8)
+    skip(io, 3)
+    dims = jlread(io, UInt32, dimensionality)
+    if version == 2
+        # unsupported permutation index
+        skip(io, 4*dimensionality)
+    end
+    
+    datatype_class = jlread(io, UInt8)
+    skip(io, -1)
+    @read_datatype io datatype_class base_type begin
+        ArrayDatatype(dt.class, 0x0, 0x0, 0x0, dimensionality, dims, base_type)
+    end
+end
+
+struct ArrayPlaceHolder{T, D} end
+
+odr_sizeof(::Type{ArrayPlaceHolder{T,D}}) where {T,D} = odr_sizeof(T)*prod(D)
+
+function jltype(f::JLDFile, dt::ArrayDatatype)
+    rr = jltype(f, dt.base_type)
+    T = typeof(rr).parameters[1]
+    ReadRepresentation{Array{T, Int(dt.dimensionality)}, ArrayPlaceHolder{rr, tuple(dt.dims...)}}()
+end
+
+
+function jlconvert(::ReadRepresentation{Array{T,D}, ArrayPlaceHolder{RR, DIMS}}, f::JLDFile, ptr::Ptr, 
+                    header_offset::RelOffset) where {T, D, RR, DIMS}
+    v = Array{T, D}(undef, reverse(DIMS)...)
+    for i=1:prod(DIMS)
+        v[i] = jlconvert(RR, f, ptr, header_offset)
+        ptr += jlsizeof(typeof(RR).parameters[2])
+    end
+    return v
+end
+
+struct EnumerationDatatype <: H5Datatype
+    class::UInt8
+    bitfield1::UInt8
+    bitfield2::UInt8
+    bitfield3::UInt8
+    base_type::DataType
+    names::Vector{String}
+    values::Vector{<:Any}
+end
+
+function jlread(io::IO, ::Type{EnumerationDatatype})
+    dt = jlread(io, BasicDatatype)
+    version = dt.class >> 4
+    num_members = dt.bitfield1 | UInt16(dt.bitfield2)<<8
+    base_type = jlread(io, BasicDatatype)
+    T = uintofsize(base_type.size)
+    # assume that it is an Integer
+    names = String[]
+    values = Any[]
+    for _=1:num_members
+        name = read_bytestring(io)
+        push!(names, name)
+        version < 3 && skip(io, 8-mod1(sizeof(name), 8))
+        push!(values, jlread(io, T))
+    end
+    return EnumerationDatatype(dt.class, dt.bitfield1, dt.bitfield2, dt.bitfield3,
+                                T, names, values)
+end
+
+function jltype(f::JLDFile, dt::EnumerationDatatype)
+    ReadRepresentation{dt.base_type, dt.base_type}()
+end
+
+# Can't read big endian ints 

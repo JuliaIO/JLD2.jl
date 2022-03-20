@@ -13,6 +13,11 @@ function load_dataset(f::JLDFile, offset::RelOffset)
         val = f.jloffset[offset].value
         val !== nothing && return val
     end
+    if isgroup(f, offset)
+        return let loaded_groups = f.loaded_groups
+            get!(()->load_group(f, offset), loaded_groups, offset)
+        end
+    end
 
     io = f.io
     seek(io, fileoffset(f, offset))
@@ -22,7 +27,7 @@ function load_dataset(f::JLDFile, offset::RelOffset)
     if header_version == 1
         cio = io
         sz, = read_obj_start(cio)
-        chunk_end = position(cio) + obj_header_size
+        chunk_end = position(cio) + sz
         # Skip to nearest 8byte aligned position
         skip_to_aligned!(cio, fileoffset(f, offset))
     else
@@ -45,14 +50,12 @@ function load_dataset(f::JLDFile, offset::RelOffset)
             # Message start 8byte aligned relative to object start
             skip_to_aligned!(cio, fileoffset(f, offset))
             # Version 1 header message is padded
-            skip(cio, 1) # first byte strictly part of of msg_type but always zero
-            msg = jlread(cio, HeaderMessage)
+            msg = HeaderMessage(jlread(cio, UInt16), jlread(cio, UInt16), jlread(cio, UInt8))
             skip(cio, 3)
-            endpos = position(cio) + msg.size
         else # header_version == 2
             msg = jlread(cio, HeaderMessage)
-            endpos = position(cio) + msg.size
         end
+        endpos = position(cio) + msg.size
         if msg.msg_type == HM_DATASPACE
             dataspace = read_dataspace_message(cio)
         elseif msg.msg_type == HM_DATATYPE
@@ -71,7 +74,9 @@ function load_dataset(f::JLDFile, offset::RelOffset)
                     data_length = jlread(cio, UInt16)
                     data_offset = position(cio)
                 elseif storage_type == LC_CONTIGUOUS_STORAGE
-                    data_offset = fileoffset(f, jlread(cio, RelOffset))
+                    rf = jlread(cio, RelOffset)
+                    #rf == UNDEFINED_ADDRESS && throw(UnsupportedFeatureException("not yet allocated"))
+                    data_offset = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
                     data_length = jlread(cio, Length)
                 elseif storage_type == LC_CHUNKED_STORAGE
                     # TODO: validate this
@@ -174,6 +179,12 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
         seek(io, data_offset)
         read_dataspace = (dataspace, header_offset, data_length, filter_id)
         read_data(f, rr, read_dataspace, attributes)
+    elseif data_offset == typemax(Int)
+        seek(io, datatype_offset)
+        @read_datatype io datatype_class dt begin
+            rr = jltype(f, dt)
+            return Array{typeof(rr).parameters[1], 1}()
+        end
     else
         seek(io, datatype_offset)
         @read_datatype io datatype_class dt begin
@@ -236,8 +247,11 @@ function read_data(f::JLDFile,
         return read_empty(ReadRepresentation{Union{},nothing}(), f,
                           attributes[find_dimensions_attr(attributes)],
                           header_offset)
+    elseif dataspace.dataspace_type == DS_V1
+        return read_array(f, dataspace, ReadRepresentation{Any,RelOffset}(),
+                                  -1, UInt16(0), header_offset, attributes)
     end
-    throw(UnsupportedFeatureException())
+    throw(UnsupportedFeatureException("Dataspace type $(dataspace.dataspace_type) not implemented"))
 end
 
 # Types with no payload can only be null dataspace

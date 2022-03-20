@@ -29,7 +29,7 @@ function jltype(f::JLDFile, dt::BasicDatatype)
         if (dt.bitfield1 == 0x01 || dt.bitfield1 == 0x11) && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
             return FixedLengthString{String}(dt.size)
         else
-            throw(UnsupportedFeatureException())
+            throw(UnsupportedFeatureException("Encountered an unsupported string type."))
         end
     elseif dt.class << 4 == DT_OPAQUE  << 4
         error("attempted to read a bare (non-committed) opaque datatype")
@@ -43,10 +43,17 @@ end
 function jltype(f::JLDFile, dt::VariableLengthDatatype)
     if dt == H5TYPE_VLEN_UTF8
         return ReadRepresentation{String,Vlen{String}}()
-    else
-        throw(UnsupportedFeatureException())
+    else#if dt.bitfield1 & 0x1 == 0x1 # it's a sequence
+        rr = jltype(f, dt.basetype)
+        T = typeof(rr).parameters[1]
+        odr = typeof(rr).parameters[2]
+        return ReadRepresentation{Vector{T}, Vlen{odr}}()
     end
 end
+
+jlconvert(::ReadRepresentation{Vector{T},Vlen{ODR}}, f::JLDFile, ptr::Ptr, ::RelOffset) where {T, ODR} =
+    jlconvert(ReadRepresentation{T,Vlen{ODR}}(), f, ptr, UNDEFINED_ADDRESS)
+
 
 function h5convert!(out::Pointers, fls::FixedLengthString, f::JLDFile, x, ::JLDWriteSession)
     fls.length == jlsizeof(x) || throw(InvalidDataException())
