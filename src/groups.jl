@@ -256,58 +256,58 @@ const CONTINUATION_MSG_SIZE = jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jl
 
 function load_group(f::JLDFile, roffset::RelOffset)
     io = f.io
-    chunk_start_offset::Int64 = fileoffset(f, roffset)
-    seek(io, chunk_start_offset)
+    chunk_start::Int64 = fileoffset(f, roffset)
+    seek(io, chunk_start)
 
     header_version = jlread(io, UInt8)
     if header_version == 1
-        seek(io, chunk_start_offset)
+        seek(io, chunk_start)
         cio = io
         sz, = read_obj_start(cio)
         chunk_end = position(cio) + sz
         # Skip to nearest 8byte aligned position
-        skip_to_aligned!(cio, chunk_start_offset)
+        skip_to_aligned!(cio, chunk_start)
     else
         header_version = 2
-        seek(io, chunk_start_offset)
+        seek(io, chunk_start)
         cio = begin_checksum_read(io)
         sz, = read_obj_start(cio)
         chunk_end = position(cio) + sz
     end
     # Messages
+    chunk_end::Int64
     continuation_message_goes_here::Int64 = -1
     links = OrderedDict{String,RelOffset}()
+    chunks = [(; chunk_start, chunk_end)]
+    chunk_number = 0
 
-    continuation_offset::Int64 = -1
-    continuation_length::Length = 0
     next_link_offset::Int64 = -1
     link_phase_change_max_compact::Int64 = -1 
     link_phase_change_min_dense::Int64 = -1
     est_num_entries::Int64 = 4
     est_link_name_len::Int64 = 8
-    chunk_end::Int64
     fractal_heap_address = UNDEFINED_ADDRESS
     name_index_btree = UNDEFINED_ADDRESS
 
     v1btree_address = UNDEFINED_ADDRESS
     name_index_heap = UNDEFINED_ADDRESS
 
-    while true
-        if continuation_offset != -1
-            seek(io, continuation_offset)
-            chunk_end = continuation_offset + continuation_length
-            continuation_offset = -1
+    while !isempty(chunks)
+        (; chunk_start, chunk_end) = popfirst!(chunks)
+
+        if chunk_number > 0
+            seek(io, chunk_start)
+            chunk_end -= 4
             if header_version == 2
-                chunk_end = chunk_end - 4 # leave space for checksum
                 cio = begin_checksum_read(io)
                 jlread(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
             end
         end
-
+        chunk_number += 1
         while (curpos = position(cio)) < chunk_end-4
             if header_version == 1
                 # Message start 8byte aligned relative to object start
-                skip_to_aligned!(cio, chunk_start_offset)
+                skip_to_aligned!(cio, chunk_start)
                 # Version 1 header message is padded
                 msg = HeaderMessage(jlread(cio, UInt16), jlread(cio, UInt16), jlread(cio, UInt8))
                 skip(cio, 3)
@@ -352,8 +352,10 @@ function load_group(f::JLDFile, roffset::RelOffset)
                     name, loffset = read_link(cio)
                     links[name] = loffset
                 elseif msg.msg_type == HM_OBJECT_HEADER_CONTINUATION
-                    continuation_offset = chunk_start_offset = fileoffset(f, jlread(cio, RelOffset))
-                    continuation_length = jlread(cio, Length)
+                    cont_chunk_start = fileoffset(f, jlread(cio, RelOffset))
+                    chunk_length = jlread(cio, Length)
+                    push!(chunks, (;chunk_start=cont_chunk_start,
+                                    chunk_end  =cont_chunk_start+chunk_length))
                     # For correct behaviour, empty space can only be filled in the 
                     # very last chunk. Forget about previously found empty space
                     next_link_offset = -1
@@ -368,11 +370,11 @@ function load_group(f::JLDFile, roffset::RelOffset)
         end
 
         # Checksum
-        seek(cio, chunk_end)
+        #seek(cio, chunk_end)
         if header_version == 2
             end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())
         end
-        continuation_offset == -1 && break
+        seek(cio, chunk_end)
     end
 
     if fractal_heap_address != UNDEFINED_ADDRESS
@@ -389,7 +391,7 @@ function load_group(f::JLDFile, roffset::RelOffset)
         end
     end
 
-    Group{typeof(f)}(f, chunk_start_offset, continuation_message_goes_here,        
+    Group{typeof(f)}(f, chunk_start, continuation_message_goes_here,        
                      chunk_end, next_link_offset, est_num_entries,
                      est_link_name_len,
                      OrderedDict{String,RelOffset}(), OrderedDict{String,Group}(), links)
