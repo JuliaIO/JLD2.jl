@@ -143,8 +143,10 @@ function isgroup(f::JLDFile, roffset::RelOffset)
         skip_to_aligned!(io, chunk_start)
 
         while !isempty(chunks)
-            (; chunk_start, chunk_end) = popfirst!(chunks)
-    
+            chunk = popfirst!(chunks)
+            chunk_start = chunk.chunk_start
+            chunk_end = chunk.chunk_end
+        
             if chunk_number > 0
                 seek(io, chunk_start)
             end
@@ -244,7 +246,10 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
     chunk_end::Int64
     attrs = EMPTY_READ_ATTRIBUTES
     while !isempty(chunks)
-        (; chunk_start, chunk_end) = popfirst!(chunks)
+        chunk = popfirst!(chunks)
+        chunk_start = chunk.chunk_start
+        chunk_end = chunk.chunk_end
+
         @info "Starting to read chunk no $chunk_number of length $(chunk_end-chunk_start)"
         if chunk_number > 0 # Don't do this the first time around
             seek(io, chunk_start)

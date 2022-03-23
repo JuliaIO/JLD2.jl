@@ -293,7 +293,9 @@ function load_group(f::JLDFile, roffset::RelOffset)
     name_index_heap = UNDEFINED_ADDRESS
 
     while !isempty(chunks)
-        (; chunk_start, chunk_end) = popfirst!(chunks)
+        chunk = popfirst!(chunks)
+        chunk_start = chunk.chunk_start
+        chunk_end = chunk.chunk_end
 
         if chunk_number > 0
             seek(io, chunk_start)
