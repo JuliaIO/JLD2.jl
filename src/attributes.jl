@@ -75,9 +75,13 @@ function read_attribute(io::IO, f::JLDFile)
         skip_to_aligned!(io, pos)
 
         ReadAttribute(name, dataspace, datatype_class, datatype_offset, position(io))
-    elseif ah.version == 2
+    elseif ah.version == 2 || ah.version == 3
         committed = ah.flags == 1
         !committed && ah.flags != 0 && throw(UnsupportedFeatureException())
+
+        if ah.version == 3
+            name_charset_encoding = jlread(io, UInt8)
+        end
 
         name = Symbol(jlread(io, UInt8, ah.name_size-1))
         jlread(io, UInt8) == 0 || throw(InvalidDataException())
@@ -91,7 +95,7 @@ function read_attribute(io::IO, f::JLDFile)
         seek(io, dataspace_end)
 
         ReadAttribute(name, dataspace, datatype_class, datatype_offset, position(io))
-    else 
+    else
         throw(UnsupportedVersionException("Unknown Attribute Header Version $(ah.version)"))
     end
 end

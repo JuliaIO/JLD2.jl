@@ -21,7 +21,9 @@ end
 
 
 function jltype(f::JLDFile, dt::FixedPointDatatype)
-    signed = dt.bitfield1 == 0x08 ? true : dt.bitfield1 == 0x00 ? false : throw(UnsupportedFeatureException("Invalid Bit field 1"))
+    signed = Bool(dt.bitfield1 >> 3 & 0b1)
+    endianness = dt.bitfield1 & 0b1 # 0 → little endian, 1 → big endian
+    endianness == 0 || throw(UnsupportedFeatureException("load big endian numbers is not implemented."))
     ((dt.bitfield2 == 0x00) & (dt.bitfield3 == 0x00) & (dt.bitoffset == 0) & (dt.bitprecision == dt.size*8)) ||
         throw(UnsupportedFeatureException())
     if dt.size == 8

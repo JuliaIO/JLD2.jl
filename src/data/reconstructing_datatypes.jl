@@ -26,7 +26,7 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     julia_type_attr = nothing
     written_type_attr = nothing
     for attr in attrs
-        if attr.name == :julia_type
+        if attr.name == :julia_type || attr.name == Symbol("julia type")
             julia_type_attr = attr
         elseif attr.name == :written_type
             written_type_attr = attr

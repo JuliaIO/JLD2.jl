@@ -43,9 +43,13 @@ function jltype(f::JLDFile, dt::BasicDatatype)
 end
 
 function jltype(f::JLDFile, dt::VariableLengthDatatype)
-    if dt == H5TYPE_VLEN_UTF8
+    if dt == H5TYPE_VLEN_UTF8 
+        # this is the fully supported JLD2 string
         return ReadRepresentation{String,Vlen{String}}()
-    else#if dt.bitfield1 & 0x1 == 0x1 # it's a sequence
+    elseif dt.bitfield1 & 0x1 == 0x1
+        # it's some kind of string. Let's try
+        return ReadRepresentation{String,Vlen{String}}()
+    else#if dt.bitfield1 & 0x1 == 0x0 # it's a sequence
         rr = jltype(f, dt.basetype)
         T = typeof(rr).parameters[1]
         odr = typeof(rr).parameters[2]

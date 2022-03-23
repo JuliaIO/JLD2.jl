@@ -66,8 +66,11 @@ end
 function read_datatype_message(io::IO, f::JLDFile, committed)
     if committed
         # Shared datatype
-        jlread(io, UInt8) == 3 || throw(UnsupportedVersionException())
-        jlread(io, UInt8) == 2 || throw(UnsupportedFeatureException())
+        version = jlread(io, UInt8)
+        msgtype = jlread(io, UInt8)
+        # supported combinations are 
+        (version == 3 && msgtype == 2) || (version == 2) || throw(UnsupportedVersionException("Unsupported shared message"))
+
         (typemax(UInt8), Int64(fileoffset(f, jlread(io, RelOffset))))
     else
         # Datatype stored here
@@ -249,9 +252,8 @@ function jlread(io::IO, ::Type{CompoundDatatype})
     for i = 1:nfields
         # Name
         names[i] = Symbol(read_bytestring(io))
-        
         # Byte offset of member
-        if version == 2
+        if version == 2 || version == 1
             skip(io, 8-mod1(sizeof(names[i]),8)-1)
             offsets[i] = jlread(io, UInt32)
         elseif dt.size <= typemax(UInt8)
@@ -260,6 +262,16 @@ function jlread(io::IO, ::Type{CompoundDatatype})
             offsets[i] = jlread(io, UInt16)
         else
             offsets[i] = jlread(io, UInt32)
+        end
+
+        if version == 1
+            # supports array members
+            # can encode dimensionality here
+            dimensionality = jlread(io, UInt8)
+            skip(io, 3)
+            skip(io, 4) # dimension permutation
+            skip(io, 4)
+            skip(io, 16)
         end
 
         # Member type message
@@ -347,6 +359,95 @@ end
 # Read the actual datatype for a committed datatype
 function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
     io = f.io
+    chunk_start::Int64 = fileoffset(f, cdt.header_offset)
+    seek(io, chunk_start)
+
+    header_version = jlread(io, UInt8)
+    if header_version == 1
+        seek(io, chunk_start)
+        cio = io
+        sz, = read_obj_start(cio)
+        chunk_end = position(cio) + sz
+        # Skip to nearest 8byte aligned position
+        skip_to_aligned!(cio, chunk_start)
+    else
+        header_version = 2
+        seek(io, chunk_start)
+        cio = begin_checksum_read(io)
+        sz, = read_obj_start(cio)
+        chunk_end = position(cio) + sz
+    end
+    # Messages
+    chunk_end::Int64
+    continuation_message_goes_here::Int64 = -1
+    chunks = [(; chunk_start, chunk_end)]
+    chunk_number = 0
+
+    # Messages
+    datatype_class::UInt8 = 0
+    datatype_offset::Int = 0
+    attrs = ReadAttribute[]
+
+
+    while !isempty(chunks)
+        chunk = popfirst!(chunks)
+        chunk_start = chunk.chunk_start
+        chunk_end = chunk.chunk_end
+
+        if chunk_number > 0
+            seek(io, chunk_start)
+            chunk_end -= 4
+            if header_version == 2
+                cio = begin_checksum_read(io)
+                jlread(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
+            end
+        end
+        chunk_number += 1
+        while (curpos = position(cio)) < chunk_end-4
+            if header_version == 1
+                # Message start 8byte aligned relative to object start
+                skip_to_aligned!(cio, chunk_start)
+                # Version 1 header message is padded
+                msg = HeaderMessage(jlread(cio, UInt16), jlread(cio, UInt16), jlread(cio, UInt8))
+                skip(cio, 3)
+            else # header_version == 2
+                msg = jlread(cio, HeaderMessage)
+            end
+            endpos = position(cio) + msg.size
+            if msg.msg_type == HM_DATATYPE
+                # Datatype stored here
+                datatype_offset = position(cio)
+                datatype_class = jlread(cio, UInt8)
+            elseif msg.msg_type == HM_ATTRIBUTE
+                push!(attrs, read_attribute(cio, f))
+            elseif msg.msg_type == HM_OBJECT_HEADER_CONTINUATION
+                    cont_chunk_start = fileoffset(f, jlread(cio, RelOffset))
+                    chunk_length = jlread(cio, Length)
+                    push!(chunks, (;chunk_start=cont_chunk_start,
+                                    chunk_end  =cont_chunk_start+chunk_length))
+            elseif (msg.flags & 2^3) != 0
+                throw(UnsupportedFeatureException())
+            end
+            seek(cio, endpos)
+        end
+
+        # Checksum
+        #seek(cio, chunk_end)
+        if header_version == 2
+            end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())
+        end
+        seek(cio, chunk_end)
+    end
+
+    seek(io, datatype_offset)
+    @read_datatype io datatype_class dt begin
+        return (dt, attrs)
+    end
+end
+
+#= function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
+    dump(cdt)
+    io = f.io
     seek(io, fileoffset(f, cdt.header_offset))
     cio = begin_checksum_read(io)
     sz, = read_obj_start(cio)
@@ -378,7 +479,7 @@ function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
         return (dt, attrs)
     end
 end
-
+ =#
 
 struct FixedLengthString{T<:AbstractString}
     length::Int
