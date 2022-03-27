@@ -346,9 +346,10 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
                             data_offset = position(cio)
                             println("""    type: compact storage\n    length: $length\n    offset: $(data_offset)""")
                         elseif storage_type == LC_CONTIGUOUS_STORAGE
-                            data_offset = fileoffset(f, jlread(cio, RelOffset))
+                            rf = jlread(cio, RelOffset)
+                            data_offset = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
                             data_length = jlread(cio, Length)
-                            println("""    type: contiguous storage\n    length: $length\n    offset: $(data_offset)""")
+                            println("""    type: contiguous storage\n    length: $(data_length)\n    offset: $(data_offset)""")
 
                         elseif storage_type == LC_CHUNKED_STORAGE
                             # TODO: validate this

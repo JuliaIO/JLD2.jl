@@ -401,7 +401,6 @@ end
 function read_in_local_heap(f, local_heap, pos)
     io = f.io
     offset = local_heap.offset + pos
-    println(offset)
     seek(io, fileoffset(f, offset))
     return read_bytestring(io)
 end

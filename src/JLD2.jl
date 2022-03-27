@@ -225,7 +225,7 @@ fileoffset(f::JLDFile, x::RelOffset) = Int64(x.offset + f.base_address)
 
 Converts an absolute file offset `x` to an offset relative to the superblock of file `f`.
 """
-h5offset(f::JLDFile, x::Integer) = RelOffset(Int(x - f.base_address))
+h5offset(f::JLDFile, x::Integer) = RelOffset(UInt64(x - f.base_address))
 
 #
 # File

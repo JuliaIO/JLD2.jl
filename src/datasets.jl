@@ -179,11 +179,13 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
         seek(io, data_offset)
         read_dataspace = (dataspace, header_offset, data_length, filter_id)
         read_data(f, rr, read_dataspace, attributes)
-    elseif data_offset == typemax(Int)
+    elseif data_offset == typemax(Int64)
         seek(io, datatype_offset)
         @read_datatype io datatype_class dt begin
             rr = jltype(f, dt)
-            return Array{typeof(rr).parameters[1], 1}()
+            v = Array{typeof(rr).parameters[1], 1}()
+            header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
+            return v
         end
     else
         seek(io, datatype_offset)
@@ -213,6 +215,7 @@ function read_data(f::JLDFile,
     elseif dataspace.dataspace_type == DS_V1
         read_array(f, dataspace, rr, data_length, filter_id, header_offset, attributes)
     else
+        @info "dataspace type is $(dataspace.dataspace_type)"
         throw(UnsupportedFeatureException())
     end
 end
