@@ -253,7 +253,7 @@ function _resolve_type_singlemodule(::ReadRepresentation{T,DataTypeODR()},
         end
         m = getfield(m, sym)
     end
-    if !isa(m, DataType) && !isa(m, UnionAll)
+    if !isa(m, DataType) && !isa(m, UnionAll) && (@static VERSION<v"1.7" || !isa(m, Core.TypeofVararg))
         return hasparams ? UnknownType(mypath, params) : UnknownType(mypath)
     end
     return m
@@ -326,10 +326,22 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
         m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
         m isa UnknownType && return m
     end
-
+        
     if hasparams
+        @static if VERSION > v"1.7"
+            # Starting with julia v1.7 Vararg is no longer datatype. The following block is needed to load older files
+            if m isa Core.TypeofVararg
+                p1 = params[1]
+                p2 = params[2]
+                m = Core.apply_type(Vararg, p1, p2)
+                p2 isa TypeVar && (m = Core.UnionAll(p2, m))
+                p1 isa TypeVar && (m = Core.UnionAll(p1, m))
+                return m
+            end
+        end
         try
             m = m{params...}
+            @info "constructed a datatype" mypath m rr
         catch e
             return UnknownType(m, params)
         end
