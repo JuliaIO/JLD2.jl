@@ -235,7 +235,7 @@ is equivalent to
 
 
 To choose the io type `IOStream` instead of the default `MmapIO` use 
-`jldsave{IOStream}(fn; kwargs...)`.
+`jldsave(fn, IOStream; kwargs...)`.
 """
 function jldsave(filename::AbstractString, compress=false, iotype::T=MmapIO; 
                     kwargs...
