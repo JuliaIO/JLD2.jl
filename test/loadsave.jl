@@ -514,3 +514,26 @@ end
 
     end
 end
+
+
+# Loading array slices
+@testset "Loading Array Slices" begin
+    cd(mktempdir()) do
+        mat = collect(reshape(1:64, 4,4,4))
+        jldsave("test.jld2"; mat)
+
+        jldopen("test.jld2") do f
+            @test f["mat", 1:4] == mat[1:4]
+            @test f["mat", 2,2,2] == mat[2,2,2]
+            @test f["mat", 4:-1:1, 1:4,1] == mat[4:-1:1, 1:4, 1]
+        end
+
+        mat = collect(reshape(1:1024, 4,4,4,4,4))
+        jldsave("test.jld2", true; mat)
+        jldopen("test.jld2") do f
+            @test_logs((:warn, "Array is compressed and needs to be fully decompressed for slicing."),
+             f["mat", 1:4] == mat[1:4])
+        end
+
+    end
+end
