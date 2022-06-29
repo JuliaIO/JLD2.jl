@@ -47,9 +47,11 @@ load("example.jld2", "hello", "foo") # -> ("world", :bar)
 ### A new interface: jldsave
 
 `jldsave` makes use of julia's keyword argument syntax to store files,
-thus leveraging the parser and not having to rely on macros. To use it, write
+thus leveraging the parser and not having to rely on macros. The new interface can be imported with `using JLD2`. To use it, write
 
 ```julia
+using JLD2
+
 x = 1
 y = 2
 z = 42
