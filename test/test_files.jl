@@ -84,6 +84,16 @@ using Test, JLD2
             @test_broken f["grouped/y"]
         end
 
+        fn = "simple.nc"
+        jldopen(fn) do f
+            @test f["dim1"] == [2, 4, 6]
+            @test f["dim2"] == ["a", "b", "c", "d"]
+            @test f["mydata"] == Matrix(reshape(1:12, 4, 3))
+            JLD2.load_attributes(f, "dim1") # not sure what to test for. just not erroring so far
+            JLD2.load_attributes(f, "dim2")
+            JLD2.load_attributes(f, "mydata")
+        end
+
         # julia> using JLD
         # julia> struct A; x::Int; y::Float64; z::String; end
         # julia> save("jldstruct.jld", "a", A(1,2.0,"3"))

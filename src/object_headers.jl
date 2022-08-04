@@ -97,7 +97,7 @@ function read_obj_start(io::IO)
             skip(io, 32)
         end
 
-        return read_size(io, os.flags), 2
+        return read_size(io, os.flags), 2, os.flags
     else
         seek(io, curpos)
         version = jlread(io, UInt8)
@@ -107,7 +107,7 @@ function read_obj_start(io::IO)
         num_messages = jlread(io, UInt16)
         obj_ref_count = jlread(io, UInt32)
         obj_header_size = jlread(io, UInt32)
-        return obj_header_size, 1
+        return obj_header_size, 1, os.flags
     end
 end
 
@@ -124,7 +124,7 @@ function isgroup(f::JLDFile, roffset::RelOffset)
     chunk_start = fileoffset(f, roffset)
     seek(io, chunk_start)
 
-    sz, version = read_obj_start(io)
+    sz, version, = read_obj_start(io)
     chunk_end::Int64 = position(io) + sz
     if version == 2
         while position(io) <= chunk_end-4
@@ -221,7 +221,7 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
     if header_version == 1
         seek(io, chunk_start)
         cio = io
-        sz, = read_obj_start(cio)
+        sz,_,groupflags = read_obj_start(cio)
         chunk_end = position(cio) + sz
         # Skip to nearest 8byte aligned position
         skip_to_aligned!(cio, chunk_start)
@@ -230,7 +230,7 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
         header_version = 2
         seek(io, chunk_start)
         cio = begin_checksum_read(io)
-        sz, = read_obj_start(cio)
+        sz,_,groupflags = read_obj_start(cio)
         chunk_end = position(cio) + sz
     end
     # Messages
@@ -269,6 +269,7 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
                 skip(cio, 3)
             else # version == 2
                 msg = jlread(cio, HeaderMessage)
+                (groupflags & 4) == 4 && skip(cio, 2) 
             end
             endpos = position(cio) + msg.size
             println("""
@@ -393,7 +394,7 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
                         push!(attrs, read_attribute(cio, f))
                     end
                     attr = attrs[end]
-                    println("""    name: "$(attr.name)"\n    datatype: $(DATATYPES[attr.datatype_class])""")
+                    println("""    name: "$(attr.name)"\n    datatype: $(DATATYPES[attr.datatype_class%16])""")
                     try
                         data = read_attr_data(f, attr)
                         println("""    data: "$data" """)

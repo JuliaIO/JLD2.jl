@@ -357,11 +357,19 @@ function read_btree(f, offset_hh, offset_bh)
     bh = read_v2btree_header(f, offset_bh)
     
     records = read_records_in_node(f, bh.root_node_address, bh.num_records_in_root_node, bh.depth, bh, hh)
-    indirect_rb = read_indirect_block(f, hh.root_block_address, hh, hh.cur_num_rows_in_root_iblock)
-    links = map(records) do r
-        offset = get_block_offset(f, indirect_rb, r.offset, hh)
-        seek(f.io, offset)
-        read_link(f.io)
+    if hh.cur_num_rows_in_root_iblock > 0
+        indirect_rb = read_indirect_block(f, hh.root_block_address, hh, hh.cur_num_rows_in_root_iblock)
+        links = map(records) do r
+            offset = get_block_offset(f, indirect_rb, r.offset, hh)
+            seek(f.io, offset)
+            read_link(f.io)
+        end
+    else # there's only a single direct block at hh.root_block_address
+        links = map(records) do r
+            offset = fileoffset(f,hh.root_block_address) + r.offset
+            seek(f.io, offset)
+            read_link(f.io)
+        end
     end
     links
 end

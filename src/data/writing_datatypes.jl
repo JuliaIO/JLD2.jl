@@ -613,6 +613,7 @@ datamode(::Type{CustomSerialization{WrittenAs,ODR}}) where {WrittenAs,ODR} = dat
 datamode(::Union{Type{<:Vlen},Type{RelOffset}}) = HasReferences()
 datamode(::DataType) = ReferenceFree()
 datamode(::FixedLengthString) = ReferenceFree()
+datamode(::AsciiString) = ReferenceFree()
 datamode(::Nothing) = ReferenceFree()
 @generated function datamode(odr::OnDiskRepresentation{Offsets,JLTypes,H5Types} where {Offsets,JLTypes}) where H5Types
     for ty in H5Types.parameters

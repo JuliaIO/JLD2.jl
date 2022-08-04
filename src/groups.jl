@@ -203,16 +203,29 @@ function Base.keys(g::Group)
 end
 
 Base.keytype(f::Group) = String
-                
-struct LinkInfo
-    version::UInt8
-    flags::UInt8
-    fractal_heap_address::RelOffset
-    name_index_btree::RelOffset
-end
-define_packed(LinkInfo)
 
-LinkInfo() = LinkInfo(0, 0, UNDEFINED_ADDRESS, UNDEFINED_ADDRESS)
+# LinkInfo struct is used for dispatch
+struct LinkInfo end
+# In general the size depends on flags
+# when writing files we always use 18 bytes 
+# this function is only used for writing
+jlsizeof(::Type{LinkInfo}) = 18
+function jlwrite(io, ::LinkInfo)
+    jlwrite(io, zero(UInt16))
+    jlwrite(io, typemax(UInt64))
+    jlwrite(io, typemax(UInt64))
+    return nothing    
+end
+
+function jlread(io, ::Type{LinkInfo})
+    version = jlread(io, UInt8)
+    flags = jlread(io, UInt8)
+    (flags & 0b1) == 1 && skip(io, 8)
+    fractal_heap_address = jlread(io, RelOffset)
+    name_index_btree = jlread(io, RelOffset)
+    (flags & 0b10) == 0b10 && skip(io, 8)
+    (; version, flags, fractal_heap_address, name_index_btree)
+end
 
 @enum(CharacterSet,
       CSET_ASCII,
@@ -263,7 +276,7 @@ function load_group(f::JLDFile, roffset::RelOffset)
     if header_version == 1
         seek(io, chunk_start)
         cio = io
-        sz, = read_obj_start(cio)
+        sz,_,groupflags = read_obj_start(cio)
         chunk_end = position(cio) + sz
         # Skip to nearest 8byte aligned position
         skip_to_aligned!(cio, chunk_start)
@@ -271,7 +284,7 @@ function load_group(f::JLDFile, roffset::RelOffset)
         header_version = 2
         seek(io, chunk_start)
         cio = begin_checksum_read(io)
-        sz, = read_obj_start(cio)
+        sz,_,groupflags = read_obj_start(cio)
         chunk_end = position(cio) + sz
     end
     # Messages
@@ -315,6 +328,7 @@ function load_group(f::JLDFile, roffset::RelOffset)
                 skip(cio, 3)
             else # header_version == 2
                 msg = jlread(cio, HeaderMessage)
+                (groupflags & 4) == 4 && skip(cio, 2) 
             end
             endpos = position(cio) + msg.size
             if msg.msg_type == HM_NIL

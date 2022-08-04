@@ -24,7 +24,25 @@ h5type(f::JLDFile, writeas::Type{String}, x) =
 odr(::Type{String}) = fieldodr(String, true)
 objodr(x::String) = FixedLengthString{String}(jlsizeof(x))
 
+struct NullTerminated end
+struct AsciiString{TERM}
+    length::Int
+end
+
 function jltype(f::JLDFile, dt::BasicDatatype)
+    if dt.class >> 4 == 1
+        if dt.class << 4 == DT_REFERENCE  << 4
+            return ReadRepresentation{Any,RelOffset}()
+        elseif dt.class << 4 == DT_STRING  << 4
+            if dt.bitfield1 == 0x00 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
+                return AsciiString{NullTerminated}(dt.size)
+            else
+                throw(UnsupportedFeatureException("Encountered an unsupported string type."))
+            end
+        else
+            throw(UnsupportedFeatureException("Encountered an unsupported type."))
+        end
+    end
     if dt.class << 4 == DT_STRING  << 4
         if (dt.bitfield1 == 0x01 || dt.bitfield1 == 0x11) && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
             return FixedLengthString{String}(dt.size)
@@ -75,6 +93,14 @@ function jlconvert(rr::FixedLengthString{String}, ::JLDFile, ptr::Ptr, ::RelOffs
     unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
     String(data)
 end
+
+# Ascii String
+function jlconvert(rr::AsciiString{NullTerminated}, ::JLDFile, ptr::Ptr, ::RelOffset)
+    data = Vector{UInt8}(undef, rr.length)
+    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
+    String(data[1:end-1])
+end
+odr_sizeof(x::AsciiString) = x.length
 
 # Used only for custom serialization
 constructrr(::JLDFile, ::Type{String}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
