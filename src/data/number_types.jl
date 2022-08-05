@@ -19,25 +19,47 @@ for T in Base.uniontypes(UnsignedTypes)
         FixedPointDatatype($(T.parameters[1].size), false)
 end
 
+struct BENumber{T}
+    x::T
+end
+
+jlconvert(::ReadRepresentation{T,BENumber{T}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {T} =
+    bswap(jlunsafe_load(convert(Ptr{T}, ptr)))
 
 function jltype(f::JLDFile, dt::FixedPointDatatype)
     signed = Bool(dt.bitfield1 >> 3 & 0b1)
     endianness = dt.bitfield1 & 0b1 # 0 → little endian, 1 → big endian
-    endianness == 0 || throw(UnsupportedFeatureException("load big endian numbers is not implemented."))
+    #endianness == 0 || throw(UnsupportedFeatureException("load big endian numbers is not implemented."))
     ((dt.bitfield2 == 0x00) & (dt.bitfield3 == 0x00) & (dt.bitoffset == 0) & (dt.bitprecision == dt.size*8)) ||
         throw(UnsupportedFeatureException())
-    if dt.size == 8
-        return signed ? ReadRepresentation{Int64,Int64}() : ReadRepresentation{UInt64,UInt64}()
-    elseif dt.size == 1
-        return signed ? ReadRepresentation{Int8,Int8}() : ReadRepresentation{UInt8,UInt8}()
-    elseif dt.size == 4
-        return signed ? ReadRepresentation{Int32,Int32}() : ReadRepresentation{UInt32,UInt32}()
-    elseif dt.size == 2
-        return signed ? ReadRepresentation{Int16,Int16}() : ReadRepresentation{UInt16,UInt16}()
-    elseif dt.size == 16
-        return signed ? ReadRepresentation{Int128,Int128}() : ReadRepresentation{UInt128,UInt128}()
+    if endianness == 0
+        if dt.size == 8
+            return signed ? ReadRepresentation{Int64,Int64}() : ReadRepresentation{UInt64,UInt64}()
+        elseif dt.size == 1
+            return signed ? ReadRepresentation{Int8,Int8}() : ReadRepresentation{UInt8,UInt8}()
+        elseif dt.size == 4
+            return signed ? ReadRepresentation{Int32,Int32}() : ReadRepresentation{UInt32,UInt32}()
+        elseif dt.size == 2
+            return signed ? ReadRepresentation{Int16,Int16}() : ReadRepresentation{UInt16,UInt16}()
+        elseif dt.size == 16
+            return signed ? ReadRepresentation{Int128,Int128}() : ReadRepresentation{UInt128,UInt128}()
+        else
+            throw(UnsupportedFeatureException())
+        end
     else
-        throw(UnsupportedFeatureException())
+        if dt.size == 8
+            return signed ? ReadRepresentation{Int64,BENumber{Int64}}() : ReadRepresentation{UInt64,BENumber{UInt64}}()
+        elseif dt.size == 1
+            return signed ? ReadRepresentation{Int8,BENumber{Int8}}() : ReadRepresentation{UInt8,BENumber{UInt8}}()
+        elseif dt.size == 4
+            return signed ? ReadRepresentation{Int32,BENumber{Int32}}() : ReadRepresentation{UInt32,BENumber{UInt32}}()
+        elseif dt.size == 2
+            return signed ? ReadRepresentation{Int16,BENumber{Int16}}() : ReadRepresentation{UInt16,BENumber{UInt16}}()
+        elseif dt.size == 16
+            return signed ? ReadRepresentation{Int128,BENumber{Int128}}() : ReadRepresentation{UInt128,BENumber{UInt128}}()
+        else
+            throw(UnsupportedFeatureException())
+        end
     end
 end
 
@@ -52,6 +74,13 @@ h5fieldtype(::JLDFile, ::Type{Float32}, ::Type{Float32}, ::Initialized) =
 h5fieldtype(::JLDFile, ::Type{Float64}, ::Type{Float64}, ::Initialized) =
     FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x3f, 0x00, 8, 0, 64, 52, 11, 0, 52, 0x000003ff)
 
+h5fieldtype(::JLDFile, ::Type{BENumber{Float16}}, ::Type{Float16}, ::Initialized) =
+    FloatingPointDatatype(DT_FLOATING_POINT, 0x21, 0x0f, 0x00, 2, 0, 16, 10, 5, 0, 10, 0x0000000f)
+h5fieldtype(::JLDFile, ::Type{BENumber{Float32}}, ::Type{Float32}, ::Initialized) =
+    FloatingPointDatatype(DT_FLOATING_POINT, 0x21, 0x1f, 0x00, 4, 0, 32, 23, 8, 0, 23, 0x0000007f)
+h5fieldtype(::JLDFile, ::Type{BENumber{Float64}}, ::Type{Float64}, ::Initialized) =
+    FloatingPointDatatype(DT_FLOATING_POINT, 0x21, 0x3f, 0x00, 8, 0, 64, 52, 11, 0, 52, 0x000003ff)
+
 function jltype(f::JLDFile, dt::FloatingPointDatatype)
     if dt == h5fieldtype(f, Float64, Float64, Val{true})
         return ReadRepresentation{Float64,Float64}()
@@ -59,6 +88,12 @@ function jltype(f::JLDFile, dt::FloatingPointDatatype)
         return ReadRepresentation{Float32,Float32}()
     elseif dt == h5fieldtype(f, Float16, Float16, Val{true})
         return ReadRepresentation{Float16,Float16}()
+    elseif dt == h5fieldtype(f, BENumber{Float64}, Float64, Val{true})
+        return ReadRepresentation{Float32,BENumber{Float32}}()
+    elseif dt == h5fieldtype(f, BENumber{Float32}, Float32, Val{true})
+        return ReadRepresentation{Float32,BENumber{Float32}}()
+    elseif dt == h5fieldtype(f, BENumber{Float16}, Float16, Val{true})
+        return ReadRepresentation{Float32,BENumber{Float32}}()
     else
         throw(UnsupportedFeatureException())
     end
