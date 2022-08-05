@@ -49,7 +49,7 @@ function load_dataset(f::JLDFile, offset::RelOffset)
     attrs = EMPTY_READ_ATTRIBUTES
     datatype_class::UInt8 = 0
     datatype_offset::Int64 = 0
-    data_offset::Int64 = 0
+    data_offset::Int64 = -1
     data_length::Int = -1
     chunked_storage::Bool = false
     filter_id::UInt16 = 0
@@ -90,6 +90,9 @@ function load_dataset(f::JLDFile, offset::RelOffset)
             elseif msg.msg_type == HM_FILL_VALUE
                 # don't know what to do with these
                 # ignore for now
+                version = jlread(cio, UInt8)
+                flags = jlread(cio, UInt8)
+                
             elseif msg.msg_type == HM_DATA_LAYOUT
                 version = jlread(cio, UInt8)
                 if version == 4 || version == 3
@@ -102,19 +105,22 @@ function load_dataset(f::JLDFile, offset::RelOffset)
                         #rf == UNDEFINED_ADDRESS && throw(UnsupportedFeatureException("not yet allocated"))
                         data_offset = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
                         data_length = jlread(cio, Length)
-                    elseif storage_type == LC_CHUNKED_STORAGE
+                    elseif version == 4 && storage_type == LC_CHUNKED_STORAGE
                         # TODO: validate this
+                        # TODO: this is version 4 only
                         flags = jlread(cio, UInt8)
                         dimensionality = jlread(cio, UInt8)
                         dimensionality_size = jlread(cio, UInt8)
                         skip(cio, Int(dimensionality)*Int(dimensionality_size))
 
                         chunk_indexing_type = jlread(cio, UInt8)
-                        chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
+                        chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type $chunk_indexing_type"))
                         data_length = jlread(cio, Length)
                         jlread(cio, UInt32)
                         data_offset = fileoffset(f, jlread(cio, RelOffset))
                         chunked_storage = true
+                    elseif version == 3 && storage_type == LC_CHUNKED_STORAGE
+                        throw(UnsupportedFeatureException("Version 3 chunked storage is not implemented."))
                     else
                         throw(UnsupportedFeatureException("Unknown data layout"))
                     end
@@ -206,16 +212,32 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
                    attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
     # See if there is a julia type attribute
     io = f.io
-    if datatype_class == typemax(UInt8) # Committed datatype
-        rr = jltype(f, f.datatype_locations[h5offset(f, datatype_offset)])
+    if datatype_class == typemax(UInt8) # shared datatype message
+        # this means that it is "committed" to `_types` if the file was written by JLD2  
+        offset = h5offset(f, datatype_offset)
+        rr = jltype(f, get(f.datatype_locations, offset, SharedDatatype(offset)))
+
+        if data_offset == -1
+            # There was no layout message.
+            # That means, this dataset is just a datatype
+            # return the Datatype
+            return typeof(rr).parameters[1]
+        end
+
         seek(io, data_offset)
         read_dataspace = (dataspace, header_offset, data_length, filter_id)
         read_data(f, rr, read_dataspace, attributes)
+        
     elseif data_offset == typemax(Int64)
         seek(io, datatype_offset)
         @read_datatype io datatype_class dt begin
             rr = jltype(f, dt)
-            v = Array{typeof(rr).parameters[1], 1}()
+            T,S = typeof(rr).parameters
+            if data_length > -1
+                # TODO: this could use the fill value message to populate the array
+                @warn "This array should be populated by a fill value. This is not (yet) implemented."
+            end
+            v = Array{T, 1}()
             header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
             return v
         end
@@ -224,6 +246,14 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
         @read_datatype io datatype_class dt begin
             dtt = dt
             rr = jltype(f, dtt)
+
+            if data_offset == -1
+                # There was no layout message.
+                # That means, this dataset is just a datatype
+                # return the Datatype
+                return typeof(rr).parameters[1]
+            end
+
             seek(io, data_offset)
             read_dataspace = (dataspace, header_offset, data_length, filter_id)
             read_data(f, rr, read_dataspace, attributes)

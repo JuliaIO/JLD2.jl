@@ -357,7 +357,7 @@ function commit(f::JLDFile,
 end
 
 # Read the actual datatype for a committed datatype
-function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
+function read_shared_datatype(f::JLDFile, cdt::Union{SharedDatatype, CommittedDatatype})
     io = f.io
     chunk_start::Int64 = fileoffset(f, cdt.header_offset)
     seek(io, chunk_start)
@@ -445,7 +445,7 @@ function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
     end
 end
 
-#= function read_committed_datatype(f::JLDFile, cdt::CommittedDatatype)
+#= function read_shared_datatype(f::JLDFile, cdt::CommittedDatatype)
     dump(cdt)
     io = f.io
     seek(io, fileoffset(f, cdt.header_offset))
@@ -500,7 +500,7 @@ function jlread(io::IO, ::Type{ArrayDatatype})
     dt = jlread(io, BasicDatatype)
     version = dt.class >> 4
     dimensionality = jlread(io, UInt8)
-    skip(io, 3)
+    #skip(io, 3)
     dims = jlread(io, UInt32, dimensionality)
     if version == 2
         # unsupported permutation index

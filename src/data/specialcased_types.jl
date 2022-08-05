@@ -39,6 +39,8 @@ function jltype(f::JLDFile, dt::BasicDatatype)
             else
                 throw(UnsupportedFeatureException("Encountered an unsupported string type."))
             end
+        elseif dt.class << 4 == DT_OPAQUE  << 4
+            throw(UnsupportedFeatureException("attempted to read a bare (non-committed) opaque datatype"))
         else
             throw(UnsupportedFeatureException("Encountered an unsupported type."))
         end

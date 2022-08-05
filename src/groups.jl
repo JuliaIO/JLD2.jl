@@ -386,11 +386,10 @@ function load_group(f::JLDFile, roffset::RelOffset)
         end
 
         # Checksum
-        #seek(cio, chunk_end)
+        seek(cio, chunk_end)
         if header_version == 2
             end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())
         end
-        seek(cio, chunk_end)
     end
 
     if fractal_heap_address != UNDEFINED_ADDRESS

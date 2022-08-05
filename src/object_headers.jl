@@ -90,11 +90,11 @@ function read_obj_start(io::IO)
     if os.version == 2 && os.signature == OBJECT_HEADER_SIGNATURE
         if (os.flags & OH_TIMES_STORED) != 0
             # Skip access, modification, change and birth times
-            skip(io, 128)
+            skip(io, 16)
         end
         if (os.flags & OH_ATTRIBUTE_PHASE_CHANGE_VALUES_STORED) != 0
             # Skip maximum # of attributes fields
-            skip(io, 32)
+            skip(io, 4)
         end
 
         return read_size(io, os.flags), 2, os.flags
@@ -210,6 +210,24 @@ function read_link_info(io, msg_header, OffsetType)
                     v2btree_name_index))
 end
 
+function print_header_messages(f::JLDFile, name::AbstractString)
+    if isempty(name) || name == "/"
+        print_header_messages(f, f.root_group_offset)
+    else 
+        print_header_messages(f.root_group,name)
+    end
+end
+
+function print_header_messages(g::Group, name::AbstractString)
+    f = g.f
+    f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
+    (g, name) = pathize(g, name, false)
+    roffset = lookup_offset(g, name)
+    roffset != UNDEFINED_ADDRESS || throw(ArgumentError("did not find a group or dataset named \"$name\""))
+    print_header_messages(f, roffset)
+end
+
+
 function print_header_messages(f::JLDFile, roffset::RelOffset)
     io = f.io
     chunk_start::Int64 = fileoffset(f, roffset)
@@ -232,6 +250,7 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
         cio = begin_checksum_read(io)
         sz,_,groupflags = read_obj_start(cio)
         chunk_end = position(cio) + sz
+        @info "chunk 0" position(cio) sz chunk_end
     end
     # Messages
     continuation_message_goes_here::Int64 = -1
@@ -260,7 +279,7 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
             end
         end
         chunk_number += 1
-        
+        @info "positions" position(cio) chunk_start chunk_end
         while (curpos = position(cio)) < chunk_end-4
             if header_version == 1
                 skip_to_aligned!(cio, chunk_start)
@@ -394,13 +413,18 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
                         push!(attrs, read_attribute(cio, f))
                     end
                     attr = attrs[end]
-                    println("""    name: "$(attr.name)"\n    datatype: $(DATATYPES[attr.datatype_class%16])""")
-                    try
+                    println("""    name: \"$(attr.name)\" """)
+                    if attr.datatype_class != 0xff
+                        println("""    datatype: $(DATATYPES[attr.datatype_class%16])""")
+                    else
+                        println("""    datatype: committed at $(attr.datatype_offset)""")
+                    end
+                    #try
                         data = read_attr_data(f, attr)
                         println("""    data: "$data" """)
-                    catch e
+                    #= catch e
                         println("""    loading data failed""")
-                    end
+                    end =#
                 elseif (msg.flags & 2^3) != 0
                     throw(UnsupportedFeatureException())
                 end

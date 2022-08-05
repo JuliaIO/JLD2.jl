@@ -21,7 +21,7 @@ end
 # H5Datatype. We handle committed datatypes here, and other datatypes below.
 function jltype(f::JLDFile, cdt::CommittedDatatype)
     haskey(f.h5jltype, cdt) && return f.h5jltype[cdt]::ReadRepresentation
-    dt, attrs = read_committed_datatype(f, cdt)
+    dt, attrs = read_shared_datatype(f, cdt)
 
     julia_type_attr = nothing
     written_type_attr = nothing
@@ -77,6 +77,18 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     f.datatypes[cdt.index] = dt
     f.h5jltype[cdt] = rr
 end
+
+
+# jltype is the inverse of h5type, providing a ReadRepresentation for an
+# H5Datatype. We handle shared datatypes here: ones that were not "committed" by JLD2.
+function jltype(f::JLDFile, sdt::SharedDatatype)
+    haskey(f.h5jltype, sdt) && return f.h5jltype[sdt]::ReadRepresentation
+    dt, attrs = read_shared_datatype(f, sdt)
+    rr = jltype(f, dt)
+    f.h5jltype[sdt] = rr
+end
+
+
 
 # Constructs a ReadRepresentation for a given opaque (bitstype) type
 function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{ReadAttribute})

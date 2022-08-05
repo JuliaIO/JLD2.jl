@@ -106,10 +106,26 @@ Supertype of all HDF5 datatypes.
 """
 abstract type H5Datatype end
 
+"""
+    SharedDatatype
+
+Reference to a shared datatype message (stored elsewhere in a file).
+"""
+struct SharedDatatype <: H5Datatype
+    header_offset::RelOffset
+end
+
+"""
+    CommittedDatatype
+
+Reference to a shared datatype message (stored elsewhere in a file).
+These are stored in the `_types` group and indexed.
+"""
 struct CommittedDatatype <: H5Datatype
     header_offset::RelOffset
     index::Int
 end
+
 
 """
     ReadRepresentation{T,ODR}
@@ -339,7 +355,8 @@ function load_file_metadata!(f)
             throw(UnsupportedVersionException("This file can not be edited by JLD2. Please open in read-only mode."))
         end
     end
-    f.root_group = load_group(f, f.root_group_offset)
+    try
+        f.root_group = load_group(f, f.root_group_offset)
 
     if haskey(f.root_group.written_links, "_types")
         types_group_offset = f.root_group.written_links["_types"]::RelOffset
@@ -351,6 +368,11 @@ function load_file_metadata!(f)
         resize!(f.datatypes, length(f.datatype_locations))
     else
         f.types_group = Group{typeof(f)}(f)
+    end
+    catch e
+        show(e)
+        f.types_group = Group{typeof(f)}(f)
+
     end
     nothing
 end
