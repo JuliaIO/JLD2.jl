@@ -445,42 +445,6 @@ function read_shared_datatype(f::JLDFile, cdt::Union{SharedDatatype, CommittedDa
     end
 end
 
-#= function read_shared_datatype(f::JLDFile, cdt::CommittedDatatype)
-    dump(cdt)
-    io = f.io
-    seek(io, fileoffset(f, cdt.header_offset))
-    cio = begin_checksum_read(io)
-    sz, = read_obj_start(cio)
-    pmax = position(cio) + sz
-
-    # Messages
-    datatype_class::UInt8 = 0
-    datatype_offset::Int = 0
-    attrs = ReadAttribute[]
-    while position(cio) < pmax
-        msg = jlread(cio, HeaderMessage)
-        endpos = position(cio) + msg.size
-        if msg.msg_type == HM_DATATYPE
-            # Datatype stored here
-            datatype_offset = position(cio)
-            datatype_class = jlread(cio, UInt8)
-        elseif msg.msg_type == HM_ATTRIBUTE
-            push!(attrs, read_attribute(cio, f))
-        end
-        seek(cio, endpos)
-    end
-    seek(cio, pmax)
-
-    # Checksum
-    end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())
-
-    seek(io, datatype_offset)
-    @read_datatype io datatype_class dt begin
-        return (dt, attrs)
-    end
-end
- =#
-
 struct FixedLengthString{T<:AbstractString}
     length::Int
 end
@@ -500,7 +464,7 @@ function jlread(io::IO, ::Type{ArrayDatatype})
     dt = jlread(io, BasicDatatype)
     version = dt.class >> 4
     dimensionality = jlread(io, UInt8)
-    #skip(io, 3)
+    version == 2 && skip(io, 3)
     dims = jlread(io, UInt32, dimensionality)
     if version == 2
         # unsupported permutation index

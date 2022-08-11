@@ -292,7 +292,7 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
             end
             endpos = position(cio) + msg.size
             println("""
-            Message:  $(MESSAGE_TYPES[msg.msg_type]) ($(msg.msg_type)))
+            Message:  $(MESSAGE_TYPES[msg.msg_type]) ($(msg.msg_type))
                 size: $(msg.size)
                 flags: $(msg.flags)
                 at pos $(position(cio)-chunk_start)""")
@@ -357,51 +357,46 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
                 elseif msg.msg_type == HM_FILL_VALUE
                     #(jlread(cio, UInt8) == 3 && jlread(cio, UInt8) == 0x09) || throw(UnsupportedFeatureException())
                 elseif msg.msg_type == HM_DATA_LAYOUT
-                    version = jlread(cio, UInt8)
-                    println("""    version: $version""")
-                    if version == 4 || version == 3
-                        storage_type = jlread(cio, UInt8)
-                        if storage_type == LC_COMPACT_STORAGE
-                            data_length = jlread(cio, UInt16)
-                            data_offset = position(cio)
-                            println("""    type: compact storage\n    length: $length\n    offset: $(data_offset)""")
-                        elseif storage_type == LC_CONTIGUOUS_STORAGE
-                            rf = jlread(cio, RelOffset)
-                            data_offset = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
-                            data_length = jlread(cio, Length)
-                            println("""    type: contiguous storage\n    length: $(data_length)\n    offset: $(data_offset)""")
-
-                        elseif storage_type == LC_CHUNKED_STORAGE
-                            # TODO: validate this
-                            flags = jlread(cio, UInt8)
-                            dimensionality = jlread(cio, UInt8)
-                            dimensionality_size = jlread(cio, UInt8)
-                            skip(cio, Int(dimensionality)*Int(dimensionality_size))
-        
-                            chunk_indexing_type = jlread(cio, UInt8)
-                            chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
-                            data_length = jlread(cio, Length)
-                            jlread(cio, UInt32)
-                            data_offset = fileoffset(f, jlread(cio, RelOffset))
-                            chunked_storage = true
-                            println("""    type: chunked storage
-                                    length: $length
-                                    offset: $(data_offset)
-                                    dimensionality: $dimensionality
-                                    dimensionality_size: $dimensionality_size
-                                    chunk indexing type: $chunk_indexing_type""")
-
-                        else
-                            throw(UnsupportedFeatureException("Unknown data layout"))
-                        end
-                    end
+                    layout = jlread(cio, DataLayout, f)
+                    @info layout
                 elseif msg.msg_type == HM_FILTER_PIPELINE
                     version = jlread(cio, UInt8)
-                    version == 2 || throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
-                    nfilters = jlread(cio, UInt8)
-                    nfilters == 1 || throw(UnsupportedFeatureException())
-                    filter_id = jlread(cio, UInt16)
-                    issupported_filter(filter_id) || throw(UnsupportedFeatureException("Unknown Compression Filter $filter_id"))
+                    if version == 1
+                        nfilters = jlread(cio, UInt8)
+                        skip(cio, 6)
+                        for n = 1:nfilters
+                            filter_id = jlread(cio, UInt16)
+                            name_length = jlread(cio, UInt16)
+                            flags = jlread(cio, UInt16)
+                            nclient_vals = jlread(cio, UInt16)
+                            if iszero(name_length) 
+                                name = ""
+                            else
+                                name = read_bytestring(cio)
+                                skip(cio, 8-mod1(sizeof(name), 8)-1)
+                            end
+                            client_data = jlread(cio, UInt32, nclient_vals)
+                            isodd(nclient_vals) && skip(cio, 4)
+                            print("""
+                                filter no $n
+                                    filter_id: $filter_id
+                                    flags: $flags 
+                                    name: $name
+                                    num CD values: $nclient_vals
+                            """)
+                            for (i, cd) in enumerate(client_data)
+                                println("CD value $i   $cd")
+                            end
+                        end
+                    elseif version == 2
+                        #version == 2 || throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
+                        nfilters = jlread(cio, UInt8)
+                        nfilters == 1 || throw(UnsupportedFeatureException("number of filters should be 1 - is $nfilters"))
+                        filter_id = jlread(cio, UInt16)
+                        issupported_filter(filter_id) || throw(UnsupportedFeatureException("Unknown Compression Filter $filter_id"))
+                    else
+                        throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
+                    end
                 elseif msg.msg_type == HM_SYMBOL_TABLE
                     v1_btree_address = jlread(cio, RelOffset)
                     local_heap_address = jlread(cio, RelOffset)
@@ -439,4 +434,74 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
         end
     end
     nothing
+end
+
+
+struct DataLayout
+    version::UInt8
+    storage_type::UInt8
+    data_length::Int64
+    data_offset::Int64
+    dimensionality::UInt8
+    chunk_indexing_type::UInt8 # only in version 4
+    chunk_dimensions::Vector{UInt32} # only defined if dimensionality > 0
+    DataLayout(version, storage_type, data_length, data_offset) = 
+        new(version, storage_type, data_length, data_offset, 0, 0)
+    DataLayout(version, storage_type, data_length, data_offset, dimensionality, chunk_indexing_type, chunk_dimensions) = 
+        new(version, storage_type, data_length, data_offset, dimensionality, chunk_indexing_type, chunk_dimensions)
+end
+
+ischunked(dl::DataLayout) = dl.storage_type == 2
+
+function jlread(cio, ::Type{DataLayout}, f)
+    version = jlread(cio, UInt8)
+    if version == 4 || version == 3
+        storage_type = jlread(cio, UInt8)
+        if storage_type == LC_COMPACT_STORAGE
+            data_length = jlread(cio, UInt16)
+            data_offset = position(cio)
+            return DataLayout(version, storage_type, data_length, data_offset) 
+        elseif storage_type == LC_CONTIGUOUS_STORAGE
+            rf = jlread(cio, RelOffset)
+            data_offset = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
+            data_length = jlread(cio, Length)
+            DataLayout(version, storage_type, data_length, data_offset) 
+        elseif version == 4 && storage_type == LC_CHUNKED_STORAGE
+            # TODO: validate this
+            flags = jlread(cio, UInt8)
+            dimensionality = jlread(cio, UInt8)
+            dimensionality_size = jlread(cio, UInt8)
+            #skip(cio, Int(dimensionality)*Int(dimensionality_size))
+            chunk_dimensions = [read_nb_uint(cio, dimensionality_size) for _=1:dimensionality]
+            chunk_indexing_type = jlread(cio, UInt8)
+            @info "chunk dims" tuple(chunk_dimensions...) dimensionality dimensionality_size chunk_indexing_type
+            chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
+            data_length = jlread(cio, Length)
+            jlread(cio, UInt32)
+            data_offset = fileoffset(f, jlread(cio, RelOffset))
+            chunked_storage = true
+            DataLayout(version, storage_type, data_length, data_offset, dimensionality, chunk_indexing_type, chunk_dimensions) 
+
+        elseif version == 3 && storage_type == LC_CHUNKED_STORAGE
+            dimensionality = jlread(cio, UInt8)
+            data_offset = fileoffset(f, jlread(cio, RelOffset))
+            chunk_dimensions = jlread(cio, UInt32, dimensionality-1)
+            data_length = jlread(cio, UInt32)
+            chunked_storage = true
+            DataLayout(version, storage_type, data_length, data_offset, dimensionality, 0, chunk_dimensions) 
+        else
+            throw(UnsupportedFeatureException("Unknown data layout"))
+        end
+    else
+        throw(UnsupportedVersionException("Data layout message version $version is not supported"))
+    end
+end
+
+function read_nb_uint(io::IO, nb)
+    val = zero(UInt)
+    for n = 1:nb
+        #val = val << 8
+        val += jlread(io, UInt8)*(2^(8n))
+    end
+    val
 end

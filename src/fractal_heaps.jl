@@ -423,7 +423,7 @@ function read_v1btree(f, offset)
 
     # 0 for internal node, 1 for chunked datasets
     node_type = jlread(io, UInt8)
-    node_type == 0 || throw(InvalidDataException("Only group v1 btrees implemented"))
+    node_type == 0 || throw(InvalidDataException("Expected a v1 btree for group nodes"))
     # level of node. 0 implies leaf node
     node_level = jlread(io, UInt8)
     # how many entries are used
@@ -450,6 +450,44 @@ function read_v1btree(f, offset)
     end
     return links
 end
+
+function read_v1btree_dataset_chunks(f, offset, dimensionality)
+    io = f.io
+    seek(io, fileoffset(f, offset))
+
+    signature = jlread(io, UInt32)
+    signature == V1_BTREE_NODE_SIGNATURE || throw(InvalidDataException("Signature does not match."))
+
+    # 0 for internal node, 1 for chunked datasets
+    node_type = jlread(io, UInt8)
+    node_type == 1 || throw(InvalidDataException("Expected a v1 btree for dataset chunks"))
+    # level of node. 0 implies leaf node
+    node_level = jlread(io, UInt8)
+    # how many entries are used
+    entries_used = jlread(io, UInt16)
+    # maximum value appears to be the one from superblock
+    # but this is irrelevant for reading
+    left_sibling = jlread(io, RelOffset)
+    right_sibling = jlread(io, RelOffset)
+    children = Any[]
+    for _ = 1:entries_used
+        chunk_size = Int(jlread(io, UInt32))
+        filter_mask = Int(jlread(io, UInt32))
+        index = jlread(io, UInt64, dimensionality)
+        push!(children, (offset=jlread(io, RelOffset), node_level, chunk_size, filter_mask, idx=tuple(Int.(index)...)))
+    end
+
+    chunks = Any[]
+    for child in children
+        if child.node_level > 0
+            append!(chunks, read_v1btree_dataset_chunks(f, child.offset, dimensionality))
+        else
+            push!(chunks, child)
+        end
+    end
+    return chunks
+end
+
 
 const SYMBOL_TABLE_NODE_SIGNATURE = htol(0x444f4e53) # UInt8['S', 'N', 'O', 'D']
 

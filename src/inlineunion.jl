@@ -48,18 +48,17 @@ end
 # exept for the ReadRepresentation and the very last line where the data is
 # converted back into a Union Array
 function read_array(f::JLDFile, dataspace::ReadDataspace,
-                    rr::ReadRepresentation{InlineUnionEl{T1,T2},RR}, data_length::Int,
+                    rr::ReadRepresentation{InlineUnionEl{T1,T2},RR}, layout::DataLayout,
                     filter_id::UInt16, header_offset::RelOffset,
                     attributes::Union{Vector{ReadAttribute},Nothing}) where {T1, T2,RR}
     io = f.io
-    data_offset = position(io)
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
     seek(io, offset)
     v = construct_array(io, InlineUnionEl{T1,T2}, Val(Int(ndims)))
     n = length(v)
-    seek(io, data_offset)
+    seek(io, layout.data_offset)
     if !iszero(filter_id)
-        read_compressed_array!(v, f, rr, data_length, filter_id)
+        read_compressed_array!(v, f, rr, layout.data_length, filter_id)
     else
         read_array!(v, f, rr)
     end

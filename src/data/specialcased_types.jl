@@ -36,8 +36,10 @@ function jltype(f::JLDFile, dt::BasicDatatype)
         elseif dt.class << 4 == DT_STRING  << 4
             if dt.bitfield1 == 0x00 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
                 return AsciiString{NullTerminated}(dt.size)
+            elseif dt.bitfield1 == 0x10 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
+                return FixedLengthString{String}(dt.size)
             else
-                throw(UnsupportedFeatureException("Encountered an unsupported string type."))
+                throw(UnsupportedFeatureException("Encountered an unsupported string type. $dt"))
             end
         elseif dt.class << 4 == DT_OPAQUE  << 4
             throw(UnsupportedFeatureException("attempted to read a bare (non-committed) opaque datatype"))
