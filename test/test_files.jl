@@ -104,5 +104,15 @@ using Test, JLD2
             @test a.y == 2.0
             @test a.z == "3"
         end
+
+        fn = "chunking1.h5"
+        jldopen(fn) do f
+            @test f["uncompressed_chunks"] == reshape(1:1000., 25, 40)
+            @test f["compressed_chunks"] == reshape(1:1000., 25, 40)
+            @test_broken f["shuffle_compressed_chunks"] = reshape(1:1000, 25, 40)
+            @test size(f["incomplete_allocation"]) == (50,50,10)
+            @test f["incomplete_allocation"][1:50,1:50, 2] == reshape(1:2500, 50,50)
+            #f["incomplete_allocation"][1,1,1] == 0 
+        end
     end
 end

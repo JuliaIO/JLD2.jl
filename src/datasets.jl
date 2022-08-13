@@ -97,6 +97,9 @@ function load_dataset(f::JLDFile, offset::RelOffset)
                 version = jlread(cio, UInt8)
                 if version == 1
                     nfilters = jlread(cio, UInt8)
+                    if nfilters > 1
+                        throw(UnsupportedFeatureException("Decompression with more than one filter is not implemented"))
+                    end
                     skip(cio, 6)
                     for n = 1:nfilters
                         filter_id = jlread(cio, UInt16)
@@ -438,28 +441,25 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
         v = construct_array(io, T, Val(Int(ndims)))
         if layout.version == 3 
             # version 1 B-tree
-            chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)
-            @info "chunking" sizeof(v) chunks
+            # This version appears to be padding incomplete chunks
+            chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)                
+            vchunk = Array{T, Int(ndims)}(undef, reverse(layout.chunk_dimensions)...)
             for chunk in chunks
-                #@info chunk
                 idx = reverse(chunk.idx[1:end-1])
                 seek(io, fileoffset(f, chunk.offset))
                 indexview =  (:).(idx .+1, min.(idx .+ reverse(layout.chunk_dimensions), size(v)))
-                @info "dimension stuff" size(v) (reverse(layout.chunk_dimensions)...,) chunk.idx (indexview...,) idx
-                vchunk = Array{T, Int(ndims)}(undef, length.(indexview)...)
+                indexview2 = (:).(1, length.(indexview))
                 if filter_id !=0 && chunk.filter_mask & 1 == 0
                     read_compressed_array!(vchunk, f, rr, chunk.chunk_size, filter_id)
-                    v[indexview...] = vchunk
+                    v[indexview...] = @view vchunk[indexview2...]
                 else
                     read_array!(vchunk, f, rr)
-                    v[indexview...] = vchunk
-
+                    v[indexview...] = @view vchunk[indexview2...]
                 end
             end
             return v
         end
-        #read_chunked_array!(v, f, rr, layout, filter_id)
-        error("got to here but now I don't know what to do")
+        throw(UnsupportedVersionException("Encountered a chunked array ($layout) that is not implemented."))
     end
 end
 
