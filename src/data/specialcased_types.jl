@@ -1,3 +1,16 @@
+## Opaque Data
+struct OpaqueData{N}
+    data::Vector{UInt8}
+    OpaqueData(data) = new{length(data)}(data)
+end
+odr_sizeof(x::Type{OpaqueData{N}}) where {N} = UInt32(N)
+function jlconvert(rr::ReadRepresentation{OpaqueData{N}, Vector{UInt8}}, ::JLDFile, ptr::Ptr, ::RelOffset) where N
+    data = Vector{UInt8}(undef, N)
+    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), N)
+    OpaqueData(data)
+end
+
+
 ## Strings
 
 const H5TYPE_VLEN_UTF8 = VariableLengthDatatype(DT_VARIABLE_LENGTH, 0x11, 0x01, 0x00,
@@ -29,20 +42,25 @@ struct AsciiString{TERM}
     length::Int
 end
 
+
+struct FixedLengthAsciiString{TERM, N} end
+
 function jltype(f::JLDFile, dt::BasicDatatype)
     if dt.class >> 4 == 1
         if dt.class << 4 == DT_REFERENCE  << 4
             return ReadRepresentation{Any,RelOffset}()
         elseif dt.class << 4 == DT_STRING  << 4
             if dt.bitfield1 == 0x00 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
-                return AsciiString{NullTerminated}(dt.size)
+                #return AsciiString{NullTerminated}(dt.size)
+                return ReadRepresentation{String, FixedLengthAsciiString{NullTerminated, dt.size}}()
             elseif dt.bitfield1 == 0x10 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
                 return FixedLengthString{String}(dt.size)
             else
                 throw(UnsupportedFeatureException("Encountered an unsupported string type. $dt"))
             end
         elseif dt.class << 4 == DT_OPAQUE  << 4
-            throw(UnsupportedFeatureException("attempted to read a bare (non-committed) opaque datatype"))
+            return ReadRepresentation{OpaqueData{Int(dt.size)},Vector{UInt8}}()
+
         else
             throw(UnsupportedFeatureException("Encountered an unsupported type."))
         end
@@ -56,7 +74,7 @@ function jltype(f::JLDFile, dt::BasicDatatype)
             throw(UnsupportedFeatureException("Encountered an unsupported string type."))
         end
     elseif dt.class << 4 == DT_OPAQUE  << 4
-        error("attempted to read a bare (non-committed) opaque datatype")
+        return ReadRepresentation{OpaqueData{Int(dt.size)},Vector{UInt8}}()
     elseif dt.class << 4 == DT_REFERENCE  << 4
         return ReadRepresentation{Any,RelOffset}()
     else
@@ -104,7 +122,18 @@ function jlconvert(rr::AsciiString{NullTerminated}, ::JLDFile, ptr::Ptr, ::RelOf
     unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
     String(data[1:end-1])
 end
+function jlconvert(rr::ReadRepresentation{String, FixedLengthAsciiString{NullTerminated,N}}, ::JLDFile, ptr::Ptr, ::RelOffset) where N
+    data = Vector{UInt8}(undef, N)
+    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), N)
+    @show data
+    String(data)#1:end-1])
+end
 odr_sizeof(x::AsciiString) = x.length
+odr_sizeof(x::Type{FixedLengthAsciiString{TERM, N}}) where {TERM, N} = UInt32(N)#::Int
+
+
+
+
 
 # Used only for custom serialization
 constructrr(::JLDFile, ::Type{String}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =

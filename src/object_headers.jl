@@ -484,7 +484,8 @@ function jlread(cio, ::Type{DataLayout}, f)
 
         elseif version == 3 && storage_type == LC_CHUNKED_STORAGE
             dimensionality = jlread(cio, UInt8)
-            data_offset = fileoffset(f, jlread(cio, RelOffset))
+            rf = jlread(cio, RelOffset)
+            data_offset = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
             chunk_dimensions = jlread(cio, UInt32, dimensionality-1)
             data_length = jlread(cio, UInt32)
             chunked_storage = true
