@@ -143,6 +143,21 @@ read as type `S`.
 """
 struct CustomSerialization{T,S} end
 
+
+struct Filter
+    id::UInt16
+    flags::UInt16
+    name::String
+    client_data::Vector{UInt32}
+end
+
+struct FilterPipeline
+    filters::Vector{Filter}
+end
+
+FilterPipeline() = FilterPipeline(Filter[])
+iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
+
 """
     Group(file)
 

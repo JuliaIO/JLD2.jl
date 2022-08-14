@@ -50,7 +50,7 @@ function load_dataset(f::JLDFile, offset::RelOffset)
     datatype_class::UInt8 = 0
     datatype_offset::Int64 = 0
     layout::DataLayout = DataLayout(0,0,0,-1)
-    filter_id::UInt16 = 0
+    filter_pipeline::FilterPipeline = FilterPipeline(Filter[])
     while !isempty(chunks)
         chunk = popfirst!(chunks)
         chunk_start = chunk.chunk_start
@@ -94,35 +94,7 @@ function load_dataset(f::JLDFile, offset::RelOffset)
             elseif msg.msg_type == HM_DATA_LAYOUT
                 layout = jlread(cio, DataLayout, f)
             elseif msg.msg_type == HM_FILTER_PIPELINE
-                version = jlread(cio, UInt8)
-                if version == 1
-                    nfilters = jlread(cio, UInt8)
-                    if nfilters > 1
-                        throw(UnsupportedFeatureException("Decompression with more than one filter is not implemented"))
-                    end
-                    skip(cio, 6)
-                    for n = 1:nfilters
-                        filter_id = jlread(cio, UInt16)
-                        name_length = jlread(cio, UInt16)
-                        flags = jlread(cio, UInt16)
-                        nclient_vals = jlread(cio, UInt16)
-                        if iszero(name_length) 
-                            name = ""
-                        else
-                            name = read_bytestring(cio)
-                            skip(cio, 8-mod1(sizeof(name), 8)-1)
-                        end
-                        client_data = jlread(cio, UInt32, nclient_vals)
-                        isodd(nclient_vals) && skip(cio, 4)
-                    end
-                elseif version == 2
-                    nfilters = jlread(cio, UInt8)
-                    nfilters == 1 || throw(UnsupportedFeatureException("number of filters should be 1 - is $nfilters"))
-                    filter_id = jlread(cio, UInt16)
-                    issupported_filter(filter_id) || throw(UnsupportedFeatureException("Unknown Compression Filter $filter_id"))
-                else
-                    throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
-                end
+               filter_pipeline = jlread(cio, FilterPipeline)
             elseif msg.msg_type == HM_ATTRIBUTE
                 if attrs === EMPTY_READ_ATTRIBUTES
                     attrs = ReadAttribute[read_attribute(cio, f)]
@@ -147,11 +119,11 @@ function load_dataset(f::JLDFile, offset::RelOffset)
             end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException("Invalid Checksum"))
         end
     end
-    filter_id != 0 && !ischunked(layout) && throw(InvalidDataException("Compressed data must be chunked"))
+    iscompressed(filter_pipeline) && !ischunked(layout) && throw(InvalidDataException("Compressed data must be chunked"))
 
     # TODO verify that data length matches
     val = read_data(f, dataspace, datatype_class, datatype_offset, layout,
-                    filter_id, offset, attrs)
+                    filter_pipeline, offset, attrs)
     val
 end
 
@@ -181,7 +153,7 @@ function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Da
         dt = jlread(io, typeof(expected_datatype))
         if dt == expected_datatype
             seek(f.io, attr.data_offset)
-            read_dataspace = (attr.dataspace, NULL_REFERENCE, DataLayout(0,0,-1,attr.data_offset), UInt16(0))
+            read_dataspace = (attr.dataspace, NULL_REFERENCE, DataLayout(0,0,-1,attr.data_offset), FilterPipeline())
             return read_data(f, rr, read_dataspace)
         end
     end
@@ -190,7 +162,7 @@ end
 
 """
     read_data(f::JLDFile, dataspace::ReadDataspace, datatype_class::UInt8,
-              datatype_offset::Int64, data_offset::Int64[, filter_id::UInt16,
+              datatype_offset::Int64, data_offset::Int64[, filters::FilterPipeline,
               header_offset::RelOffset, attributes::Vector{ReadAttribute}])
 
 Read data from a file. If `datatype_class` is typemax(UInt8), the datatype is assumed to be
@@ -200,7 +172,7 @@ Otherwise, datatype_offset points to the offset of the datatype attribute.
 function read_data(f::JLDFile, dataspace::ReadDataspace,
                    datatype_class::UInt8, datatype_offset::Int64,
                    layout::DataLayout, 
-                   filter_id::UInt16=UInt16(0),
+                   filters::FilterPipeline=FilterPipeline(),
                    header_offset::RelOffset=NULL_REFERENCE,
                    attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
     # See if there is a julia type attribute
@@ -218,7 +190,7 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
         end
 
         seek(io, layout.data_offset)
-        read_dataspace = (dataspace, header_offset, layout, filter_id)
+        read_dataspace = (dataspace, header_offset, layout, filters)
         read_data(f, rr, read_dataspace, attributes)
         
     elseif layout.data_offset == typemax(Int64)
@@ -248,7 +220,7 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
             end
 
             seek(io, layout.data_offset)
-            read_dataspace = (dataspace, header_offset, layout, filter_id)
+            read_dataspace = (dataspace, header_offset, layout, filters)
             read_data(f, rr, read_dataspace, attributes)
         end
     end
@@ -257,19 +229,19 @@ end
 # Most types can only be scalars or arrays
 function read_data(f::JLDFile,
      @nospecialize(rr),
-     read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,UInt16},
+     read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,FilterPipeline},
      attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
 
-    dataspace, header_offset, layout, filter_id = read_dataspace
+    dataspace, header_offset, layout, filters = read_dataspace
     if dataspace.dataspace_type == DS_SCALAR
-        filter_id != 0 && throw(UnsupportedFeatureException())
+        iscompressed(filters) && throw(UnsupportedFeatureException())
         read_scalar(f, rr, header_offset)
     elseif dataspace.dataspace_type == DS_SIMPLE
-        read_array(f, dataspace, rr, layout, filter_id, header_offset, attributes)
+        read_array(f, dataspace, rr, layout, filters, header_offset, attributes)
     elseif dataspace.dataspace_type == DS_V1 && dataspace.dimensionality == 0
         read_scalar(f, rr, header_offset)
     elseif dataspace.dataspace_type == DS_V1
-        read_array(f, dataspace, rr, layout, filter_id, header_offset, attributes)
+        read_array(f, dataspace, rr, layout, filters, header_offset, attributes)
     else
         throw(UnsupportedFeatureException())
     end
@@ -278,11 +250,11 @@ end
 # Reference arrays can only be arrays or null dataspace (for Union{} case)
 function read_data(f::JLDFile,
     rr::ReadRepresentation{Any,RelOffset},
-    read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,UInt16},
+    read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,FilterPipeline},
     attributes::Vector{ReadAttribute})
 
-    dataspace, header_offset, layout, filter_id = read_dataspace
-    filter_id != 0 && throw(UnsupportedFeatureException())
+    dataspace, header_offset, layout, filters = read_dataspace
+    iscompressed(filters) && throw(UnsupportedFeatureException())
     if dataspace.dataspace_type == DS_SIMPLE
         # Since this is an array of references, there should be an attribute
         # informing us of the type
@@ -298,7 +270,7 @@ function read_data(f::JLDFile,
                 end
                 seek(io, startpos)
                 return read_array(f, dataspace, ReadRepresentation{T,RelOffset}(),
-                                  layout, UInt16(0), header_offset, attributes)
+                                  layout, FilterPipeline(), header_offset, attributes)
             end
         end
     elseif dataspace.dataspace_type == DS_NULL
@@ -316,10 +288,10 @@ end
 function read_data(f::JLDFile,
                    rr::Union{ReadRepresentation{T,nothing} where T,
                              ReadRepresentation{T,CustomSerialization{S,nothing}} where {S,T}},
-                   read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,UInt16},
+                   read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,FilterPipeline},
                    attributes::Vector{ReadAttribute})
-    dataspace, header_offset, layout, filter_id = read_dataspace
-    filter_id != 0 && throw(UnsupportedFeatureException())
+    dataspace, header_offset, layout, filters = read_dataspace
+    iscompressed(filters) && throw(UnsupportedFeatureException())
     dataspace.dataspace_type == DS_NULL || throw(UnsupportedFeatureException())
 
     dimensions_attr_index = find_dimensions_attr(attributes)
@@ -416,7 +388,7 @@ end
 
 function read_array(f::JLDFile, dataspace::ReadDataspace,
                     rr::ReadRepresentation{T,RR}, layout::DataLayout,
-                    filter_id::UInt16, header_offset::RelOffset,
+                    filters::FilterPipeline, header_offset::RelOffset,
                     attributes::Union{Vector{ReadAttribute},Nothing}) where {T,RR}
     io = f.io
     data_offset = layout.data_offset
@@ -428,8 +400,8 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
         v = construct_array(io, T, Val(Int(ndims)))
         n = length(v)
         seek(io, data_offset)
-        if filter_id !=0
-            read_compressed_array!(v, f, rr, layout.data_length, filter_id)
+        if iscompressed(filters)
+            read_compressed_array!(v, f, rr, layout.data_length, filters)
         else
             read_array!(v, f, rr)
         end
@@ -449,9 +421,28 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
                 seek(io, fileoffset(f, chunk.offset))
                 indexview =  (:).(idx .+1, min.(idx .+ reverse(layout.chunk_dimensions), size(v)))
                 indexview2 = (:).(1, length.(indexview))
-                if filter_id !=0 && chunk.filter_mask & 1 == 0
-                    read_compressed_array!(vchunk, f, rr, chunk.chunk_size, filter_id)
-                    v[indexview...] = @view vchunk[indexview2...]
+        
+                if iscompressed(filters)
+                    if chunk.filter_mask == 0
+                        read_compressed_array!(vchunk, f, rr, chunk.chunk_size, filters)
+                        v[indexview...] = @view vchunk[indexview2...]    
+                    else
+                        if length(filters.filters) == 1
+                            read_array!(vchunk, f, rr)
+                            v[indexview...] = @view vchunk[indexview2...]
+                        else
+                            mask = [chunk.filter_mask & 2^(n-1) == 0 for n=eachindex(filters.filters)]
+                            if any(mask)
+                                rf = FilterPipeline(filters.filters[mask])
+                                read_compressed_array!(vchunk, f, rr, chunk.chunk_size, rf)
+                                v[indexview...] = @view vchunk[indexview2...]
+                            else
+                                read_array!(vchunk, f, rr)
+                                v[indexview...] = @view vchunk[indexview2...]
+                            end
+
+                        end
+                    end
                 else
                     read_array!(vchunk, f, rr)
                     v[indexview...] = @view vchunk[indexview2...]

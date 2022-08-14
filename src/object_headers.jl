@@ -360,43 +360,8 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
                     layout = jlread(cio, DataLayout, f)
                     @info layout
                 elseif msg.msg_type == HM_FILTER_PIPELINE
-                    version = jlread(cio, UInt8)
-                    if version == 1
-                        nfilters = jlread(cio, UInt8)
-                        skip(cio, 6)
-                        for n = 1:nfilters
-                            filter_id = jlread(cio, UInt16)
-                            name_length = jlread(cio, UInt16)
-                            flags = jlread(cio, UInt16)
-                            nclient_vals = jlread(cio, UInt16)
-                            if iszero(name_length) 
-                                name = ""
-                            else
-                                name = read_bytestring(cio)
-                                skip(cio, 8-mod1(sizeof(name), 8)-1)
-                            end
-                            client_data = jlread(cio, UInt32, nclient_vals)
-                            isodd(nclient_vals) && skip(cio, 4)
-                            print("""
-                                filter no $n
-                                    filter_id: $filter_id
-                                    flags: $flags 
-                                    name: $name
-                                    num CD values: $nclient_vals
-                            """)
-                            for (i, cd) in enumerate(client_data)
-                                println("CD value $i   $cd")
-                            end
-                        end
-                    elseif version == 2
-                        #version == 2 || throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
-                        nfilters = jlread(cio, UInt8)
-                        nfilters == 1 || throw(UnsupportedFeatureException("number of filters should be 1 - is $nfilters"))
-                        filter_id = jlread(cio, UInt16)
-                        issupported_filter(filter_id) || throw(UnsupportedFeatureException("Unknown Compression Filter $filter_id"))
-                    else
-                        throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
-                    end
+                    filter_pipeline = jlread(cio, FilterPipeline)
+                    @info filter_pipeline
                 elseif msg.msg_type == HM_SYMBOL_TABLE
                     v1_btree_address = jlread(cio, RelOffset)
                     local_heap_address = jlread(cio, RelOffset)

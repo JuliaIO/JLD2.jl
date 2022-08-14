@@ -1,6 +1,56 @@
+function jlread(io, ::Type{FilterPipeline})
+    version = jlread(io, UInt8)
+    nfilters = jlread(io, UInt8)
+    if version == 1
+        skip(cio, 6)
+        filters = map(1:nfilters) do _
+            id = jlread(io, UInt16)
+            name_length = jlread(io, UInt16)
+            flags = jlread(io, UInt16)
+            nclient_vals = jlread(io, UInt16)
+            if iszero(name_length) 
+                name = ""
+            else
+                name = read_bytestring(io)
+                skip(cio, 8-mod1(sizeof(name), 8)-1)
+            end
+            client_data = jlread(io, UInt32, nclient_vals)
+            isodd(nclient_vals) && skip(io, 4)
+            Filter(id, flags, name, client_data)
+        end
+        return FilterPipeline(filters)
+    elseif version == 2
+        filters = map(1:nfilters) do _
+            id = jlread(io, UInt16)
+            if id > 255
+                name_length = jlread(io, UInt16)
+                flags = jlread(io, UInt16)
+                nclient_vals = jlread(io, UInt16)
+                if iszero(name_length) 
+                    name = ""
+                else
+                    name = read_bytestring(io)
+                    skip(io, 8-mod1(sizeof(name), 8)-1)
+                end
+            else
+                name = ""
+                flags = jlread(io, UInt16)
+                nclient_vals = jlread(io, UInt16)
+            end
+            client_data = jlread(io, UInt32, nclient_vals)
+            Filter(id, flags, name, client_data)
+        end
+        return FilterPipeline(filters)
+    else
+        throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
+    end
+
+
+end
 
 const COMPRESSOR_TO_ID = Dict(
     :ZlibCompressor => UInt16(1),
+    :ShuffleFilter => UInt16(2),
     :Bzip2Compressor => UInt16(307),
     #:BloscCompressor => UInt16(32001),
     :LZ4FrameCompressor => UInt16(32004),
@@ -9,6 +59,7 @@ const COMPRESSOR_TO_ID = Dict(
 # For loading need filter_ids as keys
 const ID_TO_DECOMPRESSOR = Dict(
     UInt16(1) => (:CodecZlib, :ZlibCompressor, :ZlibDecompressor, ""),
+    UInt16(2) => (:JLD2, :ShuffleFilter, :ShuffleFilter, ""),
     UInt16(307) => (:CodecBzip2, :Bzip2Compressor, :Bzip2Decompressor, "BZIP2"),
     #UInt16(32001) => (:Blosc, :BloscCompressor, :BloscDecompressor, "BLOSC"),
     UInt16(32004) => (:CodecLz4, :LZ4FrameCompressor, :LZ4FrameDecompressor, "LZ4"),
@@ -111,6 +162,16 @@ function get_decompressor(filter_id::UInt16)
     invoke_again, m = checked_import(modname)
     return invoke_again, @eval $m.$decompressorname()
 end
+function get_decompressor(filters::FilterPipeline)
+    decompressors = Any[]
+    invoke_again = false
+    for filter in filters.filters
+        modname, compressorname, decompressorname, = ID_TO_DECOMPRESSOR[filter.id]
+        invoke_again, m = checked_import(modname)
+        push!(decompressors, @eval $m.$decompressorname())
+    end
+    return invoke_again, decompressors
+end
 
 pipeline_message_size(filter_id) = 4 + 12 + (filter_id > 255)*(2 + length(ID_TO_DECOMPRESSOR[filter_id][4]))
 
@@ -188,23 +249,52 @@ function write_compressed_data(cio, f, data, odr, wsession, filter_id, compresso
     jlwrite(f.io, deflated)
 end
 
+function decompress!(inptr::Ptr, data_length, element_size, decompressor::TranscodingStreams.Codec)
+    TranscodingStreams.initialize(decompressor)
+    data = transcode(decompressor, unsafe_wrap(Array, Ptr{UInt8}(inptr), data_length))::Array{UInt8, 1}
+    TranscodingStreams.finalize(decompressor)
+    return data
+end
 
+struct ShuffleFilter end
+
+function decompress!(data::Vector{UInt8}, data_length, element_size, decompressor::ShuffleFilter)
+    # Start with all least significant bytes, then work your way up
+    # I'll leave this for somenone else to make performant
+    @assert data_length == length(data)
+    @assert data_length % element_size == 0
+    data_new = similar(data)
+    numelements = length(data)÷element_size
+    for n = eachindex(data_new)
+        j = 1 + (n-1)*numelements
+        i = mod1(j , length(data)) + j÷length(data)
+        data_new[n] = data[i]
+    end
+    return data_new
+end
+function decompress!(io::IOStream, data_length, element_size,decompressor)
+    read!(TranscodingStream(decompressor, io), Vector{UInt8}(undef, odr_sizeof(RR)*n))
+end
 
 function read_compressed_array!(v::Array{T}, f::JLDFile{MmapIO},
                                 rr::ReadRepresentation{T,RR},
                                 data_length::Int64,
-                                filter_id
+                                filters
                                 ) where {T,RR}
 
-    invoke_again, decompressor = get_decompressor(filter_id)
+    invoke_again, decompressors = get_decompressor(filters)
     if invoke_again
-        return Base.invokelatest(read_compressed_array!, v, f, rr, data_length, filter_id)::typeof(v)
+        return Base.invokelatest(read_compressed_array!, v, f, rr, data_length, filters)::typeof(v)
     end
     io = f.io
     inptr = io.curptr
-    TranscodingStreams.initialize(decompressor)
-    data = transcode(decompressor, unsafe_wrap(Array, Ptr{UInt8}(inptr), data_length))::Array{UInt8, 1}
-    TranscodingStreams.finalize(decompressor)
+    element_size = odr_sizeof(RR)
+    data = decompress!(inptr, data_length, element_size, decompressors[end])
+    if length(decompressors) > 1 
+        for decompressor in decompressors[end-1:-1:1]
+            data = decompress!(data, length(data), element_size, decompressor)
+        end
+    end
     @simd for i = 1:length(v)
         dataptr = Ptr{Cvoid}(pointer(data, odr_sizeof(RR)*(i-1)+1))
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
@@ -218,16 +308,22 @@ end
 function read_compressed_array!(v::Array{T}, f::JLDFile{IOStream},
                                 rr::ReadRepresentation{T,RR},
                                 data_length::Int64,
-                                filter_id,
+                                filters,
                                 ) where {T,RR}
-    invoke_again, decompressor = get_decompressor(filter_id)
+    invoke_again, decompressors = get_decompressor(filters)
     if invoke_again
-        return Base.invokelatest(read_compressed_array!, v, f, rr, data_length, filter_id)::typeof(v)
+        return Base.invokelatest(read_compressed_array!, v, f, rr, data_length, filters)::typeof(v)
     end
+
     io = f.io
     data_offset = position(io)
     n = length(v)
-    data = read!(TranscodingStream(decompressor, io), Vector{UInt8}(undef, odr_sizeof(RR)*n))
+    data = decompress!(io, data_length, element_size, decompressors[end])
+    if length(decompressors) > 1 
+        for decompressor in decompressors[end-1:-1:1]
+            data = decompress!(data, data_length, element_size, decompressor)
+        end
+    end
     @simd for i = 1:n
         dataptr = Ptr{Cvoid}(pointer(data, odr_sizeof(RR)*(i-1)+1))
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)

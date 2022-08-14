@@ -16,10 +16,10 @@ constructrr(::JLDFile, ::Type{T}, dt::VariableLengthDatatype, ::Vector{ReadAttri
 # with JLD2 with versions v0.1.12 - v0.3.1
 function read_array(f::JLDFile, dataspace::ReadDataspace,
                     rr::FixedLengthString{String}, layout::DataLayout,
-                    filter_id::UInt16, header_offset::RelOffset,
+                    filters::FilterPipeline, header_offset::RelOffset,
                     attributes::Union{Vector{ReadAttribute},Nothing})
     rrv = ReadRepresentation{UInt8,odr(UInt8)}()
-    v = read_array(f, dataspace, rrv, layout, filter_id, NULL_REFERENCE, attributes)
+    v = read_array(f, dataspace, rrv, layout, filters, NULL_REFERENCE, attributes)
     String(v)
 end
 
