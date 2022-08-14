@@ -2,7 +2,7 @@ function jlread(io, ::Type{FilterPipeline})
     version = jlread(io, UInt8)
     nfilters = jlread(io, UInt8)
     if version == 1
-        skip(cio, 6)
+        skip(io, 6)
         filters = map(1:nfilters) do _
             id = jlread(io, UInt16)
             name_length = jlread(io, UInt16)
@@ -12,7 +12,7 @@ function jlread(io, ::Type{FilterPipeline})
                 name = ""
             else
                 name = read_bytestring(io)
-                skip(cio, 8-mod1(sizeof(name), 8)-1)
+                skip(io, 8-mod1(sizeof(name), 8)-1)
             end
             client_data = jlread(io, UInt32, nclient_vals)
             isodd(nclient_vals) && skip(io, 4)
@@ -249,7 +249,7 @@ function write_compressed_data(cio, f, data, odr, wsession, filter_id, compresso
     jlwrite(f.io, deflated)
 end
 
-function decompress!(inptr::Ptr, data_length, element_size, decompressor::TranscodingStreams.Codec)
+function decompress!(inptr::Ptr, data_length, element_size, n, decompressor::TranscodingStreams.Codec)
     TranscodingStreams.initialize(decompressor)
     data = transcode(decompressor, unsafe_wrap(Array, Ptr{UInt8}(inptr), data_length))::Array{UInt8, 1}
     TranscodingStreams.finalize(decompressor)
@@ -258,7 +258,7 @@ end
 
 struct ShuffleFilter end
 
-function decompress!(data::Vector{UInt8}, data_length, element_size, decompressor::ShuffleFilter)
+function decompress!(data::Vector{UInt8}, data_length, element_size,n, decompressor::ShuffleFilter)
     # Start with all least significant bytes, then work your way up
     # I'll leave this for somenone else to make performant
     @assert data_length == length(data)
@@ -272,8 +272,8 @@ function decompress!(data::Vector{UInt8}, data_length, element_size, decompresso
     end
     return data_new
 end
-function decompress!(io::IOStream, data_length, element_size,decompressor)
-    read!(TranscodingStream(decompressor, io), Vector{UInt8}(undef, odr_sizeof(RR)*n))
+function decompress!(io::IOStream, data_length, element_size, n, decompressor)
+    read!(TranscodingStream(decompressor, io), Vector{UInt8}(undef, element_size*n))
 end
 
 function read_compressed_array!(v::Array{T}, f::JLDFile{MmapIO},
@@ -289,10 +289,11 @@ function read_compressed_array!(v::Array{T}, f::JLDFile{MmapIO},
     io = f.io
     inptr = io.curptr
     element_size = odr_sizeof(RR)
-    data = decompress!(inptr, data_length, element_size, decompressors[end])
+    n = length(v)
+    data = decompress!(inptr, data_length, element_size, n, decompressors[end])
     if length(decompressors) > 1 
         for decompressor in decompressors[end-1:-1:1]
-            data = decompress!(data, length(data), element_size, decompressor)
+            data = decompress!(data, length(data), element_size, n, decompressor)
         end
     end
     @simd for i = 1:length(v)
@@ -318,10 +319,11 @@ function read_compressed_array!(v::Array{T}, f::JLDFile{IOStream},
     io = f.io
     data_offset = position(io)
     n = length(v)
-    data = decompress!(io, data_length, element_size, decompressors[end])
+    element_size = odr_sizeof(RR)
+    data = decompress!(io, data_length, element_size, n, decompressors[end])
     if length(decompressors) > 1 
         for decompressor in decompressors[end-1:-1:1]
-            data = decompress!(data, data_length, element_size, decompressor)
+            data = decompress!(data, length(data), element_size, n, decompressor)
         end
     end
     @simd for i = 1:n

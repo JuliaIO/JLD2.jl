@@ -279,7 +279,7 @@ function read_data(f::JLDFile,
                           header_offset)
     elseif dataspace.dataspace_type == DS_V1
         return read_array(f, dataspace, ReadRepresentation{Any,RelOffset}(),
-                                  layout, UInt16(0), header_offset, attributes)
+                                  layout, FilterPipeline(), header_offset, attributes)
     end
     throw(UnsupportedFeatureException("Dataspace type $(dataspace.dataspace_type) not implemented"))
 end
