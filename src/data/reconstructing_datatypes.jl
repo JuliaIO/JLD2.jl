@@ -239,7 +239,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
                 end
             end
         end
-        return (ReadRepresentation{T,OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}}()}(), false)
+        return (ReadRepresentation{T,OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}, offsets[end]+odr_sizeof(odrs[end])}()}(), false)
     end
 end
 
@@ -489,7 +489,7 @@ function reconstruct_odr(f::JLDFile, dt::CompoundDatatype,
         end
         types[i], h5types[i] = typeof(dtrr).parameters
     end
-    return OnDiskRepresentation{(dt.offsets...,), Tuple{types...}, Tuple{h5types...}}()
+    return OnDiskRepresentation{(dt.offsets...,), Tuple{types...}, Tuple{h5types...},dt.size}()
 end
 
 # Reconstruct type that is a "lost cause": either we were not able to resolve
@@ -567,7 +567,7 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
                 end
             end
         end
-    
+
         push!(args, (:obj))    
         return blk
     end

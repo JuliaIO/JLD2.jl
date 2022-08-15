@@ -38,6 +38,7 @@ odr(::Type{String}) = fieldodr(String, true)
 objodr(x::String) = FixedLengthString{String}(jlsizeof(x))
 
 struct NullTerminated end
+struct SpacePadded end 
 struct AsciiString{TERM}
     length::Int
 end
@@ -55,6 +56,8 @@ function jltype(f::JLDFile, dt::BasicDatatype)
                 return ReadRepresentation{String, FixedLengthAsciiString{NullTerminated, dt.size}}()
             elseif dt.bitfield1 == 0x10 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
                 return FixedLengthString{String}(dt.size)
+            elseif dt.bitfield1 == 0x02 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
+                return ReadRepresentation{String, FixedLengthAsciiString{SpacePadded, dt.size}}()
             else
                 throw(UnsupportedFeatureException("Encountered an unsupported string type. $dt"))
             end
@@ -122,11 +125,16 @@ function jlconvert(rr::AsciiString{NullTerminated}, ::JLDFile, ptr::Ptr, ::RelOf
     unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
     String(data[1:end-1])
 end
-function jlconvert(rr::ReadRepresentation{String, FixedLengthAsciiString{NullTerminated,N}}, ::JLDFile, ptr::Ptr, ::RelOffset) where N
+function jlconvert(rr::ReadRepresentation{String, FixedLengthAsciiString{NullTerminated,N}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {N}
     data = Vector{UInt8}(undef, N)
     unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), N)
-    @show data
-    String(data)#1:end-1])
+    String(data)
+end
+
+function jlconvert(rr::ReadRepresentation{String, FixedLengthAsciiString{SpacePadded,N}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {N}
+    data = Vector{UInt8}(undef, N)
+    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), N)
+    rstrip(String(data))
 end
 odr_sizeof(x::AsciiString) = x.length
 odr_sizeof(x::Type{FixedLengthAsciiString{TERM, N}}) where {TERM, N} = UInt32(N)#::Int

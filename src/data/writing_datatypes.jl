@@ -1,5 +1,5 @@
 # Initial ODR for DataType
-const DataTypeODR = OnDiskRepresentation{(0, odr_sizeof(Vlen{String})),Tuple{String,Vector{Any}},Tuple{Vlen{String},Vlen{RelOffset}}}
+const DataTypeODR = OnDiskRepresentation{(0, odr_sizeof(Vlen{String})),Tuple{String,Vector{Any}},Tuple{Vlen{String},Vlen{RelOffset}}, odr_sizeof(Vlen{String})+odr_sizeof(Vlen{RelOffset})}
 
 const NULL_COMMITTED_DATATYPE = CommittedDatatype(RelOffset(0), 0)
 
@@ -35,8 +35,9 @@ function hasdata(T::DataType, encounteredtypes=DataType[])
 end
 
 # Gets the size of an on-disk representation
-Base.@pure function odr_sizeof(::OnDiskRepresentation{Offsets,JLTypes,H5Types}) where {Offsets,JLTypes,H5Types}
-    Offsets[end]+odr_sizeof(H5Types.parameters[end])
+function odr_sizeof(::OnDiskRepresentation{Offsets,JLTypes,H5Types,Size}) where {Offsets,JLTypes,H5Types,Size}
+    #Offsets[end]+odr_sizeof(H5Types.parameters[end])
+    Size
 end
 
 # Determines whether a type will have the same layout on disk as in memory
@@ -225,8 +226,8 @@ h5convert!(out::Pointers, ::Type{T}, ::JLDFile, x, ::JLDWriteSession) where {T} 
 
 # We pack types that have padding using a staged h5convert! method
 @generated function h5convert!(out::Pointers,
-       ::OnDiskRepresentation{Offsets,Types,H5Types},
-       file::JLDFile, x, wsession::JLDWriteSession) where {Offsets,Types,H5Types}
+       ::OnDiskRepresentation{Offsets,Types,H5Types,Size},
+       file::JLDFile, x, wsession::JLDWriteSession) where {Offsets,Types,H5Types,Size}
     T = x
     types = Types.parameters
     members = H5Types.parameters
@@ -445,7 +446,8 @@ const H5TYPE_UNION = CompoundDatatype(
 const UnionTypeODR = OnDiskRepresentation{
       (0, odr_sizeof(Vlen{String}), odr_sizeof(Vlen{String})+odr_sizeof(Vlen{RelOffset})),
       Tuple{String, Vector{Any}, Vector{Any}},
-      Tuple{Vlen{String}, Vlen{RelOffset}, Vlen{RelOffset}}}
+      Tuple{Vlen{String}, Vlen{RelOffset}, Vlen{RelOffset}},
+      odr_sizeof(Vlen{String})+2*odr_sizeof(Vlen{RelOffset})}
 
 function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type{S}, ::Initialized) where {T<:Union,S<:Union}
     @lookup_committed f Union
@@ -508,7 +510,7 @@ end
 
 ## UnionAll
 
-const UnionAllODR = OnDiskRepresentation{(0, 8),Tuple{TypeVar,Any},Tuple{RelOffset,RelOffset}}
+const UnionAllODR = OnDiskRepresentation{(0, 8),Tuple{TypeVar,Any},Tuple{RelOffset,RelOffset}, 16}
 
 # This needs its own h5convert! method, since otherwise we will attempt to specialize the
 # generic h5convert! method for the specific UnionAll type rather than for UnionAll
@@ -602,7 +604,7 @@ function odr(::Type{T}) where T
         offset += odr_sizeof(fodr)
     end
 
-    OnDiskRepresentation{(offsets...,), Tuple{T.types...}, Tuple{odrs...}}()
+    OnDiskRepresentation{(offsets...,), Tuple{T.types...}, Tuple{odrs...}, offset}()
 end
 
 abstract type DataMode end
@@ -615,7 +617,7 @@ datamode(::DataType) = ReferenceFree()
 datamode(::FixedLengthString) = ReferenceFree()
 datamode(::AsciiString) = ReferenceFree()
 datamode(::Nothing) = ReferenceFree()
-@generated function datamode(odr::OnDiskRepresentation{Offsets,JLTypes,H5Types} where {Offsets,JLTypes}) where H5Types
+@generated function datamode(odr::OnDiskRepresentation{Offsets,JLTypes,H5Types,Size} where {Offsets,JLTypes,Size}) where H5Types
     for ty in H5Types.parameters
         datamode(ty) == HasReferences() && return HasReferences()
     end

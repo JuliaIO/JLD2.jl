@@ -106,10 +106,16 @@ function jlread(io::IO, ::Type{GlobalHeap})
     startpos = position(io)
     free = heapsz
     while free > 8 + jlsizeof(Length)
-        push!(objects, position(io))
+        curpos = position(io)
         objidx = jlread(io, UInt16)
         objidx == 0 && break
-        objidx == index || throw(UnsupportedFeatureException())
+        if objidx > index 
+            append!(objects, fill(typemax(Int), objidx-index))
+            index = objidx
+        elseif objidx < index
+            throw(InvalidDataException("Encountered unordered list of global heap objects."))
+        end
+        push!(objects, curpos)
         skip(io, 6)                    # Reference count and reserved
         sz = jlread(io, Length)          # Length
         skip(io, sz + 8 - mod1(sz, 8)) # Payload

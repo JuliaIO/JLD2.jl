@@ -35,7 +35,7 @@ using Test, JLD2
         # Big Endian Integers are not implemented
         fn = "h5ex_t_int.h5"
         jldopen(fn) do f
-            @test_broken f["DS1"]
+            @test f["DS1"] == [0:-1:-6 zeros(Int,7) 0:6 0:2:12]
         end
 
         fn = "h5ex_t_objref.h5"
@@ -46,12 +46,12 @@ using Test, JLD2
 
         fn = "h5ex_t_opaque.h5"
         jldopen(fn) do f
-            @test_broken f["DS1"]
+            @test f["DS1"][4].data == [0x4f, 0x50, 0x41, 0x51, 0x55, 0x45, 0x30]
         end
 
         fn = "h5ex_t_string.h5"
         jldopen(fn) do f
-            @test_broken f["DS1"]
+            @test f["DS1"] == ["Parting", "is such", "sweet", "sorrow."]
         end
 
         fn = "h5ex_t_vlen.h5"
@@ -109,10 +109,11 @@ using Test, JLD2
         jldopen(fn) do f
             @test f["uncompressed_chunks"] == reshape(1:1000., 25, 40)
             @test f["compressed_chunks"] == reshape(1:1000., 25, 40)
-            @test_broken f["shuffle_compressed_chunks"] = reshape(1:1000, 25, 40)
+            @test f["shuffle_compressed_chunks"] == reshape(1:1000, 25, 40)
             @test size(f["incomplete_allocation"]) == (50,50,10)
             @test f["incomplete_allocation"][1:50,1:50, 2] == reshape(1:2500, 50,50)
             #f["incomplete_allocation"][1,1,1] == 0 
         end
+
     end
 end

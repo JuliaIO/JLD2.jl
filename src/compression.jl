@@ -258,16 +258,16 @@ end
 
 struct ShuffleFilter end
 
-function decompress!(data::Vector{UInt8}, data_length, element_size,n, decompressor::ShuffleFilter)
+function decompress!(data::Vector{UInt8}, data_length, element_size, num_elements, decompressor::ShuffleFilter)
     # Start with all least significant bytes, then work your way up
     # I'll leave this for somenone else to make performant
     @assert data_length == length(data)
     @assert data_length % element_size == 0
+    @assert data_length÷element_size == num_elements
     data_new = similar(data)
-    numelements = length(data)÷element_size
     for n = eachindex(data_new)
-        j = 1 + (n-1)*numelements
-        i = mod1(j , length(data)) + j÷length(data)
+        j = 1 + (n-1)*num_elements
+        i = mod1(j , data_length) + (j-1)÷data_length
         data_new[n] = data[i]
     end
     return data_new
@@ -278,7 +278,7 @@ end
 
 function read_compressed_array!(v::Array{T}, f::JLDFile{MmapIO},
                                 rr::ReadRepresentation{T,RR},
-                                data_length::Int64,
+                                data_length::Integer,
                                 filters
                                 ) where {T,RR}
 
@@ -308,7 +308,7 @@ end
 
 function read_compressed_array!(v::Array{T}, f::JLDFile{IOStream},
                                 rr::ReadRepresentation{T,RR},
-                                data_length::Int64,
+                                data_length::Integer,
                                 filters,
                                 ) where {T,RR}
     invoke_again, decompressors = get_decompressor(filters)
