@@ -507,6 +507,16 @@ end
 jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
           header_offset::RelOffset) = Union{}
 
+# Set a field of a struct by modifying the memory
+# This is dirty but I can't think of a better way to reinstantiate mutable structs with const fields
+function jlsetfield!(obj, i, x)
+    if ismutable(x)
+        unsafe_store!(Ptr{Ptr{Nothing}}(pointer_from_objref(obj)+fieldoffset(typeof(obj),i)), pointer_from_objref(x))
+    else
+	unsafe_store!(Ptr{typeof(x)}(pointer_from_objref(obj)+fieldoffset(typeof(obj),i)), x)
+    end
+    x
+end
 
 
 # This jlconvert method handles compound types with padding or references
@@ -540,9 +550,9 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
             if odr === nothing
                 # Type is not stored or single instance
                 newi = Expr(:new, ttype)
-                push!(args, :(setfield!(obj, $fni, $newi)))                    
+                push!(args, :(jlsetfield!(obj, $i, $newi)))                    
             else
-                loadfield = :(setfield!(obj, $fni, rconvert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype))
+                loadfield = :(jlsetfield!(obj, $i, rconvert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype))
                 if jlconvert_canbeuninitialized(rr)
                     push!(args, :(jlconvert_isinitialized($rr, ptr+$offset) && $(loadfield)))
                 else
