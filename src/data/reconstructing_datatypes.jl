@@ -542,8 +542,7 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
                 newi = Expr(:new, ttype)
                 # use jl_set_nth_field instead of setfield! since the former also works for const fields
                 # in mutable structs.
-                push!(args, :(ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), obj, ($i)-1, $newi)))                    
-               
+                push!(args, :(ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), obj, ($i)-1, $newi)))
             else
                 loadfield = quote
                     fieldval = rconvert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype
