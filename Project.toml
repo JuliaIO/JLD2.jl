@@ -1,6 +1,6 @@
 name = "JLD2"
 uuid = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
-version = "0.4.23"
+version = "0.4.24"
 
 [deps]
 FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
