@@ -514,3 +514,30 @@ end
 
     end
 end
+
+if VERSION ≥ v"1.8"
+
+    struct SingletonStruct end
+
+    # This is a workaround since for old julia versions this syntax is not allowed and the parser
+    # is eager and attempts to parse this piece of code anyway
+    eval(Meta.parse("""mutable struct WrappedSingleton
+                  x::Int
+                  const y::Vector{Int}
+                  const z::SingletonStruct
+              end
+              """))
+
+    @testset "Constant fields in mutable structs (>v1.8) - Issue #410" begin
+        mktempdir() do folder
+            # The real test here is that it doesn't fail in v1.8
+            b = WrappedSingleton(1, [2,3], SingletonStruct())
+            save("test.jld2", "b", b)
+            bloaded = load("test.jld2", "b")
+            @test b.x == bloaded.x
+            @test b.y == bloaded.y
+            @test b.z == bloaded.z
+        end
+    end
+
+end
