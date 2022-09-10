@@ -540,9 +540,14 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
             if odr === nothing
                 # Type is not stored or single instance
                 newi = Expr(:new, ttype)
-                push!(args, :(setfield!(obj, $fni, $newi)))                    
+                # use jl_set_nth_field instead of setfield! since the former also works for const fields
+                # in mutable structs.
+                push!(args, :(ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), obj, ($i)-1, $newi)))
             else
-                loadfield = :(setfield!(obj, $fni, rconvert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype))
+                loadfield = quote
+                    fieldval = rconvert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype
+                    ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), obj, ($i)-1, fieldval)
+                end
                 if jlconvert_canbeuninitialized(rr)
                     push!(args, :(jlconvert_isinitialized($rr, ptr+$offset) && $(loadfield)))
                 else

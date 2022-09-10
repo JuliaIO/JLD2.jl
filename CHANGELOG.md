@@ -1,3 +1,6 @@
+## 0.4.23
+ - Support for `const` fields in mutable structs
+ 
 ## 0.4.22
  - Fix reconstruction of partially intialized structs
 
