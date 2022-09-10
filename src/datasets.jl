@@ -431,7 +431,7 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
                             read_array!(vchunk, f, rr)
                             v[indexview...] = @view vchunk[indexview2...]
                         else
-                            mask = [chunk.filter_mask & 2^(n-1) == 0 for n=eachindex(filters.filters)]
+                            mask = Bool[chunk.filter_mask & 2^(n-1) == 0 for n=eachindex(filters.filters)]
                             if any(mask)
                                 rf = FilterPipeline(filters.filters[mask])
                                 read_compressed_array!(vchunk, f, rr, chunk.chunk_size, rf)

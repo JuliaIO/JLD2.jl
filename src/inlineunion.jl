@@ -58,7 +58,7 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     n = length(v)
     seek(io, layout.data_offset)
     if iscompressed(filters)
-        read_compressed_array!(v, f, rr, layout.data_length, filter_id)
+        read_compressed_array!(v, f, rr, layout.data_length, filters)
     else
         read_array!(v, f, rr)
     end

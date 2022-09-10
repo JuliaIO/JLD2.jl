@@ -108,7 +108,7 @@ function read_fractal_heap_header(f, offset)
         max_size_managed_objects)
 end
 
-function read_indirect_block(f, offset, hh, nrows)
+function read_indirect_block(f, offset, hh, nrows::Int)
     io = f.io
     seek(io, fileoffset(f, offset))
     cio = begin_checksum_read(io)
@@ -155,7 +155,7 @@ function read_indirect_block(f, offset, hh, nrows)
         block_num = K+(n-1)
         rownum = block_num ÷ hh.table_width
         block_size = (2^(max(0,rownum-1))) * hh.starting_block_size
-        sub_iblock_nrows = (log2(block_size)-log2(hh.starting_block_size* hh.table_width))+1
+        sub_iblock_nrows::Int = (log2(block_size)-log2(hh.starting_block_size* hh.table_width))+1
         iblocks[n] = read_indirect_block(f, iblock_offset , hh, sub_iblock_nrows)
     end
     FractalHeapIndirectBlock(offset, block_offset, dblocks, iblocks)
@@ -328,7 +328,7 @@ function read_records_in_node(f, offset, num_records, depth, bh, hh)
         return read_v2btree_leaf_node(f, offset, num_records, bh, hh).records
     end
     
-    node = read_v2btree_node(f, offset, num_records, depth, bh, hh)
+    node = read_v2btree_node(f, offset, num_records, depth, bh, hh)::BTreeInternalNodeV2
 
     records = []
     for n=1:num_records+1
