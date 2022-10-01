@@ -6,6 +6,7 @@
 const DS_SCALAR = 0x00
 const DS_SIMPLE = 0x01
 const DS_NULL = 0x02
+const DS_V1 = 0xff
 
 struct WriteDataspace{N,A<:Tuple}
     dataspace_type::UInt8
@@ -86,7 +87,14 @@ end
 # dataspace_dimensions are the corresponding dimensions
 function read_dataspace_message(io::IO)
     dspace_start = jlread(io, DataspaceStart)
-    dspace_start.version == 2 || throw(UnsupportedVersionException())
-    dataspace_type = dspace_start.dataspace_type
-    ReadDataspace(dataspace_type, dspace_start.dimensionality, position(io))
+    if dspace_start.version == 1 || dspace_start.version == 0 
+        skip(io, 4) # skip another 4 bytes
+        dataspace_type = DS_V1
+        return ReadDataspace(dataspace_type, dspace_start.dimensionality, position(io))
+    elseif dspace_start.version == 2
+        dataspace_type = dspace_start.dataspace_type
+        return ReadDataspace(dataspace_type, dspace_start.dimensionality, position(io))
+    else
+        throw(UnsupportedVersionException("Dataspace Messages version $(dspace_start.version)"))
+    end
 end

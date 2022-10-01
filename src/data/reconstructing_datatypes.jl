@@ -21,12 +21,12 @@ end
 # H5Datatype. We handle committed datatypes here, and other datatypes below.
 function jltype(f::JLDFile, cdt::CommittedDatatype)
     haskey(f.h5jltype, cdt) && return f.h5jltype[cdt]::ReadRepresentation
-    dt, attrs = read_committed_datatype(f, cdt)
+    dt, attrs = read_shared_datatype(f, cdt)
 
     julia_type_attr = nothing
     written_type_attr = nothing
     for attr in attrs
-        if attr.name == :julia_type
+        if attr.name == :julia_type || attr.name == Symbol("julia type")
             julia_type_attr = attr
         elseif attr.name == :written_type
             written_type_attr = attr
@@ -77,6 +77,18 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     f.datatypes[cdt.index] = dt
     f.h5jltype[cdt] = rr
 end
+
+
+# jltype is the inverse of h5type, providing a ReadRepresentation for an
+# H5Datatype. We handle shared datatypes here: ones that were not "committed" by JLD2.
+function jltype(f::JLDFile, sdt::SharedDatatype)
+    haskey(f.h5jltype, sdt) && return f.h5jltype[sdt]::ReadRepresentation
+    dt, attrs = read_shared_datatype(f, sdt)
+    rr = jltype(f, dt)
+    f.h5jltype[sdt] = rr
+end
+
+
 
 # Constructs a ReadRepresentation for a given opaque (bitstype) type
 function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{ReadAttribute})
@@ -227,7 +239,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
                 end
             end
         end
-        return (ReadRepresentation{T,OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}}()}(), false)
+        return (ReadRepresentation{T,OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}, offsets[end]+odr_sizeof(odrs[end])}()}(), false)
     end
 end
 
@@ -477,7 +489,7 @@ function reconstruct_odr(f::JLDFile, dt::CompoundDatatype,
         end
         types[i], h5types[i] = typeof(dtrr).parameters
     end
-    return OnDiskRepresentation{(dt.offsets...,), Tuple{types...}, Tuple{h5types...}}()
+    return OnDiskRepresentation{(dt.offsets...,), Tuple{types...}, Tuple{h5types...},dt.size}()
 end
 
 # Reconstruct type that is a "lost cause": either we were not able to resolve
@@ -555,7 +567,7 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
                 end
             end
         end
-    
+
         push!(args, (:obj))    
         return blk
     end

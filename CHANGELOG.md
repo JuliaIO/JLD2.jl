@@ -1,3 +1,11 @@
+## 0.4.24
+ - read-only support for `JLD.jl` files
+ - read-only support for many HDF5 files. Most test files of HDF5.jl are covered
+ - read Opaque bit fields
+ - read some other string encodings
+ - read big endian numbers
+ - read typical chunking formats
+
 ## 0.4.23
  - Support for `const` fields in mutable structs
  

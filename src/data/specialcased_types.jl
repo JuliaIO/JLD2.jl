@@ -1,3 +1,16 @@
+## Opaque Data
+struct OpaqueData{N}
+    data::Vector{UInt8}
+    OpaqueData(data) = new{length(data)}(data)
+end
+odr_sizeof(x::Type{OpaqueData{N}}) where {N} = UInt32(N)
+function jlconvert(rr::ReadRepresentation{OpaqueData{N}, Vector{UInt8}}, ::JLDFile, ptr::Ptr, ::RelOffset) where N
+    data = Vector{UInt8}(undef, N)
+    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), N)
+    OpaqueData(data)
+end
+
+
 ## Strings
 
 const H5TYPE_VLEN_UTF8 = VariableLengthDatatype(DT_VARIABLE_LENGTH, 0x11, 0x01, 0x00,
@@ -24,16 +37,48 @@ h5type(f::JLDFile, writeas::Type{String}, x) =
 odr(::Type{String}) = fieldodr(String, true)
 objodr(x::String) = FixedLengthString{String}(jlsizeof(x))
 
+struct NullTerminated end
+struct SpacePadded end 
+struct AsciiString{TERM}
+    length::Int
+end
+
+
+struct FixedLengthAsciiString{TERM, N} end
+
 function jltype(f::JLDFile, dt::BasicDatatype)
-    if dt.class == DT_STRING
+    if dt.class >> 4 == 1
+        if dt.class << 4 == DT_REFERENCE  << 4
+            return ReadRepresentation{Any,RelOffset}()
+        elseif dt.class << 4 == DT_STRING  << 4
+            if dt.bitfield1 == 0x00 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
+                #return AsciiString{NullTerminated}(dt.size)
+                return ReadRepresentation{String, FixedLengthAsciiString{NullTerminated, dt.size}}()
+            elseif dt.bitfield1 == 0x10 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
+                return FixedLengthString{String}(dt.size)
+            elseif dt.bitfield1 == 0x02 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
+                return ReadRepresentation{String, FixedLengthAsciiString{SpacePadded, dt.size}}()
+            else
+                throw(UnsupportedFeatureException("Encountered an unsupported string type. $dt"))
+            end
+        elseif dt.class << 4 == DT_OPAQUE  << 4
+            return ReadRepresentation{OpaqueData{Int(dt.size)},Vector{UInt8}}()
+
+        else
+            throw(UnsupportedFeatureException("Encountered an unsupported type."))
+        end
+    end
+    if dt.class << 4 == DT_STRING  << 4
         if (dt.bitfield1 == 0x01 || dt.bitfield1 == 0x11) && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
             return FixedLengthString{String}(dt.size)
+        elseif dt.bitfield1 == 0x10 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
+            return FixedLengthString{String}(dt.size)
         else
-            throw(UnsupportedFeatureException())
+            throw(UnsupportedFeatureException("Encountered an unsupported string type."))
         end
-    elseif dt.class == DT_OPAQUE
-        error("attempted to read a bare (non-committed) opaque datatype")
-    elseif dt.class == DT_REFERENCE
+    elseif dt.class << 4 == DT_OPAQUE  << 4
+        return ReadRepresentation{OpaqueData{Int(dt.size)},Vector{UInt8}}()
+    elseif dt.class << 4 == DT_REFERENCE  << 4
         return ReadRepresentation{Any,RelOffset}()
     else
         throw(UnsupportedFeatureException())
@@ -41,12 +86,23 @@ function jltype(f::JLDFile, dt::BasicDatatype)
 end
 
 function jltype(f::JLDFile, dt::VariableLengthDatatype)
-    if dt == H5TYPE_VLEN_UTF8
+    if dt == H5TYPE_VLEN_UTF8 
+        # this is the fully supported JLD2 string
         return ReadRepresentation{String,Vlen{String}}()
-    else
-        throw(UnsupportedFeatureException())
+    elseif dt.bitfield1 & 0x1 == 0x1
+        # it's some kind of string. Let's try
+        return ReadRepresentation{String,Vlen{String}}()
+    else#if dt.bitfield1 & 0x1 == 0x0 # it's a sequence
+        rr = jltype(f, dt.basetype)
+        T = typeof(rr).parameters[1]
+        odr = typeof(rr).parameters[2]
+        return ReadRepresentation{Vector{T}, Vlen{odr}}()
     end
 end
+
+jlconvert(::ReadRepresentation{Vector{T},Vlen{ODR}}, f::JLDFile, ptr::Ptr, ::RelOffset) where {T, ODR} =
+    jlconvert(ReadRepresentation{T,Vlen{ODR}}(), f, ptr, UNDEFINED_ADDRESS)
+
 
 function h5convert!(out::Pointers, fls::FixedLengthString, f::JLDFile, x, ::JLDWriteSession)
     fls.length == jlsizeof(x) || throw(InvalidDataException())
@@ -62,6 +118,30 @@ function jlconvert(rr::FixedLengthString{String}, ::JLDFile, ptr::Ptr, ::RelOffs
     unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
     String(data)
 end
+
+# Ascii String
+function jlconvert(rr::AsciiString{NullTerminated}, ::JLDFile, ptr::Ptr, ::RelOffset)
+    data = Vector{UInt8}(undef, rr.length)
+    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
+    String(data[1:end-1])
+end
+function jlconvert(rr::ReadRepresentation{String, FixedLengthAsciiString{NullTerminated,N}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {N}
+    data = Vector{UInt8}(undef, N)
+    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), N)
+    String(data)
+end
+
+function jlconvert(rr::ReadRepresentation{String, FixedLengthAsciiString{SpacePadded,N}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {N}
+    data = Vector{UInt8}(undef, N)
+    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), N)
+    rstrip(String(data))
+end
+odr_sizeof(x::AsciiString) = x.length
+odr_sizeof(x::Type{FixedLengthAsciiString{TERM, N}}) where {TERM, N} = UInt32(N)#::Int
+
+
+
+
 
 # Used only for custom serialization
 constructrr(::JLDFile, ::Type{String}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =

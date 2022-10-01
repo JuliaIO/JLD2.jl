@@ -13,86 +13,120 @@ function load_dataset(f::JLDFile, offset::RelOffset)
         val = f.jloffset[offset].value
         val !== nothing && return val
     end
+    if isgroup(f, offset)
+        return let loaded_groups = f.loaded_groups
+            get!(()->load_group(f, offset), loaded_groups, offset)
+        end
+    end
 
     io = f.io
-    seek(io, fileoffset(f, offset))
-    cio = begin_checksum_read(io)
-    sz = read_obj_start(cio)
-    pmax = position(cio) + sz
+    chunk_start::Int64 = fileoffset(f, offset)
+    seek(io, chunk_start)
+    # Version 1 object header have no signature and start with version
+    header_version = jlread(io, UInt8)
+
+
+    if header_version == 1
+        seek(io, chunk_start)
+        cio = io
+        sz,_,groupflags = read_obj_start(cio)
+        chunk_end = position(cio) + sz
+        # Skip to nearest 8byte aligned position
+        skip_to_aligned!(cio, fileoffset(f, offset))
+    else
+        header_version = 2
+        seek(io, chunk_start)
+        cio = begin_checksum_read(io)
+        sz,_,groupflags = read_obj_start(cio)
+        chunk_end = position(cio) + sz #- 4
+    end
 
     # Messages
+    chunks = [(; chunk_start, chunk_end)]
+    chunk_number = 0
+
     dataspace = ReadDataspace()
     attrs = EMPTY_READ_ATTRIBUTES
     datatype_class::UInt8 = 0
     datatype_offset::Int64 = 0
-    data_offset::Int64 = 0
-    data_length::Int = -1
-    chunked_storage::Bool = false
-    filter_id::UInt16 = 0
-    while position(cio) <= pmax-4
-        msg = jlread(cio, HeaderMessage)
-        endpos = position(cio) + msg.size
-        if msg.msg_type == HM_DATASPACE
-            dataspace = read_dataspace_message(cio)
-        elseif msg.msg_type == HM_DATATYPE
-            datatype_class, datatype_offset = read_datatype_message(cio, f, (msg.flags & 2) == 2)
-        elseif msg.msg_type == HM_FILL_VALUE
-            (jlread(cio, UInt8) == 3 && jlread(cio, UInt8) == 0x09) || throw(UnsupportedFeatureException())
-        elseif msg.msg_type == HM_DATA_LAYOUT
-            jlread(cio, UInt8) == 4 || throw(UnsupportedVersionException())
-            storage_type = jlread(cio, UInt8)
-            if storage_type == LC_COMPACT_STORAGE
-                data_length = jlread(cio, UInt16)
-                data_offset = position(cio)
-            elseif storage_type == LC_CONTIGUOUS_STORAGE
-                data_offset = fileoffset(f, jlread(cio, RelOffset))
-                data_length = jlread(cio, Length)
-            elseif storage_type == LC_CHUNKED_STORAGE
-                # TODO: validate this
-                flags = jlread(cio, UInt8)
-                dimensionality = jlread(cio, UInt8)
-                dimensionality_size = jlread(cio, UInt8)
-                skip(cio, Int(dimensionality)*Int(dimensionality_size))
+    layout::DataLayout = DataLayout(0,0,0,-1)
+    filter_pipeline::FilterPipeline = FilterPipeline(Filter[])
+    while !isempty(chunks)
+        chunk = popfirst!(chunks)
+        chunk_start = chunk.chunk_start
+        chunk_end = chunk.chunk_end
 
-                chunk_indexing_type = jlread(cio, UInt8)
-                chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
-                data_length = jlread(cio, Length)
-                jlread(cio, UInt32)
-                data_offset = fileoffset(f, jlread(cio, RelOffset))
-                chunked_storage = true
-            else
-                throw(UnsupportedFeatureException("Unknown data layout"))
+        if chunk_number > 0 # Don't do this the first time around
+            seek(io, chunk_start)
+            if header_version == 2
+                chunk_end -= 4
+                cio = begin_checksum_read(io)
+                jlread(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
             end
-        elseif msg.msg_type == HM_FILTER_PIPELINE
-            version = jlread(cio, UInt8)
-            version == 2 || throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
-            nfilters = jlread(cio, UInt8)
-            nfilters == 1 || throw(UnsupportedFeatureException())
-            filter_id = jlread(cio, UInt16)
-            issupported_filter(filter_id) || throw(UnsupportedFeatureException("Unknown Compression Filter $filter_id"))
-        elseif msg.msg_type == HM_ATTRIBUTE
-            if attrs === EMPTY_READ_ATTRIBUTES
-                attrs = ReadAttribute[read_attribute(cio, f)]
-            else
-                push!(attrs, read_attribute(cio, f))
-            end
-        elseif (msg.flags & 2^3) != 0
-            throw(UnsupportedFeatureException())
         end
-        seek(cio, endpos)
+        chunk_number += 1
+
+        while position(cio) <= chunk_end-4
+            if header_version == 1
+                # Message start 8byte aligned relative to object start
+                skip_to_aligned!(cio, chunk_start)
+                # Version 1 header message is padded
+                msg = HeaderMessage(jlread(cio, UInt16), jlread(cio, UInt16), jlread(cio, UInt8))
+                skip(cio, 3)
+            else # header_version == 2
+                msg = jlread(cio, HeaderMessage)
+                (groupflags & 4) == 4 && skip(cio, 2) 
+            end
+            endpos = position(cio) + msg.size
+            if msg.msg_type == HM_DATASPACE
+                dataspace = read_dataspace_message(cio)
+            elseif msg.msg_type == HM_DATATYPE
+                datatype_class, datatype_offset = read_datatype_message(cio, f, (msg.flags & 2) == 2)
+            elseif msg.msg_type == HM_FILL_VALUE_OLD
+                # don't know what to do with these
+                # ignore for now
+            elseif msg.msg_type == HM_FILL_VALUE
+                # don't know what to do with these
+                # ignore for now
+                version = jlread(cio, UInt8)
+                flags = jlread(cio, UInt8)
+                
+            elseif msg.msg_type == HM_DATA_LAYOUT
+                layout = jlread(cio, DataLayout, f)
+            elseif msg.msg_type == HM_FILTER_PIPELINE
+               filter_pipeline = jlread(cio, FilterPipeline)
+            elseif msg.msg_type == HM_ATTRIBUTE
+                if attrs === EMPTY_READ_ATTRIBUTES
+                    attrs = ReadAttribute[read_attribute(cio, f)]
+                else
+                    push!(attrs, read_attribute(cio, f))
+                end
+            elseif msg.msg_type == HM_OBJECT_HEADER_CONTINUATION
+                continuation_offset = fileoffset(f, jlread(cio, RelOffset))
+                continuation_length = jlread(cio, Length)
+                push!(chunks, (; chunk_start = continuation_offset,
+                                 chunk_end = continuation_offset + continuation_length))
+
+            elseif (msg.flags & 2^3) != 0
+                throw(UnsupportedFeatureException())
+            end
+            seek(cio, endpos)
+        end
+        seek(cio, chunk_end)
+
+        if header_version == 2
+            # Checksum
+            end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException("Invalid Checksum"))
+        end
     end
-    seek(cio, pmax)
-
-    filter_id != 0 && !chunked_storage && throw(InvalidDataException("Compressed data must be chunked"))
-
-    # Checksum
-    end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException("Invalid Checksum"))
+    iscompressed(filter_pipeline) && !ischunked(layout) && throw(InvalidDataException("Compressed data must be chunked"))
 
     # TODO verify that data length matches
-    val = read_data(f, dataspace, datatype_class, datatype_offset, data_offset, data_length,
-                    filter_id, offset, attrs)
+    val = read_data(f, dataspace, datatype_class, datatype_offset, layout,
+                    filter_pipeline, offset, attrs)
     val
 end
+
 
 """
     read_attr_data(f::JLDFile, attr::ReadAttribute)
@@ -101,7 +135,7 @@ jlread data from an attribute.
 """
 read_attr_data(f::JLDFile, attr::ReadAttribute) =
     read_data(f, attr.dataspace, attr.datatype_class, attr.datatype_offset,
-              attr.data_offset)
+              DataLayout(0,0,-1,attr.data_offset))
 
 """
     read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
@@ -114,12 +148,12 @@ better type stability while simultaneously validating the data.
 function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
                         rr::ReadRepresentation)
     io = f.io
-    if attr.datatype_class == class(expected_datatype)
+    if (attr.datatype_class << 4) == (class(expected_datatype) << 4)
         seek(io, attr.datatype_offset)
         dt = jlread(io, typeof(expected_datatype))
         if dt == expected_datatype
             seek(f.io, attr.data_offset)
-            read_dataspace = (attr.dataspace, NULL_REFERENCE, -1, UInt16(0))
+            read_dataspace = (attr.dataspace, NULL_REFERENCE, DataLayout(0,0,-1,attr.data_offset), FilterPipeline())
             return read_data(f, rr, read_dataspace)
         end
     end
@@ -128,7 +162,7 @@ end
 
 """
     read_data(f::JLDFile, dataspace::ReadDataspace, datatype_class::UInt8,
-              datatype_offset::Int64, data_offset::Int64[, filter_id::UInt16,
+              datatype_offset::Int64, data_offset::Int64[, filters::FilterPipeline,
               header_offset::RelOffset, attributes::Vector{ReadAttribute}])
 
 Read data from a file. If `datatype_class` is typemax(UInt8), the datatype is assumed to be
@@ -137,22 +171,56 @@ Otherwise, datatype_offset points to the offset of the datatype attribute.
 """
 function read_data(f::JLDFile, dataspace::ReadDataspace,
                    datatype_class::UInt8, datatype_offset::Int64,
-                   data_offset::Int64, data_length::Int=-1, filter_id::UInt16=UInt16(0),
+                   layout::DataLayout, 
+                   filters::FilterPipeline=FilterPipeline(),
                    header_offset::RelOffset=NULL_REFERENCE,
                    attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
     # See if there is a julia type attribute
     io = f.io
-    if datatype_class == typemax(UInt8) # Committed datatype
-        rr = jltype(f, f.datatype_locations[h5offset(f, datatype_offset)])
-        seek(io, data_offset)
-        read_dataspace = (dataspace, header_offset, data_length, filter_id)
+    if datatype_class == typemax(UInt8) # shared datatype message
+        # this means that it is "committed" to `_types` if the file was written by JLD2  
+        offset = h5offset(f, datatype_offset)
+        rr = jltype(f, get(f.datatype_locations, offset, SharedDatatype(offset)))
+
+        if layout.data_offset == -1
+            # There was no layout message.
+            # That means, this dataset is just a datatype
+            # return the Datatype
+            return typeof(rr).parameters[1]
+        end
+
+        seek(io, layout.data_offset)
+        read_dataspace = (dataspace, header_offset, layout, filters)
         read_data(f, rr, read_dataspace, attributes)
-    else
+        
+    elseif layout.data_offset == typemax(Int64)
         seek(io, datatype_offset)
         @read_datatype io datatype_class dt begin
             rr = jltype(f, dt)
-            seek(io, data_offset)
-            read_dataspace = (dataspace, header_offset, data_length, filter_id)
+            T,S = typeof(rr).parameters
+            if layout.data_length > -1
+                # TODO: this could use the fill value message to populate the array
+                @warn "This array should be populated by a fill value. This is not (yet) implemented."
+            end
+            v = Array{T, 1}()
+            header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
+            return v
+        end
+    else
+        seek(io, datatype_offset)
+        @read_datatype io datatype_class dt begin
+            dtt = dt
+            rr = jltype(f, dtt)
+
+            if layout.data_offset == -1
+                # There was no layout message.
+                # That means, this dataset is just a datatype
+                # return the Datatype
+                return typeof(rr).parameters[1]
+            end
+
+            seek(io, layout.data_offset)
+            read_dataspace = (dataspace, header_offset, layout, filters)
             read_data(f, rr, read_dataspace, attributes)
         end
     end
@@ -161,15 +229,19 @@ end
 # Most types can only be scalars or arrays
 function read_data(f::JLDFile,
      @nospecialize(rr),
-     read_dataspace::Tuple{ReadDataspace,RelOffset,Int,UInt16},
+     read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,FilterPipeline},
      attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
 
-    dataspace, header_offset, data_length, filter_id = read_dataspace
+    dataspace, header_offset, layout, filters = read_dataspace
     if dataspace.dataspace_type == DS_SCALAR
-        filter_id != 0 && throw(UnsupportedFeatureException())
+        iscompressed(filters) && throw(UnsupportedFeatureException())
         read_scalar(f, rr, header_offset)
     elseif dataspace.dataspace_type == DS_SIMPLE
-        read_array(f, dataspace, rr, data_length, filter_id, header_offset, attributes)
+        read_array(f, dataspace, rr, layout, filters, header_offset, attributes)
+    elseif dataspace.dataspace_type == DS_V1 && dataspace.dimensionality == 0
+        read_scalar(f, rr, header_offset)
+    elseif dataspace.dataspace_type == DS_V1
+        read_array(f, dataspace, rr, layout, filters, header_offset, attributes)
     else
         throw(UnsupportedFeatureException())
     end
@@ -178,11 +250,11 @@ end
 # Reference arrays can only be arrays or null dataspace (for Union{} case)
 function read_data(f::JLDFile,
     rr::ReadRepresentation{Any,RelOffset},
-    read_dataspace::Tuple{ReadDataspace,RelOffset,Int,UInt16},
+    read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,FilterPipeline},
     attributes::Vector{ReadAttribute})
 
-    dataspace, header_offset, data_length, filter_id = read_dataspace
-    filter_id != 0 && throw(UnsupportedFeatureException())
+    dataspace, header_offset, layout, filters = read_dataspace
+    iscompressed(filters) && throw(UnsupportedFeatureException())
     if dataspace.dataspace_type == DS_SIMPLE
         # Since this is an array of references, there should be an attribute
         # informing us of the type
@@ -198,25 +270,28 @@ function read_data(f::JLDFile,
                 end
                 seek(io, startpos)
                 return read_array(f, dataspace, ReadRepresentation{T,RelOffset}(),
-                                  -1, UInt16(0), header_offset, attributes)
+                                  layout, FilterPipeline(), header_offset, attributes)
             end
         end
     elseif dataspace.dataspace_type == DS_NULL
         return read_empty(ReadRepresentation{Union{},nothing}(), f,
                           attributes[find_dimensions_attr(attributes)],
                           header_offset)
+    elseif dataspace.dataspace_type == DS_V1
+        return read_array(f, dataspace, ReadRepresentation{Any,RelOffset}(),
+                                  layout, FilterPipeline(), header_offset, attributes)
     end
-    throw(UnsupportedFeatureException())
+    throw(UnsupportedFeatureException("Dataspace type $(dataspace.dataspace_type) not implemented"))
 end
 
 # Types with no payload can only be null dataspace
 function read_data(f::JLDFile,
                    rr::Union{ReadRepresentation{T,nothing} where T,
                              ReadRepresentation{T,CustomSerialization{S,nothing}} where {S,T}},
-                   read_dataspace::Tuple{ReadDataspace,RelOffset,Int,UInt16},
+                   read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,FilterPipeline},
                    attributes::Vector{ReadAttribute})
-    dataspace, header_offset, data_length, filter_id = read_dataspace
-    filter_id != 0 && throw(UnsupportedFeatureException())
+    dataspace, header_offset, layout, filters = read_dataspace
+    iscompressed(filters) && throw(UnsupportedFeatureException())
     dataspace.dataspace_type == DS_NULL || throw(UnsupportedFeatureException())
 
     dimensions_attr_index = find_dimensions_attr(attributes)
@@ -312,24 +387,71 @@ function construct_array(io::IO, ::Type{T}, ::Val{N})::Array{T,N} where {T,N}
 end
 
 function read_array(f::JLDFile, dataspace::ReadDataspace,
-                    rr::ReadRepresentation{T,RR}, data_length::Int,
-                    filter_id::UInt16, header_offset::RelOffset,
+                    rr::ReadRepresentation{T,RR}, layout::DataLayout,
+                    filters::FilterPipeline, header_offset::RelOffset,
                     attributes::Union{Vector{ReadAttribute},Nothing}) where {T,RR}
     io = f.io
-    data_offset = position(io)
-    ndims, offset = get_ndims_offset(f, dataspace, attributes)
+    data_offset = layout.data_offset
+    if !ischunked(layout) || (layout.chunk_indexing_type == 1)
+        #data_offset = position(io)
+        ndims, offset = get_ndims_offset(f, dataspace, attributes)
 
-    seek(io, offset)
-    v = construct_array(io, T, Val(Int(ndims)))
-    n = length(v)
-    seek(io, data_offset)
-    if filter_id !=0
-        read_compressed_array!(v, f, rr, data_length, filter_id)
+        seek(io, offset)
+        v = construct_array(io, T, Val(Int(ndims)))
+        n = length(v)
+        seek(io, data_offset)
+        if iscompressed(filters)
+            read_compressed_array!(v, f, rr, layout.data_length, filters)
+        else
+            read_array!(v, f, rr)
+        end
+        header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
+        v
     else
-        read_array!(v, f, rr)
+        ndims, offset = get_ndims_offset(f, dataspace, attributes)
+        seek(io, offset)
+        v = construct_array(io, T, Val(Int(ndims)))
+        if layout.version == 3 
+            # version 1 B-tree
+            # This version appears to be padding incomplete chunks
+            chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)                
+            vchunk = Array{T, Int(ndims)}(undef, reverse(layout.chunk_dimensions)...)
+            for chunk in chunks
+                idx = reverse(chunk.idx[1:end-1])
+                seek(io, fileoffset(f, chunk.offset))
+                indexview =  (:).(idx .+1, min.(idx .+ reverse(layout.chunk_dimensions), size(v)))
+                indexview2 = (:).(1, length.(indexview))
+        
+                if iscompressed(filters)
+                    if chunk.filter_mask == 0
+                        read_compressed_array!(vchunk, f, rr, chunk.chunk_size, filters)
+                        v[indexview...] = @view vchunk[indexview2...]    
+                    else
+                        if length(filters.filters) == 1
+                            read_array!(vchunk, f, rr)
+                            v[indexview...] = @view vchunk[indexview2...]
+                        else
+                            mask = Bool[chunk.filter_mask & 2^(n-1) == 0 for n=eachindex(filters.filters)]
+                            if any(mask)
+                                rf = FilterPipeline(filters.filters[mask])
+                                read_compressed_array!(vchunk, f, rr, chunk.chunk_size, rf)
+                                v[indexview...] = @view vchunk[indexview2...]
+                            else
+                                read_array!(vchunk, f, rr)
+                                v[indexview...] = @view vchunk[indexview2...]
+                            end
+
+                        end
+                    end
+                else
+                    read_array!(vchunk, f, rr)
+                    v[indexview...] = @view vchunk[indexview2...]
+                end
+            end
+            return v
+        end
+        throw(UnsupportedVersionException("Encountered a chunked array ($layout) that is not implemented."))
     end
-    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
-    v
 end
 
 
@@ -600,7 +722,7 @@ function delete_written_link!(f::JLDFile, roffset::RelOffset, name::AbstractStri
     chunk_start_offset::Int64 = fileoffset(f, roffset)
     seek(io, chunk_start_offset)
 
-    sz = read_obj_start(io)
+    sz, = read_obj_start(io)
     chunk_checksum_offset::Int64 = position(io) + sz
 
     continuation_offset::Int64 = -1

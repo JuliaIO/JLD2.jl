@@ -203,16 +203,29 @@ function Base.keys(g::Group)
 end
 
 Base.keytype(f::Group) = String
-                
-struct LinkInfo
-    version::UInt8
-    flags::UInt8
-    fractal_heap_address::RelOffset
-    name_index_btree::RelOffset
-end
-define_packed(LinkInfo)
 
-LinkInfo() = LinkInfo(0, 0, UNDEFINED_ADDRESS, UNDEFINED_ADDRESS)
+# LinkInfo struct is used for dispatch
+struct LinkInfo end
+# In general the size depends on flags
+# when writing files we always use 18 bytes 
+# this function is only used for writing
+jlsizeof(::Type{LinkInfo}) = 18
+function jlwrite(io, ::LinkInfo)
+    jlwrite(io, zero(UInt16))
+    jlwrite(io, typemax(UInt64))
+    jlwrite(io, typemax(UInt64))
+    return nothing    
+end
+
+function jlread(io, ::Type{LinkInfo})
+    version = jlread(io, UInt8)
+    flags = jlread(io, UInt8)
+    (flags & 0b1) == 1 && skip(io, 8)
+    fractal_heap_address = jlread(io, RelOffset)
+    name_index_btree = jlread(io, RelOffset)
+    (flags & 0b10) == 0b10 && skip(io, 8)
+    (; version, flags, fractal_heap_address, name_index_btree)
+end
 
 @enum(CharacterSet,
       CSET_ASCII,
@@ -256,41 +269,73 @@ const CONTINUATION_MSG_SIZE = jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jl
 
 function load_group(f::JLDFile, roffset::RelOffset)
     io = f.io
-    chunk_start_offset::Int64 = fileoffset(f, roffset)
-    seek(io, chunk_start_offset)
+    chunk_start::Int64 = fileoffset(f, roffset)
+    seek(io, chunk_start)
 
-    cio = begin_checksum_read(io)
-    sz = read_obj_start(cio)
-    chunk_checksum_offset::Int64 = position(cio) + sz
-
+    header_version = jlread(io, UInt8)
+    if header_version == 1
+        seek(io, chunk_start)
+        cio = io
+        sz,_,groupflags = read_obj_start(cio)
+        chunk_end = position(cio) + sz
+        # Skip to nearest 8byte aligned position
+        skip_to_aligned!(cio, chunk_start)
+    else
+        header_version = 2
+        seek(io, chunk_start)
+        cio = begin_checksum_read(io)
+        sz,_,groupflags = read_obj_start(cio)
+        chunk_end = position(cio) + sz
+    end
     # Messages
+    chunk_end::Int64
     continuation_message_goes_here::Int64 = -1
     links = OrderedDict{String,RelOffset}()
+    chunks = [(; chunk_start, chunk_end)]
+    chunk_number = 0
 
-    continuation_offset::Int64 = -1
-    continuation_length::Length = 0
     next_link_offset::Int64 = -1
+    link_phase_change_max_compact::Int64 = -1 
+    link_phase_change_min_dense::Int64 = -1
     est_num_entries::Int64 = 4
     est_link_name_len::Int64 = 8
+    fractal_heap_address = UNDEFINED_ADDRESS
+    name_index_btree = UNDEFINED_ADDRESS
 
-    while true
-        if continuation_offset != -1
-            seek(io, continuation_offset)
-            chunk_checksum_offset = continuation_offset + continuation_length - 4
-            continuation_offset = -1
+    v1btree_address = UNDEFINED_ADDRESS
+    name_index_heap = UNDEFINED_ADDRESS
 
-            cio = begin_checksum_read(io)
-            jlread(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
+    while !isempty(chunks)
+        chunk = popfirst!(chunks)
+        chunk_start = chunk.chunk_start
+        chunk_end = chunk.chunk_end
+
+        if chunk_number > 0
+            seek(io, chunk_start)
+            chunk_end -= 4
+            if header_version == 2
+                cio = begin_checksum_read(io)
+                jlread(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
+            end
         end
-
-        while (curpos = position(cio)) <= chunk_checksum_offset - 4
-            msg = jlread(cio, HeaderMessage)
-            endpos = curpos + jlsizeof(HeaderMessage) + msg.size
+        chunk_number += 1
+        while (curpos = position(cio)) < chunk_end-4
+            if header_version == 1
+                # Message start 8byte aligned relative to object start
+                skip_to_aligned!(cio, chunk_start)
+                # Version 1 header message is padded
+                msg = HeaderMessage(jlread(cio, UInt16), jlread(cio, UInt16), jlread(cio, UInt8))
+                skip(cio, 3)
+            else # header_version == 2
+                msg = jlread(cio, HeaderMessage)
+                (groupflags & 4) == 4 && skip(cio, 2) 
+            end
+            endpos = position(cio) + msg.size
             if msg.msg_type == HM_NIL
                 if continuation_message_goes_here == -1 && 
-                    chunk_checksum_offset - curpos == CONTINUATION_MSG_SIZE
+                    chunk_end - curpos == CONTINUATION_MSG_SIZE
                     continuation_message_goes_here = curpos
-                elseif endpos + CONTINUATION_MSG_SIZE == chunk_checksum_offset
+                elseif endpos + CONTINUATION_MSG_SIZE == chunk_end
                     # This is the remaining space at the end of a chunk
                     # Use only if a message can potentially fit inside
                     # Single Character Name Link Message has 13 bytes payload
@@ -302,25 +347,37 @@ function load_group(f::JLDFile, roffset::RelOffset)
                 continuation_message_goes_here = -1
                 if msg.msg_type == HM_LINK_INFO
                     link_info = jlread(cio, LinkInfo)
-                    link_info.fractal_heap_address == UNDEFINED_ADDRESS || throw(UnsupportedFeatureException())
+                    fractal_heap_address = link_info.fractal_heap_address
+                    name_index_btree = link_info.name_index_btree
                 elseif msg.msg_type == HM_GROUP_INFO
                     if msg.size > 2
                         # Version Flag
-                        jlread(cio, UInt8) == 0 || throw(UnsupportedFeatureException()) 
-                        # Verify that non-default group size is given
-                        jlread(cio, UInt8) == 2 || throw(UnsupportedFeatureException()) 
-                        est_num_entries = jlread(cio, UInt16)
-                        est_link_name_len = jlread(cio, UInt16)
+                        jlread(io, UInt8) == 0 || throw(UnsupportedFeatureException()) 
+                        flag = jlread(io, UInt8)
+                        if flag%2 == 1 # first bit set
+                            link_phase_change_max_compact = jlread(io, UInt16)
+                            link_phase_change_min_dense = jlread(io, UInt16)
+                        end
+                        if (flag >> 1)%2 == 1 # second bit set
+                            # Verify that non-default group size is given
+                            est_num_entries = jlread(io, UInt16)
+                            est_link_name_len = jlread(io, UInt16)
+                        end
                     end
                 elseif msg.msg_type == HM_LINK_MESSAGE
                     name, loffset = read_link(cio)
                     links[name] = loffset
                 elseif msg.msg_type == HM_OBJECT_HEADER_CONTINUATION
-                    continuation_offset = chunk_start_offset = fileoffset(f, jlread(cio, RelOffset))
-                    continuation_length = jlread(cio, Length)
+                    cont_chunk_start = fileoffset(f, jlread(cio, RelOffset))
+                    chunk_length = jlread(cio, Length)
+                    push!(chunks, (;chunk_start=cont_chunk_start,
+                                    chunk_end  =cont_chunk_start+chunk_length))
                     # For correct behaviour, empty space can only be filled in the 
                     # very last chunk. Forget about previously found empty space
                     next_link_offset = -1
+                elseif msg.msg_type == HM_SYMBOL_TABLE
+                    v1btree_address = jlread(cio, RelOffset)
+                    name_index_heap = jlread(cio, RelOffset)                
                 elseif (msg.flags & 2^3) != 0
                     throw(UnsupportedFeatureException())
                 end
@@ -329,14 +386,28 @@ function load_group(f::JLDFile, roffset::RelOffset)
         end
 
         # Checksum
-        seek(cio, chunk_checksum_offset)
-        end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())
-
-        continuation_offset == -1 && break
+        seek(cio, chunk_end)
+        if header_version == 2
+            end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())
+        end
     end
 
-    Group{typeof(f)}(f, chunk_start_offset, continuation_message_goes_here,        
-                     chunk_checksum_offset, next_link_offset, est_num_entries,
+    if fractal_heap_address != UNDEFINED_ADDRESS
+        records = read_btree(f, fractal_heap_address, name_index_btree)
+        for r in records
+            links[r[1]] = r[2]
+        end
+    end
+
+    if v1btree_address != UNDEFINED_ADDRESS
+        records = read_oldstyle_group(f, v1btree_address, name_index_heap)
+        for r in records
+            links[r[1]] = r[2]
+        end
+    end
+
+    Group{typeof(f)}(f, chunk_start, continuation_message_goes_here,        
+                     chunk_end, next_link_offset, est_num_entries,
                      est_link_name_len,
                      OrderedDict{String,RelOffset}(), OrderedDict{String,Group}(), links)
 end

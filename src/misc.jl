@@ -100,9 +100,65 @@ function size_size(sz::Integer)
     end
 end
 
+# Get the size of the size
+function size_size2(sz::Integer)
+    if sz < 2^8
+        1
+    elseif sz < 2^16
+        2
+    elseif sz < 2^24
+        3
+    elseif sz < 2^32
+        4
+    elseif sz < 2^40
+        5
+    elseif sz < 2^48
+        6
+    elseif sz < 2^56
+        7
+    else
+        8
+    end
+end
+
+
 """
     symbol_length(x::Symbol)
 
 Returns the length of the string represented by `x`.
 """
 symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)
+
+function uintofsize(sz)
+    if sz == 1
+        UInt8 
+    elseif sz == 2
+        UInt16
+    elseif sz == 4
+        UInt32
+    else 
+        UInt64
+    end
+end
+
+function to_uint64(bts::Vector{UInt8})
+    bts2 = [bts; zeros(UInt8, 8-length(bts))]
+    u = zero(UInt64)
+    for b in reverse(bts2)
+        u = u << 8
+        u += b
+    end
+    u
+end
+
+"""
+    skip_to_aligned!(io, rel=0)
+
+Skip to nearest position aligned to a multiple of 8 bytes relative to `rel`.
+"""
+function skip_to_aligned!(io, rel=0)
+    pos = position(io)
+    pos += 8 - mod1(pos-rel, 8)
+    seek(io, pos)
+    return nothing
+end
