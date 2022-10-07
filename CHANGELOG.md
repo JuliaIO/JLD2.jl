@@ -1,3 +1,6 @@
+## 0.4.25
+ - remove leftover debug statement
+ 
 ## 0.4.24
  - read-only support for `JLD.jl` files
  - read-only support for many HDF5 files. Most test files of HDF5.jl are covered

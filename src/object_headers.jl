@@ -439,7 +439,6 @@ function jlread(cio, ::Type{DataLayout}, f)
             #skip(cio, Int(dimensionality)*Int(dimensionality_size))
             chunk_dimensions = [read_nb_uint(cio, dimensionality_size) for _=1:dimensionality]
             chunk_indexing_type = jlread(cio, UInt8)
-            @info "chunk dims" tuple(chunk_dimensions...) dimensionality dimensionality_size chunk_indexing_type
             chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
             data_length = jlread(cio, Length)
             jlread(cio, UInt32)
