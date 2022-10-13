@@ -68,7 +68,12 @@ jldsave("example.jld2"; x, a=y, z)
 jldsave("example.jld2"; z=x, x=y, y=z)
 ```
 
-In the above examples, `;` after the filename is important. Compression and non-default IO types may be set via positional arguments.
+In the above examples, `;` after the filename is important. Compression and non-default IO types may be set via positional arguments like:
+```
+jldopen("example.jld2", "w"; compress = true) do f
+    f["large_array"] = zeros(10000)
+end
+```
 
 ### File interface
 
