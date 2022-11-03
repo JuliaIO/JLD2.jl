@@ -12,11 +12,11 @@ const PrimitiveTypes     = Union{Bool, Int8, Int16, Int32, Int64, Int128, UInt8,
 
 for T in Base.uniontypes(SignedTypes)
     @eval h5fieldtype(::JLDFile, ::$T, ::$T, ::Initialized) =
-        FixedPointDatatype($(T.parameters[1].size), true)
+        FixedPointDatatype($(sizeof(T.parameters[1])), true)
 end
 for T in Base.uniontypes(UnsignedTypes)
     @eval h5fieldtype(::JLDFile, ::$T, ::$T, ::Initialized) =
-        FixedPointDatatype($(T.parameters[1].size), false)
+        FixedPointDatatype($(sizeof(T.parameters[1])), false)
 end
 
 struct BENumber{T}

@@ -27,7 +27,7 @@ end
 
 # Determines whether a specific type has fields that should be saved in the file
 function hasdata(T::DataType, encounteredtypes=DataType[])
-    isempty(T.types) && T.size != 0 && return true
+    isempty(T.types) && sizeof(T) != 0 && return true
     for ty in T.types
         hasfielddata(writeas(ty), copy(encounteredtypes)) && return true
     end
@@ -49,9 +49,9 @@ function samelayout(T::DataType)
         ty = T.types[i]
         ty !== writeas(ty) && return false
         !samelayout(ty) && return false
-        offset += ty.size
+        offset += sizeof(ty)
     end
-    return offset == T.size
+    return offset == sizeof(T)
 end
 samelayout(::Type) = false
 
@@ -89,7 +89,7 @@ end
                 @lookup_committed f T
                 $(if isempty(T.types)
                     # Opaque datatype
-                    :(return commit(f, OpaqueDatatype(T.size), T, readas))
+                    :(return commit(f, OpaqueDatatype(sizeof(T)), T, readas))
                 else
                     # Compound type
                     :(return commit_compound(f, fieldnames(T), T, readas))
@@ -123,7 +123,7 @@ function h5type(f::JLDFile, writtenas, x)
     if !hasdata(writtenas)
         commit(f, OpaqueDatatype(1), writtenas, T, WrittenAttribute(f, :empty, UInt8(1)))
     elseif isempty(writtenas.types) # bitstype
-        commit(f, OpaqueDatatype(writtenas.size), writtenas, T)
+        commit(f, OpaqueDatatype(sizeof(writtenas)), writtenas, T)
     else
         commit_compound(f, fieldnames(writtenas), writtenas, T)
     end
@@ -380,7 +380,7 @@ function typename(T::DataType)
     join(s, fullname(T.name.module), '.')
     print(s, '.')
     print(s, T.name.name)
-    return String(resize!(s.data, s.size))
+    return String(resize!(s.data, sizeof(s)))
 end
 
 function refs_from_types(f::JLDFile, types, wsession::JLDWriteSession)
@@ -550,14 +550,14 @@ end
 # jlconvert for empty objects
 function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
                               header_offset::RelOffset) where T
-    T.size == 0 && return newstruct(T)::T
+    sizeof(T) == 0 && return newstruct(T)::T
 
     # In this case, T is a non-empty object, but the written data was empty
     # because the custom serializers for the fields all resulted in empty
     # objects
     fields = map(T.types) do ty
         writtenas = writeas(ty)
-        @assert writtenas.size == 0
+        @assert sizeof(writtenas) == 0
         if writtenas === ty
             # This will usually equal `ty()` unless ty does not have a
             # constructor without arguments

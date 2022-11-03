@@ -93,7 +93,7 @@ end
 # Constructs a ReadRepresentation for a given opaque (bitstype) type
 function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{ReadAttribute})
     dt.class == DT_OPAQUE || throw(UnsupportedFeatureException())
-    if T.size == dt.size && isempty(T.types)
+    if sizeof(T) == dt.size && isempty(T.types)
         (ReadRepresentation{T,T}(), true)
     else
         empty = check_empty(attrs)
@@ -101,12 +101,12 @@ function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{Re
             if !hasdata(T)
                 (ReadRepresentation{T,nothing}(), true)
             else
-                @warn("$T has $(T.size*8) bytes, but written type was empty; reconstructing")
+                @warn("$T has $(sizeof(T)) bytes, but written type was empty; reconstructing")
                 reconstruct_bitstype(T.name.name, dt.size, empty)
             end
         else
             if isempty(T.types)
-                @warn("primitive type $T has $(T.size*8) bits, but written type has $(dt.size*8) bits; reconstructing")
+                @warn("primitive type $T has $(sizeof(T)*8) bits, but written type has $(dt.size*8) bits; reconstructing")
             else
                 @warn("$T is a non-primitive type, but written type is a primitive type with $(dt.size*8) bits; reconstructing")
             end
@@ -149,7 +149,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
     types = Vector{Any}(undef, length(T.types))
     odrs = Vector{Any}(undef, length(T.types))
     fn = fieldnames(T)
-    samelayout = isbitstype(T) && T.size == dt.size
+    samelayout = isbitstype(T) && sizeof(T) == dt.size
     dtindex = 0
     for i = 1:length(T.types)
         wstype = T.types[i]
