@@ -42,6 +42,9 @@ jlconvert_canbeuninitialized(::ReadRepresentation{T,CustomSerialization{S,ODR}})
     jlconvert_canbeuninitialized(ODR)
 jlconvert_isinitialized(::ReadRepresentation{T,CustomSerialization{S,ODR}}, ptr::Ptr) where {T,S,ODR} =
     jlconvert_isinitialized(ReadRepresentation{S,ODR}(), ptr)
-jlconvert(::ReadRepresentation{T,CustomSerialization{S,ODR}},
-          f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T,S,ODR} =
-    rconvert(T, jlconvert(ReadRepresentation{S,ODR}(), f, ptr, header_offset))::T
+function jlconvert(::ReadRepresentation{T,CustomSerialization{S,ODR}},
+          f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T,S,ODR}
+    v = rconvert(T, jlconvert(ReadRepresentation{S,ODR}(), f, ptr, header_offset))::T
+    track_weakref!(f, header_offset, v)
+    return v
+end
