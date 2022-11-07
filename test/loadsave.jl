@@ -541,3 +541,61 @@ if VERSION ≥ v"1.8"
     end
 
 end
+
+## Issue #431 Identity-Preservation of nested structs with CustomSerialization 
+
+abstract type AT end
+Base.@kwdef mutable struct T1 <: AT
+    f
+end
+Base.@kwdef mutable struct T2 <: AT
+    t1::T1
+end
+Base.@kwdef mutable struct T3 <: AT
+    t1::T1
+    t2::T2
+end
+
+DSA=Dict{Symbol, Any}
+JLD2.writeas(::Type{T}) where {T <: AT} = DSA
+JLD2.wconvert(::Type{DSA}, t::AT) = DSA(f => getproperty(t, f) for f in fieldnames(typeof(t)))
+JLD2.rconvert(::Type{T}, dsa::DSA) where {T <: AT} = T(; dsa...)
+
+@testset "Issue #431 Identity-Preservation" begin
+    cd(mktempdir()) do
+        t1 = T1(1)
+        t2 = T2(t1)
+        t3 = T3(t1, t2)
+        save_object("kk.jld2", t3)
+
+        t3 = load_object("kk.jld2")
+        @test t3.t1 === t3.t2.t1
+    end
+end
+
+## Issue #433 circular references with custom serialization
+
+
+mutable struct CR
+    r::CR
+    CR() = new()
+    CR(x) = new(x)
+end
+
+mutable struct CRSerialized
+    r::CR
+end
+
+JLD2.writeas(::Type{CR}) = CRSerialized
+JLD2.wconvert(::Type{CRSerialized}, t::CR) = CRSerialized(t.r)
+JLD2.rconvert(::Type{CR}, dsa::CRSerialized) = CR(dsa.r)
+@testset "Issue #433 circular references with custom serialization" begin
+    cd(mktempdir()) do
+        cr = CR()
+        cr.r = cr
+        save_object("kk.jld2", cr)
+
+        t1 = load_object("kk.jld2")
+        @test t1 === t1.r
+    end
+end

@@ -8,6 +8,15 @@ function track_weakref!(f::JLDFile, header_offset::RelOffset, @nospecialize v)
     nothing
 end
 
+function track_weakref_if_untracked!(f::JLDFile, header_offset::RelOffset, @nospecialize v)
+    if header_offset !== NULL_REFERENCE 
+        if !haskey(f.jloffset, header_offset)
+            f.jloffset[header_offset] = WeakRef(v)
+        end
+    end
+    nothing
+end
+
 ## Generic machinery
 
 # Carries the type and on-disk representation of data to be read from
@@ -305,6 +314,7 @@ jlconvert_canbeuninitialized(::ReadRepresentation{RelOffset,RelOffset}) = false
     x = load_dataset(f, jlunsafe_load(convert(Ptr{RelOffset}, ptr)))
     (isa(x, T) ? x : rconvert(T, x))::T
 end
+
 jlconvert_canbeuninitialized(::ReadRepresentation{T,RelOffset}) where {T} = true
 jlconvert_isinitialized(::ReadRepresentation{T,RelOffset}, ptr::Ptr) where {T} =
     jlunsafe_load(convert(Ptr{RelOffset}, ptr)) != NULL_REFERENCE
