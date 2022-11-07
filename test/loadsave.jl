@@ -572,3 +572,30 @@ JLD2.rconvert(::Type{T}, dsa::DSA) where {T <: AT} = T(; dsa...)
         @test t3.t1 === t3.t2.t1
     end
 end
+
+## Issue #433 circular references with custom serialization
+
+
+mutable struct CR
+    r::CR
+    CR() = new()
+    CR(x) = new(x)
+end
+
+mutable struct CRSerialized
+    r::CR
+end
+
+JLD2.writeas(::Type{CR}) = CRSerialized
+JLD2.wconvert(::Type{CRSerialized}, t::CR) = CRSerialized(t.r)
+JLD2.rconvert(::Type{CR}, dsa::CRSerialized) = CR(dsa.r)
+@testset "Issue #433 circular references with custom serialization" begin
+    cd(mktempdir()) do
+        cr = CR()
+        cr.r = cr
+        save_object("kk.jld2", cr)
+
+        t1 = load_object("kk.jld2")
+        @test t1 === t1.r
+    end
+end

@@ -537,7 +537,7 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
     if ismutabletype(T)
         push!(args, quote
             obj = $(Expr(:new, T))
-            track_weakref!(f, header_offset, obj)
+            track_weakref_if_untracked!(f, header_offset, obj)
         end)
         fn = fieldnames(T)
         for i = 1:length(types)

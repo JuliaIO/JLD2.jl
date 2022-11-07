@@ -42,9 +42,21 @@ jlconvert_canbeuninitialized(::ReadRepresentation{T,CustomSerialization{S,ODR}})
     jlconvert_canbeuninitialized(ODR)
 jlconvert_isinitialized(::ReadRepresentation{T,CustomSerialization{S,ODR}}, ptr::Ptr) where {T,S,ODR} =
     jlconvert_isinitialized(ReadRepresentation{S,ODR}(), ptr)
+
 function jlconvert(::ReadRepresentation{T,CustomSerialization{S,ODR}},
           f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T,S,ODR}
+    
+    # May encounter a self-referential struct that used custom serialization
+    # provide an unitialized struct and later fill it with values
+    obj = newstruct(T)
+    track_weakref!(f, header_offset, obj)
+
+    # actually load the data
     v = rconvert(T, jlconvert(ReadRepresentation{S,ODR}(), f, ptr, header_offset))::T
-    track_weakref!(f, header_offset, v)
-    return v
+    # copy fields to initial struct
+    for i in 0:nfields(obj)-1
+        fieldval = ccall(:jl_get_nth_field, Any, (Any, Csize_t), v, i)
+        ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), obj, i, fieldval)
+    end
+    return obj
 end
