@@ -1,3 +1,6 @@
+## 0.4.26
+ - fix identity relations with custom serialization
+
 ## 0.4.25
  - remove leftover debug statement
  
