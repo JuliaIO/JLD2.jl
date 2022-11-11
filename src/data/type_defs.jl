@@ -4,7 +4,7 @@ const Pointers = Union{Ptr{Cvoid}, IndirectPointer}
 
 struct OnDiskRepresentation{Offsets,JLTypes,H5Types, Size} end
 odr_sizeof(::Nothing) = 0
-@Base.pure odr_sizeof(x::DataType) = Int(x.size)
+@Base.pure odr_sizeof(x::DataType) = Int(sizeof(x))
 
 struct UnknownType{T}
     name::T
