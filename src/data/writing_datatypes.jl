@@ -10,7 +10,7 @@ end
 
 function track_weakref_if_untracked!(f::JLDFile, header_offset::RelOffset, @nospecialize v)
     if header_offset !== NULL_REFERENCE 
-        if !haskey(f.jloffset, header_offset)
+        if !haskey(f.jloffset, header_offset) || isnothing(f.jloffset[header_offset].value)
             f.jloffset[header_offset] = WeakRef(v)
         end
     end
