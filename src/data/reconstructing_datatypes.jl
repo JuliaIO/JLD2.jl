@@ -93,7 +93,7 @@ end
 # Constructs a ReadRepresentation for a given opaque (bitstype) type
 function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{ReadAttribute})
     dt.class == DT_OPAQUE || throw(UnsupportedFeatureException())
-    if T.size == dt.size && isempty(T.types)
+    if sizeof(T) == dt.size && isempty(T.types)
         (ReadRepresentation{T,T}(), true)
     else
         empty = check_empty(attrs)
@@ -149,7 +149,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
     types = Vector{Any}(undef, length(T.types))
     odrs = Vector{Any}(undef, length(T.types))
     fn = fieldnames(T)
-    samelayout = isbitstype(T) && T.size == dt.size
+    samelayout = isbitstype(T) && sizeof(T) == dt.size
     dtindex = 0
     for i = 1:length(T.types)
         wstype = T.types[i]

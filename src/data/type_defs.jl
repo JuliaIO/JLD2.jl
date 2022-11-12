@@ -4,7 +4,18 @@ const Pointers = Union{Ptr{Cvoid}, IndirectPointer}
 
 struct OnDiskRepresentation{Offsets,JLTypes,H5Types, Size} end
 odr_sizeof(::Nothing) = 0
-@Base.pure odr_sizeof(x::DataType) = Int(x.size)
+@static if VERSION ≥ v"1.9.0-DEV"
+    # Modelled after Base.datatype_alignment
+    function datatype_size(dt::DataType)
+        Base.@_foldable_meta
+        dt.layout == C_NULL && throw(UndefRefError())
+        size = unsafe_load(convert(Ptr{Base.DataTypeLayout}, dt.layout)).size
+        return Int(size)
+    end
+    @Base.pure odr_sizeof(x::DataType) = datatype_size(x)
+else
+    @Base.pure odr_sizeof(x::DataType) = Int(x.size)
+end
 
 struct UnknownType{T}
     name::T
