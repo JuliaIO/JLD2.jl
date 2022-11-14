@@ -1,3 +1,6 @@
+## 0.4.28
+ - compatibility to julia v1.9-dev (@eschnett)
+ 
 ## 0.4.26
  - fix identity relations with custom serialization
 
