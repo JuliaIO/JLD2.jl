@@ -3,20 +3,19 @@
 # representations than ordinary opaque types
 
 # This construction prevents these methods from getting called on type unions
-const SignedTypes        = Union{Type{Int8}, Type{Int16}, Type{Int32}, Type{Int64}, Type{Int128}}
-const UnsignedTypes      = Union{Type{UInt8}, Type{UInt16}, Type{UInt32}, Type{UInt64}, Type{UInt128}}
-const FloatTypes         = Union{Type{Float16}, Type{Float32}, Type{Float64}}
-const PrimitiveTypeTypes = Union{SignedTypes, UnsignedTypes, FloatTypes, Type{Bool}}
-const PrimitiveTypes     = Union{Bool, Int8, Int16, Int32, Int64, Int128, UInt8, UInt16, UInt32,
-                                 UInt64, UInt128, Float16, Float32, Float64}
+const SignedTypes        = [Int8, Int16, Int32, Int64, Int128]
+const UnsignedTypes      = [UInt8, UInt16, UInt32, UInt64, UInt128]
+const FloatTypes         = [Float16, Float32, Float64]
+const PrimitiveTypes     = [SignedTypes; UnsignedTypes; FloatTypes; Bool]
+const PrimitiveTypeTypes = Union{(Type{T} for T in PrimitiveTypes)...}
 
-for T in Base.uniontypes(SignedTypes)
-    @eval h5fieldtype(::JLDFile, ::$T, ::$T, ::Initialized) =
-        FixedPointDatatype($(T.parameters[1].size), true)
+for T in SignedTypes
+    @eval h5fieldtype(::JLDFile, ::Type{$T}, ::Type{$T}, ::Initialized) =
+        FixedPointDatatype($(sizeof(T)), true)
 end
-for T in Base.uniontypes(UnsignedTypes)
-    @eval h5fieldtype(::JLDFile, ::$T, ::$T, ::Initialized) =
-        FixedPointDatatype($(T.parameters[1].size), false)
+for T in UnsignedTypes
+    @eval h5fieldtype(::JLDFile, ::Type{$T}, ::Type{$T}, ::Initialized) =
+        FixedPointDatatype($(sizeof(T)), false)
 end
 
 struct BENumber{T}
