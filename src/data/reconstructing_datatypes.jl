@@ -243,6 +243,20 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
     end
 end
 
+function constructrr(f::JLDFile, u::Upgrade, dt::CompoundDatatype,
+                     attrs::Vector{ReadAttribute},
+                     hard_failure::Bool=false)
+    field_datatypes = read_field_datatypes(f, attrs)
+
+
+    rodr = reconstruct_odr(f, dt, field_datatypes)
+    types = typeof(rodr).parameters[2].parameters
+
+    T2 = NamedTuple{tuple(dt.names...), typeof(rodr).parameters[2]}
+
+    return (ReadRepresentation{u.target, CustomSerialization{T2, rodr}}(), false)    
+end
+
 function constructrr(f::JLDFile, T::UnionAll, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)

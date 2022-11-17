@@ -145,6 +145,15 @@ read as type `S`.
 """
 struct CustomSerialization{T,S} end
 
+"""
+    Upgrade(T)
+
+Specify an upgrade path for serialized structs using the `typemap`` keyword argument
+and `rconvert`.
+"""
+struct Upgrade
+    target
+end
 
 struct Filter
     id::UInt16
