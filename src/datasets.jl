@@ -268,7 +268,7 @@ function read_data(f::JLDFile,
                     @warn("type $(str) does not exist in workspace; interpreting Array{$str} as Array{Any}")
                     rr = ReadRepresentation{Any,RelOffset}()
                 elseif T isa Upgrade
-                    rr = ReadRepresentation{T.target, CustomSerialization{Any, RelOffset}}()
+                    rr = ReadRepresentation{T.target, RelOffset}()
                 else
                     rr = ReadRepresentation{T, RelOffset}()
                 end
