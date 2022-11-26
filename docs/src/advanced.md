@@ -43,6 +43,37 @@ julia> f["a"]
 A_old(42)
 ```
 
+## Upgrading old structures on load
+The section above explains how you can make JLD2 load old structs with a different DataType name as target.
+A different method for loading old data is described here:
+
+```julia
+# This is the old version of the struct stored in the file
+struct OldStructVersion
+    x::Int
+    y::Float64
+end
+orig = OldStructVersion(1,2.0)
+jldsave("test.jld2"; data=orig)
+
+### new session
+
+# This is the new version of your struct
+struct UpdatedStruct
+    x::Float64 # no longer int
+    y::Float64
+    z::Float64 # = x*y
+end
+
+# When upgrading a struct, JLD2 will load the fields of the old struct into a `NamedTuple`
+# and call `rconvert` on it. Here we implement a conversion method that returns an `UpdatedStruct`
+JLD2.rconvert(::Type{UpdatedStruct}, nt::NamedTuple) = UpdatedStruct(Float64(nt.x), nt.y, nt.x*nt.y)
+
+# Here we provide the `typemap` keyword argument. It is a dictionary mapping the stored struct name
+# to an `Upgrade` instance with the new struct.
+load("test.jld2", "data"; typemap=Dict("Main.OldStructVersion" => JLD2.Upgrade(UpdatedStruct)))
+```
+
 ## Groups - Appending to files
 
 

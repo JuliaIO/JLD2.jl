@@ -599,3 +599,42 @@ JLD2.rconvert(::Type{CR}, dsa::CRSerialized) = CR(dsa.r)
         @test t1 === t1.r
     end
 end
+
+###################################################################################################
+##             `Upgrade` Tests
+###################################################################################################
+
+struct OldStructVersion
+    x::Int
+    y::Float64
+end
+
+struct UpdatedStruct
+    x::Float64 # no longer int
+    y::Float64
+    z::Float64 # x*y
+end
+JLD2.rconvert(::Type{UpdatedStruct}, nt::NamedTuple) = UpdatedStruct(Float64(nt.x), nt.y, nt.x*nt.y)
+# Dummy Upgrade, keeps struct but changes values
+JLD2.rconvert(::Type{OldStructVersion}, nt::NamedTuple) = OldStructVersion(nt.x, 2*nt.y)
+
+
+@testset "Explicit `Upgrade`ing" begin
+    cd(mktempdir()) do
+        orig = OldStructVersion(1,2.0)
+        newver = UpdatedStruct(1.0, 2.0, 2.0)
+        save_object("test.jld2", orig)
+        @test orig == load_object("test.jld2")
+        @test newver == JLD2.load("test.jld2", "single_stored_object"; typemap=Dict("Main.OldStructVersion" => JLD2.Upgrade(UpdatedStruct)))
+
+        # Test for container with vector elements being upgraded
+        wrapped_orig = ([orig,],)
+        wrapped_newver = ([OldStructVersion(1,4.0),],)
+        save_object("test.jld2", wrapped_orig)
+        @test wrapped_orig == load_object("test.jld2")
+        @test wrapped_newver == JLD2.load("test.jld2", "single_stored_object"; typemap=Dict("Main.OldStructVersion" => JLD2.Upgrade(OldStructVersion)))
+    end
+end
+
+
+
