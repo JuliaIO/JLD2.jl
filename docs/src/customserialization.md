@@ -1,8 +1,4 @@
-# Custom Serialization (Experimental)
-
-Version `v0.3.0` of introduces support for custom serialization.
-For now this feature is considered experimental as it passes tests but 
-has little testing in the wild. → Please test and report if you encounter problems.
+# Custom Serialization
 
 The API is simple enough, to enable custom serialization for your type `A` you define
 a new type e.g. `ASerialization` that contains the fields you want to store and define

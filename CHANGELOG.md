@@ -1,3 +1,6 @@
+## 0.4.29
+ - added `Upgrade` feature
+ 
 ## 0.4.28
  - compatibility to julia v1.9-dev (@eschnett)
  

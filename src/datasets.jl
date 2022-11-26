@@ -266,10 +266,14 @@ function read_data(f::JLDFile,
                 if isa(T, UnknownType)
                     str = typestring(T)
                     @warn("type $(str) does not exist in workspace; interpreting Array{$str} as Array{Any}")
-                    T = Any
+                    rr = ReadRepresentation{Any,RelOffset}()
+                elseif T isa Upgrade
+                    rr = ReadRepresentation{T.target, RelOffset}()
+                else
+                    rr = ReadRepresentation{T, RelOffset}()
                 end
                 seek(io, startpos)
-                return read_array(f, dataspace, ReadRepresentation{T,RelOffset}(),
+                return read_array(f, dataspace, rr,
                                   layout, FilterPipeline(), header_offset, attributes)
             end
         end
