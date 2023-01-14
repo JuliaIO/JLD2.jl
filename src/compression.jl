@@ -160,7 +160,7 @@ end
 function get_decompressor(filter_id::UInt16)
     modname, compressorname, decompressorname, = ID_TO_DECOMPRESSOR[filter_id]
     invoke_again, m = checked_import(modname)
-    return invoke_again, @eval $m.$decompressorname()
+    return invoke_again, getproperty(m,decompressorname)()
 end
 function get_decompressor(filters::FilterPipeline)
     decompressors = Any[]
@@ -168,7 +168,7 @@ function get_decompressor(filters::FilterPipeline)
     for filter in filters.filters
         modname, compressorname, decompressorname, = ID_TO_DECOMPRESSOR[filter.id]
         invoke_again, m = checked_import(modname)
-        push!(decompressors, @eval $m.$decompressorname())
+        push!(decompressors, getproperty(m,decompressorname)())
     end
     return invoke_again, decompressors
 end
