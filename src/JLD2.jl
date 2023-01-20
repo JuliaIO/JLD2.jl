@@ -595,6 +595,7 @@ include("backwards_compatibility.jl")
 include("inlineunion.jl")
 include("fileio.jl")
 include("compression.jl")
+include("repl_completions.jl")
 
 if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
     include("precompile.jl")
