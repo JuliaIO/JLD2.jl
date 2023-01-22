@@ -1,3 +1,6 @@
+## 0.4.30
+ -  allow loading compressed files during precompilation #446 (@marius311)
+ 
 ## 0.4.29
  - added `Upgrade` feature
  
