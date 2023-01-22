@@ -1,7 +1,12 @@
 using Test, JLD2
+using LazyArtifacts
+# When adding test files to the JLD2Testfiles repo tag a new
+# release and adapt Artifacts.toml and the line below accordingly.
+testfiles = artifact"testfiles/JLD2TestFiles-0.1.0/artifacts"
+
 @testset "HDF5 compat test files" begin
     # These are test files copied from the HDF5.jl test suite
-    cd(joinpath(@__DIR__,"test_files")) do
+    cd(testfiles) do
 
         fn = "compound.h5"
         jldopen(fn) do f 
