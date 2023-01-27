@@ -409,7 +409,7 @@ struct DataLayout
     data_offset::Int64
     dimensionality::UInt8
     chunk_indexing_type::UInt8 # only in version 4
-    chunk_dimensions::Vector{UInt32} # only defined if dimensionality > 0
+    chunk_dimensions::Vector{UInt64} # only defined if dimensionality > 0
     DataLayout(version, storage_type, data_length, data_offset) = 
         new(version, storage_type, data_length, data_offset, 0, 0)
     DataLayout(version, storage_type, data_length, data_offset, dimensionality, chunk_indexing_type, chunk_dimensions) = 
