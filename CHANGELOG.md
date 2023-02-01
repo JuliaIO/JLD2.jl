@@ -1,3 +1,7 @@
+## 0.4.31
+ - fix UInt32 truncation error for absurdly large array sizes
+ - move test-files to a separate repo
+ 
 ## 0.4.30
  -  allow loading compressed files during precompilation #446 (@marius311)
  
