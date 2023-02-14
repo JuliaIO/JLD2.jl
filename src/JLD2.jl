@@ -6,6 +6,9 @@ using MacroTools
 using Printf
 using Mmap
 using TranscodingStreams
+using Pkg: Pkg
+using Serialization: Serialization
+
 @reexport using FileIO: load, save
 
 export jldopen, @load, @save, save_object, load_object, printtoc
@@ -595,6 +598,9 @@ include("backwards_compatibility.jl")
 include("inlineunion.jl")
 include("fileio.jl")
 include("compression.jl")
+include("metadata.jl")
+include("write_blob.jl")
+
 
 if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
     include("precompile.jl")
