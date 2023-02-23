@@ -99,17 +99,6 @@ jldopen("example.jld2", "w") do file
 end
 ```
 
-When additionally loading the [UnPack.jl](https://github.com/mauro3/UnPack.jl) package, the there defined `@unpack` and `@pack!` macros can be used to quickly save and load date from  the file-like interface. Example:
-```julia
-using UnPack
-file = jldopen("example.jld2", "w")
-x, y = rand(2)
-
-@pack! file = x, y # equivalent to file["x"] = x; file["y"] = y
-@unpack x, y = file # equivalent to x = file["x"]; y = file["y"]
-```
-
-
 ### Groups
 
 It is possible to construct groups within a JLD2 file, which may or may not be useful for organizing your data. You can create groups explicitly:
@@ -152,8 +141,6 @@ or using slashes as path delimiters:
 ```julia
 @assert load("example.jld2", "mygroup/mystuff") == 42
 ```
-
-The group `file["mygroup"]` can be accessed with the same file-like interface as the "full" struct. When using [UnPack.jl](https://github.com/mauro3/UnPack.jl), the macros `@unpack` and `@pack!` work without modifications.
 
 ### Custom Serialization
 
@@ -201,3 +188,18 @@ jldsave("test.jld2"; arr)
 
 In this example JLD2 converts the array of `B` structs to a plain `Vector{Float64}` prior to 
 storing to disk.
+
+### Unpack.jl API
+
+When additionally loading the [UnPack.jl](https://github.com/mauro3/UnPack.jl) package, its `@unpack` and `@pack!` macros can be used to quickly save and load data from the file-like interface. Example:
+
+```julia
+using UnPack
+file = jldopen("example.jld2", "w")
+x, y = rand(2)
+
+@pack! file = x, y # equivalent to file["x"] = x; file["y"] = y
+@unpack x, y = file # equivalent to x = file["x"]; y = file["y"]
+```
+
+The group `file_group = Group(file, "mygroup")` can be accessed with the same file-like interface as the "full" struct.
