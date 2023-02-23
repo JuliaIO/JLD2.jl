@@ -7,6 +7,7 @@ using Printf
 using Mmap
 using TranscodingStreams
 @reexport using FileIO: load, save
+using Requires
 
 export jldopen, @load, @save, save_object, load_object, printtoc
 export jldsave
@@ -172,7 +173,7 @@ iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
 """
     Group(file)
 
-JLD2 group object. 
+JLD2 group object.
 
 ## Advanced Usage
 Takes two optional keyword arguments:
@@ -598,6 +599,13 @@ include("compression.jl")
 
 if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
     include("precompile.jl")
+end
+
+function __init__()
+    # If UnPack.jl package is loaded, extend @unpack, @pack! for file-like interface
+    @require UnPack="3a884ed6-31ef-47d7-9d2a-63182c4928ed" begin
+        include("../ext/UnPackExt.jl")
+    end
 end
 
 end

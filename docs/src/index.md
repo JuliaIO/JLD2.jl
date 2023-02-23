@@ -140,6 +140,20 @@ or using slashes as path delimiters:
 @assert load("example.jld2", "mygroup/mystuff") == 42
 ```
 
+### Unpack.jl API
+
+When additionally loading the [UnPack.jl](https://github.com/mauro3/UnPack.jl) package, its `@unpack` and `@pack!` macros can be used to quickly save and load data from the file-like interface. Example:
+
+```julia
+using UnPack
+file = jldopen("example.jld2", "w")
+x, y = rand(2)
+
+@pack! file = x, y # equivalent to file["x"] = x; file["y"] = y
+@unpack x, y = file # equivalent to x = file["x"]; y = file["y"]
+```
+
+The group `file_group = Group(file, "mygroup")` can be accessed with the same file-like interface as the "full" struct.
 
 ## Gotchas
 
