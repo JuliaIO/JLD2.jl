@@ -110,7 +110,7 @@ macro read_datatype(io, datatype_class, datatype, then)
         elseif $datatype_class << 4 == DT_BITFIELD << 4
             $(replace_expr(then, datatype, :(jlread($io, BitFieldDatatype))))
         elseif $datatype_class << 4 == DT_TIME << 4
-            $(replace_expr(then, datatype, :(jlread($io, TimeDatatype))))
+            throw(UnsupportedFeatureException("Time datatype (rarely used) not supported"))
         elseif $datatype_class << 4 == DT_ARRAY << 4
             $(replace_expr(then, datatype, :(jlread($io, ArrayDatatype))))
         elseif $datatype_class << 4 == DT_ENUMERATED << 4
