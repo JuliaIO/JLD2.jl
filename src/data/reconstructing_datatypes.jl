@@ -17,6 +17,9 @@ function check_empty(attrs::Vector{ReadAttribute})
     false
 end
 
+_readas(T) = readas(T)
+_readas(T::UnknownType) = readas(T.name)
+
 # jltype is the inverse of h5type, providing a ReadRepresentation for an
 # H5Datatype. We handle committed datatypes here, and other datatypes below.
 function jltype(f::JLDFile, cdt::CommittedDatatype)
@@ -56,18 +59,18 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     datatype = read_attr_data(f, julia_type_attr)
     if written_type_attr !== nothing
         # Custom serialization
-        readas = datatype
+        read_as = _readas(datatype)
         datatype = read_attr_data(f, written_type_attr)
-        if isa(readas, UnknownType)
-            @warn("custom serialization of $(typestring(readas))" *
+        if isa(read_as, UnknownType)
+            @warn("custom serialization of $(typestring(read_as))" *
                   " encountered, but the type does not exist in the workspace; the data will be read unconverted")
             rr = (constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool})[1]
             canonical = false
         else
             rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
             rrty = typeof(rr)
-            rr = ReadRepresentation{readas, CustomSerialization{rrty.parameters[1], rrty.parameters[2]}}()
-            canonical = canonical && writeas(readas) === datatype
+            rr = ReadRepresentation{read_as, CustomSerialization{rrty.parameters[1], rrty.parameters[2]}}()
+            canonical = canonical && writeas(read_as) === datatype
         end
     else
         rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
