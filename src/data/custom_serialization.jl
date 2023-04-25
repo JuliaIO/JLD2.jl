@@ -1,8 +1,7 @@
 ## Custom serialization
 
-# The default, write and read a type as itself
+# The default, write a type as itself
 writeas(T::Type) = T
-readas(T::Type) = T
 
 # wconvert and rconvert do type conversion before reading and writing,
 # respectively. These fall back to convert.

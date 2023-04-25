@@ -17,8 +17,13 @@ function check_empty(attrs::Vector{ReadAttribute})
     false
 end
 
-_readas(T) = readas(T)
-_readas(T::UnknownType) = readas(T.name)
+# By default, if readas returns nothing, try using the original type, T_in
+# This can be overloaded to define a custom type to read as, based on the serialized type.
+readas(::Any) = nothing
+function _readas(T_custom, T_in)
+    T_out = readas(T_custom)
+    return ifelse(isnothing(T_out), T_in, T_out)
+end
 
 # jltype is the inverse of h5type, providing a ReadRepresentation for an
 # H5Datatype. We handle committed datatypes here, and other datatypes below.
@@ -59,18 +64,18 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     datatype = read_attr_data(f, julia_type_attr)
     if written_type_attr !== nothing
         # Custom serialization
-        read_as = _readas(datatype)
-        datatype = read_attr_data(f, written_type_attr)
+        custom_datatype = read_attr_data(f, written_type_attr)
+        read_as = _readas(custom_datatype, datatype)
         if isa(read_as, UnknownType)
             @warn("custom serialization of $(typestring(read_as))" *
                   " encountered, but the type does not exist in the workspace; the data will be read unconverted")
-            rr = (constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool})[1]
+            rr = (constructrr(f, custom_datatype, dt, attrs)::Tuple{ReadRepresentation,Bool})[1]
             canonical = false
         else
-            rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
+            rr, canonical = constructrr(f, custom_datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
             rrty = typeof(rr)
             rr = ReadRepresentation{read_as, CustomSerialization{rrty.parameters[1], rrty.parameters[2]}}()
-            canonical = canonical && writeas(read_as) === datatype
+            canonical = canonical && writeas(read_as) === custom_datatype
         end
     else
         rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
