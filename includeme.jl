@@ -26,6 +26,6 @@ struct BarSerialization
     fun
 end
 
-JLD2.writeas(::Type{Bar}) = BarSerialization
-Base.convert(::Type{BarSerialization}, f::Foo) = FooSerialization(f.fun)
-Base.convert(::Type{Bar{F}}, f::FooSerialization) where {F<:Function} = Bar{F}(f.fun)
+JLD2.writeas(::Type{<:Bar}) = BarSerialization
+Base.convert(::Type{BarSerialization}, f::Bar) = BarSerialization(f.fun)
+Base.convert(::Type{Bar{F}}, f::BarSerialization) where {F<:Function} = Bar{F}(f.fun)
