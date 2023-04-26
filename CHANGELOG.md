@@ -1,3 +1,6 @@
+## 0.4.32
+ - add experimental `JLD2.readas` function for customized reading of custom serialized objects (#468)
+
 ## 0.4.31
  - fix UInt32 truncation error for absurdly large array sizes
  - move test-files to a separate repo
