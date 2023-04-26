@@ -17,11 +17,55 @@ function check_empty(attrs::Vector{ReadAttribute})
     false
 end
 
-# By default, if readas returns nothing, try using the original type, T_in
-# This can be overloaded to define a custom type to read as, based on the serialized type.
-readas(::Any) = nothing
+"""
+    readas(::Type)::Type
+
+`JLD2.readas` can be overloaded to override which type a saved type is read as,
+and is used together with custom serialization using [`JLD2.writeas`](@ref).
+
+The typical case is custom serialization of parametric types,
+where not all type parameters are available during reading. 
+
+Consider the following example for an anonymous function `fun` inside a `Foo`
+```julia
+struct Foo{F<:Function}
+    fun::F
+end
+struct FooSerialization
+    fun
+end
+JLD2.writeas(::Type{<:Foo}) = FooSerialization
+Base.convert(::Type{<:FooSerialization}, f::Foo) = FooSerialization(f.fun)
+
+JLD2.readas(::Type{<:FooSerialization}) = Foo
+struct UndefinedFunction <:Function
+    fun
+end
+(f::UndefinedFunction)(args...; kwargs...) = error("The function \$(f.fun) is not defined")
+function Base.convert(::Type{<:Foo}, f::FooSerialization)
+    isa(f.fun, Function) && return Foo(f.fun)
+    return Foo(UndefinedFunction(f.fun))
+end
+```
+If we include these definitions, 
+save: `jldsave("foo.jld2"; foo = Foo(x->x^2))`, restart julia and 
+include the definitions again. Running 
+```julia
+foo = jldopen("foo.jld2", "r") do io
+    io["foo"]
+end
+```
+yields something like 
+
+* `foo::Foo{UndefinedFunction}(UndefinedFunction(JLD2.ReconstructedTypes.var"##Main.#7#8#314"()))`.
+* `foo::FooSerialization(JLD2.ReconstructedTypes.var"##Main.#7#8#313"())`
+
+with and without defining `JLD2.readas`, respectively.
+"""
+readas(::Any) = nothing # default to nothing to do nothing if no overload is specified. 
+
 function _readas(T_custom, T_in)
-    T_out = readas(T_custom)
+    T_out = readas(T_custom)::Union{Type,Nothing}
     return ifelse(isnothing(T_out), T_in, T_out)
 end
 
