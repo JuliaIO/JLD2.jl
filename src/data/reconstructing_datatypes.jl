@@ -20,12 +20,12 @@ end
 """
     readas(::Type)::Type
 
+**Experimental feature**: 
 `JLD2.readas` can be overloaded to override which type a saved type is read as,
 and is used together with custom serialization using [`JLD2.writeas`](@ref).
 
 The typical case is custom serialization of parametric types,
 where not all type parameters are available during reading. 
-
 Consider the following example for an anonymous function `fun` inside a `Foo`
 ```julia
 struct Foo{F<:Function}
@@ -47,20 +47,11 @@ function Base.convert(::Type{<:Foo}, f::FooSerialization)
     return Foo(UndefinedFunction(f.fun))
 end
 ```
-If we include these definitions, 
-save: `jldsave("foo.jld2"; foo = Foo(x->x^2))`, restart julia and 
-include the definitions again. Running 
-```julia
-foo = jldopen("foo.jld2", "r") do io
-    io["foo"]
-end
-```
-yields something like 
-
-* `foo::Foo{UndefinedFunction}(UndefinedFunction(JLD2.ReconstructedTypes.var"##Main.#7#8#314"()))`.
-* `foo::FooSerialization(JLD2.ReconstructedTypes.var"##Main.#7#8#313"())`
-
-with and without defining `JLD2.readas`, respectively.
+If we include these definitions, call `jldsave("foo.jld2"; foo=Foo(x->x^2))`,
+restart julia, include the definitions again, and call
+`foo = jldopen("foo.jld2") do io; io["foo"]; end`, we get
+`foo::Foo{UndefinedFunction}` and `foo::FooSerialization`
+with and without defining the `JLD2.readas` above, respectively.
 """
 readas(::Any) = nothing # default to nothing to do nothing if no overload is specified. 
 
