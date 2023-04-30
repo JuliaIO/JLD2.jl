@@ -124,7 +124,7 @@ _odr(writtenas::DataType, readas::DataType, odr) =
 # h5type is objodr's HDF5 companion. It should give the HDF5 datatype
 # reflecting the on-disk representation
 #
-# Performance note: this should be inferrable.
+# Performance note: this should be inferable.
 function h5type(f::JLDFile, writtenas, x)
     check_writtenas_type(writtenas)
     T = typeof(x)
@@ -536,7 +536,7 @@ end
 
 # The following two definitions are borrowed from BSON.
 # They are used to generate instances of arbitrary types
-# given their fields regarless of potential constructors.
+# given their fields regardless of potential constructors.
 # It is unclear to the author whether this approach is
 # optimal.
 newstruct(T) = ccall(:jl_new_struct_uninit, Any, (Any,), T)

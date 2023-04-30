@@ -19,7 +19,7 @@ function read_superblock(io::IO)
     version = jlread(cio, UInt8)
     if version == 0
         version_free_space_storage = jlread(cio, UInt8) # has to be zero
-        version_root_group_symbol_table_enty = jlread(cio, UInt8) # has to be zero
+        version_root_group_symbol_table_entry = jlread(cio, UInt8) # has to be zero
         jlread(cio, UInt8)
         version_share_header_msg_format = jlread(cio, UInt8) # has to be zero
         size_of_offsets = jlread(cio, UInt8)
@@ -32,10 +32,10 @@ function read_superblock(io::IO)
         jlread(cio, UInt32)
         #indexed_storage_internal_node_k = jlread(cio, UInt16) # must be greater than zero
         #jlread(cio, UInt16)
-        base_address = jlread(cio, UInt64) # base adress for offsets within file (also absolute address of superblock)
-        adress_free_space_info = jlread(cio, RelOffset)  # Undefined Adress
-        end_of_file_address = jlread(cio, UInt64) # absolute adress of first byte past end of data
-        driver_info_block_adress = jlread(cio, RelOffset) # undefined of relative adress of driver info block
+        base_address = jlread(cio, UInt64) # base address for offsets within file (also absolute address of superblock)
+        address_free_space_info = jlread(cio, RelOffset)  # Undefined Address
+        end_of_file_address = jlread(cio, UInt64) # absolute address of first byte past end of data
+        driver_info_block_address = jlread(cio, RelOffset) # undefined of relative address of driver info block
         #root_group_symbol_table_entry = jlread(cio, UInt32) # symbol table entry of root group
 
         link_name_offset = jlread(cio, RelOffset)

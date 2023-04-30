@@ -29,7 +29,7 @@
  - Support for `const` fields in mutable structs
  
 ## 0.4.22
- - Fix reconstruction of partially intialized structs
+ - Fix reconstruction of partially initialized structs
 
 ## 0.4.21
  - Add explicit type mapping 

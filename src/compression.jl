@@ -260,7 +260,7 @@ struct ShuffleFilter end
 
 function decompress!(data::Vector{UInt8}, data_length, element_size, num_elements, decompressor::ShuffleFilter)
     # Start with all least significant bytes, then work your way up
-    # I'll leave this for somenone else to make performant
+    # I'll leave this for someone else to make performant
     @assert data_length == length(data)
     @assert data_length % element_size == 0
     @assert data_length÷element_size == num_elements
