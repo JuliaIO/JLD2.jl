@@ -644,7 +644,7 @@ function show_group(io::IO, g::Group, maxnumlines::Int=10, prefix::String=" ", s
     iszero(maxnumlines) && return 0
     if g.f.n_times_opened == 0
         print(io, "  (closed)")
-        return
+        return -1
     end
 
     ks = collect(keys(g))
@@ -652,7 +652,7 @@ function show_group(io::IO, g::Group, maxnumlines::Int=10, prefix::String=" ", s
 
     if isempty(ks) && prefix == " "
         print(io, "  (no datasets)")
-        return
+        return -1
     end
 
     for i = 1:length(ks)
@@ -670,7 +670,11 @@ function show_group(io::IO, g::Group, maxnumlines::Int=10, prefix::String=" ", s
             if !isempty(newg)
                 if (maxnumlines > 1 || (islast && maxnumlines >= 2))
                     print(io, '\n')
-                    maxnumlines = show_group(io, newg, islast ? maxnumlines : maxnumlines-1, prefix*(islast ? "   " : "│  "), false)
+                    ret = show_group(io, newg, islast ? maxnumlines : maxnumlines-1, prefix*(islast ? "   " : "│  "), false)
+                    if ret < 0
+                        error("closed or empty dataset, this should not happen")
+                    end
+                    maxnumlines = ret
                     maxnumlines += islast ? 0 : 1
                 else
                     nentries = length(keys(newg))
