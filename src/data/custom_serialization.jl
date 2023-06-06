@@ -49,7 +49,7 @@ function jlconvert(::ReadRepresentation{T,CustomSerialization{S,ODR}},
     
     if ismutabletype(T) && !(T <: Core.SimpleVector)
         # May encounter a self-referential struct that used custom serialization
-        # provide an unitialized struct and later fill it with values
+        # provide an uninitialized struct and later fill it with values
         obj = newstruct(T)
         track_weakref!(f, header_offset, obj)
 

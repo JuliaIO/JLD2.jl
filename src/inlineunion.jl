@@ -45,7 +45,7 @@ function write_dataset(f::JLDFile, x::Array{T}, wsession::JLDWriteSession, compr
 end
 
 # This function is identical to the one in data.jl
-# exept for the ReadRepresentation and the very last line where the data is
+# except for the ReadRepresentation and the very last line where the data is
 # converted back into a Union Array
 function read_array(f::JLDFile, dataspace::ReadDataspace,
                     rr::ReadRepresentation{InlineUnionEl{T1,T2},RR}, layout::DataLayout,

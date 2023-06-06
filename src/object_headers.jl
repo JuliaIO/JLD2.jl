@@ -365,7 +365,7 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
                 elseif msg.msg_type == HM_SYMBOL_TABLE
                     v1_btree_address = jlread(cio, RelOffset)
                     local_heap_address = jlread(cio, RelOffset)
-                    println("""    required for \"old style" groups\n    v1 B-Tree Adress: $(v1_btree_address)\n    Local Heap Adress: $(local_heap_address)""")
+                    println("""    required for \"old style" groups\n    v1 B-Tree Address: $(v1_btree_address)\n    Local Heap Address: $(local_heap_address)""")
                 elseif msg.msg_type == HM_ATTRIBUTE
                     if attrs === EMPTY_READ_ATTRIBUTES
                         attrs = ReadAttribute[read_attribute(cio, f)]

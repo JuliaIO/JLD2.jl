@@ -51,7 +51,7 @@ end
 """
     read_attribute(io::IO, f::JLDFile)
 
-Read an attribute message at the current postion of the `io` object.
+Read an attribute message at the current position of the `io` object.
 Supports attribute message version 1 and 2.
 """
 function read_attribute(io::IO, f::JLDFile)

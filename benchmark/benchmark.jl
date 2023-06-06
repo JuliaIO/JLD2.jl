@@ -73,7 +73,7 @@ bench("any_complex128_vector", Any[complex(rand(), rand()) for i = 1:1000000])
 # Many empty arrays
 bench("empty_arrays", Any[Int[] for i = 1:1000000])
 
-# Many one-eleemnt arrays
+# Many one-element arrays
 bench("one_element_arrays", [[rand(typemin(Int):typemax(Int))] for i = 1:1000000])
 
 # Equivalent benchmark from https://github.com/timholy/HDF5.jl/issues/170
