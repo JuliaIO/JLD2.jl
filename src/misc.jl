@@ -142,9 +142,9 @@ function uintofsize(sz)
 end
 
 function to_uint64(bts::Vector{UInt8})
-    bts2 = [bts; zeros(UInt8, 8-length(bts))]
+    bts2 = append!(zeros(UInt8, 8-length(bts)), reverse(bts))
     u = zero(UInt64)
-    for b in reverse(bts2)
+    for b in bts2
         u = u << 8
         u += b
     end
