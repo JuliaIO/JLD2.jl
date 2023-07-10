@@ -65,18 +65,17 @@ const ID_TO_DECOMPRESSOR = Dict(
     UInt16(32004) => (:CodecLz4, :LZ4FrameCompressor, :LZ4FrameDecompressor, "LZ4"),
 )
 
+const compressor_list_string = map(values(ID_TO_DECOMPRESSOR)) do val
+    "\n\t"*string(val[1])*"."*string(val[2])
+end
+
 issupported_filter(filter_id) = filter_id ∈ keys(ID_TO_DECOMPRESSOR)
 
 function verify_compressor(compressor)
     (compressor isa Bool || haskey(COMPRESSOR_TO_ID, nameof(typeof(compressor)))) && return
 
-    crs = map(values(ID_TO_DECOMPRESSOR)) do val
-        "\n\t"*string(val[1])*"."*string(val[2])
-    end
-
-
     throw(ArgumentError("""Unsupported Compressor
-    Supported Compressors are $(crs...)"""))
+    Supported Compressors are $(compressor_list_string...)"""))
 end
 #############################################################################################################
 # Dynamic Package Loading Logic copied from FileIO
