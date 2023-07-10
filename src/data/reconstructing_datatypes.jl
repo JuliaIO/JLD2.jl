@@ -17,6 +17,49 @@ function check_empty(attrs::Vector{ReadAttribute})
     false
 end
 
+"""
+    readas(::Type)::Type
+
+**Experimental feature**: 
+`JLD2.readas` can be overloaded to override which type a saved type is read as,
+and is used together with custom serialization using [`JLD2.writeas`](@ref).
+
+The typical case is custom serialization of parametric types,
+where not all type parameters are available during reading. 
+Consider the following example for an anonymous function `fun` inside a `Foo`
+```julia
+struct Foo{F<:Function}
+    fun::F
+end
+struct FooSerialization
+    fun
+end
+JLD2.writeas(::Type{<:Foo}) = FooSerialization
+Base.convert(::Type{<:FooSerialization}, f::Foo) = FooSerialization(f.fun)
+
+JLD2.readas(::Type{<:FooSerialization}) = Foo
+struct UndefinedFunction <:Function
+    fun
+end
+(f::UndefinedFunction)(args...; kwargs...) = error("The function \$(f.fun) is not defined")
+function Base.convert(::Type{<:Foo}, f::FooSerialization)
+    isa(f.fun, Function) && return Foo(f.fun)
+    return Foo(UndefinedFunction(f.fun))
+end
+```
+If we include these definitions, call `jldsave("foo.jld2"; foo=Foo(x->x^2))`,
+restart julia, include the definitions again, and call
+`foo = jldopen("foo.jld2") do io; io["foo"]; end`, we get
+`foo::Foo{UndefinedFunction}` and `foo::FooSerialization`
+with and without defining the `JLD2.readas` above, respectively.
+"""
+readas(::Any) = nothing # default to nothing to do nothing if no overload is specified. 
+
+function _readas(T_custom, T_in)
+    T_out = readas(T_custom)::Union{Type,Nothing}
+    return ifelse(isnothing(T_out), T_in, T_out)
+end
+
 # jltype is the inverse of h5type, providing a ReadRepresentation for an
 # H5Datatype. We handle committed datatypes here, and other datatypes below.
 function jltype(f::JLDFile, cdt::CommittedDatatype)
@@ -56,18 +99,18 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     datatype = read_attr_data(f, julia_type_attr)
     if written_type_attr !== nothing
         # Custom serialization
-        readas = datatype
-        datatype = read_attr_data(f, written_type_attr)
-        if isa(readas, UnknownType)
-            @warn("custom serialization of $(typestring(readas))" *
+        custom_datatype = read_attr_data(f, written_type_attr)
+        read_as = _readas(custom_datatype, datatype)
+        if isa(read_as, UnknownType)
+            @warn("custom serialization of $(typestring(read_as))" *
                   " encountered, but the type does not exist in the workspace; the data will be read unconverted")
-            rr = (constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool})[1]
+            rr = (constructrr(f, custom_datatype, dt, attrs)::Tuple{ReadRepresentation,Bool})[1]
             canonical = false
         else
-            rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
+            rr, canonical = constructrr(f, custom_datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
             rrty = typeof(rr)
-            rr = ReadRepresentation{readas, CustomSerialization{rrty.parameters[1], rrty.parameters[2]}}()
-            canonical = canonical && writeas(readas) === datatype
+            rr = ReadRepresentation{read_as, CustomSerialization{rrty.parameters[1], rrty.parameters[2]}}()
+            canonical = canonical && writeas(read_as) === custom_datatype
         end
     else
         rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
