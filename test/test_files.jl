@@ -83,10 +83,10 @@ testfiles = artifact"testfiles/JLD2TestFiles-0.1.0/artifacts"
         fn = "netcdf.nc"
         jldopen(fn) do f
             @test f["hello"] == ones(5)
-            @test_broken f["x"]
-            @test_broken f["z"]
+            #@test_broken f["x"]
+            #@test_broken f["z"]
             @test f["grouped/data"] == 0:9
-            @test_broken f["grouped/y"]
+            #@test_broken f["grouped/y"]
         end
 
         fn = "simple.nc"

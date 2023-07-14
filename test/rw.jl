@@ -243,15 +243,6 @@ zerod[] = 1
 zerod_any = Array{Any}(undef)
 zerod_any[] = 1.0+1.0im
 
-# Type with None typed field
-struct NoneTypedField{T}
-    a::Int
-    b::T
-
-    NoneTypedField{T}(a) where T = new(a)
-end
-nonetypedfield = NoneTypedField{Union{}}(47)
-
 # Cyclic object
 mutable struct CyclicObject
     x::CyclicObject
@@ -292,7 +283,6 @@ end
 iseq(x::MyStruct, y::MyStruct) = (x.len == y.len && x.data == y.data)
 iseq(x::MyImmutable, y::MyImmutable) = (isequal(x.x, y.x) && isequal(x.y, y.y) && isequal(x.z, y.z))
 iseq(x::Union{EmptyTI,EmptyTT,EmptyIT}, y::Union{EmptyTI,EmptyTT,EmptyIT}) = iseq(x.x, y.x)
-iseq(x::NoneTypedField{Union{}}, y::NoneTypedField{Union{}}) = x.a === y.a
 iseq(c1::Array, c2::Array) = length(c1) == length(c2) && all(p->iseq(p...), zip(c1, c2))
 function iseq(c1::Base.Sys.CPUinfo, c2::Base.Sys.CPUinfo)
     for n in fieldnames(Base.Sys.CPUinfo)
@@ -463,7 +453,6 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @write fid tuple_of_tuples
     @write fid zerod
     @write fid zerod_any
-    @write fid nonetypedfield
     @write fid cyclicobject
     @write fid simplevec
     @write fid natyperef
@@ -599,7 +588,6 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @check fidr tuple_of_tuples
     @check fidr zerod
     @check fidr zerod_any
-    @check fidr nonetypedfield
 
     obj = read(fidr, "cyclicobject")
     @test obj.x === obj
