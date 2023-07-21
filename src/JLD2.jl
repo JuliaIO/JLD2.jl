@@ -297,18 +297,27 @@ FallbackType(::Type{IOStream}) = nothing
 read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
 
 const OPEN_FILES = Dict{String,WeakRef}()
+const OPEN_PARALLEL_FILES = Dict{String,WeakRef}() #these files are read-only
 const OPEN_FILES_LOCK = ReentrantLock()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
                  fallback::Union{Type, Nothing} = FallbackType(iotype),
                  compress=false,
                  mmaparrays::Bool=false,
                  typemap::Dict{String}=Dict{String,Any}(),
+                 parallel_read::Bool=false,
                  ) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
     verify_compressor(compress)
     exists = ispath(fname)
 
-    lock(OPEN_FILES_LOCK)
+    # Can only open multiple times if mode is "r"
+    if parallel_read && (wr, create, truncate)  != (false, false, false)
+        throw(ArgumentError("Cannot open file in multiple threads unless mode is \"r\""))
+    end
+
+    #Do not lock file if user specifies parallel_read
+    parallel_read && lock(OPEN_FILES_LOCK)
+
     f = try
         if exists
             rname = realpath(fname)
@@ -316,6 +325,12 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
             if !isfile(rname)
                 throw(ArgumentError("not a regular file: $fname"))
             end
+            
+            #Check that file is not open elsewhere in a non-read context
+            if parallel_read && haskey(OPEN_FILES, rname)
+                #TODO: 
+            end
+
             if haskey(OPEN_FILES, rname)
                 ref = OPEN_FILES[rname]
                 f = ref.value
@@ -339,6 +354,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                     return f
                 end
             end
+            
         end
 
         io = openfile(iotype, fname, wr, create, truncate, fallback)
@@ -350,7 +366,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
     catch e
         rethrow(e)
     finally
-        unlock(OPEN_FILES_LOCK)
+        parallel_read && unlock(OPEN_FILES_LOCK)
     end
     if f.written
         f.base_address = 512
