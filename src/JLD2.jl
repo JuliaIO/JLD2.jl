@@ -328,8 +328,13 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
             
             #Check that file is not open elsewhere in a non-read context
             if parallel_read && haskey(OPEN_FILES, rname)
-                #TODO: 
+                ref = OPEN_FILES[rname]
+                f = ref.value
+                if !isnothing(f)
+                    f.writable && throw(ArgumentError("Cannot open file multiple times unless mode is always \"r\". File was open elsewhere in a write mode."))
+                end
             end
+            #TODO: Use dict of parallel files open
 
             if haskey(OPEN_FILES, rname)
                 ref = OPEN_FILES[rname]
