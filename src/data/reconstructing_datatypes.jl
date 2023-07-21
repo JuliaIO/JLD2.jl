@@ -435,6 +435,11 @@ struct ReconstructedSingleton{N} <: AbstractReconstructedType{N} end
 struct ReconstructedStaticCompound{N, FN, NT} <: AbstractReconstructedType{N}
     fields::NamedTuple{FN, NT}
 end
+
+function Base.getproperty(rc::ReconstructedStaticCompound, s::Symbol) 
+    getproperty(getfield(rc, 1),s)
+end
+
 struct ReconstructedMutableCompound{N, FN, FT} <: AbstractReconstructedType{N}
     fields::Vector{Any}
 end
