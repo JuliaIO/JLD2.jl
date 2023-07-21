@@ -602,7 +602,7 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
     # Now reconstruct the type
     T = ReconstructedMutableCompound{Symbol(T), tuple(dt.names...), Tuple{types...}}
 
-    rr = ReadRepresentation{T, OnDiskRepresentation{(0,), Tuple{Vector{Any}}, Tuple{rodr}, dt.size}()}()
+    rr = ReadRepresentation{T, rodr}()
     return rr, false
 end
 
@@ -612,7 +612,7 @@ end
 jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
           header_offset::RelOffset) = Union{}
 
-function jlconvert(::ReadRepresentation{Vector{Any}, S}, f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {S}
+function jlconvert(::ReadRepresentation{T, S}, f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T<:ReconstructedMutableCompound, S}
     offsets = typeof(S).parameters[1]
     types = typeof(S).parameters[2].parameters
     odrs = typeof(S).parameters[3].parameters
@@ -628,7 +628,7 @@ function jlconvert(::ReadRepresentation{Vector{Any}, S}, f::JLDFile, ptr::Ptr, h
             res[i] = jlconvert(rr, f, ptr+offset, NULL_REFERENCE)
         end
     end
-    return res
+    return T(res)
 end
 
 # This jlconvert method handles compound types with padding or references
