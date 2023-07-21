@@ -428,17 +428,39 @@ constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute})
 
 module ReconstructedTypes end
 
+abstract type AbstractReconstructedType{N} end
+
+struct ReconstructedSingleton{N} <: AbstractReconstructedType{N} end
+
+struct ReconstructedStaticCompound{N, FN, NT} <: AbstractReconstructedType{N}
+    fields::NamedTuple{FN, NT}
+end
+struct ReconstructedMutableCompound{N, FN, FT} <: AbstractReconstructedType{N}
+    fields::Vector{Any}
+end
+
+function Base.getproperty(rc::ReconstructedMutableCompound{N,FN,FT}, s::Symbol) where {N,FN,FT}
+    i = findfirst(==(s), FN)
+    isnothing(i) && throw(ArgumentError("field $s not found"))
+    getfield(rc, 1)[i]::FT.parameters[i]
+end
+
 isreconstructed(x) = isreconstructed(typeof(x))
 
 function isreconstructed(::Type{T}) where T
-    return supertype(T) == Any && parentmodule(T) == ReconstructedTypes
+    return (T <: AbstractReconstructedType) ||
+        (supertype(T) == Any && parentmodule(T) == ReconstructedTypes) # needed for primitive types
 end
 
 function reconstruct_bitstype(name::Union{Symbol,String}, size::Integer, empty::Bool)
-    sym = gensym(name)
-    Core.eval(ReconstructedTypes, empty ? :(struct $(sym) end) : :(primitive type $(sym) $(Int(size)*8) end))
-    T = getfield(ReconstructedTypes, sym)
-    (ReadRepresentation{T, empty ? nothing : T}(), false)
+    if empty
+        return (ReadRepresentation{ReconstructedSingleton{Symbol(name)}, nothing}(), false)
+    else
+        sym = gensym(name)
+        Core.eval(ReconstructedTypes, :(primitive type $(sym) $(Int(size)*8) end))
+        T = getfield(ReconstructedTypes, sym)
+        return (ReadRepresentation{T, T}(), false)
+    end
 end
 
 function constructrr(f::JLDFile, unk::UnknownType, dt::BasicDatatype,
@@ -564,18 +586,24 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
                               field_datatypes::Union{Vector{RelOffset},Nothing})
     rodr = reconstruct_odr(f, dt, field_datatypes)
     types = typeof(rodr).parameters[2].parameters
+    odrs = typeof(rodr).parameters[3].parameters
+
+    fullyinit = true
+    for i = 1:length(types)
+        if jlconvert_canbeuninitialized(ReadRepresentation{types[i], odrs[i]}())
+            fullyinit = false
+            break
+        end
+    end
+    if fullyinit
+        return (ReadRepresentation{ReconstructedStaticCompound{Symbol(T),tuple(dt.names...),Tuple{types...}}, OnDiskRepresentation{(0,), Tuple{NT}, Tuple{rodr}, dt.size}()}(), true)
+    end
 
     # Now reconstruct the type
-    reconname = gensym(T)
-    Core.eval(ReconstructedTypes,
-              Expr(:struct, false, reconname,
-                   Expr(:block, Any[ Expr(Symbol("::"), dt.names[i], types[i]) for i = 1:length(types) ]...,
-                        # suppress default constructors, plus a bogus `new()` call to make sure
-                        # ninitialized is zero.
-                        Expr(:if, false, Expr(:call, :new)))))
-    T = getfield(ReconstructedTypes, reconname)
+    T = ReconstructedMutableCompound{Symbol(T), tuple(dt.names...), Tuple{types...}}
 
-    (ReadRepresentation{T,rodr}(), false)
+    rr = ReadRepresentation{T, OnDiskRepresentation{(0,), Tuple{Vector{Any}}, Tuple{rodr}, dt.size}()}()
+    return rr, false
 end
 
 # At present, we write Union{} as an object of Core.TypeofBottom. The method above
@@ -584,7 +612,24 @@ end
 jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
           header_offset::RelOffset) = Union{}
 
+function jlconvert(::ReadRepresentation{Vector{Any}, S}, f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {S}
+    offsets = typeof(S).parameters[1]
+    types = typeof(S).parameters[2].parameters
+    odrs = typeof(S).parameters[3].parameters
 
+    res = Vector{Any}(undef, length(types))
+    for i = 1:length(types)
+        offset = offsets[i]
+        rtype = types[i]
+        odr = odrs[i]
+    
+        rr = ReadRepresentation{rtype,odr}()
+        if !(jlconvert_canbeuninitialized(rr)) || jlconvert_isinitialized(rr, ptr+offset) 
+            res[i] = jlconvert(rr, f, ptr+offset, NULL_REFERENCE)
+        end
+    end
+    return res
+end
 
 # This jlconvert method handles compound types with padding or references
 @generated function jlconvert(::ReadRepresentation{T,S}, f::JLDFile, ptr::Ptr,
