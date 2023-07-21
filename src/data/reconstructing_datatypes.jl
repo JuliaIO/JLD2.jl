@@ -596,7 +596,7 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
         end
     end
     if fullyinit
-        return (ReadRepresentation{ReconstructedStaticCompound{Symbol(T),tuple(dt.names...),Tuple{types...}}, OnDiskRepresentation{(0,), Tuple{NT}, Tuple{rodr}, dt.size}()}(), true)
+        return (ReadRepresentation{ReconstructedStaticCompound{Symbol(T),tuple(dt.names...),Tuple{types...}}, OnDiskRepresentation{(0,), Tuple{NamedTuple{tuple(dt.names...),Tuple{types...}}}, Tuple{rodr}, dt.size}()}(), false)
     end
 
     # Now reconstruct the type
