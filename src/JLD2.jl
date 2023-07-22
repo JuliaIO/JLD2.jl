@@ -310,9 +310,9 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
     verify_compressor(compress)
     exists = ispath(fname)
 
-    # Can only open multiple times if mode is "r"
+    # Can only open multiple in parallel if mode is "r"
     if parallel_read && (wr, create, truncate)  != (false, false, false)
-        throw(ArgumentError("Cannot open file in multiple threads unless mode is \"r\""))
+        throw(ArgumentError("Cannot open file in a parallel context unless mode is \"r\""))
     end
 
     #Do not lock file if user specifies parallel_read
@@ -326,17 +326,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                 throw(ArgumentError("not a regular file: $fname"))
             end
             
-            #Check that file is not open elsewhere in a non-read context
-            if parallel_read && haskey(OPEN_FILES, rname)
-                ref = OPEN_FILES[rname]
-                f = ref.value
-                if !isnothing(f)
-                    f.writable && throw(ArgumentError("Cannot open file multiple times unless mode is always \"r\". File was open elsewhere in a write mode."))
-                end
-            end
-            #TODO: Use dict of parallel files open
-
-            if haskey(OPEN_FILES, rname)
+            if !parallel_read && haskey(OPEN_FILES, rname)
                 ref = OPEN_FILES[rname]
                 f = ref.value
                 if !isnothing(f)
@@ -358,6 +348,16 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                     f.n_times_opened += 1
                     return f
                 end
+            elseif parallel_read && haskey(OPEN_FILES, rname)
+                throw(ArgumentError("Tried to open file in a parallel context but it is open elsewhere in a serial context."))
+            elseif parallel_read && haskey(OPEN_PARALLEL_FILES, rname)
+                ref = OPEN_PARALLEL_FILES[rname]
+                f = ref.value
+                if !isnothing(f)
+                    f = f::JLDFile{iotype}
+                    f.n_times_opened += 1
+                    return f
+                end
             end
             
         end
@@ -366,7 +366,11 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         created = !exists || truncate
         rname = realpath(fname)
         f = JLDFile(io, rname, wr, created, compress, mmaparrays)
-        OPEN_FILES[rname] = WeakRef(f)
+        if parallel_read
+            OPEN_PARALLEL_FILES[rname] = WeakRef(f)
+        else
+            OPEN_FILES[rname] = WeakRef(f)
+        end
         f
     catch e
         rethrow(e)
