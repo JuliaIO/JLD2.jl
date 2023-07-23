@@ -425,9 +425,6 @@ constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute})
 
 
 ## Type reconstruction
-
-module ReconstructedTypes end
-
 abstract type AbstractReconstructedType{N} end
 
 struct ReconstructedPrimitive{N, T} <: AbstractReconstructedType{N}
