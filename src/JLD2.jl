@@ -315,8 +315,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         throw(ArgumentError("Cannot open file in a parallel context unless mode is \"r\""))
     end
 
-    #Do not lock file if user specifies parallel_read
-    !parallel_read && lock(OPEN_FILES_LOCK)
+    lock(OPEN_FILES_LOCK)
 
     f = try
         if exists
@@ -375,7 +374,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
     catch e
         rethrow(e)
     finally
-        !parallel_read && unlock(OPEN_FILES_LOCK)
+        unlock(OPEN_FILES_LOCK)
     end
     if f.written
         f.base_address = 512
