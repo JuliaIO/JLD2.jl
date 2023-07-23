@@ -437,8 +437,8 @@ end
 
 struct ReconstructedSingleton{N} <: AbstractReconstructedType{N} end
 
-function Base.show(io::IO, f::Type{ReconstructedSingleton{N}}) where {N}
-    print(io, "Reconstruct@$N")
+function Base.show(io::IO, ::ReconstructedSingleton{N}) where {N}
+    print(io, "Reconstruct@$N()")
 end
 
 struct ReconstructedStatic{N, FN, NT} <: AbstractReconstructedType{N}
