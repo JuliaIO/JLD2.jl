@@ -263,9 +263,9 @@ function read_data(f::JLDFile,
         for x in attributes
             if x.name == :julia_type
                 T = read_attr_data(f, x)
-                if isa(T, UnknownType)
+                if isunknowntype(T)
                     str = typestring(T)
-                    @warn("type $(str) does not exist in workspace; interpreting Array{$str} as Array{Any}")
+                    @warn "type $(str) does not exist in workspace; interpreting Array{$str} as Array{Any}" maxlog=1
                     rr = ReadRepresentation{Any,RelOffset}()
                 elseif T isa Upgrade
                     rr = ReadRepresentation{T.target, RelOffset}()
