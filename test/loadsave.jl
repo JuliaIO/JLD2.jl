@@ -627,6 +627,8 @@ end
     @test_throws ArgumentError jldopen(fn, "a+"; parallel_read = true) do f end
     @test_throws ArgumentError jldopen(fn, "a"; parallel_read = true) do f end
 
+
+    rm(fn; force = true, recursive = true)
 end
 
 
