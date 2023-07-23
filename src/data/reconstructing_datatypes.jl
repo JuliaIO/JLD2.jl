@@ -101,7 +101,7 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
         # Custom serialization
         custom_datatype = read_attr_data(f, written_type_attr)
         read_as = _readas(custom_datatype, datatype)
-        if isa(read_as, UnknownType)
+        if read_as <: UnknownType
             @warn("custom serialization of $(typestring(read_as))" *
                   " encountered, but the type does not exist in the workspace; the data will be read unconverted")
             rr = (constructrr(f, custom_datatype, dt, attrs)::Tuple{ReadRepresentation,Bool})[1]
@@ -437,6 +437,10 @@ end
 
 struct ReconstructedSingleton{N} <: AbstractReconstructedType{N} end
 
+function Base.show(io::IO, f::Type{ReconstructedSingleton{N}}) where {N}
+    print(io, "Reconstruct@$N")
+end
+
 struct ReconstructedStatic{N, FN, NT} <: AbstractReconstructedType{N}
     fields::NamedTuple{FN, NT}
 end
@@ -493,7 +497,7 @@ See also shorttypestring.
 """
 function typestring(::Type{UnknownType{T, P}}) where {T, P}
     tn = IOBuffer()
-    print(tn, T isa Symbol ? T : T.name)
+    print(tn, T)
     params = P.parameters
     if !isempty(params)
         write(tn, '{')
