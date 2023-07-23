@@ -19,19 +19,20 @@ end
 
 struct UnknownType{T, P} end
 
-function Base.show(io::IO, x::Type{UnknownType{T, P}}) where {T, P}
-    print(io, "UnknownType:\"", T,"\"")
-    if !isempty(P.parameters)
-        print(io, "{")
-        for p in P.parameters
-            print(io, p)
-            if p !== P.parameters[end]
-                print(io, ", ")
-            end
-        end
-        print(io, "}")
-    end
-end
+# Horrible Invalidations
+# function Base.show(io::IO, x::Type{UnknownType{T, P}}) where {T, P}
+#     print(io, "UnknownType:\"", T,"\"")
+#     if !isempty(P.parameters)
+#         print(io, "{")
+#         for p in P.parameters
+#             print(io, p)
+#             if p !== P.parameters[end]
+#                 print(io, ", ")
+#             end
+#         end
+#         print(io, "}")
+#     end
+# end
 
 struct Vlen{T}
     size::UInt32
