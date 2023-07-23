@@ -600,6 +600,59 @@ JLD2.rconvert(::Type{CR}, dsa::CRSerialized) = CR(dsa.r)
     end
 end
 
+# Test jldsave
+@testset "Multi-threaded read" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+
+    jldsave(fn; a=1, b=2)
+
+    #########################
+    # Valid access patterns #
+    #########################
+
+    #Normal read
+    jldopen(fn, "r"; parallel_read = true) do f
+        @test f["a"] == 1
+        @test f["b"] == 2
+    end
+
+    #Parallel read -- not guranteed to read at same time, but will test two handles being open
+    # Threads.@spawn begin
+    #     jldopen(fn, "r"; parallel_read = true) do f
+    #         @test f["a"] == 1
+    #         @test f["b"] == 2
+    #         sleep(15) #pause with file open
+    #     end
+    # end
+    # Threads.@spawn begin
+    #     jldopen(fn, "r"; parallel_read = true) do f
+    #         @test f["a"] == 1
+    #         @test f["b"] == 2
+    #     end
+    # end
+
+    ###########################
+    # Invalid access patterns #
+    ###########################
+
+    # Open for non-read in parallel context
+    @test_throws ArgumentError jldopen(fn, "w"; parallel_read = true) do f end 
+    @test_throws ArgumentError jldopen(fn, "w+"; parallel_read = true) do f end
+    @test_throws ArgumentError jldopen(fn, "r+"; parallel_read = true) do f end 
+    @test_throws ArgumentError jldopen(fn, "a+"; parallel_read = true) do f end
+    @test_throws ArgumentError jldopen(fn, "a"; parallel_read = true) do f end
+
+    #Open for writing in one context, open for reading in parallel context
+    # @test_throws ArgumentError Threads.@threads for i in 1:100
+    #     jldopen(fn, "r"; parallel_read = true) do f
+    #         @test f["a"] == 1
+    #         @test f["b"] == 2
+    #     end
+    #     jldopen(fn, "w") do f end
+    # end
+end
+
+
 ###################################################################################################
 ##             `Upgrade` Tests
 ###################################################################################################

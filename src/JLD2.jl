@@ -316,7 +316,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
     end
 
     #Do not lock file if user specifies parallel_read
-    parallel_read && lock(OPEN_FILES_LOCK)
+    !parallel_read && lock(OPEN_FILES_LOCK)
 
     f = try
         if exists
@@ -325,7 +325,16 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
             if !isfile(rname)
                 throw(ArgumentError("not a regular file: $fname"))
             end
+
+            #File can only be opened in parallel, or in serial as a stand alone instance
+            if !parallel_read && haskey(OPEN_PARALLEL_FILES, rname)
+                throw(ArgumentError("Cannot open file in serial context. It is open elsewhere in a parallel context."))
+            end
+            if parallel_read && haskey(OPEN_FILES, rname)
+                throw(ArgumentError("Tried to open file in a parallel context but it is open elsewhere in a serial context."))
+            end
             
+            # If in serial, return existing handle. In paralell always generate a new handle
             if !parallel_read && haskey(OPEN_FILES, rname)
                 ref = OPEN_FILES[rname]
                 f = ref.value
@@ -348,34 +357,25 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                     f.n_times_opened += 1
                     return f
                 end
-            elseif parallel_read && haskey(OPEN_FILES, rname)
-                throw(ArgumentError("Tried to open file in a parallel context but it is open elsewhere in a serial context."))
-            elseif parallel_read && haskey(OPEN_PARALLEL_FILES, rname)
-                ref = OPEN_PARALLEL_FILES[rname]
-                f = ref.value
-                if !isnothing(f)
-                    f = f::JLDFile{iotype}
-                    f.n_times_opened += 1
-                    return f
-                end
             end
-            
         end
 
         io = openfile(iotype, fname, wr, create, truncate, fallback)
         created = !exists || truncate
         rname = realpath(fname)
         f = JLDFile(io, rname, wr, created, compress, mmaparrays)
+
         if parallel_read
             OPEN_PARALLEL_FILES[rname] = WeakRef(f)
         else
             OPEN_FILES[rname] = WeakRef(f)
         end
+
         f
     catch e
         rethrow(e)
     finally
-        parallel_read && unlock(OPEN_FILES_LOCK)
+        !parallel_read && unlock(OPEN_FILES_LOCK)
     end
     if f.written
         f.base_address = 512
