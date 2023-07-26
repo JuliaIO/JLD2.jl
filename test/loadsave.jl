@@ -614,7 +614,19 @@ end
     jldopen(fn, "r"; parallel_read = true) do f
         @test f["a"] == 1
         @test f["b"] == 2
+        @test fn ∉ keys(JLD2.OPEN_FILES)
     end
+
+    # Can read in parallel and serial (read-only)
+    f1 = jldopen(fn)
+    f2 = jldopen(fn; parallel_read = true)
+    @test JLD2.OPEN_FILES[fn] == f1
+    @test f1 != f2
+    close(f1); close(f2)
+
+    f1 = jldopen(fn, "a")
+    @test_throws ArgumentError jldopen(fn; parallel_read = true)
+    close(f1)
 
     ###########################
     # Invalid access patterns #

@@ -322,11 +322,6 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
             # catch existing file system entities that are not regular files
             !isfile(rname) && throw(ArgumentError("not a regular file: $fname"))
 
-            #File can only be opened in parallel, or in serial as a stand alone instance
-            if parallel_read && haskey(OPEN_FILES, rname)
-                throw(ArgumentError("Tried to open file in a parallel context but it is open elsewhere in a serial context."))
-            end
-            
             # If in serial, return existing handle. In parallel always generate a new handle
             if haskey(OPEN_FILES, rname)
                 ref = OPEN_FILES[rname]
