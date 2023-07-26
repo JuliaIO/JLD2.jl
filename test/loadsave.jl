@@ -620,7 +620,7 @@ end
     # Can read in parallel and serial (read-only)
     f1 = jldopen(fn)
     f2 = jldopen(fn; parallel_read = true)
-    @test JLD2.OPEN_FILES[fn] == f1
+    @test JLD2.OPEN_FILES[realpath(fn)] == f1
     @test f1 != f2
     close(f1); close(f2)
 
