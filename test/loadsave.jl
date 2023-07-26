@@ -600,6 +600,50 @@ JLD2.rconvert(::Type{CR}, dsa::CRSerialized) = CR(dsa.r)
     end
 end
 
+# Test jldsave
+@testset "Multi-threaded read" begin
+    fn = joinpath(mktempdir(), "test.jld2")
+
+    jldsave(fn; a=1, b=2)
+
+    #########################
+    # Valid access patterns #
+    #########################
+
+    #Normal read
+    jldopen(fn, "r"; parallel_read = true) do f
+        @test f["a"] == 1
+        @test f["b"] == 2
+        @test fn ∉ keys(JLD2.OPEN_FILES)
+    end
+
+    # Can read in parallel and serial (read-only)
+    f1 = jldopen(fn)
+    f2 = jldopen(fn; parallel_read = true)
+    @test JLD2.OPEN_FILES[realpath(fn)] == f1
+    @test f1 != f2
+    close(f1); close(f2)
+
+    f1 = jldopen(fn, "a")
+    @test_throws ArgumentError jldopen(fn; parallel_read = true)
+    close(f1)
+
+    ###########################
+    # Invalid access patterns #
+    ###########################
+
+    # Open for non-read in parallel context
+    @test_throws ArgumentError jldopen(fn, "w"; parallel_read = true) do f end 
+    @test_throws ArgumentError jldopen(fn, "w+"; parallel_read = true) do f end
+    @test_throws ArgumentError jldopen(fn, "r+"; parallel_read = true) do f end 
+    @test_throws ArgumentError jldopen(fn, "a+"; parallel_read = true) do f end
+    @test_throws ArgumentError jldopen(fn, "a"; parallel_read = true) do f end
+
+
+    rm(fn; force = true, recursive = true)
+end
+
+
 ###################################################################################################
 ##             `Upgrade` Tests
 ###################################################################################################
