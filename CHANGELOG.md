@@ -1,6 +1,7 @@
-## 0.4.35
+## 0.4.33
  - fix `Upgrade` for parametric types
  - new type reconstruction when matching DataType cannot be found (eval-free)
+ - new `parallel_read` keyword for creating stand-alone file handles for multithreaded file reading (@ejmeitz)
 
 ## 0.4.32
  - add experimental `JLD2.readas` function for customized reading of custom serialized objects (#468)

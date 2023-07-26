@@ -297,7 +297,6 @@ FallbackType(::Type{IOStream}) = nothing
 read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
 
 const OPEN_FILES = Dict{String,WeakRef}()
-const OPEN_PARALLEL_FILES = Dict{String,WeakRef}() #these files are read-only
 const OPEN_FILES_LOCK = ReentrantLock()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
                  fallback::Union{Type, Nothing} = FallbackType(iotype),
@@ -321,40 +320,39 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         if exists
             rname = realpath(fname)
             # catch existing file system entities that are not regular files
-            if !isfile(rname)
-                throw(ArgumentError("not a regular file: $fname"))
-            end
+            !isfile(rname) && throw(ArgumentError("not a regular file: $fname"))
 
             #File can only be opened in parallel, or in serial as a stand alone instance
-            if !parallel_read && haskey(OPEN_PARALLEL_FILES, rname)
-                throw(ArgumentError("Cannot open file in serial context. It is open elsewhere in a parallel context."))
-            end
             if parallel_read && haskey(OPEN_FILES, rname)
                 throw(ArgumentError("Tried to open file in a parallel context but it is open elsewhere in a serial context."))
             end
             
-            # If in serial, return existing handle. In paralell always generate a new handle
-            if !parallel_read && haskey(OPEN_FILES, rname)
+            # If in serial, return existing handle. In parallel always generate a new handle
+            if haskey(OPEN_FILES, rname)
                 ref = OPEN_FILES[rname]
                 f = ref.value
                 if !isnothing(f)
-                    if truncate
-                        throw(ArgumentError("attempted to truncate a file that was already open"))
-                    elseif !isa(f, JLDFile{iotype})
-                        throw(ArgumentError("attempted to open file with $iotype backend, but already open with a different backend"))
-                    elseif f.writable != wr
-                        current = wr ? "read/write" : "read-only"
-                        previous = f.writable ? "read/write" : "read-only"
-                        throw(ArgumentError("attempted to open file $(current), but file was already open $(previous)"))
-                    elseif f.compress != compress
-                        throw(ArgumentError("attempted to open file with compress=$(compress), but file was already open with compress=$(f.compress)"))
-                    elseif f.mmaparrays != mmaparrays
-                        throw(ArgumentError("attempted to open file with mmaparrays=$(mmaparrays), but file was already open with mmaparrays=$(f.mmaparrays)"))
-                    end
+                    if parallel_read 
+                        f.writable && throw(ArgumentError("Tried to open file in a parallel context but it is open in write-mode elsewhere in a serial context."))
+                    else
+                        if truncate
+                            throw(ArgumentError("attempted to truncate a file that was already open"))
+                        elseif !isa(f, JLDFile{iotype})
+                            throw(ArgumentError("attempted to open file with $iotype backend, but already open with a different backend"))
+                        elseif f.writable != wr
+                            current = wr ? "read/write" : "read-only"
+                            previous = f.writable ? "read/write" : "read-only"
+                            throw(ArgumentError("attempted to open file $(current), but file was already open $(previous)"))
+                        elseif f.compress != compress
+                            throw(ArgumentError("attempted to open file with compress=$(compress), but file was already open with compress=$(f.compress)"))
+                        elseif f.mmaparrays != mmaparrays
+                            throw(ArgumentError("attempted to open file with mmaparrays=$(mmaparrays), but file was already open with mmaparrays=$(f.mmaparrays)"))
+                        end
 
-                    f = f::JLDFile{iotype}
-                    f.n_times_opened += 1
-                    return f
+                        f = f::JLDFile{iotype}
+                        f.n_times_opened += 1
+                        return f
+                    end
                 end
             end
         end
@@ -364,9 +362,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         rname = realpath(fname)
         f = JLDFile(io, rname, wr, created, compress, mmaparrays)
 
-        if parallel_read
-            OPEN_PARALLEL_FILES[rname] = WeakRef(f)
-        else
+        if !parallel_read
             OPEN_FILES[rname] = WeakRef(f)
         end
 
