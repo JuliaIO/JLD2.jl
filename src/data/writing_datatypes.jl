@@ -429,7 +429,7 @@ end
 
 # This is a trick to compactly write long NTuple
 # This uses that NTuple{N,T} == Tuple{T,T,T,T,...,T}
-function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::Type{NTuple{N,ET}}, wsession::JLDWriteSession) where {N,ET}
+function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::Type{NTuple{N,ET}}, wsession::JLDWriteSession) where {N, ET}
     if isempty(T.parameters)
         store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, "Tuple"), f.datatype_wsession)
         h5convert_uninitialized!(out+odr_sizeof(Vlen{UInt8}), Vlen{UInt8})

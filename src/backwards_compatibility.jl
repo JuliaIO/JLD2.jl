@@ -161,7 +161,7 @@ function _julia_type(s::AbstractString)
         end
     end
     if typ == UnconvertedType || typ == UnsupportedType
-        return UnknownType(s)
+        return UnknownType{Symbol(s), Tuple{}}
     else
         return typ
     end

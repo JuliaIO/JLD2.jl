@@ -17,15 +17,22 @@ else
     @Base.pure odr_sizeof(x::DataType) = Int(x.size)
 end
 
-struct UnknownType{T}
-    name::T
-    parameters::Vector{Any}
+struct UnknownType{T, P} end
 
-    UnknownType{T}(name) where T = new(name)
-    UnknownType{T}(name, parameters) where T = new(name, parameters)
-end
-UnknownType(name) = UnknownType{typeof(name)}(name)
-UnknownType(name, parameters) = UnknownType{typeof(name)}(name, parameters)
+# Horrible Invalidations
+# function Base.show(io::IO, x::Type{UnknownType{T, P}}) where {T, P}
+#     print(io, "UnknownType:\"", T,"\"")
+#     if !isempty(P.parameters)
+#         print(io, "{")
+#         for p in P.parameters
+#             print(io, p)
+#             if p !== P.parameters[end]
+#                 print(io, ", ")
+#             end
+#         end
+#         print(io, "}")
+#     end
+# end
 
 struct Vlen{T}
     size::UInt32

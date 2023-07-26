@@ -101,7 +101,7 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
         # Custom serialization
         custom_datatype = read_attr_data(f, written_type_attr)
         read_as = _readas(custom_datatype, datatype)
-        if isa(read_as, UnknownType)
+        if read_as <: UnknownType
             @warn("custom serialization of $(typestring(read_as))" *
                   " encountered, but the type does not exist in the workspace; the data will be read unconverted")
             rr = (constructrr(f, custom_datatype, dt, attrs)::Tuple{ReadRepresentation,Bool})[1]
@@ -318,18 +318,18 @@ function _resolve_type_singlemodule(::ReadRepresentation{T,DataTypeODR()},
     for part in parts
         sym = Symbol(part)
         if !isa(m, Module) || !isdefined(m, sym)
-            return hasparams ? UnknownType(mypath, params) : UnknownType(mypath)
+            return nothing
         end
         m = getfield(m, sym)
     end
     if !isa(m, DataType) && !isa(m, UnionAll)
-        return hasparams ? UnknownType(mypath, params) : UnknownType(mypath)
+        return nothing
     end
     return m
 end
 
-_is_not_unknown_type(x::UnknownType) = false
-_is_not_unknown_type(x) = true
+isunknowntype(x::Type{<:UnknownType}) = true
+isunknowntype(x) = false
 
 function _resolve_type(rr::ReadRepresentation{T,DataTypeODR()},
                        f::JLDFile,
@@ -348,11 +348,11 @@ function _resolve_type(rr::ReadRepresentation{T,DataTypeODR()},
                                                         mypath,
                                                         hasparams,
                                                         params)
-        if _is_not_unknown_type(resolution_attempt)
+        if !isnothing(resolution_attempt)
             return resolution_attempt
         end
     end
-    return hasparams ? UnknownType(mypath, params) : UnknownType(mypath)
+    return hasparams ? UnknownType{Symbol(mypath), Tuple{params...}} : UnknownType{Symbol(mypath), Tuple{}}
 end
 
 
@@ -368,7 +368,7 @@ function types_from_refs(f::JLDFile, ptr::Ptr)
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
             res = cdt !== nulldt ? (typeof(jltype(f, cdt)::ReadRepresentation)::DataType).parameters[1] : load_dataset(f, ref)
-            unknown_params = unknown_params || isa(res, UnknownType)
+            unknown_params = unknown_params || isunknowntype(res)
             res
         end for ref in refs]
         return params, unknown_params
@@ -402,14 +402,14 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
         m isa Upgrade && return m
     else
         m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
-        m isa UnknownType && return m
+        isunknowntype(m) && return m
     end
 
     if hasparams
         try
             m = m{params...}
         catch e
-            return UnknownType(m, params)
+            return UnknownType{m, Tuple{params...}}
         end
     elseif m === Tuple
         # Need to instantiate with no parameters, since Tuple is really
@@ -426,39 +426,87 @@ constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute})
 
 
 ## Type reconstruction
+abstract type AbstractReconstructedType{N} end
 
-module ReconstructedTypes end
+struct ReconstructedPrimitive{N, T} <: AbstractReconstructedType{N}
+    val::T
+end
+function Base.show(io::IO, f::ReconstructedPrimitive{N}) where {N}
+    print(io, "Reconstruct@$N($(Int(f.val)))")
+end
+
+
+struct ReconstructedSingleton{N} <: AbstractReconstructedType{N} end
+
+function Base.show(io::IO, ::ReconstructedSingleton{N}) where {N}
+    print(io, "Reconstruct@$N()")
+end
+
+struct ReconstructedStatic{N, FN, NT} <: AbstractReconstructedType{N}
+    fields::NamedTuple{FN, NT}
+end
+
+Base.getproperty(rc::ReconstructedStatic, s::Symbol) = getproperty(getfield(rc, 1),s)
+Base.propertynames(rc::ReconstructedStatic) = propertynames(getfield(rc, 1))
+
+# simple one-line display (without trailing line break)
+function Base.show(io::IO, f::ReconstructedStatic{N, FN, FT}) where {N,FN,FT}
+    print(io, "Reconstruct@$N($(values(getfield(f,1))))")
+end
+
+struct ReconstructedMutable{N, FN, FT} <: AbstractReconstructedType{N}
+    fields::Vector{Any}
+end
+
+function Base.getproperty(rc::ReconstructedMutable{N,FN,FT}, s::Symbol) where {N,FN,FT}
+    i = findfirst(==(s), FN)
+    isnothing(i) && throw(ArgumentError("field $s not found"))
+    getfield(rc, 1)[i]::FT.parameters[i]
+end
+Base.propertynames(rc::ReconstructedMutable) = propertynames(getfield(rc, 1))
+
+
+function Base.show(io::IO, f::ReconstructedMutable{N, FN, FT}) where {N,FN,FT}
+    print(io, "Reconstruct@$N($(getfield(f,1)))")
+end
+
+
 
 isreconstructed(x) = isreconstructed(typeof(x))
-
-function isreconstructed(::Type{T}) where T
-    return supertype(T) == Any && parentmodule(T) == ReconstructedTypes
-end
+isreconstructed(x::Type{<:AbstractReconstructedType}) = true
+isreconstructed(x::Type) = false
 
 function reconstruct_bitstype(name::Union{Symbol,String}, size::Integer, empty::Bool)
-    sym = gensym(name)
-    Core.eval(ReconstructedTypes, empty ? :(struct $(sym) end) : :(primitive type $(sym) $(Int(size)*8) end))
-    T = getfield(ReconstructedTypes, sym)
-    (ReadRepresentation{T, empty ? nothing : T}(), false)
+    if empty
+        return (ReadRepresentation{ReconstructedSingleton{Symbol(name)}, nothing}(), false)
+    else
+        T = ReconstructedPrimitive{Symbol(name), uintofsize(size)}
+        return (ReadRepresentation{T, T}(), false)
+    end
 end
 
-function constructrr(f::JLDFile, unk::UnknownType, dt::BasicDatatype,
+function constructrr(f::JLDFile, unk::Type{<:UnknownType}, dt::BasicDatatype,
                      attrs::Vector{ReadAttribute})
     @warn("type $(typestring(unk)) does not exist in workspace; reconstructing")
-    reconstruct_bitstype(typestring(unk), dt.size, check_empty(attrs))
+    reconstruct_bitstype(shorttypestring(unk), dt.size, check_empty(attrs))
 end
 
-# Convert an ordinary type or an UnknownType to a corresponding string. This is
-# only used to create gensymmed names for reconstructed types.
-function typestring(T::UnknownType)
+"""
+    typestring(::Type{ <:UnknownType})
+Convert an UnknownType to a corresponding string. This is
+only used for warning during reconstruction errors.
+See also shorttypestring.
+"""
+function typestring(::Type{UnknownType{T, P}}) where {T, P}
     tn = IOBuffer()
-    print(tn, T.name)
-    if isdefined(T, :parameters)
+    print(tn, T)
+    params = P.parameters
+    if !isempty(params)
         write(tn, '{')
-        for i = 1:length(T.parameters)
-            x = T.parameters[i]
+        for i = 1:length(params)
+            x = params[i]
             i != 1 && write(tn, ',')
-            if isa(x, UnknownType)
+            if isunknowntype(x)
                 write(tn, typestring(x))
             else
                 print(tn, x)
@@ -469,20 +517,31 @@ function typestring(T::UnknownType)
     String(take!(tn))
 end
 
-function constructrr(f::JLDFile, unk::UnknownType{DataType}, dt::CompoundDatatype,
-                     attrs::Vector{ReadAttribute})
-    field_datatypes = read_field_datatypes(f, attrs)
-    if unk.name == Tuple
-        # For a tuple with unknown fields, we should reconstruct the fields
-        rodr = reconstruct_odr(f, dt, field_datatypes)
-        # This is a "pseudo-RR" since the tuple is not fully parametrized, but
-        # the parameters must depend on the types actually encoded in the file
-        (ReadRepresentation{Tuple,rodr}(), false)
-    else
-        @warn("read type $(typestring(unk)) was parametrized, but type " *
-              "$(unk.name) in workspace is not; reconstructing")
-        reconstruct_compound(f, typestring(unk), dt, field_datatypes)
+
+"""
+    shorttypestring(::Type{ <:UnknownType})
+Convert an UnknownType to a corresponding string. This is
+only used to create names for reconstructed types.
+See also typestring.
+"""
+function shorttypestring(::Type{UnknownType{T, P}}) where {T, P}
+    tn = IOBuffer()
+    print(tn, T isa Symbol ? split(string(T),'.')[end] : T.name)
+    params = P.parameters
+    if !isempty(params)
+        write(tn, '{')
+        for i = 1:length(params)
+            x = params[i]
+            i != 1 && write(tn, ',')
+            if isunknowntype(x)
+                write(tn, shorttypestring(x))
+            else
+                print(tn, x)
+            end
+        end
+        write(tn, '}')
     end
+    String(take!(tn))
 end
 
 """
@@ -493,52 +552,64 @@ Given a UnionAll type, recursively eliminates the `where` clauses
 behead(T::UnionAll) = behead(T.body)
 behead(@nospecialize T) = T
 
-function constructrr(f::JLDFile, unk::UnknownType{UnionAll}, dt::CompoundDatatype,
-                     attrs::Vector{ReadAttribute})
+
+function constructrr(f::JLDFile, unk::Type{UnknownType{T,P}}, dt::CompoundDatatype,
+    attrs::Vector{ReadAttribute}) where {T,P}
     field_datatypes = read_field_datatypes(f, attrs)
-    body = behead(unk.name)
-    if length(body.parameters) != length(unk.parameters)
-        @warn("read type $(typestring(unk)) has a different number of parameters from type " *
-              "$(unk.name) in workspace; reconstructing")
-        reconstruct_compound(f, typestring(unk), dt, field_datatypes)
-    else
-        params = copy(unk.parameters)
-        for i = 1:length(params)
-            if isa(params[i], UnknownType)
-                param = body.parameters[i]::TypeVar
-                params[i] = param.ub
+    if T isa DataType
+        if unk.name == Tuple
+            # For a tuple with unknown fields, we should reconstruct the fields
+            rodr = reconstruct_odr(f, dt, field_datatypes)
+            # This is a "pseudo-RR" since the tuple is not fully parametrized, but
+            # the parameters must depend on the types actually encoded in the file
+            return (ReadRepresentation{Tuple,rodr}(), false)
+        else
+            @warn("read type $(typestring(unk)) was parametrized, but type " *
+            "$(T) in workspace is not; reconstructing")
+            
+        end
+    elseif T isa UnionAll
+        body = behead(unk.name)
+        if length(body.parameters) != length(unk.parameters)
+            @warn("read type $(typestring(unk)) has a different number of parameters from type " *
+                "$(unk.name) in workspace; reconstructing")
+            reconstruct_compound(f, typestring(unk), dt, field_datatypes)
+        else
+            params = [P.parameters...,]
+            for i = 1:length(params)
+                if isa(params[i], UnknownType)
+                    param = body.parameters[i]::TypeVar
+                    params[i] = param.ub
+                end
+            end
+
+            # Try to construct the rr for the relaxed type. On failure, fall back to
+            # reconstruct_compound.`
+            try
+                T2 = unk.name{params...}
+            catch err
+                @warn("type parameters for $(typestring(unk)) do not match type $(T) in workspace; reconstructing")
+                return reconstruct_compound(f, shorttypestring(unk), dt, field_datatypes)
+            end
+
+            try
+                (rr,) = constructrr(f, T2, dt, attrs, true)
+                @warn("some parameters could not be resolved for type $(typestring(unk)); reading as $T2")
+                return (rr, false)
+            catch err
+                !isa(err, TypeMappingException) && rethrow(err)
+                @warn("some parameters could not be resolved for type $(typestring(unk)); reconstructing")
             end
         end
-
-        # Try to construct the rr for the relaxed type. On failure, fall back to
-        # reconstruct_compound.
-        local T
-        try
-            T = unk.name{params...}
-        catch err
-            @warn("type parameters for $(typestring(unk)) do not match type $(unk.name) in workspace; reconstructing")
-            return reconstruct_compound(f, typestring(unk), dt, field_datatypes)
-        end
-
-        try
-            (rr,) = constructrr(f, T, dt, attrs, true)
-            @warn("some parameters could not be resolved for type $(typestring(unk)); reading as $T")
-            return (rr, false)
-        catch err
-            !isa(err, TypeMappingException) && rethrow(err)
-            @warn("some parameters could not be resolved for type $(typestring(unk)); reconstructing")
-            return reconstruct_compound(f, typestring(unk), dt, field_datatypes)
-        end
+    elseif T isa Symbol
+        @warn("type $(typestring(unk)) does not exist in workspace; reconstructing")
+    else
+        throw(InternalError("Something went very wrong here."))
     end
+    reconstruct_compound(f, shorttypestring(unk), dt, field_datatypes)
 end
 
-# An UnknownType for which we were not able to resolve the name.
-function constructrr(f::JLDFile, unk::UnknownType{String}, dt::CompoundDatatype,
-                     attrs::Vector{ReadAttribute})
-    ts = typestring(unk)
-    @warn("type $ts does not exist in workspace; reconstructing")
-    reconstruct_compound(f, ts, dt, read_field_datatypes(f, attrs))
-end
+
 
 # Reconstruct the ODR of a type from the CompoundDatatype and field_datatypes
 # attribute
@@ -565,18 +636,24 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
                               field_datatypes::Union{Vector{RelOffset},Nothing})
     rodr = reconstruct_odr(f, dt, field_datatypes)
     types = typeof(rodr).parameters[2].parameters
+    odrs = typeof(rodr).parameters[3].parameters
+
+    fullyinit = true
+    for i = 1:length(types)
+        if jlconvert_canbeuninitialized(ReadRepresentation{types[i], odrs[i]}())
+            fullyinit = false
+            break
+        end
+    end
+    if fullyinit
+        return (ReadRepresentation{ReconstructedStatic{Symbol(T),tuple(dt.names...),Tuple{types...}}, OnDiskRepresentation{(0,), Tuple{NamedTuple{tuple(dt.names...),Tuple{types...}}}, Tuple{rodr}, dt.size}()}(), false)
+    end
 
     # Now reconstruct the type
-    reconname = gensym(T)
-    Core.eval(ReconstructedTypes,
-              Expr(:struct, false, reconname,
-                   Expr(:block, Any[ Expr(Symbol("::"), dt.names[i], types[i]) for i = 1:length(types) ]...,
-                        # suppress default constructors, plus a bogus `new()` call to make sure
-                        # ninitialized is zero.
-                        Expr(:if, false, Expr(:call, :new)))))
-    T = getfield(ReconstructedTypes, reconname)
+    T = ReconstructedMutable{Symbol(T), tuple(dt.names...), Tuple{types...}}
 
-    (ReadRepresentation{T,rodr}(), false)
+    rr = ReadRepresentation{T, rodr}()
+    return rr, false
 end
 
 # At present, we write Union{} as an object of Core.TypeofBottom. The method above
@@ -585,7 +662,24 @@ end
 jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
           header_offset::RelOffset) = Union{}
 
+function jlconvert(::ReadRepresentation{T, S}, f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T<:ReconstructedMutable, S}
+    offsets = typeof(S).parameters[1]
+    types = typeof(S).parameters[2].parameters
+    odrs = typeof(S).parameters[3].parameters
 
+    res = Vector{Any}(undef, length(types))
+    for i = 1:length(types)
+        offset = offsets[i]
+        rtype = types[i]
+        odr = odrs[i]
+    
+        rr = ReadRepresentation{rtype,odr}()
+        if !(jlconvert_canbeuninitialized(rr)) || jlconvert_isinitialized(rr, ptr+offset) 
+            res[i] = jlconvert(rr, f, ptr+offset, NULL_REFERENCE)
+        end
+    end
+    return T(res)
+end
 
 # This jlconvert method handles compound types with padding or references
 @generated function jlconvert(::ReadRepresentation{T,S}, f::JLDFile, ptr::Ptr,
