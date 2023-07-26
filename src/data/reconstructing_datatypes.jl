@@ -399,6 +399,7 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
 
     if mypath in keys(f.typemap)
         m = f.typemap[mypath]
+        m isa Upgrade && return m
     else
         m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
         m isa UnknownType && return m
