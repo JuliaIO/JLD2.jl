@@ -1,3 +1,7 @@
+## 0.4.35
+ - fix `Upgrade` for parametric types
+ - new type reconstruction when matching DataType cannot be found (eval-free)
+
 ## 0.4.32
  - add experimental `JLD2.readas` function for customized reading of custom serialized objects (#468)
 

@@ -445,9 +445,8 @@ struct ReconstructedStatic{N, FN, NT} <: AbstractReconstructedType{N}
     fields::NamedTuple{FN, NT}
 end
 
-function Base.getproperty(rc::ReconstructedStatic, s::Symbol) 
-    getproperty(getfield(rc, 1),s)
-end
+Base.getproperty(rc::ReconstructedStatic, s::Symbol) = getproperty(getfield(rc, 1),s)
+Base.propertynames(rc::ReconstructedStatic) = propertynames(getfield(rc, 1))
 
 # simple one-line display (without trailing line break)
 function Base.show(io::IO, f::ReconstructedStatic{N, FN, FT}) where {N,FN,FT}
@@ -463,6 +462,8 @@ function Base.getproperty(rc::ReconstructedMutable{N,FN,FT}, s::Symbol) where {N
     isnothing(i) && throw(ArgumentError("field $s not found"))
     getfield(rc, 1)[i]::FT.parameters[i]
 end
+Base.propertynames(rc::ReconstructedMutable) = propertynames(getfield(rc, 1))
+
 
 function Base.show(io::IO, f::ReconstructedMutable{N, FN, FT}) where {N,FN,FT}
     print(io, "Reconstruct@$N($(getfield(f,1)))")
