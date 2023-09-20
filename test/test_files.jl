@@ -124,7 +124,7 @@ testfiles = artifact"testfiles/JLD2TestFiles-0.1.0/artifacts"
 end
 
 @testset "Opening corrupted files" begin
-    mktemp() do (path, io)
+    mktemp() do path, io
         close(io)
         @test_throws EOFError jldopen(path)
         # We want to make sure that this didn't accidentally add itself to the open
