@@ -122,3 +122,15 @@ testfiles = artifact"testfiles/JLD2TestFiles-0.1.0/artifacts"
 
     end
 end
+
+@testset "Opening corrupted files" begin
+    mktemp() do path, io
+        close(io)
+        @test_throws EOFError jldopen(path)
+        # We want to make sure that this didn't accidentally add itself to the open
+        # files cache
+        @test_throws EOFError jldopen(path)
+        # Opening for overwriting should succeed
+        close(jldopen(path, "w+"))
+    end
+end
