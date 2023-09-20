@@ -377,7 +377,12 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
             f.types_group = Group{JLDFile{IOStream}}(f)
         end
     else
-        load_file_metadata!(f)
+        try
+            load_file_metadata!(f)
+        catch e
+            close(f)
+            rethrow(e)
+        end
     end
     merge!(f.typemap, typemap)
     return f
