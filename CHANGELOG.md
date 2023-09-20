@@ -1,3 +1,6 @@
+## 0.4.34
+ - reclose file when opening fails
+
 ## 0.4.33
  - fix `Upgrade` for parametric types
  - new type reconstruction when matching DataType cannot be found (eval-free)
