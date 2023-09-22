@@ -1,3 +1,6 @@
+## 0.4.35
+ - fix roundtrip of Type{} objects #484
+
 ## 0.4.34
  - reclose file when opening fails
 
