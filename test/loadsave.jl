@@ -680,5 +680,10 @@ JLD2.rconvert(::Type{OldStructVersion}, nt::NamedTuple) = OldStructVersion(nt.x,
     end
 end
 
-
-
+@testset "Issue #484 round-trip Tuple{Type{Int}}" begin
+    cd(mktempdir()) do 
+        T = Tuple{Type{Int}}
+	jldsave("test.jld2"; T)
+	@test T == load("test.jld2", "T")
+    end
+end

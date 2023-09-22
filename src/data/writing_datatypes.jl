@@ -356,11 +356,11 @@ const H5TYPE_DATATYPE = CompoundDatatype(
 )
 
 function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T<:DataType
-    if !(readas <: DataType)
+    if !(readas <: DataType) || (T isa Type{Type{T}} where T)
         @lookup_committed f readas
         return commit(f, H5TYPE_DATATYPE, DataType, readas)
     end
-
+    
     @lookup_committed f DataType
     io = f.io
     offset = f.end_of_data
