@@ -94,7 +94,7 @@ function Base.getindex(g::Group, name::AbstractString)
     f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
 
     (g, name) = pathize(g, name, false)
-
+    isempty(name) && return g
     roffset = lookup_offset(g, name)
     if roffset == UNDEFINED_ADDRESS
         haskey(g.unwritten_child_groups, name) && return g.unwritten_child_groups[name]
@@ -185,7 +185,7 @@ function Base.haskey(g::Group, name::AbstractString)
         name = String(dirs[end])
     end
     (g.last_chunk_start_offset != -1 && haskey(g.written_links, name)) ||
-        haskey(g.unwritten_links, name) || haskey(g.unwritten_child_groups, name)
+        haskey(g.unwritten_links, name) || haskey(g.unwritten_child_groups, name) || isempty(name)
 end
 
 Base.isempty(g::Group) =

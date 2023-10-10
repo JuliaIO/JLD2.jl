@@ -118,6 +118,18 @@ struct HeaderMessage
 end
 define_packed(HeaderMessage)
 
+function isgroup(f::JLDFile, name::String)
+    g = f.root_group
+    (g, name) = pathize(g, name, false)
+    isempty(name) && return true
+    roffset = lookup_offset(g, name)
+    if roffset == UNDEFINED_ADDRESS
+        haskey(g.unwritten_child_groups, name) && return (g.unwritten_child_groups[name] isa Group)
+        throw(KeyError(name))
+    else
+       return isgroup(f, roffset)
+    end
+end
 
 function isgroup(f::JLDFile, roffset::RelOffset)
     io = f.io
