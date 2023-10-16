@@ -1,3 +1,6 @@
+## 0.4.36
+- compat bound for TranscodingStreams.jl
+
 ## 0.4.35
  - fix roundtrip of Type{} objects #484
 
