@@ -9,6 +9,8 @@ using TranscodingStreams
 @reexport using FileIO: load, save
 using Requires
 
+using PrecompileTools
+
 export jldopen, @load, @save, save_object, load_object, printtoc
 export jldsave
 
