@@ -2,6 +2,7 @@
 
 # The default, write a type as itself
 writeas(T::Type) = T
+writeas(::Type{Union{}}, slurp...) = (@assert isempty(slurp); Union{})
 
 # wconvert and rconvert do type conversion before reading and writing,
 # respectively. These fall back to convert.
