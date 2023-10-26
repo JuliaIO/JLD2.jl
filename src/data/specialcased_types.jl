@@ -244,20 +244,14 @@ writeas(::Type{Core.SimpleVector}) = Vector{Any}
 wconvert(::Type{Vector{Any}}, x::Core.SimpleVector) = collect(Any, x)
 rconvert(::Type{Core.SimpleVector}, x::Vector{Any}) = Core.svec(x...)
 
-## Dicts
-
+## Standard Dictionary Types
+# Custom dictionaries may need to store additional fields
 writeas(::Type{Dict{K,V}}) where {K,V} = Vector{Pair{K,V}}
-writeas(::Type{IdDict{Any,Any}}) = Vector{Pair{Any,Any}}
+writeas(::Type{IdDict{K,V}}) where {K,V} = Vector{Pair{K,V}}
 writeas(::Type{Base.ImmutableDict{K,V}}) where {K,V} = Vector{Pair{K,V}}
+
 wconvert(::Type{Vector{Pair{K,V}}}, x::AbstractDict{K,V}) where {K,V} = collect(x)
-function rconvert(::Type{T}, x::Vector{Pair{K,V}}) where {T<:AbstractDict,K,V}
-    d = T()
-    isa(d, Dict) && sizehint!(d::Dict, length(x))
-    for (k,v) in x
-        d[k] = v
-    end
-    d
-end
+rconvert(::Type{T}, x::Vector{Pair{K,V}}) where {T<:Union{Dict,IdDict},K,V} = T(x)
 
 function rconvert(::Type{<:Base.ImmutableDict}, x::Vector{Pair{K,V}}) where {K,V}
     @assert !isempty(x)
