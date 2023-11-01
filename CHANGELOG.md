@@ -1,5 +1,11 @@
+## 0.4.38
+ - restrict default Dict encoding to Base implementations
+
+## 0.4.37
+ - Update Dict encoding for latest julia 
+
 ## 0.4.36
-- compat bound for TranscodingStreams.jl
+ - compat bound for TranscodingStreams.jl
 
 ## 0.4.35
  - fix roundtrip of Type{} objects #484
