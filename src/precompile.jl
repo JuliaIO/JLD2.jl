@@ -11,18 +11,22 @@
     h=rand(2000)
 
     @compile_workload begin
-        mktemp() do path, _
 
-            # jldsave
-            jldsave(path; a, b, c, d, e, f, g, h)
-
-            jldopen(path) do f
+        # Win7 and below systems use IOStream method to ensure pre-compilation correct
+        if Sys.iswindows() && Sys.windows_version().major <= 6 && Sys.windows_version().minor <= 1
+            jldsave(path, IOStream; a, b, c, d, e, f, g, h)
+            jldopen(path; iotype = IOStream) do f
                 for k in keys(f)
                     f[k]
                 end
             end
-
-            nothing
+        else
+            jldsave(path; a, b, c, d, e, f, g, h)
+            jldopen(path) do f
+            for k in keys(f)
+                f[k]
+            end
         end
+
     end
 end
