@@ -56,6 +56,14 @@ include("bufferedio.jl")
 include("misc.jl")
 include("superblock.jl")
 
+is_win7() = Sys.iswindows() && Sys.windows_version().major <= 6 && Sys.windows_version().minor <= 1
+# Windows 7 doesn't support mmap, falls back to IOStream
+const DEFAULT_IOTYPE = if is_win7()
+    IOStream
+else
+    JLD2.MmapIO
+end
+
 """
     RelOffset
 
@@ -300,7 +308,7 @@ read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
 
 const OPEN_FILES = Dict{String,WeakRef}()
 const OPEN_FILES_LOCK = ReentrantLock()
-function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=MmapIO;
+function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=DEFAULT_IOTYPE;
                  fallback::Union{Type, Nothing} = FallbackType(iotype),
                  compress=false,
                  mmaparrays::Bool=false,
@@ -437,7 +445,7 @@ Opens a JLD2 file at path `fname`.
 `"a"`/`"a+"`: Open for reading and writing, creating a new file if none exists, but
               preserving the existing file if one is present
 """
-function jldopen(fname::AbstractString, mode::AbstractString="r"; iotype=MmapIO, kwargs...)
+function jldopen(fname::AbstractString, mode::AbstractString="r"; iotype=DEFAULT_IOTYPE, kwargs...)
     (wr, create, truncate) = mode == "r"  ? (false, false, false) :
                              mode == "r+" ? (true, false, false) :
                              mode == "a" || mode == "a+" ? (true, true, false) :
