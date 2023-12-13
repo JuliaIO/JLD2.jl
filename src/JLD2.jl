@@ -61,7 +61,7 @@ is_win7() = Sys.iswindows() && Sys.windows_version().major <= 6 && Sys.windows_v
 const DEFAULT_IOTYPE = if is_win7()
     IOStream
 else
-    JLD2.MmapIO
+    MmapIO
 end
 
 """
