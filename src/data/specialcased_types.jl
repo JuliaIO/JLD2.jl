@@ -38,7 +38,7 @@ odr(::Type{String}) = fieldodr(String, true)
 objodr(x::String) = FixedLengthString{String}(jlsizeof(x))
 
 struct NullTerminated end
-struct SpacePadded end 
+struct SpacePadded end
 struct AsciiString{TERM}
     length::Int
 end
@@ -86,7 +86,7 @@ function jltype(f::JLDFile, dt::BasicDatatype)
 end
 
 function jltype(f::JLDFile, dt::VariableLengthDatatype)
-    if dt == H5TYPE_VLEN_UTF8 
+    if dt == H5TYPE_VLEN_UTF8
         # this is the fully supported JLD2 string
         return ReadRepresentation{String,Vlen{String}}()
     elseif dt.bitfield1 & 0x1 == 0x1
@@ -281,3 +281,28 @@ end
 
 wconvert(::Type{Vector{T}}, x::NTuple{N,T}) where {N,T} = collect(x)
 rconvert(::Type{NTuple{N,T}}, x::Vector{T}) where {N,T} = NTuple{N,T}(x)
+
+## Modules
+# Modules are stored by name
+writeas(::Type{Module}) = String
+wconvert(::Type{String}, x::Module) = string(x)
+function rconvert(::Type{Module}, x::String)
+    pkg = Symbol(x)
+    # Try to find the module
+    # Start with the method used to find compression libraries
+    m =_findmod(pkg)
+    isnothing(m) || return Base.loaded_modules[m]
+    @info "Encountered reference to module $x, but it is not currently loaded."
+    return try
+        topimport(pkg)
+        Base.loaded_modules[_findmod(pkg)]
+    catch
+       @warn "Could not load module $x. Returning a dummy module"
+       Module(Symbol(x*"_dummy"))
+    end
+end
+
+function jlconvert(::ReadRepresentation{Module,CustomSerialization{String,Vlen{String}}},
+    f::JLDFile, ptr::Ptr, header_offset::RelOffset)
+rconvert(Module, jlconvert(ReadRepresentation{String, Vlen{String}}(), f, ptr, header_offset))
+end
