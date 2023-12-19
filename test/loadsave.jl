@@ -556,10 +556,16 @@ Base.@kwdef mutable struct T3 <: AT
     t2::T2
 end
 
-DSA=Dict{Symbol, Any}
+# Custom Serialization is not transitive, so using a custom serialization via a type
+# that is custom serialized itself will not work
+mutable struct PseudoDict{K,V}
+    kv::Vector{Pair{K,V}}
+end
+
+DSA=PseudoDict{Symbol, Any}
 JLD2.writeas(::Type{T}) where {T <: AT} = DSA
-JLD2.wconvert(::Type{DSA}, t::AT) = DSA(f => getproperty(t, f) for f in fieldnames(typeof(t)))
-JLD2.rconvert(::Type{T}, dsa::DSA) where {T <: AT} = T(; dsa...)
+JLD2.wconvert(::Type{DSA}, t::AT) = DSA([f => getproperty(t, f) for f in fieldnames(typeof(t))])
+JLD2.rconvert(::Type{T}, dsa::DSA) where {T <: AT} = T(; dsa.kv...)
 
 @testset "Issue #431 Identity-Preservation" begin
     cd(mktempdir()) do
@@ -686,4 +692,14 @@ end
 	jldsave("test.jld2"; T)
 	@test T == load("test.jld2", "T")
     end
+end
+
+
+@testset "Issue #510 uninitialized Dicts" begin
+    cd(mktempdir()) do
+        save_object("test.jld2", Vector{Dict{String,Float64}}(undef, 10))
+        o = load_object("test.jld2")
+        @test !any(isassigned.(Ref(o), eachindex(o)))
+    end
+
 end
