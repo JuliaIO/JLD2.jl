@@ -687,3 +687,13 @@ end
 	@test T == load("test.jld2", "T")
     end
 end
+
+
+@testset "Issue #510 uninitialized Dicts" begin
+    cd(mktempdir()) do
+        save_object("test.jld2", Vector{Dict{String,Float64}}(undef, 10))
+        o = load_object("test.jld2")
+        @test !any(isassigned.(Ref(o), eachindex(o)))
+    end
+
+end
