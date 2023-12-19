@@ -180,6 +180,13 @@ wconvert(::Type{String}, x::BigFloat) = string(x)
 rconvert(::Type{BigInt}, x::String) = parse(BigInt, x, base = 62)
 rconvert(::Type{BigFloat}, x::String) = parse(BigFloat, x)
 
+# BigInts and BigFloats are defined as mutable structs but should be reconstructed like an
+# immutable one. This overrides the default behavior.
+function jlconvert(::ReadRepresentation{BN,CustomSerialization{String,Vlen{String}}},
+        f::JLDFile, ptr::Ptr, header_offset::RelOffset) where BN <: Union{BigInt, BigFloat}
+    rconvert(BN, jlconvert(ReadRepresentation{String, Vlen{String}}(), f, ptr, header_offset))
+end
+
 ## Pointers
 
 # Previously it was disallowed to serialize pointers.
