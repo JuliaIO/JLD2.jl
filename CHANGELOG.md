@@ -1,3 +1,7 @@
+## 0.4.40
+ - fix unitialized custom-serialized objects
+ - allow serializing pkg-modules by name
+
 ## 0.4.39
  - backward compatibility support for windows 7 by changing the default IO type to IOStream (#509) (@HongBinYu-hub)
 
