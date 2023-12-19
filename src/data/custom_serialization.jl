@@ -38,7 +38,7 @@ h5convert_uninitialized!(out::Pointers, odr::Type{CustomSerialization{T,ODR}}) w
     h5convert_uninitialized!(out, ODR)
 
 jlconvert_canbeuninitialized(::ReadRepresentation{T,CustomSerialization{S,ODR}}) where {T,S,ODR} =
-    jlconvert_canbeuninitialized(ODR)
+    jlconvert_canbeuninitialized(ReadRepresentation{S,ODR}())
 jlconvert_isinitialized(::ReadRepresentation{T,CustomSerialization{S,ODR}}, ptr::Ptr) where {T,S,ODR} =
     jlconvert_isinitialized(ReadRepresentation{S,ODR}(), ptr)
 
