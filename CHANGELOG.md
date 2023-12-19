@@ -1,3 +1,6 @@
+## 0.4.39
+ - backward compatibility support for windows 7 by changing the default IO type to IOStream (#509) (@HongBinYu-hub)
+
 ## 0.4.38
  - restrict default Dict encoding to Base implementations
 
