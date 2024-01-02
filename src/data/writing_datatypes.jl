@@ -428,20 +428,27 @@ end
 
 
 # This is a trick to compactly write long NTuple
-# This uses that NTuple{N,T} == Tuple{T,T,T,T,...,T}
-function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::Type{NTuple{N,ET}}, wsession::JLDWriteSession) where {N, ET}
-    if isempty(T.parameters)
+# This uses that NTuple{N,T} === Tuple{T,T,T,T,...,T}
+function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::Type{<: NTuple}, wsession::JLDWriteSession)
+    params = T.parameters
+    N = length(params)
+    if N ≤ 1
         store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, "Tuple"), f.datatype_wsession)
-        h5convert_uninitialized!(out+odr_sizeof(Vlen{UInt8}), Vlen{UInt8})
-    else
+        if N == 0
+            h5convert_uninitialized!(out+odr_sizeof(Vlen{UInt8}), Vlen{UInt8})
+        else # N==1
+            # this also catches NTuples with indeterminate length
+            refs = refs_from_types(f, params, wsession)
+            store_vlen!(out+odr_sizeof(Vlen{UInt8}), RelOffset, f, refs, f.datatype_wsession)
+        end     
+    else # actual NTuple with more than one entry
         store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, "NTuple"), f.datatype_wsession)
+        ET = params[1] # T === Tuple{ET,ET,ET,...}
         refs = refs_from_types(f, Any[N,ET], wsession)
         store_vlen!(out+odr_sizeof(Vlen{UInt8}), RelOffset, f, refs, f.datatype_wsession)
     end
     nothing
 end
-
-
 
 ## Union Types
 
