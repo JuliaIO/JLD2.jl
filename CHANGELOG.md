@@ -1,3 +1,7 @@
+## 0.4.41
+ - fix ntuple type with typevar length
+ - fix OpaqueData test (HDF5 compat)
+
 ## 0.4.40
  - fix unitialized custom-serialized objects
  - allow serializing pkg-modules by name
