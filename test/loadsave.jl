@@ -708,7 +708,10 @@ end
         s_type = Tuple{Int, Tuple{Vararg{Int, T}} where T}
         a = Dict{s_type, Int}()
         a[(0, (1, 2, 3))] = 4
-        save_object("test.jld2", a)
-        @test a == load_object("test.jld2")
+        if VERSION < v"1.7.0-A"
+            @test_broken a == (save_object("test.jld2", a); load_object("test.jld2"))
+        else
+            @test a == (save_object("test.jld2", a); load_object("test.jld2"))
+        end
     end
 end 
