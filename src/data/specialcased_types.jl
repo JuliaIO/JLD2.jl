@@ -3,8 +3,8 @@ struct OpaqueData{N}
     data::Vector{UInt8}
     OpaqueData(data) = new{length(data)}(data)
 end
-odr_sizeof(x::Type{OpaqueData{N}}) where {N} = UInt32(N)
-function jlconvert(rr::ReadRepresentation{OpaqueData{N}, Vector{UInt8}}, ::JLDFile, ptr::Ptr, ::RelOffset) where N
+
+function jlconvert(rr::ReadRepresentation{OpaqueData{N}, NTuple{N,UInt8}}, ::JLDFile, ptr::Ptr, ::RelOffset) where N
     data = Vector{UInt8}(undef, N)
     unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), N)
     OpaqueData(data)
@@ -62,7 +62,7 @@ function jltype(f::JLDFile, dt::BasicDatatype)
                 throw(UnsupportedFeatureException("Encountered an unsupported string type. $dt"))
             end
         elseif dt.class << 4 == DT_OPAQUE  << 4
-            return ReadRepresentation{OpaqueData{Int(dt.size)},Vector{UInt8}}()
+            return ReadRepresentation{OpaqueData{Int(dt.size)},NTuple{Int(dt.size),UInt8}}()
 
         else
             throw(UnsupportedFeatureException("Encountered an unsupported type."))
@@ -77,7 +77,7 @@ function jltype(f::JLDFile, dt::BasicDatatype)
             throw(UnsupportedFeatureException("Encountered an unsupported string type."))
         end
     elseif dt.class << 4 == DT_OPAQUE  << 4
-        return ReadRepresentation{OpaqueData{Int(dt.size)},Vector{UInt8}}()
+        return ReadRepresentation{OpaqueData{Int(dt.size)},NTuple{Int(dt.size),UInt8}}()
     elseif dt.class << 4 == DT_REFERENCE  << 4
         return ReadRepresentation{Any,RelOffset}()
     else
