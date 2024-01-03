@@ -402,9 +402,9 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
         m isa Upgrade && return m
     else
         m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
-        isunknowntype(m) && return m
     end
-
+    isunknowntype(m) && return m
+    unknown_params && return UnknownType{m, Tuple{params...}}
     if hasparams
         try
             m = m{params...}
@@ -569,15 +569,15 @@ function constructrr(f::JLDFile, unk::Type{UnknownType{T,P}}, dt::CompoundDataty
             
         end
     elseif T isa UnionAll
-        body = behead(unk.name)
-        if length(body.parameters) != length(unk.parameters)
-            @warn("read type $(typestring(unk)) has a different number of parameters from type " *
-                "$(unk.name) in workspace; reconstructing")
-            reconstruct_compound(f, typestring(unk), dt, field_datatypes)
+        body = behead(T)
+        if length(body.parameters) != length(P.parameters)
+            @warn("read type $(typestring(T)) has a different number of parameters from type " *
+                "$(T) in workspace; reconstructing")
+            reconstruct_compound(f, typestring(T), dt, field_datatypes)
         else
             params = [P.parameters...,]
             for i = 1:length(params)
-                if isa(params[i], UnknownType)
+                if isunknowntype(params[i])
                     param = body.parameters[i]::TypeVar
                     params[i] = param.ub
                 end
@@ -585,8 +585,8 @@ function constructrr(f::JLDFile, unk::Type{UnknownType{T,P}}, dt::CompoundDataty
 
             # Try to construct the rr for the relaxed type. On failure, fall back to
             # reconstruct_compound.`
-            try
-                T2 = unk.name{params...}
+            T2 = try
+                T{params...}
             catch err
                 @warn("type parameters for $(typestring(unk)) do not match type $(T) in workspace; reconstructing")
                 return reconstruct_compound(f, shorttypestring(unk), dt, field_datatypes)
