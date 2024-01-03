@@ -23,7 +23,9 @@ Base.convert(::Type{A}, a::ASerialization) = A(only(a.x))
     Take care, some Julia internal types already use a `CustomSerialization` and JLD2.jl cannot nest them.
     In order to avoid unexpected behavior you should define a wrapper type,
     such as in the example above `ASerialization` even if you could use a simple Julia built in type (as in this case `Vector{Int}`).
-    
+    Target types to avoid are `<: AbstractDict` and `<:Array`.
+
+
 If you do not want to overload `Base.convert` then you can also define
 
 ```julia
