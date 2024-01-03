@@ -368,7 +368,7 @@ function types_from_refs(f::JLDFile, ptr::Ptr)
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
             res = cdt !== nulldt ? (typeof(jltype(f, cdt)::ReadRepresentation)::DataType).parameters[1] : load_dataset(f, ref)
-            unknown_params = unknown_params || isunknowntype(res)
+            unknown_params = unknown_params || isunknowntype(res) || isreconstructed(res)
             res
         end for ref in refs]
         return params, unknown_params
@@ -557,7 +557,7 @@ function constructrr(f::JLDFile, unk::Type{UnknownType{T,P}}, dt::CompoundDataty
     attrs::Vector{ReadAttribute}) where {T,P}
     field_datatypes = read_field_datatypes(f, attrs)
     if T isa DataType
-        if unk.name == Tuple
+        if T === Tuple
             # For a tuple with unknown fields, we should reconstruct the fields
             rodr = reconstruct_odr(f, dt, field_datatypes)
             # This is a "pseudo-RR" since the tuple is not fully parametrized, but

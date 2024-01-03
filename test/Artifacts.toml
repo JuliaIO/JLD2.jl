@@ -1,7 +1,7 @@
 [testfiles]
-git-tree-sha1 = "496c72594b20fe977506afc3c7af39e8dedae53d"
+git-tree-sha1 = "8d34be7b8603854dca03eb0330f214a9194de75a"
 lazy = true
 
     [[testfiles.download]]
-    url = "https://github.com/JonasIsensee/JLD2TestFiles/archive/refs/tags/v0.1.0.tar.gz"
-    sha256 = "e2e00e745a840b5a76cdf8b8bf17c78d135985c86397a8e53e0fd678ab42f4f5"
+    sha256 = "f91805f612a00178ca68d5ecc895af09c231d1ca949c7ef0157cb9730b3a84aa"
+    url = "https://github.com/JonasIsensee/JLD2TestFiles/archive/refs/tags/v0.1.1.tar.gz"
