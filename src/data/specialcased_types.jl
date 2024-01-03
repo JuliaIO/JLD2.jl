@@ -253,13 +253,19 @@ rconvert(::Type{Core.SimpleVector}, x::Vector{Any}) = Core.svec(x...)
 
 ## Standard Dictionary Types
 # Custom dictionaries may need to store additional fields
-writeas(::Type{Dict{K,V}}) where {K,V} = Vector{Pair{K,V}}
-writeas(::Type{IdDict{K,V}}) where {K,V} = Vector{Pair{K,V}}
-writeas(::Type{Base.ImmutableDict{K,V}}) where {K,V} = Vector{Pair{K,V}}
+mutable struct SerializedDict
+    kvvec # Vector{Pair{K,V}}
+end
 
-wconvert(::Type{Vector{Pair{K,V}}}, x::AbstractDict{K,V}) where {K,V} = collect(x)
-rconvert(::Type{T}, x::Vector{Pair{K,V}}) where {T<:Union{Dict,IdDict},K,V} = T(x)
+writeas(::Type{Dict{K,V}}) where {K,V} = SerializedDict
+writeas(::Type{IdDict{K,V}}) where {K,V} = SerializedDict
+writeas(::Type{Base.ImmutableDict{K,V}}) where {K,V} = SerializedDict
 
+wconvert(::Type{SerializedDict}, x::AbstractDict) = SerializedDict(collect(x))
+rconvert(::Type{T}, x::SerializedDict) where {T<:Union{Dict,IdDict,Base.ImmutableDict}} = rconvert(T,x.kvvec)
+
+# These are kept around for legacy
+rconvert(::Type{T}, x::Vector{ <: Pair}) where {T<:Union{Dict,IdDict}} = T(x)
 function rconvert(::Type{<:Base.ImmutableDict}, x::Vector{Pair{K,V}}) where {K,V}
     @assert !isempty(x)
     d = Base.ImmutableDict(x[1])
