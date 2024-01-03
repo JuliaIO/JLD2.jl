@@ -33,6 +33,10 @@ function writeasbits(T::Union)
 end
 
 function write_dataset(f::JLDFile, x::Array{T}, wsession::JLDWriteSession, compress=f.compress) where {T}
+    if !isa(wsession, JLDWriteSession{Union{}})
+        offset = get(wsession.h5offset, objectid(x), UNDEFINED_ADDRESS)
+        offset != UNDEFINED_ADDRESS && return offset
+    end
     if T isa Union && writeasbits(T)
         # Conversion has to be done earlier here because
         # vectors are special cased in dispatch
