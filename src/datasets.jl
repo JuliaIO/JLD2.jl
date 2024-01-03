@@ -642,25 +642,15 @@ define_packed(ContiguousStorageMessage)
     )
 
 function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
+    if ismutabletype(typeof(x)) && !isa(wsession, JLDWriteSession{Union{}})
+        offset = get(wsession.h5offset, objectid(x), UNDEFINED_ADDRESS)
+        offset != UNDEFINED_ADDRESS && return offset
+    end
     odr = objodr(x)
     write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)::RelOffset
 end
 
-function write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession)
-    offset = get(wsession.h5offset, objectid(x), RelOffset(0))
-    offset != RelOffset(0) ? offset : write_dataset(f, x, wsession)::RelOffset
-end
-
-write_ref_mutable(f::JLDFile, x, wsession::JLDWriteSession{Union{}}) =
-    write_dataset(f, x, wsession)
-
-function write_ref(f::JLDFile, x, wsession::JLDWriteSession)
-    if ismutabletype(typeof(x))
-        write_ref_mutable(f, x, wsession)::RelOffset
-    else
-        write_dataset(f, x, wsession)::RelOffset
-    end
-end
+write_ref(f::JLDFile, x, wsession::JLDWriteSession) = write_dataset(f, x, wsession)::RelOffset
 write_ref(f::JLDFile, x::RelOffset, wsession::JLDWriteSession) = x
 
 Base.delete!(f::JLDFile, x::AbstractString) = delete!(f.root_group, x)
