@@ -2,7 +2,7 @@ using Test, JLD2
 using LazyArtifacts
 # When adding test files to the JLD2Testfiles repo tag a new
 # release and adapt Artifacts.toml and the line below accordingly.
-testfiles = artifact"testfiles/JLD2TestFiles-0.1.0/artifacts"
+testfiles = artifact"testfiles/JLD2TestFiles-0.1.1/artifacts"
 
 @testset "HDF5 compat test files" begin
     # These are test files copied from the HDF5.jl test suite
@@ -133,4 +133,14 @@ end
         # Opening for overwriting should succeed
         close(jldopen(path, "w+"))
     end
+end
+
+@testset "Mutable Struct Reconstruction Issue #506" begin
+    fn = joinpath(testfiles,"struct_reconstruction.jld2")
+    data = load(fn)
+    @test data["dms"] isa JLD2.SerializedDict
+    @test JLD2.isreconstructed(data["dms"].kvvec[1].second)
+    @test data["ds"] isa JLD2.SerializedDict
+    @test JLD2.isreconstructed(data["ds"].kvvec[1].second)
+    @test JLD2.isreconstructed(data["tms"][2])
 end
