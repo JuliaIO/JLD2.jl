@@ -105,6 +105,7 @@ mutable struct JLDFile{T<:IO}
     path::String
     writable::Bool
     written::Bool
+    plain::Bool
     compress#::Union{Bool,Symbol}
     mmaparrays::Bool
     n_times_opened::Int
@@ -125,11 +126,13 @@ mutable struct JLDFile{T<:IO}
     root_group::Group{JLDFile{T}}
     types_group::Group{JLDFile{T}}
     base_address::UInt64
+    
 
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
+                        plain::Bool,
                         compress,#::Union{Bool,Symbol},
                         mmaparrays::Bool) where T
-        f = new(io, path, writable, written, compress, mmaparrays, 1, false,
+        f = new(io, path, writable, written, plain, compress, mmaparrays, 1, false,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), Dict{String,Any}(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             DATA_START, Dict{RelOffset,GlobalHeap}(),
@@ -138,8 +141,8 @@ mutable struct JLDFile{T<:IO}
         f
     end
 end
-JLDFile(io::IO, path::AbstractString, writable::Bool, written::Bool, compress, mmaparrays::Bool) =
-    JLDFile{typeof(io)}(io, path, writable, written, compress, mmaparrays)
+JLDFile(io::IO, path::AbstractString, writable::Bool, written::Bool, plain::Bool, compress, mmaparrays::Bool) =
+    JLDFile{typeof(io)}(io, path, writable, written, plain, compress, mmaparrays)
 
 """
     fileoffset(f::JLDFile, x::RelOffset)
@@ -189,6 +192,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                  mmaparrays::Bool=false,
                  typemap::Dict{String}=Dict{String,Any}(),
                  parallel_read::Bool=false,
+                 plain::Bool=false
                  ) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
     verify_compressor(compress)
@@ -240,7 +244,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         io = openfile(iotype, fname, wr, create, truncate, fallback)
         created = !exists || truncate
         rname = realpath(fname)
-        f = JLDFile(io, rname, wr, created, compress, mmaparrays)
+        f = JLDFile(io, rname, wr, created, plain, compress, mmaparrays)
 
         if !parallel_read
             OPEN_FILES[rname] = WeakRef(f)

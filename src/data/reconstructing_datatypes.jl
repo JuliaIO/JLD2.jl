@@ -98,6 +98,11 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     end
 
     datatype = read_attr_data(f, julia_type_attr)
+    if !(datatype <: Tuple) && f.plain
+        rr = jltype(f, dt)
+        return f.h5jltype[cdt] = rr
+    end
+
     if written_type_attr !== nothing
         # Custom serialization
         custom_datatype = read_attr_data(f, written_type_attr)
@@ -415,6 +420,9 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     isunknowntype(m) && return m
     unknown_params && return UnknownType{m, Tuple{params...}}
     if hasparams
+        if f.plain && !(m === Tuple)
+            return Any
+        end
         try
             m = m{params...}
         catch e
