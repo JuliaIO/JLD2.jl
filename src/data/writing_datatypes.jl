@@ -67,6 +67,7 @@ samelayout(::Type) = false
 fieldnames(x::Type{T}) where {T<:Tuple} = [Symbol(i) for i = 1:length(x.types)]
 fieldnames(@nospecialize x) = collect(Base.fieldnames(x))
 
+const MAX_INLINE_SIZE = 2^10
 # fieldodr gives the on-disk representation of a field of a given type,
 # which is either always initialized (initialized=true) or potentially
 # uninitialized (initialized=false)
@@ -75,7 +76,7 @@ fieldnames(@nospecialize x) = collect(Base.fieldnames(x))
         if !hasfielddata(T)
             # A ghost type, so no need to store at all
             return nothing
-        elseif isa(T, DataType)
+        elseif isa(T, DataType) && sizeof(T) ≤ MAX_INLINE_SIZE
             if isbitstype(T)
                 return :(odr(T))
             elseif !ismutabletype(T)
@@ -93,7 +94,7 @@ end
     if isconcretetype(T)
         if !hasfielddata(T)
             return nothing
-        elseif isbitstype(T) || (isa(initialized, Type{Type{Val{true}}}) && !ismutabletype(T))
+        elseif (isbitstype(T) || (isa(initialized, Type{Type{Val{true}}}) && !ismutabletype(T))) && sizeof(T) ≤ MAX_INLINE_SIZE
             return quote
                 @lookup_committed f T
                 $(if isempty(T.types)
