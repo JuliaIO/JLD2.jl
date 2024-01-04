@@ -352,16 +352,16 @@ function load_group(f::JLDFile, roffset::RelOffset)
                 elseif msg.msg_type == HM_GROUP_INFO
                     if msg.size > 2
                         # Version Flag
-                        jlread(io, UInt8) == 0 || throw(UnsupportedFeatureException()) 
-                        flag = jlread(io, UInt8)
+                        jlread(cio, UInt8) == 0 || throw(UnsupportedFeatureException()) 
+                        flag = jlread(cio, UInt8)
                         if flag%2 == 1 # first bit set
-                            link_phase_change_max_compact = jlread(io, UInt16)
-                            link_phase_change_min_dense = jlread(io, UInt16)
+                            link_phase_change_max_compact = jlread(cio, UInt16)
+                            link_phase_change_min_dense = jlread(cio, UInt16)
                         end
                         if (flag >> 1)%2 == 1 # second bit set
                             # Verify that non-default group size is given
-                            est_num_entries = jlread(io, UInt16)
-                            est_link_name_len = jlread(io, UInt16)
+                            est_num_entries = jlread(cio, UInt16)
+                            est_link_name_len = jlread(cio, UInt16)
                         end
                     end
                 elseif msg.msg_type == HM_LINK_MESSAGE
