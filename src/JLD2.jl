@@ -589,6 +589,7 @@ function Base.show(io::IO, ::MIME"text/plain", f::JLDFile)
         print(io, "\n")
         printtoc(io, f; numlines = get(io, :jld2_numlines, 10))
     end
+    return nothing
 end
 
 """
