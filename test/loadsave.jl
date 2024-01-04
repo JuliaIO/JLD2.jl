@@ -732,7 +732,7 @@ end
         f["b/d/f/g"] = 4
         close(f)
         @test load(fn, "b/d/f") == Dict("g" => 4)
-        @test load(fn, "b/d/f", "a") == [Dict("g" => 4), 1]
+        @test load(fn, "b/d/f", "a") == (Dict("g" => 4), 1)
         @test load(fn, "b/d") == Dict("e" => 3, "f" => Dict("g"=> 4))
     end
 end
