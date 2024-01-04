@@ -98,7 +98,7 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
     end
 
     datatype = read_attr_data(f, julia_type_attr)
-    if !(datatype <: Tuple) && f.plain
+    if f.plain && !(datatype isa Upgrade) && !(datatype <: Tuple) 
         rr = jltype(f, dt)
         return f.h5jltype[cdt] = rr
     end
