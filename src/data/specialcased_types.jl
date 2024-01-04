@@ -6,7 +6,7 @@ end
 
 function jlconvert(rr::ReadRepresentation{OpaqueData{N}, NTuple{N,UInt8}}, ::JLDFile, ptr::Ptr, ::RelOffset) where N
     data = Vector{UInt8}(undef, N)
-    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), N)
+    unsafe_copyto!(pointer(data), pconvert(Ptr{UInt8}, ptr), N)
     OpaqueData(data)
 end
 
@@ -106,7 +106,7 @@ jlconvert(::ReadRepresentation{Vector{T},Vlen{ODR}}, f::JLDFile, ptr::Ptr, ::Rel
 
 function h5convert!(out::Pointers, fls::FixedLengthString, f::JLDFile, x, ::JLDWriteSession)
     fls.length == jlsizeof(x) || throw(InvalidDataException())
-    (unsafe_copyto!(convert(Ptr{UInt8}, out), pointer(x), fls.length); nothing)
+    (unsafe_copyto!(pconvert(Ptr{UInt8}, out), pointer(x), fls.length); nothing)
 end
 h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x, wsession::JLDWriteSession) =
     store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, x), wsession)
@@ -115,25 +115,25 @@ jlconvert(::ReadRepresentation{String,Vlen{String}}, f::JLDFile, ptr::Ptr, ::Rel
     String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
 function jlconvert(rr::FixedLengthString{String}, ::JLDFile, ptr::Ptr, ::RelOffset)
     data = Vector{UInt8}(undef, rr.length)
-    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
+    unsafe_copyto!(pointer(data), pconvert(Ptr{UInt8}, ptr), rr.length)
     String(data)
 end
 
 # Ascii String
 function jlconvert(rr::AsciiString{NullTerminated}, ::JLDFile, ptr::Ptr, ::RelOffset)
     data = Vector{UInt8}(undef, rr.length)
-    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), rr.length)
+    unsafe_copyto!(pointer(data), pconvert(Ptr{UInt8}, ptr), rr.length)
     String(data[1:end-1])
 end
 function jlconvert(rr::ReadRepresentation{String, FixedLengthAsciiString{NullTerminated,N}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {N}
     data = Vector{UInt8}(undef, N)
-    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), N)
+    unsafe_copyto!(pointer(data), pconvert(Ptr{UInt8}, ptr), N)
     String(data)
 end
 
 function jlconvert(rr::ReadRepresentation{String, FixedLengthAsciiString{SpacePadded,N}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {N}
     data = Vector{UInt8}(undef, N)
-    unsafe_copyto!(pointer(data), convert(Ptr{UInt8}, ptr), N)
+    unsafe_copyto!(pointer(data), pconvert(Ptr{UInt8}, ptr), N)
     rstrip(String(data))
 end
 odr_sizeof(x::AsciiString) = x.length

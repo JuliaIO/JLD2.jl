@@ -9,7 +9,7 @@ odr_sizeof(::Nothing) = 0
     function datatype_size(dt::DataType)
         Base.@_foldable_meta
         dt.layout == C_NULL && throw(UndefRefError())
-        size = unsafe_load(convert(Ptr{Base.DataTypeLayout}, dt.layout)).size
+        size = unsafe_load(pconvert(Ptr{Base.DataTypeLayout}, dt.layout)).size
         return Int(size)
     end
     @Base.pure odr_sizeof(x::DataType) = datatype_size(x)

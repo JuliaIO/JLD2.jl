@@ -359,7 +359,7 @@ end
 
 function types_from_refs(f::JLDFile, ptr::Ptr)
     # Test for a potential null pointer indicating an empty array
-    isinit = jlunsafe_load(convert(Ptr{UInt32}, ptr)) != 0
+    isinit = jlunsafe_load(pconvert(Ptr{UInt32}, ptr)) != 0
     unknown_params = false
     if isinit
         refs = jlconvert(ReadRepresentation{RelOffset, Vlen{RelOffset}}(), f, ptr, NULL_REFERENCE)
@@ -684,7 +684,7 @@ end
 # This jlconvert method handles compound types with padding or references
 @generated function jlconvert(::ReadRepresentation{T,S}, f::JLDFile, ptr::Ptr,
                               header_offset::RelOffset) where {T,S}
-    isa(S, DataType) && return :(convert(T, jlunsafe_load(convert(Ptr{S}, ptr))))
+    isa(S, DataType) && return :(convert(T, jlunsafe_load(pconvert(Ptr{S}, ptr))))
     @assert isa(S, OnDiskRepresentation)
 
     offsets = typeof(S).parameters[1]

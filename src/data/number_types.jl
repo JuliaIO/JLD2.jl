@@ -23,7 +23,7 @@ struct BENumber{T}
 end
 
 jlconvert(::ReadRepresentation{T,BENumber{T}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {T} =
-    bswap(jlunsafe_load(convert(Ptr{T}, ptr)))
+    bswap(jlunsafe_load(pconvert(Ptr{T}, ptr)))
 
 function jltype(f::JLDFile, dt::FixedPointDatatype)
     signed = Bool(dt.bitfield1 >> 3 & 0b1)
