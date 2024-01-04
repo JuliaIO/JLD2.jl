@@ -34,16 +34,30 @@ fileio_save(f::File{format"JLD2"}, value...; kwargs...) = error("must supply a n
 
 
 # load with just a filename returns a dictionary containing all the variables
-function fileio_load(f::File{format"JLD2"}; kwargs...)
-    jldopen(FileIO.filename(f), "r"; kwargs...) do file
-        loadtodict!(Dict{String,Any}(), file)
+function fileio_load(f::File{format"JLD2"}; nested::Bool=false, kwargs...)
+    file = jldopen(FileIO.filename(f), "r"; kwargs...)
+    try
+        if nested
+            return loadnesteddict(file)
+        else
+            return loadtodict!(Dict{String,Any}(), file)
+        end
+    catch e
+        throw(e)
+    finally
+        close(file)
     end
 end
 
 # When called with explicitly requested variable names, return each one
 function fileio_load(f::File{format"JLD2"}, varname::AbstractString; kwargs...)
-    jldopen(FileIO.filename(f), "r"; kwargs...) do file
-        read(file, varname)
+    file = jldopen(FileIO.filename(f), "r"; kwargs...)
+    try
+        return load_data_or_dict(file, varname)
+    catch e
+        throw(e)
+    finally
+        close(file)
     end
 end
 
@@ -51,7 +65,12 @@ fileio_load(f::File{format"JLD2"}, varnames::AbstractString...; kwargs...) =
     fileio_load(f, varnames; kwargs...)
 
 function fileio_load(f::File{format"JLD2"}, varnames::Tuple{Vararg{AbstractString}}; kwargs...)
-    jldopen(FileIO.filename(f), "r"; kwargs...) do file
-        map((var)->jlread(file, var), varnames)
+    file = jldopen(FileIO.filename(f), "r"; kwargs...)
+    try
+        return map(var -> load_data_or_dict(file, var),  varnames)
+    catch e
+        throw(e)
+    finally
+        close(file)
     end
 end
