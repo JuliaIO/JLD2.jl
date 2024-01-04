@@ -715,3 +715,24 @@ end
         end
     end
 end 
+
+@testset "FileIO.load of (nested) groups" begin
+    cd(mktempdir()) do
+        # create a file
+        fn = "test.jld2"
+        f = jldopen(fn, "w")
+        f["a"] = 1
+        f["b/c"] = 2
+        close(f)
+        @test load(fn) == Dict("a" => 1, "b/c" => 2)
+        @test load(fn; nested=true) == Dict("a" => 1, "b" => Dict("c" => 2))
+
+        f = jldopen(fn, "a")
+        f["b/d/e"] = 3
+        f["b/d/f/g"] = 4
+        close(f)
+        @test load(fn, "b/d/f") == Dict("g" => 4)
+        @test load(fn, "b/d/f", "a") == [Dict("g" => 4), 1]
+        @test load(fn, "b/d") == Dict("e" => 3, "f" => Dict("g"=> 4))
+    end
+end

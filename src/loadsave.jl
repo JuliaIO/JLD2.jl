@@ -161,6 +161,32 @@ function loadtodict!(d::Dict, g::Union{JLDFile,Group}, prefix::String="")
     return d
 end
 
+"""
+    loadnesteddict(g::Union{JLDFile, Group})
+Return a dictionary with all data contained in group or file.
+Nested groups are loaded as nested dictionaries.
+"""
+function loadnesteddict(g::Union{JLDFile,Group})
+    d = Dict{String, Any}()
+    for k in keys(g)
+        v = g[k]
+        d[k] = v isa Group ? loadnesteddict(v) : v
+    end
+    return d
+end
+
+"""
+    load_data_or_dict(g::Union{JLDFile,Group}, varname::AbstractString)
+Return the value of key `varname` but if it represents a `Group` load the group as a nested dictionary.
+"""
+function load_data_or_dict(g::Union{JLDFile,Group}, varname::AbstractString)
+    dataset = g[varname]
+    if dataset isa Group
+        return loadnesteddict(dataset)
+    end
+    return dataset
+end
+
 # Name used in JLD2 file to identify objects stored with `save_object`
 const SINGLE_OBJECT_NAME = "single_stored_object"
 
@@ -181,8 +207,8 @@ To save the string `hello` to the JLD2 file example.jld2:
     hello = "world"
     save_object("example.jld2", hello)
 """
-function save_object(filename, x)
-  jldopen(filename, "w") do file
+function save_object(filename, x; kwargs...)
+  jldopen(filename, "w"; kwargs...) do file
     file[SINGLE_OBJECT_NAME] = x
   end
   return
