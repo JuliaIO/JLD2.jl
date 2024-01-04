@@ -44,6 +44,9 @@ jlwrite(io, x) = Base.write(io, x)
 jlread(io, x) = Base.read(io, x)
 jlread(io::IO, ::Type{T}, n::Integer) where {T} = T[jlread(io, T) for _=1:n]
 
+# Use internal convert function (for pointer conversion) to avoid invalidations
+pconvert(T, x) = Base.convert(T, x)
+
 jlsizeof(x) = Base.sizeof(x)
 jlunsafe_store!(p, x) = Base.unsafe_store!(p, x)
 jlunsafe_load(p) = Base.unsafe_load(p)

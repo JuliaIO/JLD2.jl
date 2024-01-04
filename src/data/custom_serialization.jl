@@ -7,6 +7,7 @@ writeas(T::Type) = T
 # respectively. These fall back to convert.
 wconvert(T, x) = convert(T, x)
 rconvert(T, x) = convert(T, x)
+rconvert(::Type{Array{T,N}}, x::Array{T2,N}) where {T, T2, N} = T[rconvert(T, y) for y in x] 
 
 # Select an ODR, incorporating custom serialization only if the types do not
 # match

@@ -236,7 +236,7 @@ jlread(io::MmapIO, ::Type{T}, n::Integer) where {T} = read(io, T, Int(n))
 function read_bytestring(io::MmapIO)
     # TODO do not try to read outside the buffer
     cp = io.curptr
-    str = unsafe_string(convert(Ptr{UInt8}, cp))
+    str = unsafe_string(pconvert(Ptr{UInt8}, cp))
     io.curptr = cp + jlsizeof(str) + 1
     str
 end
@@ -277,7 +277,7 @@ function IndirectPointer(io::MmapIO, offset::Integer=position(io))
     IndirectPointer(pointer_from_objref(io) + fieldoffset(MmapIO, 4), offset)
 end
 Base.:+(x::IndirectPointer, y::Integer) = IndirectPointer(x.ptr, x.offset+y)
-Base.convert(::Type{Ptr{T}}, x::IndirectPointer) where {T} = Ptr{T}(jlunsafe_load(x.ptr) + x.offset)
+pconvert(::Type{Ptr{T}}, x::IndirectPointer) where {T} = Ptr{T}(jlunsafe_load(x.ptr) + x.offset)
 
 # We sometimes need to compute checksums. We do this by first calling begin_checksum when
 # starting to handle whatever needs checksumming, and calling end_checksum afterwards. Note

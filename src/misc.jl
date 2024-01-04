@@ -12,11 +12,11 @@ function define_packed(ty::DataType)
     if sz != jlsizeof(ty)
         @eval begin
             function jlunsafe_store!(p::Ptr{$ty}, x::$ty)
-                $([:(jlunsafe_store!(convert(Ptr{$(ty.types[i])}, p+$(packed_offsets[i])), getfield(x, $i)))
+                $([:(jlunsafe_store!(pconvert(Ptr{$(ty.types[i])}, p+$(packed_offsets[i])), getfield(x, $i)))
                    for i = 1:length(packed_offsets)]...)
             end
             function jlunsafe_load(p::Ptr{$ty})
-                $(Expr(:new, ty, [:(jlunsafe_load(convert(Ptr{$(ty.types[i])}, p+$(packed_offsets[i]))))
+                $(Expr(:new, ty, [:(jlunsafe_load(pconvert(Ptr{$(ty.types[i])}, p+$(packed_offsets[i]))))
                                    for i = 1:length(packed_offsets)]...))
             end
             jlsizeof(::Union{$ty,Type{$ty}}) = $(Int(sz))::Int

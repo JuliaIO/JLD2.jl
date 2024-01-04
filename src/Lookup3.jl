@@ -1,5 +1,5 @@
 module Lookup3
-import JLD2: jlunsafe_load
+import JLD2: jlunsafe_load, pconvert
 
 # Original source at http://www.burtleburtle.net/bob/c/lookup3.c
 
@@ -147,11 +147,11 @@ function hash(k::Ptr{UInt8}, n::Integer=length(k), initval::UInt32=UInt32(0))
     #     offset += 12
     # end
     @inbounds while n > 12
-        a += jlunsafe_load(convert(Ptr{UInt32}, ptr))
+        a += jlunsafe_load(pconvert(Ptr{UInt32}, ptr))
         ptr += 4
-        b += jlunsafe_load(convert(Ptr{UInt32}, ptr))
+        b += jlunsafe_load(pconvert(Ptr{UInt32}, ptr))
         ptr += 4
-        c += jlunsafe_load(convert(Ptr{UInt32}, ptr))
+        c += jlunsafe_load(pconvert(Ptr{UInt32}, ptr))
         (a, b, c) = mix(a, b, c)
         ptr += 4
         n -= 12
@@ -175,7 +175,7 @@ function hash(k::Ptr{UInt8}, n::Integer=length(k), initval::UInt32=UInt32(0))
     # end
     @inbounds if n > 0
         if n == 12
-            c += jlunsafe_load(convert(Ptr{UInt32}, ptr+8))
+            c += jlunsafe_load(pconvert(Ptr{UInt32}, ptr+8))
             @goto n8
         elseif n == 11
             c += UInt32(jlunsafe_load(Ptr{UInt8}(ptr+10)))<<16
@@ -190,7 +190,7 @@ function hash(k::Ptr{UInt8}, n::Integer=length(k), initval::UInt32=UInt32(0))
             @goto n8
         elseif n == 8
             @label n8
-            b += jlunsafe_load(convert(Ptr{UInt32}, ptr+4))
+            b += jlunsafe_load(pconvert(Ptr{UInt32}, ptr+4))
             @goto n4
         elseif n == 7
             @label n7
@@ -206,7 +206,7 @@ function hash(k::Ptr{UInt8}, n::Integer=length(k), initval::UInt32=UInt32(0))
             @goto n4
         elseif n == 4
             @label n4
-            a += jlunsafe_load(convert(Ptr{UInt32}, ptr))
+            a += jlunsafe_load(pconvert(Ptr{UInt32}, ptr))
         elseif n == 3
             @label n3
             a += UInt32(jlunsafe_load(Ptr{UInt8}(ptr+2)))<<16

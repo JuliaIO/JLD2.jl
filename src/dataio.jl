@@ -54,7 +54,7 @@ end
         seek(regulario, inptr - io.startptr)
         unsafe_read(regulario, pointer(v), nb)
     else
-        unsafe_copyto!(pointer(v), convert(Ptr{T}, inptr), n)
+        unsafe_copyto!(pointer(v), pconvert(Ptr{T}, inptr), n)
     end
     io.curptr = inptr + odr_sizeof(T) * n
     v
