@@ -141,8 +141,8 @@ check_writtenas_type(::Any) = throw(ArgumentError("writeas(leaftype) must return
 h5type(f::JLDFile, x) = h5type(f, writeas(typeof(x)), x)
 
 # Make a compound datatype from a set of names and types
-function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
-                         writtenas::DataType, readas::Type)
+Base.@nospecializeinfer  function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
+                         @nospecialize(writtenas::DataType), @nospecialize(readas::Type))
     types = writtenas.types
     offsets = Int[]
     h5names = Symbol[]
@@ -186,7 +186,7 @@ function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
 end
 
 # Write an HDF5 datatype to the file
-function commit(f::JLDFile,
+Base.@nospecializeinfer function commit(f::JLDFile,
         @nospecialize(dtype),#::H5Datatype,
         @nospecialize(writeas::DataType),
         @nospecialize(readas::DataType),
