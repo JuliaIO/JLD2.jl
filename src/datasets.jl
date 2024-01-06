@@ -468,7 +468,7 @@ function payload_size_without_storage_message(dataspace::WriteDataspace, datatyp
 end
 
 
-Base.@nospecializeinfer function write_dataset(
+@nospecializeinfer function write_dataset(
         f::JLDFile,
         dataspace::WriteDataspace,
         datatype::H5Datatype,
@@ -541,7 +541,7 @@ Base.@nospecializeinfer function write_dataset(
     h5offset(f, header_offset)
 end
 
-@noinline Base.@nospecializeinfer function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, @nospecialize(odr), @nospecialize(data), wsession::JLDWriteSession)
+@nospecializeinfer function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, @nospecialize(odr), @nospecialize(data), wsession::JLDWriteSession)
     io = f.io
     datasz = (odr_sizeof(odr)::Int * numel(dataspace))
     psz = payload_size_without_storage_message(dataspace, datatype)
@@ -642,7 +642,7 @@ define_packed(ContiguousStorageMessage)
         4, LC_CONTIGUOUS_STORAGE, offset, datasz
     )
 
-@noinline Base.@nospecializeinfer function write_dataset(f::JLDFile, @nospecialize(x), wsession::JLDWriteSession)::RelOffset
+@nospecializeinfer function write_dataset(f::JLDFile, @nospecialize(x), wsession::JLDWriteSession)::RelOffset
     if ismutabletype(typeof(x)) && !isa(wsession, JLDWriteSession{Union{}})
         offset = get(wsession.h5offset, objectid(x), UNDEFINED_ADDRESS)
         offset != UNDEFINED_ADDRESS && return offset
