@@ -31,10 +31,10 @@ function read_compressed_array! end
 # Cutoff for using ordinary IO instead of copying into mmapped region
 const MMAP_CUTOFF = 1048576
 
-function read_scalar(f::JLDFile{MmapIO}, @nospecialize(rr), header_offset::RelOffset)
+function read_scalar(f::JLDFile{MmapIO}, @nospecialize(rr), header_offset::RelOffset)::Any
     io = f.io
     inptr = io.curptr
-    obj = jlconvert(rr, f, inptr, header_offset)::eltype(rr)
+    obj = jlconvert(rr, f, inptr, header_offset)
     io.curptr = inptr + odr_sizeof(rr)
     obj
 end
@@ -175,7 +175,7 @@ end
 # IOStream/BufferedWriter
 #
 
-function read_scalar(f::JLDFile{IOStream}, rr, header_offset::RelOffset)
+function read_scalar(f::JLDFile{IOStream}, rr, header_offset::RelOffset)::Any
     r = Vector{UInt8}(undef, odr_sizeof(rr))
     @GC.preserve r begin
         unsafe_read(f.io, pointer(r), odr_sizeof(rr))
