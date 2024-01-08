@@ -24,7 +24,7 @@ end
 odr_sizeof(::ReadRepresentation{T,S}) where {T,S} = odr_sizeof(S)
 
 # Determines whether a specific field type should be saved in the file
-@noinline function hasfielddata(@nospecialize(T), encounteredtypes=DataType[])
+function hasfielddata(@nospecialize(T), encounteredtypes=DataType[])::Bool
     T === Union{} && return false
     !isconcretetype(T) && return true
     T = T::DataType
@@ -35,7 +35,7 @@ odr_sizeof(::ReadRepresentation{T,S}) where {T,S} = odr_sizeof(S)
 end
 
 # Determines whether a specific type has fields that should be saved in the file
-function hasdata(T::DataType, encounteredtypes=DataType[])
+@nospecializeinfer function hasdata(@nospecialize(T::DataType), encounteredtypes=DataType[])::Bool
     isempty(T.types) && sizeof(T) != 0 && return true
     for ty in T.types
         hasfielddata(writeas(ty), copy(encounteredtypes)) && return true
@@ -50,7 +50,7 @@ function odr_sizeof(::OnDiskRepresentation{Offsets,JLTypes,H5Types,Size}) where 
 end
 
 # Determines whether a type will have the same layout on disk as in memory
-function samelayout(T::DataType)
+function samelayout(@nospecialize(T::DataType))::Bool
     isempty(T.types) && return true
     offset = 0
     for i = 1:length(T.types)
@@ -64,7 +64,7 @@ function samelayout(T::DataType)
 end
 samelayout(::Type) = false
 
-fieldnames(x::Type{T}) where {T<:Tuple} = [Symbol(i) for i = 1:length(x.types)]
+fieldnames(@nospecialize(x::Type{<:Tuple})) = [Symbol(i) for i = 1:length(x.types)]
 fieldnames(@nospecialize x) = collect(Base.fieldnames(x))
 
 const MAX_INLINE_SIZE = 2^10
@@ -89,8 +89,9 @@ end
 
 # h5fieldtype is fieldodr's HDF5 companion. It should give the HDF5
 # datatype reflecting the on-disk representation.
-function h5fieldtype(f::JLDFile, writeas::Type{T}, readas::Type,
-                                initialized::Initialized) where T
+@nospecializeinfer function h5fieldtype(f::JLDFile, @nospecialize(writeas), @nospecialize(readas::Type),
+                                initialized::Initialized)::Union{CommittedDatatype, H5Datatype, Nothing}
+    T = writeas
     if isconcretetype(T)
         if !hasfielddata(T)
             return nothing
@@ -113,7 +114,7 @@ end
 # almost always the on-disk representation of the type. The only
 # exception is strings, where the length is encoded in the datatype in
 # HDF5, but in the object in Julia.
-@inline function objodr(x)
+@nospecializeinfer function objodr(@nospecialize(x))
     writtenas = writeas(typeof(x))
     _odr(writtenas, typeof(x), odr(writtenas))
 end
@@ -124,7 +125,7 @@ _odr(writtenas::DataType, readas::DataType, odr) =
 # reflecting the on-disk representation
 #
 # Performance note: this should be inferable.
-function h5type(f::JLDFile, writtenas, x)
+@nospecializeinfer function h5type(f::JLDFile, @nospecialize(writtenas), @nospecialize(x))
     check_writtenas_type(writtenas)
     T = typeof(x)
     @lookup_committed f T
@@ -138,7 +139,7 @@ function h5type(f::JLDFile, writtenas, x)
 end
 check_writtenas_type(::DataType) = nothing
 check_writtenas_type(::Any) = throw(ArgumentError("writeas(leaftype) must return a leaf type"))
-h5type(f::JLDFile, x) = h5type(f, writeas(typeof(x)), x)
+h5type(f::JLDFile, @nospecialize(x)) = h5type(f, writeas(typeof(x)), x)
 
 # Make a compound datatype from a set of names and types
 @nospecializeinfer  function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
@@ -594,7 +595,7 @@ end
 # odr gives the on-disk representation of a given type, similar to
 # fieldodr, but actually encoding the data for things that odr stores
 # as references
-function odr(::Type{T}) where T
+@nospecializeinfer function odr(@nospecialize(T::Type))
     if !hasdata(T)
         # A pointer singleton or ghost. We need to write something, but we'll
         # just write a single byte.
