@@ -422,7 +422,7 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
             chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)                
             vchunk = Array{T, Int(ndims)}(undef, reverse(layout.chunk_dimensions)...)
             for chunk in chunks
-                cidx = chunk.idx::NTuple{ndims, Int}
+                cidx = chunk.idx::NTuple{Int(ndims), Int}
                 idx = reverse(cidx[1:end-1])
                 seek(io, fileoffset(f, chunk.offset))
                 indexview =  (:).(idx .+1, min.(idx .+ reverse(layout.chunk_dimensions), size(v)))
