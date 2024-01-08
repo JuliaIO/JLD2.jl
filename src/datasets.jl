@@ -290,8 +290,8 @@ end
 
 # Types with no payload can only be null dataspace
 function read_data(f::JLDFile,
-                   rr::Union{ReadRepresentation{T,nothing} where T,
-                             ReadRepresentation{T,CustomSerialization{S,nothing}} where {S,T}},
+                   @nospecialize(rr::Union{ReadRepresentation{T,nothing} where T,
+                             ReadRepresentation{T,CustomSerialization{S,nothing}} where {S,T}}),
                    read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,FilterPipeline},
                    attributes::Vector{ReadAttribute})
     dataspace, header_offset, layout, filters = read_dataspace
@@ -391,9 +391,10 @@ function construct_array(io::IO, ::Type{T}, ::Val{N})::Array{T,N} where {T,N}
 end
 
 function read_array(f::JLDFile, dataspace::ReadDataspace,
-                    rr::ReadRepresentation{T,RR}, layout::DataLayout,
+                    @nospecialize(rr::ReadRepresentation), layout::DataLayout,
                     filters::FilterPipeline, header_offset::RelOffset,
-                    attributes::Union{Vector{ReadAttribute},Nothing}) where {T,RR}
+                    attributes::Union{Vector{ReadAttribute},Nothing})
+    T = eltype(rr)
     io = f.io
     data_offset = layout.data_offset
     if !ischunked(layout) || (layout.chunk_indexing_type == 1)
@@ -421,7 +422,8 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
             chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)                
             vchunk = Array{T, Int(ndims)}(undef, reverse(layout.chunk_dimensions)...)
             for chunk in chunks
-                idx = reverse(chunk.idx[1:end-1])
+                cidx = chunkidx::NTuple{ndims, Int}
+                idx = reverse(cidx[1:end-1])
                 seek(io, fileoffset(f, chunk.offset))
                 indexview =  (:).(idx .+1, min.(idx .+ reverse(layout.chunk_dimensions), size(v)))
                 indexview2 = (:).(1, length.(indexview))
@@ -622,7 +624,7 @@ struct CompactStorageMessage
     data_size::UInt16
 end
 define_packed(CompactStorageMessage)
-@inline CompactStorageMessage(datasz::Int) =
+CompactStorageMessage(datasz::Int) =
     CompactStorageMessage(
             HeaderMessage(HM_DATA_LAYOUT, jlsizeof(CompactStorageMessage) - jlsizeof(HeaderMessage) + datasz, 0),
             4, LC_COMPACT_STORAGE, datasz
@@ -636,7 +638,7 @@ struct ContiguousStorageMessage
     data_size::Length
 end
 define_packed(ContiguousStorageMessage)
-@inline ContiguousStorageMessage(datasz::Int, offset::RelOffset) =
+ContiguousStorageMessage(datasz::Int, offset::RelOffset) =
     ContiguousStorageMessage(
         HeaderMessage(HM_DATA_LAYOUT, jlsizeof(ContiguousStorageMessage) - jlsizeof(HeaderMessage), 0),
         4, LC_CONTIGUOUS_STORAGE, offset, datasz

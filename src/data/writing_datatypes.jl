@@ -273,7 +273,7 @@ jlconvert_canbeuninitialized(::Any) = false
 
 # jlconvert converts data from a pointer into a Julia object. This method
 # handles types where this is just a simple load
-@inline jlconvert(::ReadRepresentation{T,T}, ::JLDFile, ptr::Ptr,
+jlconvert(::ReadRepresentation{T,T}, ::JLDFile, ptr::Ptr,
                   ::RelOffset) where {T} =
     jlunsafe_load(pconvert(Ptr{T}, ptr))
 
@@ -293,7 +293,7 @@ Base.showerror(io::IO, x::UndefinedFieldException) =
 h5type(::JLDFile, ::Type{RelOffset}, ::RelOffset) = ReferenceDatatype()
 odr(::Type{RelOffset}) = RelOffset
 
-@inline function h5convert!(out::Pointers, odr::Type{RelOffset}, f::JLDFile, x::Any,
+function h5convert!(out::Pointers, odr::Type{RelOffset}, f::JLDFile, x::Any,
                             wsession::JLDWriteSession)
     ref = write_ref(f, x, wsession)
     jlunsafe_store!(pconvert(Ptr{RelOffset}, out), ref)
@@ -309,7 +309,7 @@ jlconvert(::ReadRepresentation{RelOffset,RelOffset}, f::JLDFile, ptr::Ptr,
 jlconvert_canbeuninitialized(::ReadRepresentation{RelOffset,RelOffset}) = false
 
 # Reading references as other types
-@inline function jlconvert(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr,
+function jlconvert(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr,
                            ::RelOffset) where T
     x = load_dataset(f, jlunsafe_load(pconvert(Ptr{RelOffset}, ptr)))
     (isa(x, T) ? x : rconvert(T, x))::T
@@ -322,7 +322,7 @@ jlconvert_isinitialized(::ReadRepresentation{T,RelOffset}, ptr::Ptr) where {T} =
 ## Routines for variable-length datatypes
 
 # Write variable-length data and store the offset and length to out pointer
-@inline function store_vlen!(out::Pointers, odr, f::JLDFile, x::AbstractVector,
+function store_vlen!(out::Pointers, odr, f::JLDFile, x::AbstractVector,
                              wsession::JLDWriteSession)
     jlunsafe_store!(pconvert(Ptr{UInt32}, out), length(x))
     obj = write_heap_object(f, odr, x, wsession)
@@ -565,8 +565,9 @@ end
 
 
 # jlconvert for empty objects
-function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
-                              header_offset::RelOffset) where T
+function jlconvert(@nospecialize(rr::ReadRepresentation{T,nothing} where T), f::JLDFile, ptr::Ptr,
+                              header_offset::RelOffset)::eltype(rr)
+    T = eltype(rr)
     sizeof(T) == 0 && return newstruct(T)::T
 
     # In this case, T is a non-empty object, but the written data was empty

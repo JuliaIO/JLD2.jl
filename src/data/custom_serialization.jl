@@ -18,20 +18,20 @@ CustomSerialization(::Type{WrittenAs}, ::Type{ReadAs}, odr) where {WrittenAs,Rea
 odr_sizeof(::Type{CustomSerialization{T,ODR}}) where {T,ODR} = odr_sizeof(ODR)
 
 # Usually we want to convert the object and then write it.
-@inline h5convert!(out::Pointers, ::Type{CustomSerialization{T,ODR}}, f::JLDFile,
+h5convert!(out::Pointers, ::Type{CustomSerialization{T,ODR}}, f::JLDFile,
                    x, wsession::JLDWriteSession) where {T,ODR} =
     h5convert!(out, ODR, f, wconvert(T, x)::T, wsession)
 
 # When writing as a reference, we don't want to convert the object first. That
 # should happen automatically after write_dataset is called so that the written
 # object gets the right written_type attribute.
-@inline h5convert!(out::Pointers, odr::Type{CustomSerialization{T,RelOffset}},
+h5convert!(out::Pointers, odr::Type{CustomSerialization{T,RelOffset}},
                    f::JLDFile, x, wsession::JLDWriteSession) where {T} =
     h5convert!(out, RelOffset, f, x, wsession)
 
 # When writing as a reference to something that's being custom-serialized as an
 # array, we have to convert the object first.
-@inline h5convert!(out::Pointers, odr::Type{CustomSerialization{T,RelOffset}},
+h5convert!(out::Pointers, odr::Type{CustomSerialization{T,RelOffset}},
             f::JLDFile, x, wsession::JLDWriteSession) where {T<:Array} =
     h5convert!(out, RelOffset, f, wconvert(T, x)::T, wsession)
 

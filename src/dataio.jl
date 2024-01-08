@@ -31,15 +31,15 @@ function read_compressed_array! end
 # Cutoff for using ordinary IO instead of copying into mmapped region
 const MMAP_CUTOFF = 1048576
 
-@inline function read_scalar(f::JLDFile{MmapIO}, rr, header_offset::RelOffset)
+function read_scalar(f::JLDFile{MmapIO}, @nospecialize(rr), header_offset::RelOffset)
     io = f.io
     inptr = io.curptr
-    obj = jlconvert(rr, f, inptr, header_offset)
+    obj = jlconvert(rr, f, inptr, header_offset)::eltype(rr)
     io.curptr = inptr + odr_sizeof(rr)
     obj
 end
 
-@inline function read_array!(v::Array{T}, f::JLDFile{MmapIO},
+function read_array!(v::Array{T}, f::JLDFile{MmapIO},
                              rr::ReadRepresentation{T,T}) where T
     io = f.io
     inptr = io.curptr
@@ -60,7 +60,7 @@ end
     v
 end
 
-@inline function read_array!(v::Array{T}, f::JLDFile{MmapIO},
+function read_array!(v::Array{T}, f::JLDFile{MmapIO},
                              rr::ReadRepresentation{T,RR}) where {T,RR}
     io = f.io
     inptr = io.curptr
@@ -175,7 +175,7 @@ end
 # IOStream/BufferedWriter
 #
 
-@inline function read_scalar(f::JLDFile{IOStream}, rr, header_offset::RelOffset)
+function read_scalar(f::JLDFile{IOStream}, rr, header_offset::RelOffset)
     r = Vector{UInt8}(undef, odr_sizeof(rr))
     @GC.preserve r begin
         unsafe_read(f.io, pointer(r), odr_sizeof(rr))
@@ -184,13 +184,13 @@ end
 end
 
 
-@inline function read_array!(v::Array{T}, f::JLDFile{IOStream},
+function read_array!(v::Array{T}, f::JLDFile{IOStream},
                              rr::ReadRepresentation{T,T}) where T
     unsafe_read(f.io, pointer(v), odr_sizeof(T)*length(v))
     v
 end
 
-@inline function read_array!(v::Array{T}, f::JLDFile{IOStream},
+function read_array!(v::Array{T}, f::JLDFile{IOStream},
                              rr::ReadRepresentation{T,RR}) where {T,RR}
     n = length(v)
     nb = odr_sizeof(RR)*n
