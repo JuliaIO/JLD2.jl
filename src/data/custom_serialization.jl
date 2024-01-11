@@ -7,7 +7,16 @@ writeas(T::Type) = T
 # respectively. These fall back to convert.
 wconvert(T, x) = convert(T, x)
 rconvert(T, x) = convert(T, x)
-rconvert(::Type{Array{T,N}}, x::Array{T2,N}) where {T, T2, N} = T[rconvert(T, y) for y in x] 
+rconvert(::Type{Array{T,N}}, x::Array{T,N}) where {T,N} = x
+function rconvert(::Type{Array{T,N}}, x::Array{T2,N}) where {T, T2, N}
+    res = Array{T,N}(undef, size(x)...)
+    for i in eachindex(x)
+        if isassigned(x, i)
+            res[i] = rconvert(T, x[i])
+        end
+    end
+    res
+end
 
 # Select an ODR, incorporating custom serialization only if the types do not
 # match
@@ -46,7 +55,7 @@ jlconvert_isinitialized(::ReadRepresentation{T,CustomSerialization{S,ODR}}, ptr:
 
 function jlconvert(::ReadRepresentation{T,CustomSerialization{S,ODR}},
           f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T,S,ODR}
-    
+
     if ismutabletype(T) && !(T <: Core.SimpleVector)
         # May encounter a self-referential struct that used custom serialization
         # provide an uninitialized struct and later fill it with values

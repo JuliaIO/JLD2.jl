@@ -526,7 +526,7 @@ See also typestring.
 """
 function shorttypestring(::Type{UnknownType{T, P}}) where {T, P}
     tn = IOBuffer()
-    print(tn, T isa Symbol ? split(string(T),'.')[end] : T.name)
+    print(tn, T isa Symbol ? split(string(T),'.')[end] : T)
     params = P.parameters
     if !isempty(params)
         write(tn, '{')
@@ -566,14 +566,14 @@ function constructrr(f::JLDFile, unk::Type{UnknownType{T,P}}, dt::CompoundDataty
         else
             @warn("read type $(typestring(unk)) was parametrized, but type " *
             "$(T) in workspace is not; reconstructing")
-            
+
         end
     elseif T isa UnionAll
         body = behead(T)
         if length(body.parameters) != length(P.parameters)
-            @warn("read type $(typestring(T)) has a different number of parameters from type " *
+            @warn("read type $(T) has a different number of parameters from type " *
                 "$(T) in workspace; reconstructing")
-            reconstruct_compound(f, typestring(T), dt, field_datatypes)
+            reconstruct_compound(f, string(T), dt, field_datatypes)
         else
             params = [P.parameters...,]
             for i = 1:length(params)
