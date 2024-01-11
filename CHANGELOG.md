@@ -1,4 +1,7 @@
-## 0.4.42 
+## 0.4.43
+ - do not try to `rconvert` `#undef` array elements (#529)
+
+## 0.4.42
  - improvements in time-to-first save/load on julia v1.10 and up
  - discourage from using custom serialization to `Array` and stop using it internally
  as it cannot properly preserve object identity.
