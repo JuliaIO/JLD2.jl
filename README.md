@@ -142,6 +142,13 @@ or using slashes as path delimiters:
 @assert load("example.jld2", "mygroup/mystuff") == 42
 ```
 
+When loading files with nested groups these will be unrolled into paths by default but
+yield nested dictionaries but with the `nested` keyword argument.
+```julia
+load("example.jld2") # -> Dict("mygroup/mystuff" => 42)
+load("example.jld2"; nested=true) # -> Dict("mygroup" => Dict("mystuff" => 42))
+```
+
 ### Custom Serialization
 
 The API is simple enough, to enable custom serialization for your type `A` you define
