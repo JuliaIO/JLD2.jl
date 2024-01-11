@@ -2,7 +2,7 @@
 
 | **Documentation**   |  **Tests**     | **CodeCov**  | **Downloads** |
 |:--------:|:---------------:|:-------:|:---:|
-|[![](https://img.shields.io/badge/docs-online-blue.svg)](https://JuliaIO.github.io/JLD2.jl/dev)| [![CI](https://github.com/juliaio/JLD2.jl/workflows/CI/badge.svg?branch=master)](https://github.com/JuliaIO/JLD2.jl/actions) | [![codecov.io](https://codecov.io/github/JuliaIO/JLD2.jl/coverage.svg?branch=master)](https://codecov.io/github/JuliaIO/JLD2.jl?branch=master) | [![JLD2 Downloads](https://shields.io/endpoint?url=https://pkgs.genieframework.com/api/v1/badge/JLD2)](https://pkgs.genieframework.com?packages=JLD2) |
+|[![](https://img.shields.io/badge/docs-online-blue.svg)](https://JuliaIO.github.io/JLD2.jl/dev)| [![CI](https://github.com/JuliaIO/JLD2.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/JuliaIO/JLD2.jl/actions/workflows/ci.yml) | [![codecov.io](https://codecov.io/github/JuliaIO/JLD2.jl/coverage.svg?branch=master)](https://codecov.io/github/JuliaIO/JLD2.jl?branch=master) | [![JLD2 Downloads](https://shields.io/endpoint?url=https://pkgs.genieframework.com/api/v1/badge/JLD2)](https://pkgs.genieframework.com?packages=JLD2) |
 
 JLD2 saves and loads Julia data structures in a format comprising a subset of HDF5, without any dependency on the HDF5 C library. 
 JLD2 is able to read most HDF5 files created by other HDF5 implementations supporting HDF5 File Format Specification Version 3.0 (i.e. libhdf5 1.10 or later) and similarly those should be able to read the files that JLD2 produces. JLD2 provides read-only support for files created with the JLD package.
@@ -140,6 +140,13 @@ or using slashes as path delimiters:
 
 ```julia
 @assert load("example.jld2", "mygroup/mystuff") == 42
+```
+
+When loading files with nested groups these will be unrolled into paths by default but
+yield nested dictionaries but with the `nested` keyword argument.
+```julia
+load("example.jld2") # -> Dict("mygroup/mystuff" => 42)
+load("example.jld2"; nested=true) # -> Dict("mygroup" => Dict("mystuff" => 42))
 ```
 
 ### Custom Serialization
