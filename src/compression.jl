@@ -209,7 +209,7 @@ function deflate_data(f::JLDFile, data::Array{T}, odr::S, wsession::JLDWriteSess
 end
 
 
-@inline chunked_storage_message_size(ndims::Int) =
+chunked_storage_message_size(ndims::Int) =
     jlsizeof(HeaderMessage) + 5 + (ndims+1)*jlsizeof(Length) + 1 + jlsizeof(Length) + 4 + jlsizeof(RelOffset)
 
 

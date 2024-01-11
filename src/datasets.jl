@@ -290,8 +290,8 @@ end
 
 # Types with no payload can only be null dataspace
 function read_data(f::JLDFile,
-                   rr::Union{ReadRepresentation{T,nothing} where T,
-                             ReadRepresentation{T,CustomSerialization{S,nothing}} where {S,T}},
+                   @nospecialize(rr::Union{ReadRepresentation{T,nothing} where T,
+                             ReadRepresentation{T,CustomSerialization{S,nothing}} where {S,T}}),
                    read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,FilterPipeline},
                    attributes::Vector{ReadAttribute})
     dataspace, header_offset, layout, filters = read_dataspace
@@ -391,9 +391,10 @@ function construct_array(io::IO, ::Type{T}, ::Val{N})::Array{T,N} where {T,N}
 end
 
 function read_array(f::JLDFile, dataspace::ReadDataspace,
-                    rr::ReadRepresentation{T,RR}, layout::DataLayout,
+                    @nospecialize(rr::ReadRepresentation), layout::DataLayout,
                     filters::FilterPipeline, header_offset::RelOffset,
-                    attributes::Union{Vector{ReadAttribute},Nothing}) where {T,RR}
+                    attributes::Union{Vector{ReadAttribute},Nothing})
+    T = eltype(rr)
     io = f.io
     data_offset = layout.data_offset
     if !ischunked(layout) || (layout.chunk_indexing_type == 1)
@@ -421,7 +422,8 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
             chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)                
             vchunk = Array{T, Int(ndims)}(undef, reverse(layout.chunk_dimensions)...)
             for chunk in chunks
-                idx = reverse(chunk.idx[1:end-1])
+                cidx = chunk.idx::NTuple{Int(ndims+1), Int}
+                idx = reverse(cidx[1:end-1])
                 seek(io, fileoffset(f, chunk.offset))
                 indexview =  (:).(idx .+1, min.(idx .+ reverse(layout.chunk_dimensions), size(v)))
                 indexview2 = (:).(1, length.(indexview))
@@ -468,15 +470,16 @@ function payload_size_without_storage_message(dataspace::WriteDataspace, datatyp
 end
 
 
-function write_dataset(
+@nospecializeinfer function write_dataset(
         f::JLDFile,
         dataspace::WriteDataspace,
         datatype::H5Datatype,
-        odr::S,
-        data::Array{T},
+        @nospecialize(odr),
+        @nospecialize(data::Array),
         wsession::JLDWriteSession,
-        compress = f.compress,
-        ) where {T,S}
+        @nospecialize(compress = f.compress),
+        )
+    T = eltype(data)
     io = f.io
     datasz = odr_sizeof(odr)::Int * numel(dataspace)::Int
     #layout_class
@@ -540,7 +543,7 @@ function write_dataset(
     h5offset(f, header_offset)
 end
 
-function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, odr::S, data, wsession::JLDWriteSession) where S
+@nospecializeinfer function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, @nospecialize(odr), @nospecialize(data), wsession::JLDWriteSession)
     io = f.io
     datasz = (odr_sizeof(odr)::Int * numel(dataspace))
     psz = payload_size_without_storage_message(dataspace, datatype)
@@ -621,7 +624,7 @@ struct CompactStorageMessage
     data_size::UInt16
 end
 define_packed(CompactStorageMessage)
-@inline CompactStorageMessage(datasz::Int) =
+CompactStorageMessage(datasz::Int) =
     CompactStorageMessage(
             HeaderMessage(HM_DATA_LAYOUT, jlsizeof(CompactStorageMessage) - jlsizeof(HeaderMessage) + datasz, 0),
             4, LC_COMPACT_STORAGE, datasz
@@ -635,13 +638,13 @@ struct ContiguousStorageMessage
     data_size::Length
 end
 define_packed(ContiguousStorageMessage)
-@inline ContiguousStorageMessage(datasz::Int, offset::RelOffset) =
+ContiguousStorageMessage(datasz::Int, offset::RelOffset) =
     ContiguousStorageMessage(
         HeaderMessage(HM_DATA_LAYOUT, jlsizeof(ContiguousStorageMessage) - jlsizeof(HeaderMessage), 0),
         4, LC_CONTIGUOUS_STORAGE, offset, datasz
     )
 
-function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
+@nospecializeinfer function write_dataset(f::JLDFile, @nospecialize(x), wsession::JLDWriteSession)::RelOffset
     if ismutabletype(typeof(x)) && !isa(wsession, JLDWriteSession{Union{}})
         offset = get(wsession.h5offset, objectid(x), UNDEFINED_ADDRESS)
         offset != UNDEFINED_ADDRESS && return offset
@@ -650,7 +653,7 @@ function write_dataset(f::JLDFile, x, wsession::JLDWriteSession)
     write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)::RelOffset
 end
 
-write_ref(f::JLDFile, x, wsession::JLDWriteSession) = write_dataset(f, x, wsession)::RelOffset
+write_ref(f::JLDFile, @nospecialize(x), wsession::JLDWriteSession) = write_dataset(f, x, wsession)::RelOffset
 write_ref(f::JLDFile, x::RelOffset, wsession::JLDWriteSession) = x
 
 Base.delete!(f::JLDFile, x::AbstractString) = delete!(f.root_group, x)

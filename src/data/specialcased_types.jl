@@ -202,7 +202,8 @@ h5fieldtype(::JLDFile, ::Type{T}, ::Type{T}, ::Initialized) where {T<:Array} =
     ReferenceDatatype()
 fieldodr(::Type{T}, ::Bool) where {T<:Array} = RelOffset
 
-@inline function odr(::Type{Array{T,N}}) where {T,N}
+function odr(A::Type{<:Array})
+    T = eltype(A)
     writtenas = writeas(T)
     CustomSerialization(writtenas, T, fieldodr(writtenas, false))
 end

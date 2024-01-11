@@ -24,7 +24,7 @@ end
 odr_sizeof(::ReadRepresentation{T,S}) where {T,S} = odr_sizeof(S)
 
 # Determines whether a specific field type should be saved in the file
-@noinline function hasfielddata(@nospecialize(T), encounteredtypes=DataType[])
+function hasfielddata(@nospecialize(T), encounteredtypes=DataType[])::Bool
     T === Union{} && return false
     !isconcretetype(T) && return true
     T = T::DataType
@@ -35,7 +35,7 @@ odr_sizeof(::ReadRepresentation{T,S}) where {T,S} = odr_sizeof(S)
 end
 
 # Determines whether a specific type has fields that should be saved in the file
-function hasdata(T::DataType, encounteredtypes=DataType[])
+@nospecializeinfer function hasdata(@nospecialize(T::DataType), encounteredtypes=DataType[])::Bool
     isempty(T.types) && sizeof(T) != 0 && return true
     for ty in T.types
         hasfielddata(writeas(ty), copy(encounteredtypes)) && return true
@@ -50,7 +50,7 @@ function odr_sizeof(::OnDiskRepresentation{Offsets,JLTypes,H5Types,Size}) where 
 end
 
 # Determines whether a type will have the same layout on disk as in memory
-function samelayout(T::DataType)
+function samelayout(@nospecialize(T::DataType))::Bool
     isempty(T.types) && return true
     offset = 0
     for i = 1:length(T.types)
@@ -64,7 +64,7 @@ function samelayout(T::DataType)
 end
 samelayout(::Type) = false
 
-fieldnames(x::Type{T}) where {T<:Tuple} = [Symbol(i) for i = 1:length(x.types)]
+fieldnames(@nospecialize(x::Type{<:Tuple})) = [Symbol(i) for i = 1:length(x.types)]
 fieldnames(@nospecialize x) = collect(Base.fieldnames(x))
 
 const MAX_INLINE_SIZE = 2^10
@@ -89,8 +89,9 @@ end
 
 # h5fieldtype is fieldodr's HDF5 companion. It should give the HDF5
 # datatype reflecting the on-disk representation.
-function h5fieldtype(f::JLDFile, writeas::Type{T}, readas::Type,
-                                initialized::Initialized) where T
+@nospecializeinfer function h5fieldtype(f::JLDFile, @nospecialize(writeas), @nospecialize(readas::Type),
+                                initialized::Initialized)::Union{CommittedDatatype, H5Datatype, Nothing}
+    T = writeas
     if isconcretetype(T)
         if !hasfielddata(T)
             return nothing
@@ -113,7 +114,7 @@ end
 # almost always the on-disk representation of the type. The only
 # exception is strings, where the length is encoded in the datatype in
 # HDF5, but in the object in Julia.
-@inline function objodr(x)
+@nospecializeinfer function objodr(@nospecialize(x))
     writtenas = writeas(typeof(x))
     _odr(writtenas, typeof(x), odr(writtenas))
 end
@@ -124,7 +125,7 @@ _odr(writtenas::DataType, readas::DataType, odr) =
 # reflecting the on-disk representation
 #
 # Performance note: this should be inferable.
-function h5type(f::JLDFile, writtenas, x)
+@nospecializeinfer function h5type(f::JLDFile, @nospecialize(writtenas), @nospecialize(x))
     check_writtenas_type(writtenas)
     T = typeof(x)
     @lookup_committed f T
@@ -138,11 +139,11 @@ function h5type(f::JLDFile, writtenas, x)
 end
 check_writtenas_type(::DataType) = nothing
 check_writtenas_type(::Any) = throw(ArgumentError("writeas(leaftype) must return a leaf type"))
-h5type(f::JLDFile, x) = h5type(f, writeas(typeof(x)), x)
+h5type(f::JLDFile, @nospecialize(x)) = h5type(f, writeas(typeof(x)), x)
 
 # Make a compound datatype from a set of names and types
-function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
-                         writtenas::DataType, readas::Type)
+@nospecializeinfer  function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
+                         @nospecialize(writtenas::DataType), @nospecialize(readas::Type))
     types = writtenas.types
     offsets = Int[]
     h5names = Symbol[]
@@ -186,7 +187,7 @@ function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
 end
 
 # Write an HDF5 datatype to the file
-function commit(f::JLDFile,
+@nospecializeinfer function commit(f::JLDFile,
         @nospecialize(dtype),#::H5Datatype,
         @nospecialize(writeas::DataType),
         @nospecialize(readas::DataType),
@@ -272,7 +273,7 @@ jlconvert_canbeuninitialized(::Any) = false
 
 # jlconvert converts data from a pointer into a Julia object. This method
 # handles types where this is just a simple load
-@inline jlconvert(::ReadRepresentation{T,T}, ::JLDFile, ptr::Ptr,
+jlconvert(::ReadRepresentation{T,T}, ::JLDFile, ptr::Ptr,
                   ::RelOffset) where {T} =
     jlunsafe_load(pconvert(Ptr{T}, ptr))
 
@@ -292,7 +293,7 @@ Base.showerror(io::IO, x::UndefinedFieldException) =
 h5type(::JLDFile, ::Type{RelOffset}, ::RelOffset) = ReferenceDatatype()
 odr(::Type{RelOffset}) = RelOffset
 
-@inline function h5convert!(out::Pointers, odr::Type{RelOffset}, f::JLDFile, x::Any,
+function h5convert!(out::Pointers, odr::Type{RelOffset}, f::JLDFile, x::Any,
                             wsession::JLDWriteSession)
     ref = write_ref(f, x, wsession)
     jlunsafe_store!(pconvert(Ptr{RelOffset}, out), ref)
@@ -308,7 +309,7 @@ jlconvert(::ReadRepresentation{RelOffset,RelOffset}, f::JLDFile, ptr::Ptr,
 jlconvert_canbeuninitialized(::ReadRepresentation{RelOffset,RelOffset}) = false
 
 # Reading references as other types
-@inline function jlconvert(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr,
+function jlconvert(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr,
                            ::RelOffset) where T
     x = load_dataset(f, jlunsafe_load(pconvert(Ptr{RelOffset}, ptr)))
     (isa(x, T) ? x : rconvert(T, x))::T
@@ -321,7 +322,7 @@ jlconvert_isinitialized(::ReadRepresentation{T,RelOffset}, ptr::Ptr) where {T} =
 ## Routines for variable-length datatypes
 
 # Write variable-length data and store the offset and length to out pointer
-@inline function store_vlen!(out::Pointers, odr, f::JLDFile, x::AbstractVector,
+function store_vlen!(out::Pointers, odr, f::JLDFile, x::AbstractVector,
                              wsession::JLDWriteSession)
     jlunsafe_store!(pconvert(Ptr{UInt32}, out), length(x))
     obj = write_heap_object(f, odr, x, wsession)
@@ -564,8 +565,9 @@ end
 
 
 # jlconvert for empty objects
-function jlconvert(::ReadRepresentation{T,nothing}, f::JLDFile, ptr::Ptr,
-                              header_offset::RelOffset) where T
+function jlconvert(@nospecialize(rr::ReadRepresentation{T,nothing} where T), f::JLDFile, ptr::Ptr,
+                              header_offset::RelOffset)::eltype(rr)
+    T = eltype(rr)
     sizeof(T) == 0 && return newstruct(T)::T
 
     # In this case, T is a non-empty object, but the written data was empty
@@ -594,7 +596,7 @@ end
 # odr gives the on-disk representation of a given type, similar to
 # fieldodr, but actually encoding the data for things that odr stores
 # as references
-function odr(::Type{T}) where T
+@nospecializeinfer function odr(@nospecialize(T::Type))
     if !hasdata(T)
         # A pointer singleton or ghost. We need to write something, but we'll
         # just write a single byte.

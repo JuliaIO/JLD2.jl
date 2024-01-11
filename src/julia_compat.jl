@@ -21,3 +21,11 @@ else
         fieldcount(T) - T.name.n_uninitialized
     end
 end
+
+@static if VERSION < v"1.10.0"
+    macro nospecializeinfer(exp)
+        esc(exp)
+    end
+else
+    using Base: @nospecializeinfer
+end

@@ -32,7 +32,8 @@ function writeasbits(T::Union)
     length(types) == 2 && isbitstype(types[1]) && isbitstype(types[2])
 end
 
-function write_dataset(f::JLDFile, x::Array{T}, wsession::JLDWriteSession, compress=f.compress) where {T}
+@nospecializeinfer function write_dataset(f::JLDFile, @nospecialize(x::Array), wsession::JLDWriteSession, @nospecialize(compress=f.compress))
+    T = eltype(x)
     if !isa(wsession, JLDWriteSession{Union{}})
         offset = get(wsession.h5offset, objectid(x), UNDEFINED_ADDRESS)
         offset != UNDEFINED_ADDRESS && return offset

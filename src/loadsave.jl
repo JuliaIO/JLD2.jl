@@ -149,13 +149,14 @@ macro load(filename, vars...)
     end
 end
 
-function loadtodict!(d::Dict, g::Union{JLDFile,Group}, prefix::String="")
+
+function loadtodict!(d::Dict, g::Union{JLDFile, Group}, prefix::String="")
     for k in keys(g)
         v = g[k]
         if v isa Group
-            loadtodict!(d, v, prefix*k*"/")
+            loadtodict!(d, g[k], prefix*k*"/")
         else
-            d[prefix*k] = v
+            d[prefix*k] = g[k]
         end
     end
     return d
@@ -243,7 +244,9 @@ end
 
 
 """
-    jldsave(filename, compress=false; kwargs...)
+    jldsave(filename; kwargs...)
+    jldsave(filename, compress; kwargs...)
+    jldsave(filename, compress, iotype; kwargs...)
 
 Creates a JLD2 file at `filename` and stores the variables given as keyword arguments.
 
@@ -263,14 +266,19 @@ is equivalent to
 To choose the io type `IOStream` instead of the default `MmapIO` use 
 `jldsave(fn, IOStream; kwargs...)`.
 """
-function jldsave(filename::AbstractString, compress=false, iotype::T=DEFAULT_IOTYPE; 
+function jldsave(filename::AbstractString, compress=false, iotype::Union{Type{IOStream},Type{MmapIO}}=DEFAULT_IOTYPE; 
                     kwargs...
-                    ) where T<:Union{Type{IOStream},Type{MmapIO}}
-    jldopen(filename, "w"; compress=compress, iotype=iotype) do f
+                    )
+    f = jldopen(filename, "w"; compress, iotype)
+    try
         wsession = JLDWriteSession()
         for (k,v) in pairs(kwargs)
             write(f, string(k), v, wsession)
         end
+    catch e 
+        throw(e)
+    finally
+        close(f)
     end
 end
 
