@@ -1,3 +1,6 @@
+## 0.4.44
+ - fix dispatch around `Union{}` as type parameter
+
 ## 0.4.43
  - do not try to `rconvert` `#undef` array elements (#529)
 
