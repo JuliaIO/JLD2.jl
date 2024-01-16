@@ -732,3 +732,11 @@ end
         @test load(fn, "b/d") == Dict("e" => 3, "f" => Dict("g"=> 4))
     end
 end
+
+@testset "Union{} in type signature Issue #532" begin
+    cd(mktempdir()) do 
+        op = (1, pairs((;)))
+        jldsave("testopempty.jld2"; op)
+        @test op == load("testopempty.jld2", "op")
+    end
+end
