@@ -330,6 +330,7 @@ end
 
 isunknowntype(x::Type{<:UnknownType}) = true
 isunknowntype(x) = false
+isunknowntype(::Type{Union{}}) = false
 
 function _resolve_type(rr::ReadRepresentation{T,DataTypeODR()},
                        f::JLDFile,
@@ -475,6 +476,7 @@ end
 isreconstructed(x) = isreconstructed(typeof(x))
 isreconstructed(x::Type{<:AbstractReconstructedType}) = true
 isreconstructed(x::Type) = false
+isreconstructed(x::Type{Union{}}) = false
 
 function reconstruct_bitstype(name::Union{Symbol,String}, size::Integer, empty::Bool)
     if empty
