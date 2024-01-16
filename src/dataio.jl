@@ -60,8 +60,8 @@ function read_array!(v::Array{T}, f::JLDFile{MmapIO},
     v
 end
 
-function read_array!(v::Array{T}, f::JLDFile{MmapIO},
-                             rr::ReadRepresentation{T,RR}) where {T,RR}
+function read_array!(v::Array{T}, f::JLDFile{IO},
+                             rr::ReadRepresentation{T,RR}) where {T,RR, IO<:Union{MmapIO,ReadOnlyBuffer}}
     io = f.io
     inptr = io.curptr
     n = length(v)
@@ -184,14 +184,14 @@ function read_scalar(f::JLDFile{IOStream}, rr, header_offset::RelOffset)::Any
 end
 
 
-function read_array!(v::Array{T}, f::JLDFile{IOStream},
-                             rr::ReadRepresentation{T,T}) where T
+function read_array!(v::Array{T}, f::JLDFile{IO},
+                             rr::ReadRepresentation{T,T}) where {T, IO<:Union{IOStream,RWBuffer}}
     unsafe_read(f.io, pointer(v), odr_sizeof(T)*length(v))
     v
 end
 
-function read_array!(v::Array{T}, f::JLDFile{IOStream},
-                             rr::ReadRepresentation{T,RR}) where {T,RR}
+function read_array!(v::Array{T}, f::JLDFile{IO},
+                             rr::ReadRepresentation{T,RR}) where {T,RR,IO<:Union{IOStream,RWBuffer}}
     n = length(v)
     nb = odr_sizeof(RR)*n
     io = f.io

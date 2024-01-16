@@ -227,11 +227,11 @@ function decompress!(io::IOStream, data_length, element_size, n, decompressor)
     read!(TranscodingStreams.TranscodingStream(decompressor, io), Vector{UInt8}(undef, element_size*n))
 end
 
-function read_compressed_array!(v::Array{T}, f::JLDFile{MmapIO},
+function read_compressed_array!(v::Array{T}, f::JLDFile{IO},
                                 rr::ReadRepresentation{T,RR},
                                 data_length::Integer,
                                 filters
-                                ) where {T,RR}
+                                ) where {T,RR, IO<:Union{MmapIO, ReadOnlyBuffer}}
 
     invoke_again, decompressors = get_decompressor(filters)
     if invoke_again
@@ -272,6 +272,39 @@ function read_compressed_array!(v::Array{T}, f::JLDFile{IOStream},
     n = length(v)
     element_size = odr_sizeof(RR)
     data = decompress!(io, data_length, element_size, n, decompressors[end])
+    if length(decompressors) > 1 
+        for decompressor in decompressors[end-1:-1:1]
+            data = decompress!(data, length(data), element_size, n, decompressor)
+        end
+    end
+    @simd for i = 1:n
+        dataptr = Ptr{Cvoid}(pointer(data, odr_sizeof(RR)*(i-1)+1))
+        if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
+            @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
+        end
+    end
+    seek(io, data_offset + data_length)
+    v
+end
+
+
+function read_compressed_array!(v::Array{T}, f::JLDFile{IO},
+                                rr::ReadRepresentation{T,RR},
+                                data_length::Integer,
+                                filters,
+                                ) where {T,RR, IO<:RWBuffer}
+    invoke_again, decompressors = get_decompressor(filters)
+    if invoke_again
+        return Base.invokelatest(read_compressed_array!, v, f, rr, data_length, filters)::typeof(v)
+    end
+
+    io = f.io
+    data_offset = position(io)
+    n = length(v)
+    element_size = odr_sizeof(RR)
+    buf = read!(io, Vector{UInt8}(undef, data_length))
+
+    data = decompress!(pointer(buf), data_length, element_size, n, decompressors[end])
     if length(decompressors) > 1 
         for decompressor in decompressors[end-1:-1:1]
             data = decompress!(data, length(data), element_size, n, decompressor)
