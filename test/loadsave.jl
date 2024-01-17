@@ -740,3 +740,13 @@ end
         @test op == load("testopempty.jld2", "op")
     end
 end
+
+@testset "Issue #536 reading directly after writing" begin
+    cd(mktempdir()) do 
+        x = (1, Dict(2=>3))
+        jldopen("test.jld2", "w") do f
+            f["x"] = x
+            @test x == f["x"]
+        end
+    end
+end
