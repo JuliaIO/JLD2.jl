@@ -52,6 +52,13 @@ jlconvert_canbeuninitialized(::ReadRepresentation{T,CustomSerialization{S,ODR}})
 jlconvert_isinitialized(::ReadRepresentation{T,CustomSerialization{S,ODR}}, ptr::Ptr) where {T,S,ODR} =
     jlconvert_isinitialized(ReadRepresentation{S,ODR}(), ptr)
 
+function jlconvert(::ReadRepresentation{T,CustomSerialization{S,RelOffset}},
+        f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T,S}
+    # Concerns objects whose custom serialization is itself only referenced by a RelOffset
+    # This be important when the original object is mutable
+    offset = jlunsafe_load(pconvert(Ptr{RelOffset}, ptr))
+    return rconvert(T, load_dataset(f, offset))
+end
 
 function jlconvert(::ReadRepresentation{T,CustomSerialization{S,ODR}},
           f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T,S,ODR}
