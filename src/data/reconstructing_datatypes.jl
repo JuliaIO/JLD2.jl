@@ -328,9 +328,9 @@ function _resolve_type_singlemodule(::ReadRepresentation{T,DataTypeODR()},
     return m
 end
 
-isunknowntype(x::Type{<:UnknownType}) = true
 isunknowntype(x) = false
 isunknowntype(::Type{Union{}}) = false
+isunknowntype(x::Type) = x <: UnknownType ? true : false
 
 function _resolve_type(rr::ReadRepresentation{T,DataTypeODR()},
                        f::JLDFile,
@@ -464,7 +464,7 @@ function Base.getproperty(rc::ReconstructedMutable{N,FN,FT}, s::Symbol) where {N
     isnothing(i) && throw(ArgumentError("field $s not found"))
     getfield(rc, 1)[i]::FT.parameters[i]
 end
-Base.propertynames(rc::ReconstructedMutable) = propertynames(getfield(rc, 1))
+Base.propertynames(::ReconstructedMutable{N,FN}) where {N, FN} = FN
 
 
 function Base.show(io::IO, f::ReconstructedMutable{N, FN, FT}) where {N,FN,FT}
@@ -499,10 +499,17 @@ Convert an UnknownType to a corresponding string. This is
 only used for warning during reconstruction errors.
 See also shorttypestring.
 """
-function typestring(::Type{UnknownType{T, P}}) where {T, P}
+function typestring(UT)# ::Type{<:UnknownType} 
+    if UT isa UnionAll
+        UT = behead(UT)
+        T = UT.parameters[1]
+        params = ()
+    else
+        T = UT.parameters[1]
+        params = UT.parameters[2].parameters
+    end
     tn = IOBuffer()
     print(tn, T)
-    params = P.parameters
     if !isempty(params)
         write(tn, '{')
         for i = 1:length(params)
@@ -526,10 +533,17 @@ Convert an UnknownType to a corresponding string. This is
 only used to create names for reconstructed types.
 See also typestring.
 """
-function shorttypestring(::Type{UnknownType{T, P}}) where {T, P}
+function shorttypestring(UT) #::Type{<:UnknownType}
+    if UT isa UnionAll
+        UT = behead(UT)
+        T = UT.parameters[1]
+        params = ()
+    else
+        T = UT.parameters[1]
+        params = UT.parameters[2].parameters
+    end
     tn = IOBuffer()
     print(tn, T isa Symbol ? split(string(T),'.')[end] : T)
-    params = P.parameters
     if !isempty(params)
         write(tn, '{')
         for i = 1:length(params)
