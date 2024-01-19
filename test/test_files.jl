@@ -1,8 +1,30 @@
 using Test, JLD2
 using LazyArtifacts
-# When adding test files to the JLD2Testfiles repo tag a new
-# release and adapt Artifacts.toml and the line below accordingly.
-testfiles = artifact"testfiles/JLD2TestFiles-0.1.1/artifacts"
+#=
+When adding test files to the JLD2Testfiles repo tag a new
+release and adapt Artifacts.toml and the line below accordingly.
+    git clone git@github.com:JonasIsensee/JLD2TestFiles.git
+add file & commit
+    git tag v0.1.X
+    git push 
+    git push --tags
+go to github and create a new release with name "v0.1.x"
+update Artifacts.toml: 
+1) navigate to testdir
+2) launch repl and run
+    using Pkg
+    Pkg.activate(; temp=true)
+    Pkg.add("ArtifactUtils")
+    using ArtifactUtils
+    add_artifact!(
+        "Artifacts.toml",
+        "testfiles",
+        "https://github.com/JonasIsensee/JLD2TestFiles/archive/refs/tags/v0.1.x.tar.gz", # replace version here
+        force=true,
+        lazy=true)
+update artifact string below to reflect new version number
+=#
+testfiles = artifact"testfiles/JLD2TestFiles-0.1.3/artifacts"
 
 @testset "HDF5 compat test files" begin
     # These are test files copied from the HDF5.jl test suite
@@ -143,4 +165,11 @@ end
     @test data["ds"] isa JLD2.SerializedDict
     @test JLD2.isreconstructed(data["ds"].kvvec[1].second)
     @test JLD2.isreconstructed(data["tms"][2])
+end
+
+@testset "Issue #538 Reconstruction of UnionAll type parameter" begin
+    fn = joinpath(testfiles, "unionall_typeparam.jld2")
+    data = load(fn, "test")
+    @test propertynames(data) == (:val,)
+    @test data.val == 4 
 end
