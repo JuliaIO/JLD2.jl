@@ -50,6 +50,10 @@ is_win7() = Sys.iswindows() && Sys.windows_version().major <= 6 && Sys.windows_v
 # Windows 7 doesn't support mmap, falls back to IOStream
 const DEFAULT_IOTYPE = is_win7() ? IOStream : MmapIO
 
+# Experimental feature:
+# Set this variable to true to disallow committing any structs and instead error.
+const DISABLE_COMMIT = Ref(false)
+
 """
     Group{T}
     Group(file::T)
