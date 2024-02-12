@@ -13,7 +13,7 @@ TranscodingStreams = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 
 [compat]
-FileIO = "1"
+FileIO = "1.5"
 MacroTools = "0.5"
 Mmap = "1"
 OrderedCollections = "1"
