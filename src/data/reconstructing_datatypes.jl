@@ -249,7 +249,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
 
     if !all(mapped)
         @warn("the following fields are present in type $T" *
-              " saved in the file but not present in the type the workspace:\n\n" *
+              " saved in the file but not present in the type in the workspace:\n\n" *
               "$(join(dt.names[.!mapped], "\n"))," *
               "\n\nData in these fields will not be accessible")
     end
