@@ -388,9 +388,8 @@ odr(::Type{T}) where {T<:DataType} = DataTypeODR()
 function typename(T::DataType)
     s = IOBuffer()
     join(s, fullname(T.name.module), '.')
-    print(s, '.')
-    print(s, T.name.name)
-    return String(resize!(s.data, s.size))
+    print(s, '.', T.name.name)
+    return String(take!(s))
 end
 
 function refs_from_types(f::JLDFile, types, wsession::JLDWriteSession)
