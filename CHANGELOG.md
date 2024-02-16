@@ -1,3 +1,6 @@
+## 0.4.46
+ - remove usage of `IOBuffer` internals
+
 ## 0.4.45
  - fix loading of unknown struct with UnionAll (unknown) type parameter (#538)
 
