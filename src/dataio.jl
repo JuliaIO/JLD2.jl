@@ -60,8 +60,8 @@ function read_array!(v::Array{T}, f::JLDFile{MmapIO},
     v
 end
 
-function read_array!(v::Array{T}, f::JLDFile{MmapIO},
-                             rr::ReadRepresentation{T,RR}) where {T,RR}
+function read_array!(v::Array{T}, f::JLDFile{IO},
+                             rr::ReadRepresentation{T,RR}) where {T,RR, IO<:Union{MmapIO,ReadOnlyBuffer}}
     io = f.io
     inptr = io.curptr
     n = length(v)
