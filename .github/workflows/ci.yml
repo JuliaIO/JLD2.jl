@@ -35,7 +35,7 @@ jobs:
 
       # Do tests
       - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v1
+      - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
@@ -60,7 +60,7 @@ jobs:
 
       # Build docs
       - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v1
+      - uses: julia-actions/setup-julia@v2
         with:
           version: '1'
       - name: Instantiate and install dependencies
