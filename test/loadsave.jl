@@ -750,3 +750,15 @@ end
         end
     end
 end
+
+@testset "Disable committing datatypes" begin
+    cd(mktempdir()) do
+        JLD2.DISABLE_COMMIT[] = true
+        @test_throws "Attempted to commit DataType" JLD2.save_object("test.jld2", Dict(1=>2))
+        @test_throws "Attempted to commit DataType" JLD2.save_object("test.jld2", Vector{Float64})
+        @test_throws "Attempted to commit DataType" JLD2.save_object("test.jld2", (1,2,3))
+        # this could eventually be allowed
+        @test_throws "Attempted to commit DataType" JLD2.save_object("test.jld2", (; a=1, b=2))
+        JLD2.DISABLE_COMMIT[] = false
+    end
+end

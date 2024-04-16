@@ -183,6 +183,10 @@ end
 FilterPipeline() = FilterPipeline(Filter[])
 iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
 
+# Experimental feature:
+# Set this variable to true to disallow committing any structs and instead error.
+const DISABLE_COMMIT = Ref(false)
+
 """
     Group(file)
 
