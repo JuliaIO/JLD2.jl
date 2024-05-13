@@ -243,7 +243,7 @@ end
 function jlread(io::IO, ::Type{CompoundDatatype})
     dt = jlread(io, BasicDatatype)
     version = dt.class >> 4
-    nfields = UInt16(dt.bitfield1) | UInt16(dt.bitfield2 << 8)
+    nfields = UInt16(dt.bitfield1) | UInt16(dt.bitfield2) << 8
     dt.bitfield3 == 0 || throw(UnsupportedFeatureException())
 
     names = Vector{Symbol}(undef, nfields)

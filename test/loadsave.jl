@@ -750,3 +750,18 @@ end
         end
     end
 end
+
+@testset "Issue #558 a struct with 256 fields" begin
+    fields = [Symbol("field",i) for i in 1:256]
+    @eval struct Structwithmanyfields
+        $(fields...)
+    end
+    # Fill the struct
+    obj = Structwithmanyfields(ntuple(i -> i, 256)...)
+
+    cd(mktempdir()) do 
+        save_object("myStruct.jld2", obj)
+        loaded = load_object("myStruct.jld2")
+        @test loaded isa Structwithmanyfields
+    end
+end

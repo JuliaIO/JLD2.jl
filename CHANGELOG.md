@@ -1,3 +1,6 @@
+## 0.4.47
+ - fix loading structs with more than 256 fields (#558)
+
 ## 0.4.46
  - remove usage of `IOBuffer` internals
 
