@@ -42,6 +42,7 @@ your needs, you can also directly pass a compressor.
 | `CodecZlib.jl` | `ZlibCompressor` | The default as it is very widely used. |
 | `CodecBzip2.jl` | `Bzip2Compressor` | Can often times be faster |
 | `CodecLz4.jl` | `LZ4FrameCompressor` | Fast, but not compatible to the LZ4 shipped by HDF5 |
+| `CodecZstd.jl` | `ZstdCompressor` | Wide range of compression size vs speed trade-offs |
 
 
 To use any of these, replace the `compress = true` argument with an instance of the
