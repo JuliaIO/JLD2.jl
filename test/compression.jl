@@ -1,6 +1,6 @@
 using JLD2, Test, FileIO
 using Pkg: Pkg
-using CodecZlib, CodecBzip2, CodecLz4
+using CodecZlib, CodecBzip2, CodecLz4, CodecZstd
 
 
 # This is for testing the different syntax versions as well as the library
@@ -44,6 +44,18 @@ end
     r = jldopen(f -> f["randomdata"], fn, "r")
     @test r == randomdata
 end
+
+# TODO uncomment when https://github.com/JuliaIO/CodecZstd.jl/pull/46
+# is merged and released, exporting ZstdFrameCompressor
+# @testset "Compression with CodecZstd" begin
+#     fn = joinpath(mktempdir(), "test.jld2")
+
+#     randomdata = repeat(rand(2000), 10)
+#     @save fn {compress=ZstdFrameCompressor()} randomdata
+
+#     r = jldopen(f -> f["randomdata"], fn, "r")
+#     @test r == randomdata
+# end
 
 @testset "Verify Correctness of Compressor" begin
     fn = joinpath(mktempdir(), "test.jld2")
