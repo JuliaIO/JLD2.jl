@@ -103,6 +103,7 @@ end
 """
     load_attributes(f::JLDFile, name::AbstractString)
     load_attributes(g::Group, name::AbstractString)
+    load_attributes(g::Group)
     load_attributes(f::JLDFile, offset::RelOffset)
     
 Return a list of attributes attached to the dataset or group.    
@@ -122,6 +123,14 @@ function load_attributes(g::Group, name::AbstractString)
     roffset = lookup_offset(g, name)
     roffset != UNDEFINED_ADDRESS || throw(ArgumentError("did not find a group or dataset named \"$name\""))
     load_attributes(f, roffset)
+end
+
+function load_attributes(g::JLD2.Group)
+    f = g.f
+    # get offset of group in the file (file handle keeps track)
+    reloffset = findfirst(==(g), f.loaded_groups)
+    # load attributes using file handle and offset
+    load_attributes(f, reloffset)
 end
 
 function load_attributes(f::JLDFile, offset::RelOffset)
