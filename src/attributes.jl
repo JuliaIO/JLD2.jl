@@ -128,7 +128,12 @@ end
 function load_attributes(g::JLD2.Group)
     f = g.f
     # get offset of group in the file (file handle keeps track)
-    reloffset = findfirst(==(g), f.loaded_groups)
+    if g == f.root_group
+        reloffset = f.root_group_offset
+    else
+        reloffset = findfirst(==(g), f.loaded_groups)
+    end
+    isnothing(reloffset) && throw(InternalError("Unable to find group in file."))
     # load attributes using file handle and offset
     load_attributes(f, reloffset)
 end
