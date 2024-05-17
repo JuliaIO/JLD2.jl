@@ -1,5 +1,6 @@
 ## 0.4.48
  - fix behaviour for unnormalized strings
+ - add missing method for load_attributes
 
 ## 0.4.47
  - fix loading structs with more than 256 fields (#558)
