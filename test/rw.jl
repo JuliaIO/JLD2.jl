@@ -1,4 +1,4 @@
-using JLD2, Test, LinearAlgebra, Printf, Random
+using JLD2, Test, LinearAlgebra, Random
 
 macro read(fid, sym)
     if !isa(sym, Symbol)
