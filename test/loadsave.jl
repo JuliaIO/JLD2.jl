@@ -765,3 +765,25 @@ end
         @test loaded isa Structwithmanyfields
     end
 end
+
+@testset "Issue #466 non-normalized unicode string identifiers" begin
+    ahat_unnormalized = String([0x61, 0xcc, 0x82])
+    ahat_normalized = String([0xc3, 0xa2])
+    dummy_data = 42
+    fn = "test.jld2"
+    cd(mktempdir()) do 
+        jldopen(fn, "w") do f
+            f[ahat_unnormalized] = dummy_data
+            @test haskey(f, ahat_normalized)
+            @test haskey(f, ahat_unnormalized)
+            @test f[ahat_normalized] == dummy_data
+            @test f[ahat_unnormalized] == dummy_data
+        end
+        jldopen(fn) do f
+            @test haskey(f, ahat_normalized)
+            @test haskey(f, ahat_unnormalized)
+            @test f[ahat_normalized] == dummy_data
+            @test f[ahat_unnormalized] == dummy_data
+        end
+    end
+end

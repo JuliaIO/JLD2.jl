@@ -272,7 +272,7 @@ function decompress!(data::Vector{UInt8}, data_length, element_size, num_element
     return data_new
 end
 function decompress!(io::IOStream, data_length, element_size, n, decompressor)
-    read!(TranscodingStream(decompressor, io), Vector{UInt8}(undef, element_size*n))
+    read!(TranscodingStreams.TranscodingStream(decompressor, io), Vector{UInt8}(undef, element_size*n))
 end
 
 function read_compressed_array!(v::Array{T}, f::JLDFile{MmapIO},

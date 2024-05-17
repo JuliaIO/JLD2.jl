@@ -121,6 +121,7 @@ testfiles = artifact"testfiles/JLD2TestFiles-0.1.3/artifacts"
         JLD2.load_attributes(f, "dim1") # not sure what to test for. just not erroring so far
         JLD2.load_attributes(f, "dim2")
         JLD2.load_attributes(f, "mydata")
+        JLD2.load_attributes(f.root_group)
     end
 
     # julia> using JLD

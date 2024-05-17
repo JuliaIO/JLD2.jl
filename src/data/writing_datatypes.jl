@@ -209,7 +209,7 @@ end
     f.datatype_locations[h5o] = cdt
     f.jlh5type[readas] = cdt
     push!(f.datatypes, dtype)
-    f.types_group[@sprintf("%08d", id)] = h5o
+    f.types_group[string(id, pad=8)] = h5o
 
     if writeas !== readas
         wrtypeattr = WrittenAttribute(:written_type,
@@ -373,7 +373,8 @@ function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T
     f.jlh5type[DataType] = cdt
     f.h5jltype[cdt] = ReadRepresentation{DataType,DataTypeODR()}()
     push!(f.datatypes, H5TYPE_DATATYPE)
-    f.types_group[@sprintf("%08d", id)] = h5o
+    f.types_group[string(id, pad=8)] = h5o
+
 
     commit(f, H5TYPE_DATATYPE, (WrittenAttribute(:julia_type, WriteDataspace(f, DataType, odr(DataType)), cdt, DataType),))
 
