@@ -1,16 +1,13 @@
 module JLD2
 using OrderedCollections: OrderedDict
-using Reexport
-import Base.sizeof
-using MacroTools
-using Printf
-using Mmap
+using Reexport: @reexport
+using MacroTools: MacroTools, @capture
+using Mmap: Mmap
 using Unicode: Unicode
-using TranscodingStreams
+using TranscodingStreams: TranscodingStreams
 @reexport using FileIO: load, save
-using Requires
-
-using PrecompileTools
+using Requires: @require
+using PrecompileTools: @setup_workload, @compile_workload
 
 export jldopen, @load, @save, save_object, load_object, printtoc
 export jldsave
