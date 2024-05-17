@@ -5,6 +5,7 @@ import Base.sizeof
 using MacroTools
 using Printf
 using Mmap
+using Unicode: Unicode
 using TranscodingStreams
 @reexport using FileIO: load, save
 using Requires
