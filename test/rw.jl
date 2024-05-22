@@ -343,10 +343,22 @@ function checkexpr(a::Expr, b::Expr)
 end
 
 fn = joinpath(mktempdir(), "test.jld")
-for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
-    @info("[$fn]: Using $(ioty), $(compress ? "compressed" : "uncompressed")")
+io_buffer = IOBuffer()
+openfuns = [
+    (writef=() -> jldopen(fn, "w"; iotype=JLD2.MmapIO, compress=false),
+     readf=() -> jldopen(fn, "r"; iotype=JLD2.MmapIO)),
+    (writef=() -> jldopen(fn, "w"; iotype=IOStream, compress=false),
+     readf=() -> jldopen(fn, "r"; iotype=IOStream)),
+    (writef=() -> (global io_buffer=IOBuffer(); jldopen(io_buffer, "w"; compress=false)),
+     readf=() -> (seekstart(io_buffer); jldopen(io_buffer))),
+    (writef=() -> (global io_buffer=IOBuffer(); jldopen(io_buffer, "w"; compress=true)),
+     readf=() -> (seekstart(io_buffer); jldopen(io_buffer))),
+]
+
+for (writef, readf) in openfuns
+    fid = writef()
+    @info("[$fn]: Using $(fid), $(fid.compress ? "compressed" : "uncompressed")")
     @info("  Write time:")
-    fid = jldopen(fn, true, true, true, ioty, compress=compress)
     @time begin
     @write fid x
     @write fid A
@@ -461,7 +473,7 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     close(fid)
 
     @info("  Read time:")
-    fidr = jldopen(fn, false, false, false, ioty)
+    fidr = readf()
     @time begin
     @check fidr x
     @check fidr A
@@ -509,16 +521,16 @@ for ioty in [JLD2.MmapIO, IOStream], compress in [false, true]
     @check fidr typevar_lb_ub
 
     # Special cases for reading undefs
-    global arr_undef = read(fidr, "arr_undef")
-    if !isa(arr_undef, Array{Any, 1}) || length(arr_undef) != 1 || isassigned(arr_undef, 1)
+    _arr_undef = read(fidr, "arr_undef")
+    if !isa(_arr_undef, Array{Any, 1}) || length(_arr_undef) != 1 || isassigned(_arr_undef, 1)
         error("For arr_undef, read value does not agree with written value")
     end
-    global arr_undefs = read(fidr, "arr_undefs")
-    if !isa(arr_undefs, Array{Any, 2}) || length(arr_undefs) != 4 || any(map(i->isassigned(arr_undefs, i), 1:4))
+    _arr_undefs = read(fidr, "arr_undefs")
+    if !isa(_arr_undefs, Array{Any, 2}) || length(_arr_undefs) != 4 || any(map(i->isassigned(_arr_undefs, i), 1:4))
         error("For arr_undefs, read value does not agree with written value")
     end
-    global ms_undef = read(fidr, "ms_undef")
-    if !isa(ms_undef, MyStruct) || ms_undef.len != 0 || isdefined(ms_undef, :data)
+    _ms_undef = read(fidr, "ms_undef")
+    if !isa(_ms_undef, MyStruct) || _ms_undef.len != 0 || isdefined(_ms_undef, :data)
         error("For ms_undef, read value does not agree with written value")
     end
 

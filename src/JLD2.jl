@@ -260,7 +260,9 @@ mutable struct JLDFile{T<:IO}
             JLDWriteSession(), Dict{String,Any}(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             DATA_START, Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group{JLDFile{T}}}(), UNDEFINED_ADDRESS)
-        finalizer(jld_finalizer, f)
+        if !(io isa ReadOnlyBuffer) 
+            finalizer(jld_finalizer, f)
+        end
         f
     end
 end
@@ -436,9 +438,9 @@ function load_file_metadata!(f)
 end
 
 """
-    jldopen(fname::AbstractString, mode::AbstractString; iotype=MmapIO, compress=false, typemap=Dict())
+    jldopen(file, mode::AbstractString; iotype=MmapIO, compress=false, typemap=Dict())
 
-Opens a JLD2 file at path `fname`.
+Opens a JLD2 file at path `file`. Alternatively `file` may be a suitable IO object.
 
 `"r"`: Open for reading only, failing if no file exists
 `"r+"`: Open for reading and writing, failing if no file exists
@@ -446,13 +448,17 @@ Opens a JLD2 file at path `fname`.
 `"a"`/`"a+"`: Open for reading and writing, creating a new file if none exists, but
               preserving the existing file if one is present
 """
-function jldopen(fname::AbstractString, mode::AbstractString="r"; iotype=DEFAULT_IOTYPE, kwargs...)
+function jldopen(fname::Union{AbstractString, IO}, mode::AbstractString="r"; iotype=DEFAULT_IOTYPE, kwargs...)
     (wr, create, truncate) = mode == "r"  ? (false, false, false) :
                              mode == "r+" ? (true, false, false) :
                              mode == "a" || mode == "a+" ? (true, true, false) :
                              mode == "w" || mode == "w+" ? (true, true, true) :
                              throw(ArgumentError("invalid open mode: $mode"))
-    jldopen(fname, wr, create, truncate, iotype; kwargs...)
+    if fname isa AbstractString
+        jldopen(fname, wr, create, truncate, iotype; kwargs...)
+    else
+        jldopen(fname, wr, create, truncate; kwargs...)
+    end
 end
 
 """
@@ -571,6 +577,10 @@ function jld_finalizer(f::JLDFile{IOStream})
     close(f)
 end
 
+function jld_finalizer(f::JLDFile)
+    f.n_times_opened == 0 && return
+    close(f)
+end
 # Display functions
 
 # simple one-line display (without trailing line break)
@@ -621,6 +631,7 @@ include("data/custom_serialization.jl")
 include("data/writing_datatypes.jl")
 include("data/reconstructing_datatypes.jl")
 
+include("general_io.jl")
 include("dataio.jl")
 include("loadsave.jl")
 include("stdlib.jl")

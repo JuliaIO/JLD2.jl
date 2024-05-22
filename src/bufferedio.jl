@@ -9,14 +9,14 @@ const PlainType = Union{Type{Int16},Type{Int32},Type{Int64},Type{Int128},Type{UI
                         Type{Float32},Type{Float64}}
 const DEFAULT_BUFFER_SIZE = 1024
 
-struct BufferedWriter <: IO
-    f::IOStream
+struct BufferedWriter{io} <: IO
+    f::io
     buffer::Vector{UInt8}
     file_position::Int64
     position::Base.RefValue{Int}
 end
 
-function BufferedWriter(io::IOStream, buffer_size::Int)
+function BufferedWriter(io, buffer_size::Int)
     pos = position(io)
     skip(io, buffer_size)
     BufferedWriter(io, Vector{UInt8}(undef, buffer_size), pos, Ref{Int}(0))
@@ -65,14 +65,14 @@ end
 
 Base.position(io::BufferedWriter) = io.file_position + io.position[]
 
-struct BufferedReader <: IO
-    f::IOStream
+struct BufferedReader{io} <: IO
+    f::io
     buffer::Vector{UInt8}
     file_position::Int64
     position::Base.RefValue{Int}
 end
 
-BufferedReader(io::IOStream) =
+BufferedReader(io) =
     BufferedReader(io, Vector{UInt8}(), position(io), Ref{Int}(0))
 Base.show(io::IO, ::BufferedReader) = print(io, "BufferedReader")
 
