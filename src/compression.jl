@@ -54,7 +54,7 @@ const COMPRESSOR_TO_ID = Dict(
     :Bzip2Compressor => UInt16(307),
     #:BloscCompressor => UInt16(32001),
     :LZ4FrameCompressor => UInt16(32004),
-    :ZstdFrameCompressor => UInt16(32015),
+    :ZstdCompressor => UInt16(32015),
     )
 
 # For loading need filter_ids as keys
@@ -64,7 +64,7 @@ const ID_TO_DECOMPRESSOR = Dict(
     UInt16(307) => (:CodecBzip2, :Bzip2Compressor, :Bzip2Decompressor, "BZIP2"),
     #UInt16(32001) => (:Blosc, :BloscCompressor, :BloscDecompressor, "BLOSC"),
     UInt16(32004) => (:CodecLz4, :LZ4FrameCompressor, :LZ4FrameDecompressor, "LZ4"),
-    UInt16(32015) => (:CodecZstd, :ZstdFrameCompressor, :ZstdDecompressor, "ZSTD"),
+    UInt16(32015) => (:CodecZstd, :ZstdCompressor, :ZstdDecompressor, "ZSTD"),
 )
 
 const compressor_list_string = map(values(ID_TO_DECOMPRESSOR)) do val
