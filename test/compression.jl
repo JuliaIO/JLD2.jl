@@ -45,17 +45,15 @@ end
     @test r == randomdata
 end
 
-# TODO uncomment when https://github.com/JuliaIO/CodecZstd.jl/pull/46
-# is merged and released, exporting ZstdFrameCompressor
-# @testset "Compression with CodecZstd" begin
-#     fn = joinpath(mktempdir(), "test.jld2")
+@testset "Compression with CodecZstd" begin
+    fn = joinpath(mktempdir(), "test.jld2")
 
-#     randomdata = repeat(rand(2000), 10)
-#     @save fn {compress=ZstdFrameCompressor()} randomdata
+    randomdata = repeat(rand(2000), 10)
+    @save fn {compress=ZstdFrameCompressor()} randomdata
 
-#     r = jldopen(f -> f["randomdata"], fn, "r")
-#     @test r == randomdata
-# end
+    r = jldopen(f -> f["randomdata"], fn, "r")
+    @test r == randomdata
+end
 
 @testset "Verify Correctness of Compressor" begin
     fn = joinpath(mktempdir(), "test.jld2")
