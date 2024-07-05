@@ -1,3 +1,7 @@
+## 0.4.49
+ - update compat bounds
+ - add support Zstdcompression
+
 ## 0.4.48
  - fix behaviour for unnormalized strings
  - add missing method for load_attributes
