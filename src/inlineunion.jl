@@ -8,10 +8,11 @@ end
 
 """
     InlineUnionEl{T1,T2}(mask::UInt8, t1::T1, t2::T2)
+
 Custom serialization struct for two member isbits union
 fields e.g. in other structs or arrays.
-To indicate that t1 is relevant the mask takes the value `UInt8(0)`
-and for t2 `UInt8(255)`
+To indicate that `t1` is relevant the `mask` takes the value `UInt8(0)`
+and for `t2` the `mask` takes the value `UInt8(255)`.
 """
 struct InlineUnionEl{T1,T2}
     mask::UInt8

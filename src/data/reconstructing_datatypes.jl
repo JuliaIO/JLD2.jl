@@ -162,10 +162,10 @@ end
 constructrr(f::JLDFile, T::DataType, dt::CompoundType, attrs::Vector{ReadAttribute},
             hard_failure::Bool=false)
 
-Constructs a ReadRepresentation for a given type. This is the generic method for all
+Constructs a [`ReadRepresentation`](@ref) for a given type. This is the generic method for all
 types not specially handled below.
 
-If hard_failure is true, then throw a TypeMappingException instead of attempting
+If `hard_failure` is true, then throw a `TypeMappingException` instead of attempting
 reconstruction. This helps in cases where we can't know if reconstructed parametric types
 will have a matching memory layout without first inspecting the memory layout.
 """
@@ -495,11 +495,13 @@ end
 
 """
     typestring(::Type{ <:UnknownType})
-Convert an UnknownType to a corresponding string. This is
+
+Convert an `UnknownType` to a corresponding string. This is
 only used for warning during reconstruction errors.
-See also shorttypestring.
+
+See also [`shorttypestring`](@ref).
 """
-function typestring(UT)# ::Type{<:UnknownType} 
+function typestring(UT)# ::Type{<:UnknownType}
     if UT isa UnionAll
         UT = behead(UT)
         T = UT.parameters[1]
@@ -529,9 +531,11 @@ end
 
 """
     shorttypestring(::Type{ <:UnknownType})
-Convert an UnknownType to a corresponding string. This is
+
+Convert an `UnknownType` to a corresponding string. This is
 only used to create names for reconstructed types.
-See also typestring.
+
+See also [`typestring`](@ref).
 """
 function shorttypestring(UT) #::Type{<:UnknownType}
     if UT isa UnionAll
@@ -563,7 +567,7 @@ end
 """
     behead(T)
 
-Given a UnionAll type, recursively eliminates the `where` clauses
+Given a `UnionAll` type, recursively eliminates the `where` clauses
 """
 behead(T::UnionAll) = behead(T.body)
 behead(@nospecialize T) = T

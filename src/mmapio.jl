@@ -264,8 +264,8 @@ Base.position(io::MmapIO) = Int64(io.curptr - io.startptr)
 
 When writing data, we may need to enlarge the memory mapping, which would invalidate any
 memory addresses arising from the old `mmap` pointer. `IndirectPointer` holds a pointer to
-the `startptr` field of an MmapIO, and the offset relative to that pointer. It defers
-computing a memory address until converted to a Ptr{T}, so the memory mapping can be
+the `startptr` field of an `MmapIO`, and the offset relative to that pointer. It defers
+computing a memory address until converted to a `Ptr{T}`, so the memory mapping can be
 enlarged and addresses will remain valid.
 """
 struct IndirectPointer

@@ -131,7 +131,7 @@ end
 """
     read_attr_data(f::JLDFile, attr::ReadAttribute)
 
-jlread data from an attribute.
+[`jlread`](@ref) data from an attribute.
 """
 read_attr_data(f::JLDFile, attr::ReadAttribute) =
     read_data(f, attr.dataspace, attr.datatype_class, attr.datatype_offset,
@@ -141,9 +141,10 @@ read_attr_data(f::JLDFile, attr::ReadAttribute) =
     read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
                    rr::ReadRepresentation)
 
-jlread data from an attribute, assuming a specific HDF5 datatype and ReadRepresentation. If
-the HDF5 datatype does not match, throws an `UnsupportedFeatureException`. This allows
-better type stability while simultaneously validating the data.
+[`jlread`](@ref) data from an attribute, assuming a specific HDF5 datatype and
+[`ReadRepresentation`](@ref). If the HDF5 datatype does not match, throws an
+`UnsupportedFeatureException`. This allows better type stability while
+simultaneously validating the data.
 """
 function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
                         rr::ReadRepresentation)
@@ -165,9 +166,9 @@ end
               datatype_offset::Int64, data_offset::Int64[, filters::FilterPipeline,
               header_offset::RelOffset, attributes::Vector{ReadAttribute}])
 
-Read data from a file. If `datatype_class` is typemax(UInt8), the datatype is assumed to be
+Read data from a file. If `datatype_class` is `typemax(UInt8)`, the datatype is assumed to be
 committed, and `datatype_offset` points to the offset of the committed datatype's header.
-Otherwise, datatype_offset points to the offset of the datatype attribute.
+Otherwise, `datatype_offset` points to the offset of the datatype attribute.
 """
 function read_data(f::JLDFile, dataspace::ReadDataspace,
                    datatype_class::UInt8, datatype_offset::Int64,

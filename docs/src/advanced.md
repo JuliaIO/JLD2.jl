@@ -30,7 +30,7 @@ Dict{String, Any} with 1 entry:
   "a" => var"##A#257"(42)
 ```
 
-As of JLD2 version `v0.4.21` there is a fix. The `JLDFile` struct contains a `typemap` dictionary that allows for explicit type remapping. 
+As of JLD2 version 0.4.21 there is a fix. The `JLDFile` struct contains a `typemap` dictionary that allows for explicit type remapping.
 Now you can define a struct
 that matches the old definition and load your data.
 

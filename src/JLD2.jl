@@ -70,7 +70,7 @@ end
 
 Represents an HDF5 relative offset. This differs from a file offset (used elsewhere) in
 that it is relative to the superblock base address. `fileoffset` and `h5offset` convert between
-`RelOffsets` and file offsets.
+`RelOffset`s and file offsets.
 """
 struct RelOffset
     offset::UInt64
@@ -86,7 +86,7 @@ const NULL_REFERENCE = RelOffset(0)
 """
     JLDWriteSession{T}
 
-A JLDWriteSession keeps track of references to serialized objects. If `T` is a Dict,
+A `JLDWriteSession` keeps track of references to serialized objects. If `T` is a Dict,
 `h5offset` maps an object ID (returned by calling `objectid`) to th `RelOffset` of the
 written dataset. If it is `Union{}`, then references are not tracked, and objects
 referenced multiple times are written multiple times.
@@ -160,7 +160,7 @@ struct CustomSerialization{T,S} end
 """
     Upgrade(T)
 
-Specify an upgrade path for serialized structs using the `typemap`` keyword argument
+Specify an upgrade path for serialized structs using the `typemap` keyword argument
 and `rconvert`.
 """
 struct Upgrade
@@ -188,8 +188,10 @@ JLD2 group object.
 
 ## Advanced Usage
 Takes two optional keyword arguments:
-    est_num_entries::Int=4
-    est_link_name_len::Int=8
+
+- `est_num_entries::Int` = 4
+- `est_link_name_len::Int` = 8
+
 These determine how much (additional) empty space should be allocated for the group description. (list of entries)
 This can be useful for performance when one expects to append many additional datasets after first writing the file.
 """
@@ -458,8 +460,8 @@ end
 """
     load_datatypes(f::JLDFile)
 
-Populate f.datatypes and f.jlh5types with all of the committed datatypes from a file. We
-need to do this before writing to make sure we reuse written datatypes.
+Populate `f.datatypes` and `f.jlh5types` with all of the committed datatypes from a file.
+We need to do this before writing to make sure we reuse written datatypes.
 """
 function load_datatypes(f::JLDFile)
     dts = f.datatypes
