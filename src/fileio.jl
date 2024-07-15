@@ -42,8 +42,6 @@ function fileio_load(f::File{format"JLD2"}; nested::Bool=false, kwargs...)
         else
             return loadtodict!(Dict{String,Any}(), file)
         end
-    catch e
-        throw(e)
     finally
         close(file)
     end
@@ -54,8 +52,6 @@ function fileio_load(f::File{format"JLD2"}, varname::AbstractString; kwargs...)
     file = jldopen(FileIO.filename(f), "r"; kwargs...)
     try
         return load_data_or_dict(file, varname)
-    catch e
-        throw(e)
     finally
         close(file)
     end
@@ -68,8 +64,6 @@ function fileio_load(f::File{format"JLD2"}, varnames::Tuple{Vararg{AbstractStrin
     file = jldopen(FileIO.filename(f), "r"; kwargs...)
     try
         return map(var -> load_data_or_dict(file, var),  varnames)
-    catch e
-        throw(e)
     finally
         close(file)
     end

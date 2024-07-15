@@ -275,8 +275,6 @@ function jldsave(filename::AbstractString, compress=false, iotype::Union{Type{IO
         for (k,v) in pairs(kwargs)
             write(f, string(k), v, wsession)
         end
-    catch e 
-        throw(e)
     finally
         close(f)
     end
