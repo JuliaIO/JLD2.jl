@@ -31,7 +31,7 @@ It is best practice to explicitly name the variables to be loaded and saved from
 
 Additional customization is possible using assignment syntax and option passing:
 
-```
+```julia
 @save "example.jld2" bye=hello bar=foo
 @save "example.jld2" {compress=true} hello bar=foo
 ```

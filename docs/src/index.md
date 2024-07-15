@@ -120,7 +120,7 @@ end
 
 Both of these examples yield the same group structure, which you can see at the REPL:
 
-```
+```julia-repl
 julia> file = jldopen("example.jld2", "r")
 JLDFile /Users/simon/example.jld2 (read-only)
  └─📂 mygroup
@@ -168,7 +168,7 @@ The group `file_group = Group(file, "mygroup")` can be accessed with the same fi
 ### Objects are cached during loading
 JLD2 caches objects during loading. It may give you the same object twice.
 This can lead to surprising results if you edit loaded arrays. Note, the underlying file is not being edited!
-```
+```julia-repl
 julia> jldsave("demo.jld2", a=zeros(2))
 
 julia> f = jldopen("demo.jld2")
@@ -187,7 +187,7 @@ julia> f["a"]
  42.0
   0.0
 
-julia> a=nothing # remove all references to the loaded array
+julia> a = nothing # remove all references to the loaded array
 
 julia> GC.gc(true) # call GC to remove the cache
 

@@ -16,11 +16,13 @@ jldsave("example.jld2"; a = A(42))
 
 This results in warnings and sometimes even errors when trying to load the
 file as demonstrated here.
-```julia
+```julia-repl
 julia> using JLD2
+
 julia> struct A{T}
-            x::T
+           x::T
        end
+
 julia> load("example.jld2")
 ┌ Warning: read type A is not a leaf type in workspace; reconstructing
 └ @ JLD2 ~/.julia/dev/JLD2/src/data/reconstructing_datatypes.jl:273
@@ -32,13 +34,15 @@ As of JLD2 version `v0.4.21` there is a fix. The `JLDFile` struct contains a `ty
 Now you can define a struct
 that matches the old definition and load your data.
 
-```julia
+```julia-repl
 julia> struct A_old
-            x::Int
-        end
+           x::Int
+       end
+
 julia> f = jldopen("example.jld2","r"; typemap=Dict("Main.A" => A_old))
 JLDFile /home/jonas/.julia/dev/JLD2/example.jld2 (read-only)
  └─🔢 a
+
 julia> f["a"]
 A_old(42)
 ```
