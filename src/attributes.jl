@@ -188,7 +188,7 @@ function load_attributes(f::JLDFile, offset::RelOffset)
                 # Message start 8byte aligned relative to object start
                 skip_to_aligned!(cio, chunk_start)
                 # Version 1 header message is padded
-                msg = HeaderMessage(jlread(cio, UInt16), jlread(cio, UInt16), jlread(cio, UInt8))
+                msg = jlread(cio, HeaderMessage)
                 skip(cio, 3)
             else # header_version == 2
                 msg = jlread(cio, HeaderMessage)
@@ -196,9 +196,9 @@ function load_attributes(f::JLDFile, offset::RelOffset)
             end
             endpos = position(cio) + msg.size
 
-            if msg.msg_type == HM_ATTRIBUTE
+            if HeaderMessageTypes(msg.msg_type) == HM_ATTRIBUTE
                     push!(attrs, read_attribute(cio, f))
-            elseif msg.msg_type == HM_OBJECT_HEADER_CONTINUATION
+            elseif HeaderMessageTypes(msg.msg_type)== HM_OBJECT_HEADER_CONTINUATION
                 continuation_offset = fileoffset(f, jlread(cio, RelOffset))
                 continuation_length = jlread(cio, Length)
                 push!(chunks, (; chunk_start = continuation_offset,

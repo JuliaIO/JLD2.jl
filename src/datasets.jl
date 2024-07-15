@@ -71,37 +71,37 @@ function load_dataset(f::JLDFile, offset::RelOffset)
                 # Message start 8byte aligned relative to object start
                 skip_to_aligned!(cio, chunk_start)
                 # Version 1 header message is padded
-                msg = HeaderMessage(jlread(cio, UInt16), jlread(cio, UInt16), jlread(cio, UInt8))
+                msg = jlread(cio, HeaderMessage)
                 skip(cio, 3)
             else # header_version == 2
                 msg = jlread(cio, HeaderMessage)
                 (groupflags & 4) == 4 && skip(cio, 2) 
             end
             endpos = position(cio) + msg.size
-            if msg.msg_type == HM_DATASPACE
+            if HeaderMessageTypes(msg.msg_type) == HM_DATASPACE
                 dataspace = read_dataspace_message(cio)
-            elseif msg.msg_type == HM_DATATYPE
+            elseif HeaderMessageTypes(msg.msg_type) == HM_DATATYPE
                 datatype_class, datatype_offset = read_datatype_message(cio, f, (msg.flags & 2) == 2)
-            elseif msg.msg_type == HM_FILL_VALUE_OLD
+            elseif HeaderMessageTypes(msg.msg_type) == HM_FILL_VALUE_OLD
                 # don't know what to do with these
                 # ignore for now
-            elseif msg.msg_type == HM_FILL_VALUE
+            elseif HeaderMessageTypes(msg.msg_type) == HM_FILL_VALUE
                 # don't know what to do with these
                 # ignore for now
                 version = jlread(cio, UInt8)
                 flags = jlread(cio, UInt8)
                 
-            elseif msg.msg_type == HM_DATA_LAYOUT
+            elseif HeaderMessageTypes(msg.msg_type) == HM_DATA_LAYOUT
                 layout = jlread(cio, DataLayout, f)
-            elseif msg.msg_type == HM_FILTER_PIPELINE
+            elseif HeaderMessageTypes(msg.msg_type) == HM_FILTER_PIPELINE
                filter_pipeline = jlread(cio, FilterPipeline)
-            elseif msg.msg_type == HM_ATTRIBUTE
+            elseif HeaderMessageTypes(msg.msg_type) == HM_ATTRIBUTE
                 if attrs === EMPTY_READ_ATTRIBUTES
                     attrs = ReadAttribute[read_attribute(cio, f)]
                 else
                     push!(attrs, read_attribute(cio, f))
                 end
-            elseif msg.msg_type == HM_OBJECT_HEADER_CONTINUATION
+            elseif HeaderMessageTypes(msg.msg_type) == HM_OBJECT_HEADER_CONTINUATION
                 continuation_offset = fileoffset(f, jlread(cio, RelOffset))
                 continuation_length = jlread(cio, Length)
                 push!(chunks, (; chunk_start = continuation_offset,
@@ -121,6 +121,7 @@ function load_dataset(f::JLDFile, offset::RelOffset)
     end
     iscompressed(filter_pipeline) && !ischunked(layout) && throw(InvalidDataException("Compressed data must be chunked"))
 
+    @info "Loading dataset $(offset) with $(dataspace) $(datatype_class) $(datatype_offset) $(layout) $(filter_pipeline) $(attrs)"
     # TODO verify that data length matches
     val = read_data(f, dataspace, datatype_class, datatype_offset, layout,
                     filter_pipeline, offset, attrs)

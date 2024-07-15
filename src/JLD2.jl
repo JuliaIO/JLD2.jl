@@ -81,6 +81,7 @@ that it is relative to the superblock base address. `fileoffset` and `h5offset` 
 struct RelOffset
     offset::UInt64
 end
+RelOffset(r::RelOffset) = r
 define_packed(RelOffset)
 Base.:(==)(x::RelOffset, y::RelOffset) = x === y
 Base.hash(x::RelOffset) = hash(x.offset)
@@ -640,6 +641,8 @@ include("backwards_compatibility.jl")
 include("inlineunion.jl")
 include("fileio.jl")
 include("compression.jl")
+include("explicit_datasets.jl")
+include("headermessage_accessor.jl")
 
 if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
     include("precompile.jl")

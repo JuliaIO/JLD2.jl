@@ -1,54 +1,31 @@
 #
 # Object headers
 #
-
-const HM_NIL = 0x00
-const HM_DATASPACE = 0x01
-const HM_LINK_INFO = 0x02
-const HM_DATATYPE = 0x03
-const HM_FILL_VALUE_OLD = 0x04
-const HM_FILL_VALUE = 0x05
-const HM_LINK_MESSAGE = 0x06
-const HM_EXTERNAL_FILE_LIST = 0x07
-const HM_DATA_LAYOUT = 0x08
-const HM_BOGUS = 0x09
-const HM_GROUP_INFO = 0x0a
-const HM_FILTER_PIPELINE = 0x0b
-const HM_ATTRIBUTE = 0x0c
-const HM_OBJECT_COMMENT = 0x0d
-const HM_SHARED_MESSAGE_TABLE = 0x0f
-const HM_OBJECT_HEADER_CONTINUATION = 0x10
-const HM_SYMBOL_TABLE = 0x11
-const HM_MODIFICATION_TIME = 0x12
-const HM_BTREE_K_VALUES = 0x13
-const HM_DRIVER_INFO = 0x14
-const HM_ATTRIBUTE_INFO = 0x15
-const HM_REFERENCE_COUNT = 0x16
-
-MESSAGE_TYPES = Dict(
-    0x00 => "HM_NIL",
-    0x01 => "HM_DATASPACE",
-    0x02 => "HM_LINK_INFO",
-    0x03 => "HM_DATATYPE",
-    0x04 => "HM_FILL_VALUE_OLD",
-    0x05 => "HM_FILL_VALUE",
-    0x06 => "HM_LINK_MESSAGE",
-    0x07 => "HM_EXTERNAL_FILE_LIST",
-    0x08 => "HM_DATA_LAYOUT",
-    0x09 => "HM_BOGUS",
-    0x0a => "HM_GROUP_INFO",
-    0x0b => "HM_FILTER_PIPELINE",
-    0x0c => "HM_ATTRIBUTE",
-    0x0d => "HM_OBJECT_COMMENT",
-    0x0f => "HM_SHARED_MESSAGE_TABLE",
-    0x10 => "HM_OBJECT_HEADER_CONTINUATION",
-    0x11 => "HM_SYMBOL_TABLE",
-    0x12 => "HM_MODIFICATION_TIME",
-    0x13 => "HM_BTREE_K_VALUES",
-    0x14 => "HM_DRIVER_INFO",
-    0x15 => "HM_ATTRIBUTE_INFO",
-    0x16 => "HM_REFERENCE_COUNT",
-    )
+@enum HeaderMessageTypes::UInt8 begin
+    HM_NIL = 0x00
+    HM_DATASPACE = 0x01
+    HM_LINK_INFO = 0x02
+    HM_DATATYPE = 0x03
+    HM_FILL_VALUE_OLD = 0x04
+    HM_FILL_VALUE = 0x05
+    HM_LINK_MESSAGE = 0x06
+    HM_EXTERNAL_FILE_LIST = 0x07
+    HM_DATA_LAYOUT = 0x08
+    HM_BOGUS = 0x09
+    HM_GROUP_INFO = 0x0a
+    HM_FILTER_PIPELINE = 0x0b
+    HM_ATTRIBUTE = 0x0c
+    HM_OBJECT_COMMENT = 0x0d
+    HM_SHARED_MESSAGE_TABLE = 0x0f
+    HM_OBJECT_HEADER_CONTINUATION = 0x10
+    HM_SYMBOL_TABLE = 0x11
+    HM_MODIFICATION_TIME = 0x12
+    HM_BTREE_K_VALUES = 0x13
+    HM_DRIVER_INFO = 0x14
+    HM_ATTRIBUTE_INFO = 0x15
+    HM_REFERENCE_COUNT = 0x16
+end
+Base.convert(::Type{UInt8}, h::HeaderMessageTypes) = UInt8(h)
 
 const OH_ATTRIBUTE_CREATION_ORDER_TRACKED = 2^2
 const OH_ATTRIBUTE_CREATION_ORDER_INDEXED = 2^3
@@ -67,23 +44,6 @@ define_packed(ObjectStart)
 
 # Reads the start of an object including the signature, version, flags,
 # and (payload) size. Returns the size.
-# function read_obj_start(io::IO)
-#     os = jlread(io, ObjectStart)
-#     os.signature == OBJECT_HEADER_SIGNATURE || throw(InvalidDataException())
-#     os.version == 2 || throw(UnsupportedVersionException())
-
-#     if (os.flags & OH_TIMES_STORED) != 0
-#         # Skip access, modification, change and birth times
-#         skip(io, 128)
-#     end
-#     if (os.flags & OH_ATTRIBUTE_PHASE_CHANGE_VALUES_STORED) != 0
-#         # Skip maximum # of attributes fields
-#         skip(io, 32)
-#     end
-
-#     read_size(io, os.flags)
-# end
-
 function read_obj_start(io::IO)
     curpos = position(io)
     os = jlread(io, ObjectStart)
@@ -156,7 +116,7 @@ function isgroup(f::JLDFile, roffset::RelOffset)
                 # Message start 8byte aligned relative to object start
                 skip_to_aligned!(io, chunk_start)
                 # Version 1 header message is padded
-                msg = HeaderMessage(jlread(io, UInt16), jlread(io, UInt16), jlread(io, UInt8))
+                msg = jlread(cio, HeaderMessage)
                 skip(io, 3)
                 endpos = position(io) + msg.size
 
@@ -284,7 +244,7 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
             if header_version == 1
                 skip_to_aligned!(cio, chunk_start)
                 # Version 1 header message is padded
-                msg = HeaderMessage(jlread(cio, UInt16), jlread(cio, UInt16), jlread(cio, UInt8))
+                msg = jlread(cio, HeaderMessage)
                 skip(cio, 3)
             else # version == 2
                 msg = jlread(cio, HeaderMessage)
@@ -292,7 +252,7 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
             end
             endpos = position(cio) + msg.size
             println("""
-            Message:  $(MESSAGE_TYPES[msg.msg_type]) ($(msg.msg_type))
+            Message:  $(HeaderMessageTypes(msg.msg_type)) ($(msg.msg_type))
                 size: $(msg.size)
                 flags: $(msg.flags)
                 at pos $(position(cio)-chunk_start)""")

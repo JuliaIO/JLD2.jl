@@ -155,3 +155,11 @@ function end_checksum(io::Union{BufferedReader,BufferedWriter})
     finish!(io)
     ret
 end
+
+function update_checksum(io, chunk_start, chunk_end)
+    seek(io, chunk_start)
+    cio = begin_checksum_read(io)
+    seek(cio, chunk_end)
+    seek(io, chunk_end)
+    jlwrite(io, end_checksum(cio))
+end

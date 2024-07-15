@@ -408,7 +408,7 @@ function read_shared_datatype(f::JLDFile, cdt::Union{SharedDatatype, CommittedDa
                 # Message start 8byte aligned relative to object start
                 skip_to_aligned!(cio, chunk_start)
                 # Version 1 header message is padded
-                msg = HeaderMessage(jlread(cio, UInt16), jlread(cio, UInt16), jlread(cio, UInt8))
+                msg = jlread(cio, HeaderMessage)
                 skip(cio, 3)
             else # header_version == 2
                 msg = jlread(cio, HeaderMessage)
