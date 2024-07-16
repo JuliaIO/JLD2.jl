@@ -59,11 +59,7 @@ include("superblock.jl")
 
 is_win7() = Sys.iswindows() && Sys.windows_version().major <= 6 && Sys.windows_version().minor <= 1
 # Windows 7 doesn't support mmap, falls back to IOStream
-const DEFAULT_IOTYPE = if is_win7()
-    IOStream
-else
-    MmapIO
-end
+const DEFAULT_IOTYPE = is_win7() ? IOStream : MmapIO
 
 """
     RelOffset
