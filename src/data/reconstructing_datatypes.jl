@@ -404,7 +404,7 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     end
     hasparams = !isempty(params)
     mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
-    @show mypath params
+
     if mypath in keys(f.typemap)
         m = f.typemap[mypath]
         m isa Upgrade && return m
