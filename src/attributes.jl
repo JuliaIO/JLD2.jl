@@ -105,9 +105,11 @@ end
     load_attributes(g::Group, name::AbstractString)
     load_attributes(g::Group)
     load_attributes(f::JLDFile, offset::RelOffset)
-    
-Return a list of attributes attached to the dataset or group.    
+
+Return a list of attributes attached to the dataset or group.
 """
+function load_attributes end
+
 function load_attributes(f::JLDFile, name::AbstractString)
     if isempty(name) || name == "/"
         load_attributes(f, f.root_group_offset)
