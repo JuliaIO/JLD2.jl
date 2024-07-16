@@ -161,8 +161,8 @@ end
 struct TypeMappingException <: Exception end
 
 """
-constructrr(f::JLDFile, T::DataType, dt::CompoundType, attrs::Vector{ReadAttribute},
-            hard_failure::Bool=false)
+    constructrr(f::JLDFile, T::DataType, dt::CompoundType, attrs::Vector{ReadAttribute},
+                hard_failure::Bool=false)
 
 Constructs a [`ReadRepresentation`](@ref) for a given type. This is the generic method for all
 types not specially handled below.
