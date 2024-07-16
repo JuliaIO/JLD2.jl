@@ -75,7 +75,7 @@ function write_dataset(dataset::Dataset, data)
     # Attributes
     attributes = map(dataset.attributes) do a
         a isa WrittenAttribute && return a
-        typeof(a) <: (Pair{Symbol,T}where T) && return WrittenAttribute(dataset.parent.f, a.first, a.second)
+        typeof(a) <: (Pair{Symbol,T} where T) && return WrittenAttribute(dataset.parent.f, a.first, a.second)
         throw(ArgumentError("Invalid attribute: $a"))
     end
     io = f.io
