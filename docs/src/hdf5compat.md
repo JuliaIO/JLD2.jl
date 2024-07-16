@@ -11,10 +11,14 @@ such as `h5dump` and `h5debug` provided by the HDF5 group.
 !!! warning
 
     General compatibility only holds for a list of basic types:
-        - Numbers `FloatXX`, `IntXX` and `UIntXX`
-        - Strings
-        - Arrays of those types
-    Other structures can in principle also be decoded but may involve work. 
+
+    - Numbers `FloatXX`, `IntXX` and `UIntXX`
+
+    - Strings
+
+    - Arrays of those types
+
+    Other structures can in principle also be decoded but may involve work.
     See below for more information
     
 
@@ -32,20 +36,20 @@ once and all instances of that `struct` reference it.
 #### Example
 
 ```julia
-julia> using JLD2
+using JLD2
 
-julia> struct MyCustomStruct
-       x::Int64
-       y::Float64
-       end
+struct MyCustomStruct
+    x::Int64
+    y::Float64
+end
 
-julia> @save "test.jld2" a=MyCustomStruct(42, π)
+@save "test.jld2" a=MyCustomStruct(42, π)
 ```
 Let's see what JLD2 makes out of my simple `MyCustomStruct`. To do that
 we view the output of `h5dump`
 
 ```bash
-$> h5dump test.jld2
+$ h5dump test.jld2
 HDF5 "test.jld2" {
 GROUP "/" {
    GROUP "_types" {
@@ -126,8 +130,8 @@ This is done with just three lines of code utilizing the custom serialization lo
 it is shown here as it serves as a good example for usage of that feature.
 
 ```julia
-   writeas(::Type{<:Ptr}) = Nothing
-   rconvert(::Type{Ptr{T}}, ::Nothing) where {T} = Ptr{T}()
+writeas(::Type{<:Ptr}) = Nothing
+rconvert(::Type{Ptr{T}}, ::Nothing) where {T} = Ptr{T}()
 ```
 
 Usually one would also have to define a method for `wconvert`. However, in this 

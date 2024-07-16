@@ -41,12 +41,14 @@ end
     read_size(io::IO, flags::UInt8)
 
 Loads a variable-length size according to flags
+
 Expects that the first two bits of flags mean:
-0   The size of the Length of Link Name field is 1 byte.
-1   The size of the Length of Link Name field is 2 bytes.
-2   The size of the Length of Link Name field is 4 bytes.
-3   The size of the Length of Link Name field is 8 bytes.
-Returns the size as an Int
+- 0:   The size of the Length of Link Name field is 1 byte.
+- 1:   The size of the Length of Link Name field is 2 bytes.
+- 2:   The size of the Length of Link Name field is 4 bytes.
+- 3:   The size of the Length of Link Name field is 8 bytes.
+
+Returns the size as an `Int`.
 """
 function read_size(io::IO, flags::UInt8)
     if (flags & 3) == 0

@@ -512,7 +512,7 @@ end
     save_group(g::Group) -> RelOffset
 
 Stores a group to a file, updating it if it has already been saved. Returns
-UNDEFINED_ADDRESS if the group was already stored, or the offset of the new group
+`UNDEFINED_ADDRESS` if the group was already stored, or the offset of the new group
 otherwise.
 """
 function save_group(g::Group)

@@ -2,7 +2,7 @@
     read_scalar(f::JLDFile, rr, header_offset::RelOffset)
 
 Read raw data representing a scalar with read representation `rr` from the current position
-of JLDFile `f`. `header_offset` is the RelOffset of the object header, used to resolve
+of JLDFile `f`. `header_offset` is the [`RelOffset`](@ref) of the object header, used to resolve
 cycles.
 """
 function read_scalar end
@@ -11,16 +11,16 @@ function read_scalar end
     read_array!(v::Array, f::JLDFile, rr)
 
 Fill the array `v` with the contents of JLDFile `f` at the current position, assuming a
-ReadRepresentation `rr`.
+[`ReadRepresentation`](@ref) `rr`.
 """
 function read_array! end
 
 
 """
-    read_compressed_array!(v::Array, f::JLDFile, rr, data_length::Int, ::Val{filter_id})
+    read_compressed_array!(v::Array, f::JLDFile, rr, data_length::Int, Val(filter_id))
 
 Fill the array `v` with the compressed contents of JLDFile `f` at the current position,
-assuming a ReadRepresentation `rr` and that the compressed data has length `data_length`.
+assuming a [`ReadRepresentation`](@ref) `rr` and that the compressed data has length `data_length`.
 """
 function read_compressed_array! end
 

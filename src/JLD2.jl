@@ -38,7 +38,17 @@ InternalError() = InternalError("")
 
 # Due to custom overrides we do not use Base functions directly
 # but define our own to avoid type piracy
+"""
+    jlwrite(io, x)
+
+Wrapper around `Base.write(io, x)`. Defined separately to avoid type piracy.
+"""
 jlwrite(io, x) = Base.write(io, x)
+"""
+    jlread(io, x)
+
+Wrapper around `Base.read(io, x)`. Defined separately to avoid type piracy.
+"""
 jlread(io, x) = Base.read(io, x)
 jlread(io::IO, ::Type{T}, n::Integer) where {T} = T[jlread(io, T) for _=1:n]
 
@@ -59,18 +69,14 @@ include("superblock.jl")
 
 is_win7() = Sys.iswindows() && Sys.windows_version().major <= 6 && Sys.windows_version().minor <= 1
 # Windows 7 doesn't support mmap, falls back to IOStream
-const DEFAULT_IOTYPE = if is_win7()
-    IOStream
-else
-    MmapIO
-end
+const DEFAULT_IOTYPE = is_win7() ? IOStream : MmapIO
 
 """
     RelOffset
 
 Represents an HDF5 relative offset. This differs from a file offset (used elsewhere) in
 that it is relative to the superblock base address. `fileoffset` and `h5offset` convert between
-`RelOffsets` and file offsets.
+`RelOffset`s and file offsets.
 """
 struct RelOffset
     offset::UInt64
@@ -86,7 +92,7 @@ const NULL_REFERENCE = RelOffset(0)
 """
     JLDWriteSession{T}
 
-A JLDWriteSession keeps track of references to serialized objects. If `T` is a Dict,
+A `JLDWriteSession` keeps track of references to serialized objects. If `T` is a Dict,
 `h5offset` maps an object ID (returned by calling `objectid`) to th `RelOffset` of the
 written dataset. If it is `Union{}`, then references are not tracked, and objects
 referenced multiple times are written multiple times.
@@ -114,14 +120,14 @@ mutable struct GlobalHeap
 end
 
 """
-    H5Datatype
+    abstract type H5Datatype
 
 Supertype of all HDF5 datatypes.
 """
 abstract type H5Datatype end
 
 """
-    SharedDatatype
+    SharedDatatype <: H5Datatype
 
 Reference to a shared datatype message (stored elsewhere in a file).
 """
@@ -130,7 +136,7 @@ struct SharedDatatype <: H5Datatype
 end
 
 """
-    CommittedDatatype
+    CommittedDatatype <: H5Datatype
 
 Reference to a shared datatype message (stored elsewhere in a file).
 These are stored in the `_types` group and indexed.
@@ -160,7 +166,7 @@ struct CustomSerialization{T,S} end
 """
     Upgrade(T)
 
-Specify an upgrade path for serialized structs using the `typemap`` keyword argument
+Specify an upgrade path for serialized structs using the `typemap` keyword argument
 and `rconvert`.
 """
 struct Upgrade
@@ -182,14 +188,17 @@ FilterPipeline() = FilterPipeline(Filter[])
 iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
 
 """
-    Group(file)
+    Group{T}
+    Group(file::T)
 
 JLD2 group object.
 
 ## Advanced Usage
 Takes two optional keyword arguments:
-    est_num_entries::Int=4
-    est_link_name_len::Int=8
+
+- `est_num_entries::Int` = 4
+- `est_link_name_len::Int` = 8
+
 These determine how much (additional) empty space should be allocated for the group description. (list of entries)
 This can be useful for performance when one expects to append many additional datasets after first writing the file.
 """
@@ -436,15 +445,17 @@ function load_file_metadata!(f)
 end
 
 """
-    jldopen(fname::AbstractString, mode::AbstractString; iotype=MmapIO, compress=false, typemap=Dict())
+    jldopen(fname::AbstractString, mode::AbstractString;
+            iotype=MmapIO, compress=false, typemap=Dict())
 
 Opens a JLD2 file at path `fname`.
 
-`"r"`: Open for reading only, failing if no file exists
-`"r+"`: Open for reading and writing, failing if no file exists
-`"w"`/`"w+"`: Open for reading and writing, overwriting the file if it already exists
-`"a"`/`"a+"`: Open for reading and writing, creating a new file if none exists, but
-              preserving the existing file if one is present
+Options for `mode`:
+- `"r"`: Open for reading only, failing if no file exists
+- `"r+"`: Open for reading and writing, failing if no file exists
+- `"w"`/`"w+"`: Open for reading and writing, overwriting the file if it already exists
+- `"a"`/`"a+"`: Open for reading and writing, creating a new file if none exists, but
+                preserving the existing file if one is present
 """
 function jldopen(fname::AbstractString, mode::AbstractString="r"; iotype=DEFAULT_IOTYPE, kwargs...)
     (wr, create, truncate) = mode == "r"  ? (false, false, false) :
@@ -458,8 +469,8 @@ end
 """
     load_datatypes(f::JLDFile)
 
-Populate f.datatypes and f.jlh5types with all of the committed datatypes from a file. We
-need to do this before writing to make sure we reuse written datatypes.
+Populate `f.datatypes` and `f.jlh5types` with all of the committed datatypes from a file.
+We need to do this before writing to make sure we reuse written datatypes.
 """
 function load_datatypes(f::JLDFile)
     dts = f.datatypes
@@ -595,6 +606,7 @@ end
 
 """
     printtoc([io::IO,] f::JLDFile [; numlines])
+
 Prints an overview of the contents of `f` to the `IO`.
 
 Use the optional `numlines` parameter to restrict the amount of items listed.

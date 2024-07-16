@@ -5,15 +5,15 @@ but also arrays of custom structs that are immutable and only consist of basic n
 type fields.
 
 To enable the default compression, you can write
-```
+```julia
 FileIO.save("example.jld2", "large_array", zeros(10000); compress = true)
 ```
 using the `FileIO` API. Alternatively use
-```
+```julia
 jldsave("example.jld2", true; large_array=zeros(10000))
 ```
 or
-```
+```julia
 jldopen("example.jld2", "w"; compress = true) do f
     f["large_array"] = zeros(10000)
 end
@@ -37,17 +37,17 @@ default and if `compress = true` is passed,
 If you want to use a different compression algorithm that is better suited to
 your needs, you can also directly pass a compressor.
 
-| Library | Compressor |    |
-|---------|------------|----|
-| `CodecZlib.jl` | `ZlibCompressor` | The default as it is very widely used. |
-| `CodecBzip2.jl` | `Bzip2Compressor` | Can often times be faster |
-| `CodecLz4.jl` | `LZ4FrameCompressor` | Fast, but not compatible to the LZ4 shipped by HDF5 |
-| `CodecZstd.jl` | `ZstdFrameCompressor` | Fast, wide range of compression size vs speed trade-offs |
+| Library                                                   | Compressor            | Notes                                                    |
+|:----------------------------------------------------------|:----------------------|:---------------------------------------------------------|
+| [CodecZlib.jl](https://github.com/JuliaIO/CodecZlib.jl)   | `ZlibCompressor`      | The default as it is very widely used.                   |
+| [CodecBzip2.jl](https://github.com/JuliaIO/CodecBzip2.jl) | `Bzip2Compressor`     | Can often times be faster                                |
+| [CodecLz4.jl](https://github.com/JuliaIO/CodecLz4.jl)     | `LZ4FrameCompressor`  | Fast, but not compatible to the LZ4 shipped by HDF5      |
+| [CodecZstd.jl](https://github.com/JuliaIO/CodecZstd.jl)   | `ZstdFrameCompressor` | Fast, wide range of compression size vs speed trade-offs |
 
 
 To use any of these, replace the `compress = true` argument with an instance of the
 compressor, e.g.
-```
+```julia
 using JLD2, CodecBzip2
 jldopen("example.jld2", "w"; compress = Bzip2Compressor()) do f
     f["large_array"] = zeros(10000)
@@ -61,13 +61,13 @@ that for others it is not worth the effort. For precise control, the
 `write` function takes an optional keyword argument to override the file compression
 settings.
 
-```
+```julia
 using JLD2
 jldopen("example.jld2", "w") do f
-    # This can be efficiently compressed  → use compression
+    # This can be efficiently compressed → use compression
     write(f, "compressed_array", zeros(10000); compress=true)
 
-    # Don't compress this 
+    # Don't compress this
     write(f, "large_array", rand(10000))
 end
 ```

@@ -120,7 +120,7 @@ end
 
 Both of these examples yield the same group structure, which you can see at the REPL:
 
-```
+```julia-repl
 julia> file = jldopen("example.jld2", "r")
 JLDFile /Users/simon/example.jld2 (read-only)
  └─📂 mygroup
@@ -148,7 +148,7 @@ load("example.jld2") # -> Dict("mygroup/mystuff" => 42)
 load("example.jld2"; nested=true) # -> Dict("mygroup" => Dict("mystuff" => 42))
 ```
 
-### Unpack.jl API
+### UnPack.jl API
 
 When additionally loading the [UnPack.jl](https://github.com/mauro3/UnPack.jl) package, its `@unpack` and `@pack!` macros can be used to quickly save and load data from the file-like interface. Example:
 
@@ -168,7 +168,7 @@ The group `file_group = Group(file, "mygroup")` can be accessed with the same fi
 ### Objects are cached during loading
 JLD2 caches objects during loading. It may give you the same object twice.
 This can lead to surprising results if you edit loaded arrays. Note, the underlying file is not being edited!
-```
+```julia-repl
 julia> jldsave("demo.jld2", a=zeros(2))
 
 julia> f = jldopen("demo.jld2")
@@ -187,7 +187,7 @@ julia> f["a"]
  42.0
   0.0
 
-julia> a=nothing # remove all references to the loaded array
+julia> a = nothing # remove all references to the loaded array
 
 julia> GC.gc(true) # call GC to remove the cache
 
@@ -203,4 +203,4 @@ However, many julia structs may be inherently different on different architectur
 In particular, moving data from a 64bit system to a 32bit system is only guaranteed to work for basic datatypes.
 
 ### Security
-Beware of opening JLD2 files from untrusted sources. A malicious file may execute code on your computer. See e.g. [here](https://github.com/JuliaIO/JLD2.jl/issues/117). To check a file, you can use [JLD2DebugTools.jl](https://github.com/JonasIsensee/JLD2DebugTools.jl) to view what kinds of objects are stored.
+Beware of opening JLD2 files from untrusted sources. A malicious file may execute code on your computer. See e.g. this project's [issue #117](https://github.com/JuliaIO/JLD2.jl/issues/117). To check a file, you can use [JLD2DebugTools.jl](https://github.com/JonasIsensee/JLD2DebugTools.jl) to view what kinds of objects are stored.

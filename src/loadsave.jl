@@ -22,17 +22,23 @@ form to avoid saving unwanted variables.
 
 To save the string `hello` and array `xs` to the JLD2 file example.jld2:
 
-    hello = "world"
-    xs = [1,2,3]
-    @save "example.jld2" hello xs
+```julia
+hello = "world"
+xs = [1,2,3]
+@save "example.jld2" hello xs
+```
 
-For passing options to the saving command use {}
+For passing options to the saving command use `{}`
 
-    @save "example.jld2" {compress=true} hello xs
+```julia
+@save "example.jld2" {compress=true} hello xs
+```
 
 For saving variables under a different name use regular assignment syntax
 
-    @save "example.jld2" greeting=hello xarray = xs
+```julia
+@save "example.jld2" greeting=hello xarray = xs
+```
 """
 macro save(filename, vars...)
     fields = []
@@ -120,7 +126,9 @@ where the variables come from.
 
 To load the variables `hello` and `foo` from the file example.jld2, use
 
-    @load "example.jld2" hello foo
+```julia
+@load "example.jld2" hello foo
+```
 """
 macro load(filename, vars...)
     if isempty(vars)
@@ -205,8 +213,10 @@ stored as `single_stored_object`. If you want to store more than one object, use
 
 To save the string `hello` to the JLD2 file example.jld2:
 
-    hello = "world"
-    save_object("example.jld2", hello)
+```julia
+hello = "world"
+save_object("example.jld2", hello)
+```
 """
 function save_object(filename, x; kwargs...)
   jldopen(filename, "w"; kwargs...) do file
@@ -229,9 +239,11 @@ or the FileIO API.
 
 To load the only object from the JLD2 file example.jld2:
 
-    hello = "world"
-    save_object("example.jld2", hello)
-    hello_loaded = load_object("example.jld2")
+```julia
+hello = "world"
+save_object("example.jld2", hello)
+hello_loaded = load_object("example.jld2")
+```
 """
 function load_object(filename)
   jldopen(filename, "r") do file
@@ -252,16 +264,19 @@ Creates a JLD2 file at `filename` and stores the variables given as keyword argu
 
 # Examples
 
-    jldsave("example.jld2"; a=1, b=2, c)
-    
+```julia
+jldsave("example.jld2"; a=1, b=2, c)
+```
+
 is equivalent to
 
-    jldopen("example.jld2, "w") do f
-        f["a"] = 1
-        f["b"] = 2
-        f["c"] = c
-    end
-
+```julia
+jldopen("example.jld2", "w") do f
+    f["a"] = 1
+    f["b"] = 2
+    f["c"] = c
+end
+```
 
 To choose the io type `IOStream` instead of the default `MmapIO` use 
 `jldsave(fn, IOStream; kwargs...)`.
