@@ -11,10 +11,14 @@ such as `h5dump` and `h5debug` provided by the HDF5 group.
 !!! warning
 
     General compatibility only holds for a list of basic types:
-        - Numbers `FloatXX`, `IntXX` and `UIntXX`
-        - Strings
-        - Arrays of those types
-    Other structures can in principle also be decoded but may involve work. 
+
+    - Numbers `FloatXX`, `IntXX` and `UIntXX`
+
+    - Strings
+
+    - Arrays of those types
+
+    Other structures can in principle also be decoded but may involve work.
     See below for more information
     
 
