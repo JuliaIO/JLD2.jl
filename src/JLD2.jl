@@ -38,7 +38,17 @@ InternalError() = InternalError("")
 
 # Due to custom overrides we do not use Base functions directly
 # but define our own to avoid type piracy
+"""
+    jlwrite(io, x)
+
+Wrapper around `Base.write(io, x)`. Defined separately to avoid type piracy.
+"""
 jlwrite(io, x) = Base.write(io, x)
+"""
+    jlread(io, x)
+
+Wrapper around `Base.read(io, x)`. Defined separately to avoid type piracy.
+"""
 jlread(io, x) = Base.read(io, x)
 jlread(io::IO, ::Type{T}, n::Integer) where {T} = T[jlread(io, T) for _=1:n]
 
