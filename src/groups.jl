@@ -292,7 +292,7 @@ function load_group(f::JLDFile, offset::RelOffset)
 
     while !isempty(chunks)
         chunk = popfirst!(chunks)
-        (; chunk_start, chunk_end) = chunk
+        chunk_start, chunk_end = chunk.chunk_start, chunk.chunk_end
 
         if chunk_number > 0
             cio = start_chunk_read(io, chunk, header_version)

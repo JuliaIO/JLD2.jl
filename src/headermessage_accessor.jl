@@ -485,7 +485,8 @@ function read_header(f, offset::RelOffset)
     chunk_number = 1
 
     while chunk_number <= length(chunks)
-        (; chunk_start, chunk_end) = chunk = chunks[chunk_number]
+        chunk = chunks[chunk_number]
+        chunk_start, chunk_end = chunk.chunk_start, chunk.chunk_end 
 
         if chunk_number > 1 # Don't do this the first time around
             cio = start_chunk_read(io, chunk, header_version)

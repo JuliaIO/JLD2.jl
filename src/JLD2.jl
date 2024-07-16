@@ -401,8 +401,8 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         try
             load_file_metadata!(f)
         catch e
-            #close(f)
-            #rethrow(e)
+            close(f)
+            throw(e)
         end
     end
     merge!(f.typemap, typemap)
