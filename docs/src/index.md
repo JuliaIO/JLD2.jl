@@ -203,4 +203,4 @@ However, many julia structs may be inherently different on different architectur
 In particular, moving data from a 64bit system to a 32bit system is only guaranteed to work for basic datatypes.
 
 ### Security
-Beware of opening JLD2 files from untrusted sources. A malicious file may execute code on your computer. See e.g. [here](https://github.com/JuliaIO/JLD2.jl/issues/117). To check a file, you can use [JLD2DebugTools.jl](https://github.com/JonasIsensee/JLD2DebugTools.jl) to view what kinds of objects are stored.
+Beware of opening JLD2 files from untrusted sources. A malicious file may execute code on your computer. See e.g. this project's [issue #117](https://github.com/JuliaIO/JLD2.jl/issues/117). To check a file, you can use [JLD2DebugTools.jl](https://github.com/JonasIsensee/JLD2DebugTools.jl) to view what kinds of objects are stored.
