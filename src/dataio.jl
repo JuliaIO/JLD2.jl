@@ -17,7 +17,7 @@ function read_array! end
 
 
 """
-    read_compressed_array!(v::Array, f::JLDFile, rr, data_length::Int, ::Val{filter_id})
+    read_compressed_array!(v::Array, f::JLDFile, rr, data_length::Int, Val(filter_id))
 
 Fill the array `v` with the compressed contents of JLDFile `f` at the current position,
 assuming a [`ReadRepresentation`](@ref) `rr` and that the compressed data has length `data_length`.
