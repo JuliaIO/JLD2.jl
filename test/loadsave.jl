@@ -787,3 +787,31 @@ end
         end
     end
 end
+
+module DummyModule
+    using ..JLD2
+    struct AA end
+    struct BB end
+    Base.@kwdef struct CC
+        x::Any = 1
+    end
+    JLD2.rconvert(::Type{CC}, nt::NamedTuple) = CC()
+    JLD2.rconvert(::Type{BB}, nt::NamedTuple) = BB()
+end
+@testset "Upgrading a struct that was formerly singleton" begin
+    cd(mktempdir()) do     
+        jldsave("testing.jld2"; a = DummyModule.AA())
+        @test DummyModule.BB() == load("testing.jld2", "a"; typemap = Dict("Main.DummyModule.AA" => JLD2.Upgrade(DummyModule.BB)))
+        @test DummyModule.BB() == load("testing.jld2", "a"; typemap = Dict("Main.DummyModule.AA" => DummyModule.BB))
+        @test DummyModule.CC() == load("testing.jld2", "a"; typemap = Dict("Main.DummyModule.AA" => JLD2.Upgrade(DummyModule.CC)))
+    end
+end
+
+@testset "Issue #571 Loading Vararg NTuples" begin
+    tst = [("a",), ("a", "b")]
+    cd(mktempdir()) do
+        save_object("tst.jld2", tst)
+        @test tst == load_object("tst.jld2")
+    end
+end
+
