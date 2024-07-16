@@ -301,6 +301,12 @@ function constructrr(f::JLDFile, u::Upgrade, dt::CompoundDatatype,
     return (ReadRepresentation{u.target, CustomSerialization{T2, rodr}}(), false)    
 end
 
+function constructrr(f::JLDFile, u::Upgrade, dt::BasicDatatype, 
+                     attrs::Vector{ReadAttribute},
+                     hard_failure::Bool=false)
+    return (ReadRepresentation{u.target, CustomSerialization{NamedTuple{(), Tuple{}},nothing}}(), false)    
+end
+
 function constructrr(f::JLDFile, T::UnionAll, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
@@ -398,7 +404,7 @@ function jlconvert(rr::ReadRepresentation{T,DataTypeODR()},
     end
     hasparams = !isempty(params)
     mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
-
+    @show mypath params
     if mypath in keys(f.typemap)
         m = f.typemap[mypath]
         m isa Upgrade && return m

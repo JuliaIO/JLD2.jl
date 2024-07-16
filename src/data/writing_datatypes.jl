@@ -432,7 +432,7 @@ end
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::Type{<: NTuple}, wsession::JLDWriteSession)
     params = T.parameters
     N = length(params)
-    if N ≤ 1
+    if N ≤ 1 || !(reduce(==, params))
         store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, "Tuple"), f.datatype_wsession)
         if N == 0
             h5convert_uninitialized!(out+odr_sizeof(Vlen{UInt8}), Vlen{UInt8})
