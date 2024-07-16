@@ -19,113 +19,34 @@ function load_dataset(f::JLDFile, offset::RelOffset)
         end
     end
 
-    io = f.io
-    chunk_start::Int64 = fileoffset(f, offset)
-    seek(io, chunk_start)
-    # Version 1 object header have no signature and start with version
-    header_version = jlread(io, UInt8)
-
-
-    if header_version == 1
-        seek(io, chunk_start)
-        cio = io
-        sz,_,groupflags = read_obj_start(cio)
-        chunk_end = position(cio) + sz
-        # Skip to nearest 8byte aligned position
-        skip_to_aligned!(cio, fileoffset(f, offset))
-    else
-        header_version = 2
-        seek(io, chunk_start)
-        cio = begin_checksum_read(io)
-        sz,_,groupflags = read_obj_start(cio)
-        chunk_end = position(cio) + sz #- 4
-    end
-
-    # Messages
-    chunks = [(; chunk_start, chunk_end)]
-    chunk_number = 0
+    msgs, _ = read_header(f, offset)
 
     dataspace = ReadDataspace()
-    attrs = EMPTY_READ_ATTRIBUTES
+    attrs = ReadAttribute[]
     datatype_class::UInt8 = 0
     datatype_offset::Int64 = 0
     layout::DataLayout = DataLayout(0,0,0,-1)
     filter_pipeline::FilterPipeline = FilterPipeline(Filter[])
-    while !isempty(chunks)
-        chunk = popfirst!(chunks)
-        chunk_start = chunk.chunk_start
-        chunk_end = chunk.chunk_end
-
-        if chunk_number > 0 # Don't do this the first time around
-            seek(io, chunk_start)
-            if header_version == 2
-                chunk_end -= 4
-                cio = begin_checksum_read(io)
-                jlread(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
-            end
-        end
-        chunk_number += 1
-
-        while position(cio) <= chunk_end-4
-            if header_version == 1
-                # Message start 8byte aligned relative to object start
-                skip_to_aligned!(cio, chunk_start)
-                # Version 1 header message is padded
-                msg = jlread(cio, HeaderMessage)
-                skip(cio, 3)
-            else # header_version == 2
-                msg = jlread(cio, HeaderMessage)
-                (groupflags & 4) == 4 && skip(cio, 2) 
-            end
-            endpos = position(cio) + msg.size
-            if HeaderMessageTypes(msg.msg_type) == HM_DATASPACE
-                dataspace = read_dataspace_message(cio)
-            elseif HeaderMessageTypes(msg.msg_type) == HM_DATATYPE
-                datatype_class, datatype_offset = read_datatype_message(cio, f, (msg.flags & 2) == 2)
-            elseif HeaderMessageTypes(msg.msg_type) == HM_FILL_VALUE_OLD
-                # don't know what to do with these
-                # ignore for now
-            elseif HeaderMessageTypes(msg.msg_type) == HM_FILL_VALUE
-                # don't know what to do with these
-                # ignore for now
-                version = jlread(cio, UInt8)
-                flags = jlread(cio, UInt8)
-                
-            elseif HeaderMessageTypes(msg.msg_type) == HM_DATA_LAYOUT
-                layout = jlread(cio, DataLayout, f)
-            elseif HeaderMessageTypes(msg.msg_type) == HM_FILTER_PIPELINE
-               filter_pipeline = jlread(cio, FilterPipeline)
-            elseif HeaderMessageTypes(msg.msg_type) == HM_ATTRIBUTE
-                if attrs === EMPTY_READ_ATTRIBUTES
-                    attrs = ReadAttribute[read_attribute(cio, f)]
-                else
-                    push!(attrs, read_attribute(cio, f))
-                end
-            elseif HeaderMessageTypes(msg.msg_type) == HM_OBJECT_HEADER_CONTINUATION
-                continuation_offset = fileoffset(f, jlread(cio, RelOffset))
-                continuation_length = jlread(cio, Length)
-                push!(chunks, (; chunk_start = continuation_offset,
-                                 chunk_end = continuation_offset + continuation_length))
-
-            elseif (msg.flags & 2^3) != 0
-                throw(UnsupportedFeatureException())
-            end
-            seek(cio, endpos)
-        end
-        seek(cio, chunk_end)
-
-        if header_version == 2
-            # Checksum
-            end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException("Invalid Checksum"))
+    for msg in msgs
+        if msg.type == HM_DATASPACE
+            dataspace = ReadDataspace(f, msg)
+        elseif msg.type == HM_DATATYPE
+            datatype_class, datatype_offset = datatype_from_message(f, msg)
+        elseif msg.type == HM_DATA_LAYOUT
+            layout = DataLayout(f, msg)
+        elseif msg.type == HM_FILTER_PIPELINE
+            filter_pipeline = FilterPipeline(msg)
+        elseif msg.type == HM_ATTRIBUTE
+            push!(attrs, read_attribute(f, msg))
+        elseif (msg.hflags & 2^3) != 0
+            throw(UnsupportedFeatureException())
         end
     end
     iscompressed(filter_pipeline) && !ischunked(layout) && throw(InvalidDataException("Compressed data must be chunked"))
 
-    @info "Loading dataset $(offset) with $(dataspace) $(datatype_class) $(datatype_offset) $(layout) $(filter_pipeline) $(attrs)"
     # TODO verify that data length matches
-    val = read_data(f, dataspace, datatype_class, datatype_offset, layout,
+    read_data(f, dataspace, datatype_class, datatype_offset, layout,
                     filter_pipeline, offset, attrs)
-    val
 end
 
 
@@ -740,7 +661,7 @@ function delete_written_link!(f::JLDFile, roffset::RelOffset, name::AbstractStri
             msg = jlread(io, HeaderMessage)
             endpos = curpos + jlsizeof(HeaderMessage) + msg.size
 
-            if msg.msg_type == HM_LINK_MESSAGE
+            if HeaderMessageTypes(msg.msg_type) == HM_LINK_MESSAGE
                 dataset_name, loffset = read_link(io)
                 if dataset_name == name
                     # delete link
@@ -749,7 +670,7 @@ function delete_written_link!(f::JLDFile, roffset::RelOffset, name::AbstractStri
                     link_deleted = true
                     break
                 end
-            elseif msg.msg_type == HM_OBJECT_HEADER_CONTINUATION
+            elseif HeaderMessageTypes(msg.msg_type) == HM_OBJECT_HEADER_CONTINUATION
                 continuation_offset = chunk_start_offset = fileoffset(f, jlread(io, RelOffset))
                 continuation_length = jlread(io, Length)
             end

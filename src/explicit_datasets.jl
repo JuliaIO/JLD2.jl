@@ -4,6 +4,7 @@ struct Hmessage
     hflags::UInt8
     body::Vector{UInt8}
     offset::RelOffset
+    payload_offset::RelOffset
 end
 
 function Base.getproperty(hm::Hmessage, s::Symbol)
@@ -13,7 +14,7 @@ end
 
 function Hmessage(type::HeaderMessageTypes, hflags=0x00, size=0; kwargs...)
     payload = construct_hm_payload(Val(type), hflags, size; kwargs...)
-    Hmessage(type, length(payload), hflags, payload, UNDEFINED_ADDRESS)
+    Hmessage(type, length(payload), hflags, payload, UNDEFINED_ADDRESS,UNDEFINED_ADDRESS)
 end
 
 function read_msg(io, header_version, flags)
@@ -255,11 +256,11 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
     next_msg_offset,#::RelOffset=UNDEFINED_ADDRESS,
     minimum_continuation_size::Int = 0
     )
-    isempty(messages) && return nothing
     if chunk_start == UNDEFINED_ADDRESS || chunk_end == UNDEFINED_ADDRESS ||
             next_msg_offset == UNDEFINED_ADDRESS
         throw(UnsupportedFeatureException("Not implemented. pass all info"))
     end
+    next_msg_offset == -1 && throw(InternalError("next_msg_offset should not be -1"))
 
     io = f.io
     seek(io, next_msg_offset)
@@ -282,8 +283,14 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
         # Managed to add all messages
         # Cleanup and return
         # Mark remaining free space with a NIL message
-        jlwrite(io, HeaderMessage(HM_NIL, chunk_end - (position(io)+4), 0))
-        jlwrite(io, zeros(UInt8, chunk_end - (position(io)+4)))
+        empty_space = chunk_end-position(io)-4 - 20
+        if empty_space != -4
+            empty_space < 0 && throw(InternalError("Negative empty space. This should not happen"))
+            write_message(io, f, Hmessage(HM_NIL, 0, empty_space))
+        end
+        # continuation space
+        write_message(io, f, Hmessage(HM_NIL, 0, 16))
+
         # Re-calculate checksum
         update_checksum(io, chunk_start, chunk_end)
 
@@ -291,8 +298,7 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
     end
     if !iszero(remaining_space)
         # Mark remaining free space with a NIL message
-        jlwrite(io, HeaderMessage(HM_NIL, remaining_space, 0))
-        jlwrite(io, zeros(UInt8, remaining_space))
+        write_message(io, f, Hmessage(HM_NIL, 0, remaining_space-4))
     end
     # If we got to here then a new continuation needs to be created
     continuation_start = f.end_of_data

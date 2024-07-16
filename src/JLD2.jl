@@ -315,7 +315,7 @@ FallbackType(::Type{MmapIO}) = IOStream
 FallbackType(::Type{IOStream}) = nothing
 
 # The delimiter is excluded by default
-read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
+read_bytestring(io::Union{IOStream, IOBuffer}) = String(readuntil(io, 0x00))
 
 const OPEN_FILES = Dict{String,WeakRef}()
 const OPEN_FILES_LOCK = ReentrantLock()
@@ -401,8 +401,8 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         try
             load_file_metadata!(f)
         catch e
-            close(f)
-            rethrow(e)
+            #close(f)
+            #rethrow(e)
         end
     end
     merge!(f.typemap, typemap)
@@ -423,25 +423,25 @@ function load_file_metadata!(f)
             throw(UnsupportedVersionException("This file can not be edited by JLD2. Please open in read-only mode."))
         end
     end
-    try
+    #try
         f.root_group = load_group(f, f.root_group_offset)
 
-    if haskey(f.root_group.written_links, "_types")
-        types_group_offset = f.root_group.written_links["_types"]::RelOffset
-        f.types_group = f.loaded_groups[types_group_offset] = load_group(f, types_group_offset)
-        i = 0
-        for (offset::RelOffset) in values(f.types_group.written_links)
-            f.datatype_locations[offset] = CommittedDatatype(offset, i += 1)
+        if haskey(f.root_group.written_links, "_types")
+            types_group_offset = f.root_group.written_links["_types"]::RelOffset
+            f.types_group = f.loaded_groups[types_group_offset] = load_group(f, types_group_offset)
+            i = 0
+            for (offset::RelOffset) in values(f.types_group.written_links)
+                f.datatype_locations[offset] = CommittedDatatype(offset, i += 1)
+            end
+            resize!(f.datatypes, length(f.datatype_locations))
+        else
+            f.types_group = Group{typeof(f)}(f)
         end
-        resize!(f.datatypes, length(f.datatype_locations))
-    else
-        f.types_group = Group{typeof(f)}(f)
-    end
-    catch e
-        show(e)
-        f.types_group = Group{typeof(f)}(f)
+    # catch e
+    #     show(e)
+    #     f.types_group = Group{typeof(f)}(f)
 
-    end
+    # end
     nothing
 end
 

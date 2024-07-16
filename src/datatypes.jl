@@ -359,84 +359,22 @@ end
 # Read the actual datatype for a committed datatype
 function read_shared_datatype(f::JLDFile, cdt::Union{SharedDatatype, CommittedDatatype})
     io = f.io
-    chunk_start::Int64 = fileoffset(f, cdt.header_offset)
-    seek(io, chunk_start)
-
-    header_version = jlread(io, UInt8)
-    if header_version == 1
-        seek(io, chunk_start)
-        cio = io
-        sz, = read_obj_start(cio)
-        chunk_end = position(cio) + sz
-        # Skip to nearest 8byte aligned position
-        skip_to_aligned!(cio, chunk_start)
-    else
-        header_version = 2
-        seek(io, chunk_start)
-        cio = begin_checksum_read(io)
-        sz, = read_obj_start(cio)
-        chunk_end = position(cio) + sz
-    end
-    # Messages
-    chunk_end::Int64
-    continuation_message_goes_here::Int64 = -1
-    chunks = [(; chunk_start, chunk_end)]
-    chunk_number = 0
+    msgs, _ = read_header(f, cdt.header_offset)
 
     # Messages
     datatype_class::UInt8 = 0
     datatype_offset::Int = 0
     attrs = ReadAttribute[]
 
-
-    while !isempty(chunks)
-        chunk = popfirst!(chunks)
-        chunk_start = chunk.chunk_start
-        chunk_end = chunk.chunk_end
-
-        if chunk_number > 0
-            seek(io, chunk_start)
-            chunk_end -= 4
-            if header_version == 2
-                cio = begin_checksum_read(io)
-                jlread(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
-            end
+    for msg in msgs
+        if msg.type == HM_DATATYPE
+            # Datatype stored here
+            datatype_class, datatype_offset = datatype_from_message(f, msg)
+        elseif msg.type == HM_ATTRIBUTE
+            push!(attrs, read_attribute(f, msg))
+        elseif (msg.hflags & 2^3) != 0
+            throw(UnsupportedFeatureException())
         end
-        chunk_number += 1
-        while (curpos = position(cio)) < chunk_end-4
-            if header_version == 1
-                # Message start 8byte aligned relative to object start
-                skip_to_aligned!(cio, chunk_start)
-                # Version 1 header message is padded
-                msg = jlread(cio, HeaderMessage)
-                skip(cio, 3)
-            else # header_version == 2
-                msg = jlread(cio, HeaderMessage)
-            end
-            endpos = position(cio) + msg.size
-            if msg.msg_type == HM_DATATYPE
-                # Datatype stored here
-                datatype_offset = position(cio)
-                datatype_class = jlread(cio, UInt8)
-            elseif msg.msg_type == HM_ATTRIBUTE
-                push!(attrs, read_attribute(cio, f))
-            elseif msg.msg_type == HM_OBJECT_HEADER_CONTINUATION
-                    cont_chunk_start = fileoffset(f, jlread(cio, RelOffset))
-                    chunk_length = jlread(cio, Length)
-                    push!(chunks, (;chunk_start=cont_chunk_start,
-                                    chunk_end  =cont_chunk_start+chunk_length))
-            elseif (msg.flags & 2^3) != 0
-                throw(UnsupportedFeatureException())
-            end
-            seek(cio, endpos)
-        end
-
-        # Checksum
-        #seek(cio, chunk_end)
-        if header_version == 2
-            end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())
-        end
-        seek(cio, chunk_end)
     end
 
     seek(io, datatype_offset)

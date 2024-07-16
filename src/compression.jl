@@ -174,23 +174,36 @@ function get_decompressor(filters::FilterPipeline)
     return invoke_again, decompressors
 end
 
-pipeline_message_size(filter_id) = 4 + 12 + (filter_id > 255)*(2 + length(ID_TO_DECOMPRESSOR[filter_id][4]))
-
+function pipeline_message_size(filter_id) 
+    sz = 4 + 12
+    if (filter_id > 255)
+        sz += 2
+        filter_name = ID_TO_DECOMPRESSOR[filter_id][4]
+        fnamelen = length(filter_name)+1
+        fnamelen += 8-mod1(fnamelen, 8)
+        sz += fnamelen
+    end
+    sz
+end
 function write_filter_pipeline_message(io, filter_id::UInt16)
     hmsize = 12
     if filter_id > 255
         filter_name = ID_TO_DECOMPRESSOR[filter_id][4]
-        hmsize += 2 + length(filter_name)
+        fnamelen = length(filter_name)+1
+        fnamelen += 8-mod1(fnamelen, 8)
+        padding = fnamelen - length(filter_name)
+        hmsize += 2 + fnamelen
     end
     jlwrite(io, HeaderMessage(HM_FILTER_PIPELINE, hmsize, 0))
     jlwrite(io, UInt8(2))                 # Version
     jlwrite(io, UInt8(1))                 # Number of Filters
     jlwrite(io, filter_id)                # Filter Identification Value
-    filter_id > 255 && jlwrite(io, UInt16(length(filter_name)))
+    filter_id > 255 && jlwrite(io, UInt16(fnamelen))
                                         # Length of Filter Name
     jlwrite(io, UInt16(0))                # Flags
     jlwrite(io, UInt16(1))                # Number of Client Data Values
     filter_id > 255 && jlwrite(io, filter_name) # Filter Name
+    filter_id > 255 && (padding > 0) && jlwrite(io, zeros(UInt8, padding))
     jlwrite(io, UInt32(5))                # Client Data (Compression Level)
     nothing
 end

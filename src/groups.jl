@@ -277,7 +277,6 @@ function load_group(f::JLDFile, offset::RelOffset)
     continuation_message_goes_here::Int64 = -1
     links = OrderedDict{String,RelOffset}()
     chunks = [chunk]
-    chunk_end = chunks[1].chunk_end
     chunk_number = 0
 
     next_link_offset::Int64 = -1
@@ -306,13 +305,16 @@ function load_group(f::JLDFile, offset::RelOffset)
             if msg.type == HM_NIL
                 if continuation_message_goes_here == -1 && 
                     chunk_end - curpos == CONTINUATION_MSG_SIZE
-                    continuation_message_goes_here = curpos
+                    #continuation_message_goes_here = curpos # also correct
+                    continuation_message_goes_here = fileoffset(f, msg.offset)
+
                 elseif position(cio) + CONTINUATION_MSG_SIZE == chunk_end
                     # This is the remaining space at the end of a chunk
                     # Use only if a message can potentially fit inside
                     # Single Character Name Link Message has 13 bytes payload
                     if msg.size >= 13 
-                        next_link_offset = curpos
+                        #next_link_offset = curpos # also correct
+                        next_link_offset = fileoffset(f, msg.offset)
                     end
                 end
             else
@@ -324,7 +326,7 @@ function load_group(f::JLDFile, offset::RelOffset)
                     if msg.size > 2
                         # Version Flag
                         msg.version == 0 || throw(UnsupportedFeatureException()) 
-                        flag = msg.flag
+                        flag = msg.flags
                         if flag%2 == 1 # first bit set
                             link_phase_change_max_compact = msg.link_phase_change_max_compact
                             link_phase_change_min_dense = msg.link_phase_change_min_dense
@@ -339,8 +341,8 @@ function load_group(f::JLDFile, offset::RelOffset)
                     name, loffset = read_link(msg)
                     links[name] = loffset
                 elseif msg.type == HM_OBJECT_HEADER_CONTINUATION
-                    push!(chunks, (; chunk_start = msg.continuation_offset,
-                                     chunk_end = msg.continuation_offset + msg.continuation_length))
+                    push!(chunks, (; chunk_start = fileoffset(f, msg.continuation_offset),
+                                     chunk_end = fileoffset(f, msg.continuation_offset + msg.continuation_length)))
                     # For correct behaviour, empty space can only be filled in the 
                     # very last chunk. Forget about previously found empty space
                     next_link_offset = -1
@@ -518,12 +520,13 @@ function save_group(g::Group)
 
         # Group info message
         write_group_info_message(cio, g)
-
+        g.next_link_offset = position(cio)
     end
+    next_msg_offset = g.next_link_offset == -1 ? g.continuation_message_goes_here : g.next_link_offset
     attach_message(f, g.last_chunk_start_offset, collect(g.unwritten_links);
         chunk_start = g.last_chunk_start_offset,
         chunk_end = g.last_chunk_checksum_offset,
-        next_msg_offset = position(io))
+        next_msg_offset)
     # this is clearly suboptimal
     # TODO: this should always return the object start
     # but for "continued" versions this is not the case

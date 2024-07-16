@@ -30,13 +30,13 @@ macro pseudostruct(name, blck)
             push!(fields, s)
             push!(types, T)
             push!(present, cond)
-            push!(increments, :(sizeof($T)))
+            push!(increments, :(sizeof($T)* ($cond)))
         elseif @capture(ex, cond_ && s_Symbol::T_ = v_)
             push!(fields, s)
             push!(types, T)
             push!(present, cond)
             push!(kwdefs, Expr(:kw, s, v))
-            push!(increments, :(sizeof($T)))
+            push!(increments, :(sizeof($T) * ($cond)))
         else
             throw(ArgumentError("Invalid field syntax: $ex"))
         end
@@ -94,7 +94,7 @@ end
     dimensionality::UInt8
     flags::UInt8
     (hm.version == 2) && dataspace_type::UInt8
-    skip(4*(hm.version == 1))
+    skip(5*(hm.version == 1))
     dimension_size::NTuple{Int(hm.dimensionality), Int64}
     (hm.flags & 0b01 == 0b01) && max_dimension_size::NTuple{Int(hm.dimensionality), Int64}
 end
@@ -102,7 +102,7 @@ function ReadDataspace(f, msg::Hmessage)
     v = msg.version
     ReadDataspace(v == 2 ? msg.dataspace_type : DS_V1, 
         msg.dimensionality, 
-        fileoffset(f, msg.offset) + 3 + (v==2) + 4*(v==1))
+        fileoffset(f, msg.payload_offset) + 3 + (v==2) + 5*(v==1))
 end
 
 @pseudostruct HM_LINK_INFO begin
@@ -150,9 +150,9 @@ function datatype_from_message(f::JLDFile, msg)
         msgtype = msg.body[2]
         # supported combinations are 
         (version == 3 && msgtype == 2) || (version == 2) || throw(UnsupportedVersionException("Unsupported shared message"))
-        (typemax(UInt8), Int(fileoffset(f, jlunsafe_load(Ptr{RelOffset}(pointer(msg.body, 2))))))
+        (typemax(UInt8), Int(fileoffset(f, jlunsafe_load(Ptr{RelOffset}(pointer(msg.body, 3))))))
     else
-        (msg.tc, Int(fileoffset(f, msg.offset + 4)))
+        (msg.tc, Int(fileoffset(f, msg.payload_offset)))
     end
 end
 
@@ -234,7 +234,7 @@ function DataLayout(f::JLD2.JLDFile, msg::Hmessage)
         storage_type = jlread(cio, UInt8)
         if storage_type == LC_COMPACT_STORAGE
             data_length = jlread(cio, UInt16)
-            data_offset =  msg.offset+4 + position(cio)
+            data_offset =  msg.payload_offset + position(cio)
             data_offset_int = fileoffset(f, data_offset)
             return DataLayout(version, storage_type, data_length, data_offset_int) 
         elseif storage_type == LC_CONTIGUOUS_STORAGE
@@ -357,20 +357,19 @@ function read_attribute(f::JLDFile, hm::Hmessage)
         committed = false
         name = Symbol(jlread(io, UInt8, ah.name_size-1))
         jlread(io, UInt8) == 0 || throw(InvalidDataException())
-        skip_to_aligned!(io, pos)
+        skip_to_aligned!(io, 0)
 
-        datatype_end = hm.offset + position(io) + ah.datatype_size
+        datatype_end = position(io) + ah.datatype_size
         datatype_class, datatype_offset = read_datatype_message(io, f, committed)
         seek(io, datatype_end)
-        skip_to_aligned!(io, pos)
+        skip_to_aligned!(io, 0)
 
-
-        dataspace_end = hm.offset + position(io) + ah.dataspace_size
+        dataspace_end =  position(io) + ah.dataspace_size
         dataspace = read_dataspace_message(io)
         seek(io, dataspace_end)
-        skip_to_aligned!(io, pos)
+        skip_to_aligned!(io, 0)
 
-        ReadAttribute(name, dataspace, datatype_class, datatype_offset, fileoffset(f, hm.offset) + position(io))
+        ReadAttribute(name, dataspace, datatype_class, datatype_offset, fileoffset(f, hm.payload_offset) + position(io))
     elseif ah.version == 2 || ah.version == 3
         committed = ah.flags == 1
         !committed && ah.flags != 0 && throw(UnsupportedFeatureException())
@@ -383,15 +382,16 @@ function read_attribute(f::JLDFile, hm::Hmessage)
         jlread(io, UInt8) == 0 || throw(InvalidDataException())
 
         pos=position(io)
-        dthm = Hmessage(HM_DATATYPE, ah.datatype_size, hm.hflags,
-            hm.body[pos+1:pos+ah.datatype_size], hm.offset+(pos))
-        datatype_class, datatype_offset = datatype_from_message(f, dthm)
+        datatype_class = committed ? typemax(UInt8) : hm.body[pos+1]
+        datatype_roffset = committed ? unsafe_load(pconvert(Ptr{RelOffset}, pointer(hm.body, pos+3))) : hm.payload_offset + pos
+        datatype_offset = fileoffset(f, datatype_roffset)
         pos += ah.datatype_size
 
-        dshm = Hmessage(HM_DATASPACE, ah.dataspace_size, hm.hflags,  hm.body[pos+1:pos+ah.dataspace_size], hm.offset+4+pos)
+        hm.hflags & 0x10 == 0x10 && @warn "We've got a shared dataspace"
+        dshm = Hmessage(HM_DATASPACE, ah.dataspace_size, hm.hflags,  hm.body[pos+1:pos+ah.dataspace_size], hm.offset+4+pos, hm.offset+pos+4)
         dataspace = ReadDataspace(f, dshm)
         pos += ah.dataspace_size
-        data_offset = fileoffset(f, hm.offset) + jlsizeof(HeaderMessage) + pos
+        data_offset = fileoffset(f, hm.payload_offset) + pos
         ReadAttribute(name, dataspace, datatype_class, datatype_offset, data_offset)
     else
         throw(UnsupportedVersionException("Unknown Attribute Header Version $(ah.version)"))
@@ -410,7 +410,13 @@ end
     (hm.flags & 0b01==0b01) && link_phase_change_min_dense::UInt16
     (hm.flags & 0b10==0b10) && est_num_entries::UInt16
     (hm.flags & 0b10==0b10) && est_link_name_len::UInt16
+end
 
+function write_message(io, f::JLDFile, msg::Hmessage)
+    write(io, UInt8(msg.type))
+    write(io, msg.size)
+    write(io, msg.hflags)
+    write(io, msg.body)
 end
 
 function read_header_message(f, io, header_version, chunk_start, groupflags)
@@ -418,18 +424,21 @@ function read_header_message(f, io, header_version, chunk_start, groupflags)
     if header_version == 1
         # Message start 8byte aligned relative to object start
         skip_to_aligned!(io, chunk_start)
+        msgpos = h5offset(f, position(io))
         # Version 1 header message is padded
-        msg = jlread(io, HeaderMessage)
+        #msg = jlread(io, HeaderMessage)
+        msg = HeaderMessage(UInt8(jlread(io, UInt16)), jlread(io, UInt16), jlread(io, UInt8))
         skip(io, 3)
     else # header_version == 2
         msg = jlread(io, HeaderMessage)
         (groupflags & 4) == 4 && skip(io, 2) 
     end
-    payload = read(io, UInt8, msg.size)
+    payload_offset = h5offset(f, position(io))
+    payload = jlread(io, UInt8, msg.size)
     Hmessage(
         HeaderMessageTypes(msg.msg_type),
         msg.size, msg.flags, payload,
-        msgpos)
+        msgpos, payload_offset)
 end
 
 
@@ -500,4 +509,10 @@ function read_header(f, offset::RelOffset)
         end
     end
     return msgs, chunks
+end
+
+
+@pseudostruct HM_SYMBOL_TABLE begin
+    v1btree_address::RelOffset
+    name_index_heap::RelOffset
 end
