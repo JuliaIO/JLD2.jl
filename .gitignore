@@ -4,7 +4,8 @@
 *.h5
 *.nc
 *.jld
-Manifest.toml
 /test/test_out.jld
 
 docs/build/
+Manifest.toml
+.vscode/
