@@ -388,7 +388,7 @@ function read_attribute(f::JLDFile, hm::Hmessage)
         pos += ah.datatype_size
 
         hm.hflags & 0x10 == 0x10 && @warn "We've got a shared dataspace"
-        dshm = Hmessage(HM_DATASPACE, ah.dataspace_size, hm.hflags,  hm.body[pos+1:pos+ah.dataspace_size], hm.offset+4+pos, hm.offset+pos+4)
+        dshm = Hmessage(HM_DATASPACE, ah.dataspace_size, hm.hflags,  hm.body[pos+1:pos+ah.dataspace_size], hm.payload_offset+pos, hm.payload_offset+pos)
         dataspace = ReadDataspace(f, dshm)
         pos += ah.dataspace_size
         data_offset = fileoffset(f, hm.payload_offset) + pos

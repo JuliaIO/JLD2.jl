@@ -76,7 +76,7 @@ BufferedReader(io::IOStream) =
     BufferedReader(io, Vector{UInt8}(), position(io), Ref{Int}(0))
 Base.show(io::IO, ::BufferedReader) = print(io, "BufferedReader")
 
-function readmore!(io::BufferedReader, n::Int)
+function readmore!(io::BufferedReader, n::Integer)
     f = io.f
     amount = max(bytesavailable(f), n)
     buffer = io.buffer
