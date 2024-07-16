@@ -120,14 +120,14 @@ mutable struct GlobalHeap
 end
 
 """
-    H5Datatype
+    abstract type H5Datatype
 
 Supertype of all HDF5 datatypes.
 """
 abstract type H5Datatype end
 
 """
-    SharedDatatype
+    SharedDatatype <: H5Datatype
 
 Reference to a shared datatype message (stored elsewhere in a file).
 """
@@ -136,7 +136,7 @@ struct SharedDatatype <: H5Datatype
 end
 
 """
-    CommittedDatatype
+    CommittedDatatype <: H5Datatype
 
 Reference to a shared datatype message (stored elsewhere in a file).
 These are stored in the `_types` group and indexed.
@@ -188,7 +188,8 @@ FilterPipeline() = FilterPipeline(Filter[])
 iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
 
 """
-    Group(file)
+    Group{T}
+    Group(file::T)
 
 JLD2 group object.
 
@@ -444,7 +445,8 @@ function load_file_metadata!(f)
 end
 
 """
-    jldopen(fname::AbstractString, mode::AbstractString; iotype=MmapIO, compress=false, typemap=Dict())
+    jldopen(fname::AbstractString, mode::AbstractString;
+            iotype=MmapIO, compress=false, typemap=Dict())
 
 Opens a JLD2 file at path `fname`.
 
@@ -604,6 +606,7 @@ end
 
 """
     printtoc([io::IO,] f::JLDFile [; numlines])
+
 Prints an overview of the contents of `f` to the `IO`.
 
 Use the optional `numlines` parameter to restrict the amount of items listed.
