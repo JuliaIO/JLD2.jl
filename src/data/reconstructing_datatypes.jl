@@ -158,6 +158,8 @@ function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{Re
     end
 end
 
+struct TypeMappingException <: Exception end
+
 """
 constructrr(f::JLDFile, T::DataType, dt::CompoundType, attrs::Vector{ReadAttribute},
             hard_failure::Bool=false)
@@ -169,7 +171,6 @@ If `hard_failure` is true, then throw a `TypeMappingException` instead of attemp
 reconstruction. This helps in cases where we can't know if reconstructed parametric types
 will have a matching memory layout without first inspecting the memory layout.
 """
-struct TypeMappingException <: Exception; end
 function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
