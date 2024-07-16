@@ -4,7 +4,7 @@ This page lists features of JLD2 that are kept for legacy purposes.
 In particular, the following sections describes the `@load` and `@save` macros.
 They have been the default for many users but they unnecessarily introduce
 new macro-based syntax. Over time a range of issues have been opened by
-new users struggling with them. Since their inception, the julia language 
+new users struggling with them. Since their inception, the Julia language
 has improved significantly and macros may no longer be necessary in this case.
 
 

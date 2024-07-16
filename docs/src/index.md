@@ -148,7 +148,7 @@ load("example.jld2") # -> Dict("mygroup/mystuff" => 42)
 load("example.jld2"; nested=true) # -> Dict("mygroup" => Dict("mystuff" => 42))
 ```
 
-### Unpack.jl API
+### UnPack.jl API
 
 When additionally loading the [UnPack.jl](https://github.com/mauro3/UnPack.jl) package, its `@unpack` and `@pack!` macros can be used to quickly save and load data from the file-like interface. Example:
 
