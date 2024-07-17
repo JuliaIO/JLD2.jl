@@ -338,7 +338,7 @@ function load_group(f::JLDFile, offset::RelOffset)
                         end
                     end
                 elseif msg.type == HM_LINK_MESSAGE
-                    name, loffset = read_link(msg)
+                    name, loffset = msg.link_name, msg.target
                     links[name] = loffset
                 elseif msg.type == HM_OBJECT_HEADER_CONTINUATION
                     push!(chunks, (; chunk_start = fileoffset(f, msg.continuation_offset),

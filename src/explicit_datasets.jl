@@ -7,9 +7,15 @@ struct Hmessage
     payload_offset::RelOffset
 end
 
-function Base.getproperty(hm::Hmessage, s::Symbol)
-    s in fieldnames(Hmessage) && return getfield(hm, s)
-    getprop(Val(hm.type), hm, s)
+@generated function Base.getproperty(hm::Hmessage, s::Symbol)
+    ex = Expr(:block)
+    for v in instances(HeaderMessageTypes)
+        push!(ex.args, :(hm.type == $(v) && return getprop(Val($v), hm, s)))
+    end
+    return quote
+        s in fieldnames(Hmessage) && return getfield(hm, s)
+        $(ex)
+    end
 end
 
 function Hmessage(type::HeaderMessageTypes, hflags=0x00, size=0; kwargs...)

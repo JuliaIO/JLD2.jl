@@ -3,120 +3,138 @@ using MacroTools
 function getprop end
 function construct_hm_payload end
 
+function isset(flag, bit)
+    #return !iszero(flag & UInt8(2^(bit-1)))
+    return Bool(flag >> (bit) & 1)
+end
+
+function flag2uint(flag)
+    # use lowest two bits
+    value = flag << 6 >> 6
+    if value == 0
+        UInt8
+    elseif value == 1
+        UInt16
+    elseif value == 2
+        UInt32
+    else
+        UInt64
+    end
+end
+
+function build_lines(ex)
+    ptr = esc(:ptr)
+    if ex isa LineNumberNode
+        return ex
+    elseif @capture(ex, cond_ && body_)# || @capture(ex, cond_ && body_::T_)
+        cond = esc(cond)
+        return Expr(:&&, cond, build_lines(ex.args[2]))
+    elseif @capture(ex, s_Symbol::T_) || @capture(ex, s_Symbol::T_ = v_)
+        if @capture(T, @FixedLengthString(len_))
+            len = esc(len)
+            read_statement = :(unsafe_string($ptr+offset, $len))
+            increment = :($len)
+        elseif @capture(T, @Blob(len_))
+            len = esc(len)
+            read_statement = :(getfield(hm,:body)[(offset+1):(offset+1+$len)])
+            increment = :($len)
+        elseif @capture(T, @Offset)
+            read_statement = :(getfield(hm,:payload_offset) + offset)
+            increment = 0
+        else
+            T = esc(T)
+            read_statement = :(unsafe_load(Ptr{$T}($ptr+offset)))
+            increment = :(sizeof($(T)))
+        end
+
+        assign_statement = :($(esc(s)) = $read_statement)
+        bl = Expr(:block,
+            assign_statement,
+            :(s == $(QuoteNode(s)) && return $(esc(s))),
+            :(offset += $increment)
+            )
+        return bl
+    elseif @capture(ex, @skip(n_))
+        return :(offset += $(esc(n)))
+    elseif @capture(ex, @skiptoaligned(n_))
+        return :(offset += 8 - mod1(offset-$(esc(n)), 8))
+    elseif @capture(ex, if cond_; body_; end )
+        cond = esc(cond)
+        return Expr(:if, cond, Expr(:block, build_accessor!([], body)...))
+    else
+        throw(ArgumentError("Invalid field syntax: $ex"))
+    end
+end
+
+function build_accessor!(getprop_body, blk)
+    for ex in blk.args
+        push!(getprop_body, build_lines(ex))
+    end
+    return getprop_body
+end
 
 macro pseudostruct(name, blck)
-    fields = Symbol[]
-    types = []
-    present = []
-    kwdefs = []
-    increments = Any[0]
-    for ex in blck.args
-        ex isa LineNumberNode && continue
-        if @capture(ex, s_Symbol::T_)
-            push!(fields, s)
-            push!(types, T)
-            push!(present, :(true))
-            push!(increments, :(sizeof($T)))
-        elseif @capture(ex, s_Symbol::T_ = v_)
-            push!(fields, s)
-            push!(types, T)
-            push!(present, :(true))
-            push!(kwdefs, Expr(:kw, s, v))
-            push!(increments, :(sizeof($T)))
-        elseif @capture(ex, skip(n_))
-            increments[end] = :($(increments[end])+$n)
+    getprop_body = Any[:(offset=0)]
 
-        elseif @capture(ex, cond_ && s_Symbol::T_)
-            push!(fields, s)
-            push!(types, T)
-            push!(present, cond)
-            push!(increments, :(sizeof($T)* ($cond)))
-        elseif @capture(ex, cond_ && s_Symbol::T_ = v_)
-            push!(fields, s)
-            push!(types, T)
-            push!(present, cond)
-            push!(kwdefs, Expr(:kw, s, v))
-            push!(increments, :(sizeof($T) * ($cond)))
-        else
-            throw(ArgumentError("Invalid field syntax: $ex"))
-        end
-    end
-    # assemble accessor function 
-    getprop_body = [:(offset=0)]
-    for i in eachindex(fields)
-        push!(getprop_body, :(offset += $(increments[i])),
-        Expr(:if, :(s == $(QuoteNode(fields[i]))), Expr(:block,
-            !(present[i]==true) ? :( $(present[i]) || throw(ArgumentError("Field not present"))) : nothing,
-            :(return unsafe_load(Ptr{$(types[i])}(pointer(hm.body)+offset)))))
-        )
-    end
+    build_accessor!(getprop_body, blck)
 
     getpropfun = (quote
-        function $(esc(:getprop))(::Val{$name}, hm::Hmessage, s::Symbol)
+        function $(esc(:getprop))(::Val{$name}, $(esc(:hm))::Hmessage, s::Symbol)
             $(__source__)
+            $(:($(esc(:ptr)) = pointer(getfield(hm,:body))))
+            $(:($(esc(:hflags)) = getfield(hm, :hflags)))
             $(getprop_body...)
             throw(ArgumentError("Field $s not found"))
         end
     end).args[2]
-    # assemble constructor function
-    funbody = [ :(hm = (; $(kwdefs...), kwargs...)), :(body = IOBuffer()), :(offset=0)]
-
-    for i in eachindex(fields)
-        push!(funbody, 
-            :(offset += $(increments[i])),
-            :(offset > position(body) && jlwrite(body, zeros(UInt8, offset-position(body)))))
-        if present[i] == true
-            # is a required field
-            push!(funbody, 
-                :(jlwrite(body, $(types[i])(hm.$(fields[i]))))
-                )
-        else
-            # is an optional field
-            push!(funbody, 
-                :($(present[i]) && jlwrite(body, $(types[i])(hm.$(fields[i]))))
-                )
-        end
-    end
-    push!(funbody, 
-        :(hsize > position(body) && jlwrite(body, zeros(UInt8, hsize-position(body)))))
-
-    constructorfun = Expr(:function, :($(esc(:construct_hm_payload))(::Val{$name}, hflags, hsize; kwargs...)), 
-        Expr(:block, __source__, funbody..., :(return take!(body))))
     
-    return Expr(:block, getpropfun, constructorfun, nothing)
+    return Expr(:block, getpropfun, nothing)
 end
 
 
 @pseudostruct HM_NIL begin end
+construct_hm_payload(::Val{HM_NIL}, hflags, size) = zeros(UInt8, size)
 
+#MacroTools.@expand 
 @pseudostruct HM_DATASPACE begin
     version::UInt8 = 1
     dimensionality::UInt8
     flags::UInt8
-    (hm.version == 2) && dataspace_type::UInt8
-    skip(5*(hm.version == 1))
-    dimension_size::NTuple{Int(hm.dimensionality), Int64}
-    (hm.flags & 0b01 == 0b01) && max_dimension_size::NTuple{Int(hm.dimensionality), Int64}
+    (version == 2) && dataspace_type::UInt8
+    version == 1 && @skip(5)
+    dim_offset::@Offset
+    dimension_size::NTuple{Int(dimensionality), Int64}
+    isset(flags,0) && max_dimension_size::NTuple{Int(dimensionality), Int64}
 end
+
 function ReadDataspace(f, msg::Hmessage)
     v = msg.version
     ReadDataspace(v == 2 ? msg.dataspace_type : DS_V1, 
         msg.dimensionality, 
-        fileoffset(f, msg.payload_offset) + 3 + (v==2) + 5*(v==1))
+        fileoffset(f, msg.dim_offset))
 end
 
 @pseudostruct HM_LINK_INFO begin
     version::UInt8 = 0x00
     # zero-bit: creation order tracked, 1-bit: creation order is indexed
     flags::UInt8 = 0x00 
-    (hm.flags & 0b01 == 0b01) && max_creation_index::Int64
+    isset(flags,0) && max_creation_index::Int64
     fractal_heap_address::RelOffset = UNDEFINED_ADDRESS
     v2_btree_name_index::RelOffset = UNDEFINED_ADDRESS
-    (hm.flags & 0b10 == 0b10) && v2_btree_creation_order_index::RelOffset = UNDEFINED_ADDRESS
+    isset(flags, 1) && (v2_btree_creation_order_index::RelOffset = UNDEFINED_ADDRESS)
 end
 
+#@MacroTools.expand 
 @pseudostruct HM_DATATYPE begin
-    tc::UInt8 # typeclass (low four bits) and version (upper four bits)
+    if isset(hflags, 1) # shared message
+        version::UInt8
+        msgtype::UInt8
+        datatype_offset::RelOffset
+    end
+    if !isset(hflags, 1)
+        datatype_offset::@Offset
+        tc::UInt8 # typeclass (low four bits) and version (upper four bits)
+    end
     # class1::UInt8
     # class2::UInt8
     # class3::UInt8
@@ -135,7 +153,7 @@ end
     #skip to aligned
     # Class 8: Enumeration
     # Class 9: Variable Length Types
-    skip(hsize-1)
+    #@skip(hsize-1)
 end
 
 # Reads a datatype message and returns a (offset::RelOffset, class::UInt8)
@@ -146,125 +164,139 @@ end
 function datatype_from_message(f::JLDFile, msg)
     committed = msg.hflags & 2 == 2
     if committed
-        version = msg.body[1]
-        msgtype = msg.body[2]
+        version = msg.version
+        msgtype = msg.msgtype
         # supported combinations are 
         (version == 3 && msgtype == 2) || (version == 2) || throw(UnsupportedVersionException("Unsupported shared message"))
-        (typemax(UInt8), Int(fileoffset(f, jlunsafe_load(Ptr{RelOffset}(pointer(msg.body, 3))))))
+        tc = typemax(UInt8)
     else
-        (msg.tc, Int(fileoffset(f, msg.payload_offset)))
+        tc = msg.tc
     end
+    (tc, Int(fileoffset(f, msg.datatype_offset)))
 end
 
 @pseudostruct HM_FILL_VALUE_OLD begin
     size::UInt32
-    fill_value::NTuple{Int(hm.size), UInt8}
+    fill_value::NTuple{Int(size), UInt8}
 end
 @pseudostruct HM_FILL_VALUE begin
-    skip(hsize)
+    @skip(hsize)
 end
-# can't access anything here
+
 @pseudostruct HM_LINK_MESSAGE begin 
     version::UInt8 = 1
     flags::UInt8
-    # link_type::UInt8
-    # creation_order::Int64
-    # link_name_charset::UInt8
-    # link_name_len::UInt8
-    # link_name::String
-    # link_info::
-    skip(hsize-2)
-end
-function read_link(msg::Hmessage)
-    io = IOBuffer(msg.body)
-    skip(io, 2)
-    # Version
-    version = msg.version
-    version == 1 || throw(UnsupportedVersionException())
-
-    # Flags
-    flags = msg.flags
-
-    if (flags & LM_LINK_TYPE_FIELD_PRESENT) != 0
-        jlread(io, UInt8) == 0 || throw(UnsupportedFeatureException())
+    isset(flags, 3) && link_type::UInt8
+    isset(flags, 2) && creation_order::Int64
+    isset(flags, 4) && link_name_charset::UInt8
+    link_name_len::flag2uint(flags)
+    link_name::@FixedLengthString(link_name_len) # non-null-terminated
+    (!isset(flags, 3) || link_type==0) && target::RelOffset
+    if isset(flags, 3) && link_type == 1
+        link_info_size::UInt16
+        soft_link::NTuple{link_info_size, UInt8} # non-null terminated string
     end
-
-    if (flags & LM_CREATION_ORDER_PRESENT) != 0
-        skip(io, 8)
+    if isset(flags, 3) && link_type == 64
+        link_info_size::UInt16
+        external_link::NTuple{link_info_size, UInt8} # two null-terminated strings
     end
-
-    # Link name character set
-    cset = CSET_ASCII
-    if (flags & LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT) != 0
-        cset_byte = jlread(io, UInt8)
-        cset = CharacterSet(cset_byte)
-    end
-
-    sz = read_size(io, flags)  # Size
-    name = jlread(io, UInt8, sz) # Link name
-    target = jlread(io, RelOffset)  # Link information
-
-    (String(name), target)
 end
 
-# not implemented yet
-@pseudostruct HM_EXTERNAL_FILE_LIST begin end
+@pseudostruct HM_EXTERNAL_FILE_LIST begin 
+    version::UInt8
+    @skip(3)
+    allocated_slots::UInt16
+    used_slots::UInt16
+    heap_address::RelOffset
+    external_file_list::@Blob(allocated_slots*3*8)
+end
 
 @pseudostruct HM_DATA_LAYOUT begin
     version::UInt8
-    # this is incomplete
-    skip(hsize-1)
-    # Version 1 and 2
-    # dimensionality::UInt8
-    # layout_class::UInt8
-    # skip(5)
-    # address::RelOffset
-    # dimensions::NTuple{Int(hm.dimensionality), Int32}
-
-    # # Version 3 & 4
-    # version::UInt8
-    # layout_class::UInt8
-    # # Compact 
+    if version in (1,2)
+        dimensionality::UInt8
+        layout_class::UInt8
+        @skip(5)
+        (layout_class != 0) && data_address::RelOffset
+        dimensions::NTuple{Int(dimensionality), Int32}
+        (layout_class == 2) && element_size::UInt32
+        if (layout_class == 0) 
+            data_size::UInt32
+            data_address::@Offset
+            data::@Blob(data_size)
+        end
+    end
+    if version == 3 || version == 4
+        layout_class::UInt8
+        if layout_class == 0 # Compact Storage
+            data_size::UInt16
+            data_address::@Offset
+            data::@Blob(data_size)
+        end
+        if layout_class == 1
+            data_address::RelOffset
+            data_size::Int64# Lengths
+        end
+        if version == 3 && layout_class == 2
+            dimensionality::UInt8
+            data_address::RelOffset
+            dimensions::NTuple{Int(dimensionality), Int32}
+            data_size::UInt32#element_size::UInt32
+        end
+        if version == 4 && layout_class == 2
+            flags::UInt8
+            dimensionality::UInt8
+            dim_size::UInt8
+            dimensions::NTuple{Int(dimensionality), uintofsize(dim_size)}
+            chunk_indexing_type::UInt8
+            if chunk_indexing_type == 1 # Single Chunk
+                data_size::Int64 # Lengths
+                filters::UInt32
+            end
+            if chunk_indexing_type == 3
+                page_bits::UInt8
+            end
+            if chunk_indexing_type == 4
+                maxbits::UInt8
+                index_elements::UInt8
+                minpointers::UInt8
+                minelements::UInt8
+                page_bits:::UInt16
+            end
+            if chunk_indexing_type == 5
+                node_size::UInt32
+                splitpercent::UInt8
+                mergepercent::UInt8
+            end
+            data_address::RelOffset
+        end
+        if layout_class == 3 # Virtual Storage
+            data_address::RelOffset
+            index::UInt32
+        end
+    end
 end
 
 function DataLayout(f::JLD2.JLDFile, msg::Hmessage)
-    cio = IOBuffer(msg.body)
-    version = jlread(cio, UInt8)#msg.version
+    version = msg.version
+    storage_type = msg.layout_class
+    rf = msg.data_address
+    data_offset = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
+    data_length = msg.data_size
     if version == 4 || version == 3
-        storage_type = jlread(cio, UInt8)
-        if storage_type == LC_COMPACT_STORAGE
-            data_length = jlread(cio, UInt16)
-            data_offset =  msg.payload_offset + position(cio)
-            data_offset_int = fileoffset(f, data_offset)
-            return DataLayout(version, storage_type, data_length, data_offset_int) 
-        elseif storage_type == LC_CONTIGUOUS_STORAGE
-            rf = jlread(cio, RelOffset)
-            data_offset = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
-            data_length = jlread(cio, Length)
-            DataLayout(version, storage_type, data_length, data_offset) 
+        if storage_type == LC_COMPACT_STORAGE || storage_type == LC_CONTIGUOUS_STORAGE
+            return DataLayout(version, storage_type, data_length, data_offset) 
         elseif version == 4 && storage_type == LC_CHUNKED_STORAGE
-            # TODO: validate this
-            flags = jlread(cio, UInt8)
-            dimensionality = jlread(cio, UInt8)
-            dimensionality_size = jlread(cio, UInt8)
-            #skip(cio, Int(dimensionality)*Int(dimensionality_size))
-            chunk_dimensions = [read_nb_uint(cio, dimensionality_size) for _=1:dimensionality]
-            chunk_indexing_type = jlread(cio, UInt8)
+            chunk_dimensions = Int[msg.dimensions...]
+            chunk_indexing_type = msg.chunk_indexing_type
             chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
-            data_length = jlread(cio, Length)
-            jlread(cio, UInt32)
-            data_offset = fileoffset(f, jlread(cio, RelOffset))
+            #filters = msg.filters#jlread(cio, UInt32)
             chunked_storage = true
-            DataLayout(version, storage_type, data_length, data_offset, dimensionality, chunk_indexing_type, chunk_dimensions) 
-
+            DataLayout(version, storage_type, data_length, data_offset, msg.dimensionality, msg.chunk_indexing_type, chunk_dimensions) 
         elseif version == 3 && storage_type == LC_CHUNKED_STORAGE
-            dimensionality = jlread(cio, UInt8)
-            rf = jlread(cio, RelOffset)
-            data_offset = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
-            chunk_dimensions = jlread(cio, UInt32, dimensionality-1)
-            data_length = jlread(cio, UInt32)
+            chunk_dimensions = Int[msg.dimensions[1:end-1]...] # drop element size as last dimension
             chunked_storage = true
-            DataLayout(version, storage_type, data_length, data_offset, dimensionality, 0, chunk_dimensions) 
+            DataLayout(version, storage_type, data_length, data_offset, msg.dimensionality, 0, chunk_dimensions) 
         else
             throw(UnsupportedFeatureException("Unknown data layout"))
         end
@@ -276,7 +308,7 @@ end
 @pseudostruct HM_FILTER_PIPELINE begin
     version::UInt8
     nfilters::UInt8
-    skip(hsize-1)
+    @skip(hsize-1)
 end
 
 function FilterPipeline(msg::Hmessage)
@@ -331,71 +363,49 @@ function FilterPipeline(msg::Hmessage)
 
 end
 
+#MacroTools.@expand 
 @pseudostruct HM_ATTRIBUTE begin
-    # version::UInt8
-    # # zero bit: shared datatype if set
-    # # first bit: shared dataspace if set
-    # flags::UInt8
-    # name_size::UInt16 # includes null terminator
-    # datatype_size::UInt16
-    # dataspace_size::UInt16
-    # # Character encoding: 0x00: ASCII, 0x01: UTF-8
-    # (hm.version & 0x03==0x03) && name_encoding::UInt8
-    # name::String # null-terminated, not padded
-    # #(flags & 0x01 == 0x01) && datatype::SharedDatatypeMessage
-    # #(flags ⊻ 0x00 == 0x00) && datatype::SharedDatatypeMessage
-    # datatype::DataType # datatype size 
-    # dataspace::DataSpace
-    skip(hsize)    
+    version::UInt8
+    flags::UInt8
+    name_size::UInt16
+    datatype_size::UInt16
+    dataspace_size::UInt16
+    version == 3 && name_charset_encoding::UInt8
+    name::@FixedLengthString(name_size-1)
+    @skip(1)
+    (version == 1) && @skiptoaligned(0)
+
+    # committed if isset(hm.flags, 0)
+    if isset(flags, 0) #this is slightly more complicated in general
+        vshared::UInt8
+        sharedtype::UInt8
+        datatype_offset::RelOffset
+    end
+    if !isset(flags, 0)
+        datatype_offset::@Offset
+        datatype_message::NTuple{Int(datatype_size), UInt8}
+    end
+    (version == 1) && @skiptoaligned(0)
+    dataspace_offset::@Offset
+    dataspace_message::NTuple{Int(dataspace_size), UInt8}
+    (version == 1) && @skiptoaligned(0)
+    data_offset::@Offset
+    data::@Blob(hsize-offset)
 end
 
 function read_attribute(f::JLDFile, hm::Hmessage)
-    io = IOBuffer(hm.body)
-    fio = f.io
-    ah = jlread(io, AttributeHeader)
-    if ah.version == 1
-        committed = false
-        name = Symbol(jlread(io, UInt8, ah.name_size-1))
-        jlread(io, UInt8) == 0 || throw(InvalidDataException())
-        skip_to_aligned!(io, 0)
+    committed = hm.flags == 1
+    !committed && hm.flags != 0 && throw(UnsupportedFeatureException())
 
-        datatype_end = position(io) + ah.datatype_size
-        datatype_class, datatype_offset = read_datatype_message(io, f, committed)
-        seek(io, datatype_end)
-        skip_to_aligned!(io, 0)
+    name = hm.name
+    datatype_class = committed ? typemax(UInt8) : hm.datatype_message[1]
+    datatype_offset = fileoffset(f, hm.datatype_offset)
 
-        dataspace_end =  position(io) + ah.dataspace_size
-        dataspace = read_dataspace_message(io)
-        seek(io, dataspace_end)
-        skip_to_aligned!(io, 0)
-
-        ReadAttribute(name, dataspace, datatype_class, datatype_offset, fileoffset(f, hm.payload_offset) + position(io))
-    elseif ah.version == 2 || ah.version == 3
-        committed = ah.flags == 1
-        !committed && ah.flags != 0 && throw(UnsupportedFeatureException())
-
-        if ah.version == 3
-            name_charset_encoding = jlread(io, UInt8)
-        end
-
-        name = Symbol(jlread(io, UInt8, ah.name_size-1))
-        jlread(io, UInt8) == 0 || throw(InvalidDataException())
-
-        pos=position(io)
-        datatype_class = committed ? typemax(UInt8) : hm.body[pos+1]
-        datatype_roffset = committed ? unsafe_load(pconvert(Ptr{RelOffset}, pointer(hm.body, pos+3))) : hm.payload_offset + pos
-        datatype_offset = fileoffset(f, datatype_roffset)
-        pos += ah.datatype_size
-
-        hm.hflags & 0x10 == 0x10 && @warn "We've got a shared dataspace"
-        dshm = Hmessage(HM_DATASPACE, ah.dataspace_size, hm.hflags,  hm.body[pos+1:pos+ah.dataspace_size], hm.payload_offset+pos, hm.payload_offset+pos)
-        dataspace = ReadDataspace(f, dshm)
-        pos += ah.dataspace_size
-        data_offset = fileoffset(f, hm.payload_offset) + pos
-        ReadAttribute(name, dataspace, datatype_class, datatype_offset, data_offset)
-    else
-        throw(UnsupportedVersionException("Unknown Attribute Header Version $(ah.version)"))
-    end
+    hm.hflags & 0x10 == 0x10 && @warn "We've got a shared dataspace"
+    dshm = Hmessage(HM_DATASPACE, hm.dataspace_size, hm.hflags,  [hm.dataspace_message...], UNDEFINED_ADDRESS, hm.dataspace_offset)
+    dataspace = ReadDataspace(f, dshm)
+    data_offset = fileoffset(f, hm.data_offset)
+    ReadAttribute(Symbol(name), dataspace, datatype_class, datatype_offset, data_offset)
 end
 
 @pseudostruct HM_OBJECT_HEADER_CONTINUATION begin
@@ -406,14 +416,18 @@ end
 @pseudostruct HM_GROUP_INFO begin
     version::UInt8 = 0
     flags::UInt8 = 0
-    (hm.flags & 0b01==0b01) && link_phase_change_max_compact::UInt16
-    (hm.flags & 0b01==0b01) && link_phase_change_min_dense::UInt16
-    (hm.flags & 0b10==0b10) && est_num_entries::UInt16
-    (hm.flags & 0b10==0b10) && est_link_name_len::UInt16
+    if isset(flags, 0)
+        link_phase_change_max_compact::UInt16
+        link_phase_change_min_dense::UInt16
+    end
+    if isset(flags, 1)
+        est_num_entries::UInt16
+        est_link_name_len::UInt16
+    end
 end
 
 function write_message(io, f::JLDFile, msg::Hmessage)
-    write(io, UInt8(msg.type))
+    write(io, msg.type)
     write(io, msg.size)
     write(io, msg.hflags)
     write(io, msg.body)
@@ -426,7 +440,6 @@ function read_header_message(f, io, header_version, chunk_start, groupflags)
         skip_to_aligned!(io, chunk_start)
         msgpos = h5offset(f, position(io))
         # Version 1 header message is padded
-        #msg = jlread(io, HeaderMessage)
         msg = HeaderMessage(UInt8(jlread(io, UInt16)), jlread(io, UInt16), jlread(io, UInt8))
         skip(io, 3)
     else # header_version == 2
@@ -505,7 +518,6 @@ function read_header(f, offset::RelOffset)
         seek(cio, chunk_end)
 
         if header_version == 2
-            # Checksum
             end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException("Invalid Checksum"))
         end
     end
