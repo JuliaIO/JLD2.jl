@@ -219,16 +219,6 @@ function jlwrite(io, ::LinkInfo)
     return nothing    
 end
 
-function jlread(io, ::Type{LinkInfo})
-    version = jlread(io, UInt8)
-    flags = jlread(io, UInt8)
-    (flags & 0b1) == 1 && skip(io, 8)
-    fractal_heap_address = jlread(io, RelOffset)
-    name_index_btree = jlread(io, RelOffset)
-    (flags & 0b10) == 0b10 && skip(io, 8)
-    (; version, flags, fractal_heap_address, name_index_btree)
-end
-
 @enum(CharacterSet,
       CSET_ASCII,
       CSET_UTF8)

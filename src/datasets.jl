@@ -587,16 +587,7 @@ function Base.delete!(g::Group, name::AbstractString)
         @warn "No entry named $name was found"
         return
     end
-
-    if '/' in name
-        dir, dname = rsplit(name, '/'; limit=2)
-        if isempty(dir)
-            g = g.f.root_group
-        else
-            g = g[dir]
-        end
-        name = string(dname)
-    end
+    (g, name) = pathize(g, name, false)
 
     # Simple case first. If it hasn't been written yet,
     # the file doesn't need to be altered.
@@ -639,52 +630,42 @@ function delete_written_link!(f::JLDFile, roffset::RelOffset, name::AbstractStri
     # until the correct link message is found
     # The deletion is done by replacing that message by a placeholder nill message
     io = f.io
-    chunk_start_offset::Int64 = fileoffset(f, roffset)
-    seek(io, chunk_start_offset)
+    cio, header_version, chunk, groupflags = start_obj_read(f, roffset)
+    chunk_start, chunk_end = chunk
 
-    sz, = read_obj_start(io)
-    chunk_checksum_offset::Int64 = position(io) + sz
+    # Messages
+    chunks = [(; chunk_start, chunk_end)]
+    chunk_number = 0
 
-    continuation_offset::Int64 = -1
-    continuation_length::Length = 0
     link_deleted = false
-    while !link_deleted
-        if continuation_offset != -1
-            seek(io, continuation_offset)
-            chunk_start_offset = continuation_offset
-            chunk_checksum_offset = continuation_offset + continuation_length - 4
-            continuation_offset = -1
-            jlread(io, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
+    while !link_deleted && !isempty(chunks)
+        chunk = popfirst!(chunks)
+        chunk_start, chunk_end = chunk.chunk_start, chunk.chunk_end
+
+        if chunk_number > 0
+            cio = start_chunk_read(io, chunk, header_version)
+            header_version == 2 && (chunk_end -= 4)
         end
+        chunk_number += 1
+        while position(cio) < chunk_end-4
+            msg = read_header_message(f, cio, header_version, chunk_start, groupflags)
 
-        while (curpos = position(io)) <= chunk_checksum_offset - 4
-            msg = jlread(io, HeaderMessage)
-            endpos = curpos + jlsizeof(HeaderMessage) + msg.size
 
-            if HeaderMessageTypes(msg.msg_type) == HM_LINK_MESSAGE
-                dataset_name, loffset = read_link(io)
-                if dataset_name == name
+            if msg.type == HM_LINK_MESSAGE
+                if msg.link_name == name
                     # delete link
-                    seek(io, curpos)
+                    seek(io, fileoffset(f, msg.offset))
                     jlwrite(io, HeaderMessage(HM_NIL, msg.size, 0))
                     link_deleted = true
                     break
                 end
-            elseif HeaderMessageTypes(msg.msg_type) == HM_OBJECT_HEADER_CONTINUATION
-                continuation_offset = chunk_start_offset = fileoffset(f, jlread(io, RelOffset))
-                continuation_length = jlread(io, Length)
+            elseif msg.type == HM_OBJECT_HEADER_CONTINUATION
+                push!(chunks, 
+                    (; chunk_start = fileoffset(f, msg.continuation_offset),
+                        chunk_end = fileoffset(f, msg.continuation_offset + msg.continuation_length)))
             end
-            seek(io, endpos)
         end
-
-        continuation_offset == -1 && break
     end
-
-    # Update the Checksum
-    seek(io, chunk_start_offset)
-    cio = begin_checksum_read(io)
-    seek(cio, chunk_checksum_offset)
-    seek(io, chunk_checksum_offset)
-    jlwrite(io, end_checksum(cio))
+    update_checksum(io, chunk_start, chunk_end)
     return
 end

@@ -136,40 +136,6 @@ function isgroup(f::JLDFile, roffset::RelOffset)
     return false
 end
 
-# code below is work in progress and for debugging
-struct Message
-    type::UInt8
-    header
-    fields
-end
-
-
-function read_link_info(io, msg_header, OffsetType)
-    @assert HeaderMessageTypes(msg_header.msg_type) == HM_LINK_INFO
-    version = jlread(io, UInt8)
-    flags = jlread(io, UInt8)
-    # Maximum Creation index
-    # exists if bit 0 of flag is set
-    if (flags & 0x1) == 0x1
-        max_creation_index = jlread(io, UInt64)
-    else
-        max_creation_index = typemax(UInt64)
-    end
-    fractal_heap_address = jlread(io, OffsetType)
-    v2btree_name_index = jlread(io, OffsetType)
-    if (flags & 0x1) == 0x1
-        v2btree_creation_index = jlread(io, OffsetType)
-    else
-        v2btree_creation_index = UNDEFINED_ADDRESS
-    end
-    return Message(HM_LINK_INFO,msg_header, (; 
-                    version,
-                    flags,
-                    fractal_heap_address,
-                    v2btree_creation_index, 
-                    v2btree_name_index))
-end
-
 function print_header_messages(f::JLDFile, name::AbstractString)
     if isempty(name) || name == "/"
         print_header_messages(f, f.root_group_offset)
@@ -190,74 +156,36 @@ end
 
 function print_header_messages(f::JLDFile, roffset::RelOffset)
     io = f.io
-    chunk_start::Int64 = fileoffset(f, roffset)
-    seek(io, chunk_start)
+    cio, header_version, chunk, groupflags = start_obj_read(f, offset)
+    chunk_start, chunk_end = chunk
 
-    # Test for V1 Obj header        
-
-    header_version = Int(jlread(io, UInt8))
-    if header_version == 1
-        seek(io, chunk_start)
-        cio = io
-        sz,_,groupflags = read_obj_start(cio)
-        chunk_end = position(cio) + sz
-        # Skip to nearest 8byte aligned position
-        skip_to_aligned!(cio, chunk_start)
-    else
-        println("Object Header Message Version 2")
-        header_version = 2
-        seek(io, chunk_start)
-        cio = begin_checksum_read(io)
-        sz,_,groupflags = read_obj_start(cio)
-        chunk_end = position(cio) + sz
-        @info "chunk 0" position(cio) sz chunk_end
-    end
     # Messages
     continuation_message_goes_here::Int64 = -1
-    links = OrderedDict{String,RelOffset}()
     chunks = [(; chunk_start, chunk_end)]
     chunk_number = 0
     next_link_offset::Int64 = -1
-    link_phase_change_max_compact::Int64 = -1 
-    link_phase_change_min_dense::Int64 = -1
-    est_num_entries::Int64 = 4
-    est_link_name_len::Int64 = 8
+
     chunk_end::Int64
-    attrs = EMPTY_READ_ATTRIBUTES
+    attrs = ReadAttribute[]
     while !isempty(chunks)
         chunk = popfirst!(chunks)
-        chunk_start = chunk.chunk_start
-        chunk_end = chunk.chunk_end
-
+        chunk_start, chunk_end = chunk.chunk_start, chunk.chunk_end
         @info "Starting to read chunk no $chunk_number of length $(chunk_end-chunk_start)"
-        if chunk_number > 0 # Don't do this the first time around
-            seek(io, chunk_start)
-            if header_version == 2
-                chunk_end -= 4
-                cio = begin_checksum_read(io)
-                jlread(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
-            end
+
+        if chunk_number > 0
+            cio = start_chunk_read(io, chunk, header_version)
+            header_version == 2 && (chunk_end -= 4)
         end
         chunk_number += 1
         @info "positions" position(cio) chunk_start chunk_end
         while (curpos = position(cio)) < chunk_end-4
-            if header_version == 1
-                skip_to_aligned!(cio, chunk_start)
-                # Version 1 header message is padded
-                #msg = jlread(cio, HeaderMessage)
-                msg = HeaderMessage(UInt8(jlread(cio, UInt16)), jlread(cio, UInt16), jlread(cio, UInt8))
-                skip(cio, 3)
-            else # version == 2
-                msg = jlread(cio, HeaderMessage)
-                (groupflags & 4) == 4 && skip(cio, 2) 
-            end
-            endpos = position(cio) + msg.size
+            msg = read_header_message(f, cio, header_version, chunk_start, groupflags)
             println("""
-            Message:  $(HeaderMessageTypes(msg.msg_type)) ($(msg.msg_type))
+            Message:  $(msg.type) ($(Int(msg.type)))
                 size: $(msg.size)
-                flags: $(msg.flags)
-                at pos $(position(cio)-chunk_start)""")
-            if HeaderMessageTypes(msg.msg_type) == HM_NIL
+                flags: $(msg.hflags)
+                offset: $(msg.offset)""")
+            if msg.type == HM_NIL
                 if continuation_message_goes_here == -1 && 
                     chunk_end - curpos == CONTINUATION_MSG_SIZE
                     continuation_message_goes_here = curpos
@@ -271,68 +199,54 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
                 end
             else
                 continuation_message_goes_here = -1
-                if HeaderMessageTypes(msg.msg_type) == HM_LINK_INFO
-                    fullmsg = read_link_info(cio, msg, RelOffset)
-                    for (k,v) in pairs(fullmsg.fields)
-                        println("    $k: $v")
+                if msg.type == HM_LINK_INFO
+                    if isset(msg.flags,0 )
+                        println("    max_creation_index: $(msg.max_creation_index)")
                     end
-                elseif HeaderMessageTypes(msg.msg_type) == HM_GROUP_INFO
+                    println("    fractal_heap_address: $(msg.fractal_heap_address)")
+                    println("    v2_btree_name_index: $(msg.v2_btree_name_index)")
+                    if isset(msg.flags, 1)
+                        println("    v2_btree_creation_index: $(msg.v2_btree_creation_index)")
+                    end
+                elseif msg.type == HM_GROUP_INFO
                     if msg.size > 2
-                        # Version Flag
-                        jlread(io, UInt8) == 0 || throw(UnsupportedFeatureException()) 
-                        flag = jlread(io, UInt8)
-                        if flag%2 == 1 # first bit set
-                            link_phase_change_max_compact = jlread(io, UInt16)
-                            link_phase_change_min_dense = jlread(io, UInt16)
-                            println("    link_phase_change_max_compact = $link_phase_change_max_compact")
-                            println("    link_phase_change_min_dense = $link_phase_change_min_dense")
+                        flag = msg.flags
+                        if isset(flags, 0)
+                            println("    link_phase_change_max_compact = $(msg.link_phase_change_max_compact)")
+                            println("    link_phase_change_min_dense = $(msg.link_phase_change_min_dense)")
                         end
-                        if (flag >> 1)%2 == 1 # second bit set
+                        if isset(flags, 1)
                             # Verify that non-default group size is given
-                            est_num_entries = jlread(io, UInt16)
-                            est_link_name_len = jlread(io, UInt16)
-                            println("    est_num_entries = $est_num_entries")
-                            println("    est_link_name_len = $est_link_name_len")
+                            println("    est_num_entries = $(msg.est_num_entries)")
+                            println("    est_link_name_len = $(msg.est_link_name_len)")
                         end
                     end
-                elseif HeaderMessageTypes(msg.msg_type) == HM_LINK_MESSAGE
-                    name, loffset = read_link(cio)
-                    links[name] = loffset
+                elseif msg.type == HM_LINK_MESSAGE
+                    name, loffset = msg.link_name, msg.target
                     println("   name = \"$name\"")
                     println("   offset = $(Int(loffset.offset))")
-                elseif HeaderMessageTypes(msg.msg_type) == HM_OBJECT_HEADER_CONTINUATION
-                    continuation_offset = fileoffset(f, jlread(cio, RelOffset))
-                    continuation_length = jlread(cio, Length)
-                    push!(chunks, (; chunk_start = continuation_offset,
-                                     chunk_end = continuation_offset + continuation_length))
+                elseif msg.type == HM_OBJECT_HEADER_CONTINUATION
+                    push!(chunks, (; chunk_start = msg.continuation_offset,
+                                     chunk_end = msg.continuation_offset + msg.continuation_length))
                     println("""    offset = $(continuation_offset)\n    length = $(continuation_length)""")
                     println("pos=$(position(cio)) $chunk_end")
-                elseif HeaderMessageTypes(msg.msg_type) == HM_DATASPACE
-                    dataspace = read_dataspace_message(cio)
-                    println("    $dataspace")
-                elseif HeaderMessageTypes(msg.msg_type) == HM_DATATYPE
-                    datatype_class, datatype_offset = read_datatype_message(cio, f, (msg.flags & 2) == 2)
+                elseif msg.type == HM_DATASPACE
+                    println("    $(ReadDataspace(f, msg))")
+                elseif msg.type == HM_DATATYPE
+                    datatype_class, datatype_offset = datatype_from_message(f, msg)
                     println("""    class: $datatype_class\n    offset: $datatype_offset""")
-                elseif HeaderMessageTypes(msg.msg_type) == HM_FILL_VALUE_OLD
-                    #(jlread(cio, UInt8) == 3 && jlread(cio, UInt8) == 0x09) || throw(UnsupportedFeatureException())
-                elseif HeaderMessageTypes(msg.msg_type) == HM_FILL_VALUE
-                    #(jlread(cio, UInt8) == 3 && jlread(cio, UInt8) == 0x09) || throw(UnsupportedFeatureException())
-                elseif HeaderMessageTypes(msg.msg_type) == HM_DATA_LAYOUT
-                    layout = jlread(cio, DataLayout, f)
+                elseif msg.type == HM_FILL_VALUE_OLD
+                elseif msg.type == HM_FILL_VALUE
+                elseif msg.type == HM_DATA_LAYOUT
+                    layout = DataLayout(f, msg)
                     @info layout
-                elseif HeaderMessageTypes(msg.msg_type) == HM_FILTER_PIPELINE
-                    filter_pipeline = jlread(cio, FilterPipeline)
+                elseif msg.type == HM_FILTER_PIPELINE
+                    filter_pipeline = FilterPipeline(msg)
                     @info filter_pipeline
-                elseif HeaderMessageTypes(msg.msg_type) == HM_SYMBOL_TABLE
-                    v1_btree_address = jlread(cio, RelOffset)
-                    local_heap_address = jlread(cio, RelOffset)
-                    println("""    required for \"old style" groups\n    v1 B-Tree Address: $(v1_btree_address)\n    Local Heap Address: $(local_heap_address)""")
-                elseif HeaderMessageTypes(msg.msg_type) == HM_ATTRIBUTE
-                    if attrs === EMPTY_READ_ATTRIBUTES
-                        attrs = ReadAttribute[read_attribute(cio, f)]
-                    else
-                        push!(attrs, read_attribute(cio, f))
-                    end
+                elseif msg.type == HM_SYMBOL_TABLE
+                    println("""    required for \"old style" groups\n    v1 B-Tree Address: $(msg.v1_btree_address)\n    Local Heap Address: $(msg.local_heap_address)""")
+                elseif msg.type == HM_ATTRIBUTE
+                    push!(attrs, read_attribute(f, msg))
                     attr = attrs[end]
                     println("""    name: \"$(attr.name)\" """)
                     if attr.datatype_class != 0xff
@@ -350,7 +264,6 @@ function print_header_messages(f::JLDFile, roffset::RelOffset)
                     throw(UnsupportedFeatureException())
                 end
             end
-            seek(cio, endpos)
         end
 
         # Checksum
@@ -378,50 +291,6 @@ struct DataLayout
 end
 
 ischunked(dl::DataLayout) = dl.storage_type == 2
-
-function jlread(cio, ::Type{DataLayout}, f)
-    version = jlread(cio, UInt8)
-    if version == 4 || version == 3
-        storage_type = jlread(cio, UInt8)
-        if storage_type == LC_COMPACT_STORAGE
-            data_length = jlread(cio, UInt16)
-            data_offset = position(cio)
-            return DataLayout(version, storage_type, data_length, data_offset) 
-        elseif storage_type == LC_CONTIGUOUS_STORAGE
-            rf = jlread(cio, RelOffset)
-            data_offset = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
-            data_length = jlread(cio, Length)
-            DataLayout(version, storage_type, data_length, data_offset) 
-        elseif version == 4 && storage_type == LC_CHUNKED_STORAGE
-            # TODO: validate this
-            flags = jlread(cio, UInt8)
-            dimensionality = jlread(cio, UInt8)
-            dimensionality_size = jlread(cio, UInt8)
-            #skip(cio, Int(dimensionality)*Int(dimensionality_size))
-            chunk_dimensions = [read_nb_uint(cio, dimensionality_size) for _=1:dimensionality]
-            chunk_indexing_type = jlread(cio, UInt8)
-            chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
-            data_length = jlread(cio, Length)
-            jlread(cio, UInt32)
-            data_offset = fileoffset(f, jlread(cio, RelOffset))
-            chunked_storage = true
-            DataLayout(version, storage_type, data_length, data_offset, dimensionality, chunk_indexing_type, chunk_dimensions) 
-
-        elseif version == 3 && storage_type == LC_CHUNKED_STORAGE
-            dimensionality = jlread(cio, UInt8)
-            rf = jlread(cio, RelOffset)
-            data_offset = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
-            chunk_dimensions = jlread(cio, UInt32, dimensionality-1)
-            data_length = jlread(cio, UInt32)
-            chunked_storage = true
-            DataLayout(version, storage_type, data_length, data_offset, dimensionality, 0, chunk_dimensions) 
-        else
-            throw(UnsupportedFeatureException("Unknown data layout"))
-        end
-    else
-        throw(UnsupportedVersionException("Data layout message version $version is not supported"))
-    end
-end
 
 function read_nb_uint(io::IO, nb)
     val = zero(UInt)

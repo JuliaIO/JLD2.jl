@@ -95,7 +95,6 @@ end
 @pseudostruct HM_NIL begin end
 construct_hm_payload(::Val{HM_NIL}, hflags, size) = zeros(UInt8, size)
 
-#MacroTools.@expand 
 @pseudostruct HM_DATASPACE begin
     version::UInt8 = 1
     dimensionality::UInt8
@@ -363,7 +362,6 @@ function FilterPipeline(msg::Hmessage)
 
 end
 
-#MacroTools.@expand 
 @pseudostruct HM_ATTRIBUTE begin
     version::UInt8
     flags::UInt8

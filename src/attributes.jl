@@ -49,58 +49,6 @@ function write_attribute(io::IO, f::JLDFile, attr::WrittenAttribute, wsession::J
 end
 
 """
-    read_attribute(io::IO, f::JLDFile)
-
-Read an attribute message at the current position of the `io` object.
-Supports attribute message version 1 and 2.
-"""
-function read_attribute(io::IO, f::JLDFile)
-    pos = position(io)
-    ah = jlread(io, AttributeHeader)
-    if ah.version == 1
-        committed = false
-        name = Symbol(jlread(io, UInt8, ah.name_size-1))
-        jlread(io, UInt8) == 0 || throw(InvalidDataException())
-        skip_to_aligned!(io, pos)
-
-        datatype_end = position(io) + ah.datatype_size
-        datatype_class, datatype_offset = read_datatype_message(io, f, committed)
-        seek(io, datatype_end)
-        skip_to_aligned!(io, pos)
-
-
-        dataspace_end = position(io) + ah.dataspace_size
-        dataspace = read_dataspace_message(io)
-        seek(io, dataspace_end)
-        skip_to_aligned!(io, pos)
-
-        ReadAttribute(name, dataspace, datatype_class, datatype_offset, position(io))
-    elseif ah.version == 2 || ah.version == 3
-        committed = ah.flags == 1
-        !committed && ah.flags != 0 && throw(UnsupportedFeatureException())
-
-        if ah.version == 3
-            name_charset_encoding = jlread(io, UInt8)
-        end
-
-        name = Symbol(jlread(io, UInt8, ah.name_size-1))
-        jlread(io, UInt8) == 0 || throw(InvalidDataException())
-
-        datatype_end = position(io) + ah.datatype_size
-        datatype_class, datatype_offset = read_datatype_message(io, f, committed)
-        seek(io, datatype_end)
-
-        dataspace_end = position(io) + ah.dataspace_size
-        dataspace = read_dataspace_message(io)
-        seek(io, dataspace_end)
-
-        ReadAttribute(name, dataspace, datatype_class, datatype_offset, position(io))
-    else
-        throw(UnsupportedVersionException("Unknown Attribute Header Version $(ah.version)"))
-    end
-end
-
-"""
     load_attributes(f::JLDFile, name::AbstractString)
     load_attributes(g::Group, name::AbstractString)
     load_attributes(g::Group)
