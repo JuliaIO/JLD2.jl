@@ -79,61 +79,45 @@ end
 define_packed(HeaderMessage)
 
 
-function isgroup(f::JLDFile, roffset::RelOffset)
+function isgroup(f::JLDFile, offset::RelOffset)
     io = f.io
-    chunk_start = fileoffset(f, roffset)
-    seek(io, chunk_start)
+    is_group = false
+    determined = false
+    cio, header_version, chunk, objflags = start_obj_read(f, offset)
+    chunks = [chunk]
+    chunk_number = 1
 
-    sz, version, = read_obj_start(io)
-    chunk_end::Int64 = position(io) + sz
-    if version == 2
-        while position(io) <= chunk_end-4
-            msg = jlread(io, HeaderMessage)
-            endpos = position(io) + msg.size
-            if HeaderMessageTypes(msg.msg_type) == HM_LINK_INFO || HeaderMessageTypes(msg.msg_type) == HM_GROUP_INFO || HeaderMessageTypes(msg.msg_type) == HM_LINK_MESSAGE || HeaderMessageTypes(msg.msg_type) == HM_SYMBOL_TABLE
-                return true
-            elseif HeaderMessageTypes(msg.msg_type) == HM_DATASPACE || HeaderMessageTypes(msg.msg_type) == HM_DATATYPE || HeaderMessageTypes(msg.msg_type) == HM_FILL_VALUE || HeaderMessageTypes(msg.msg_type) == HM_DATA_LAYOUT
-                return false
-            end
-            seek(io, endpos)
+    while chunk_number <= length(chunks) && !determined
+        chunk = chunks[chunk_number]
+        chunk_start, chunk_end = chunk.chunk_start, chunk.chunk_end 
+
+        if chunk_number > 1 # Don't do this the first time around
+            cio = start_chunk_read(io, chunk, header_version)
+            header_version == 2 && (chunk_end -= 4)
         end
-    elseif version == 1
-        chunks = [(; chunk_start, chunk_end)]
-        chunk_number = 0
-        skip_to_aligned!(io, chunk_start)
+        chunk_number += 1
 
-        while !isempty(chunks)
-            chunk = popfirst!(chunks)
-            chunk_start = chunk.chunk_start
-            chunk_end = chunk.chunk_end
-        
-            if chunk_number > 0
-                seek(io, chunk_start)
+        while position(cio) <= chunk_end-4
+            msg = read_header_message(f, cio, header_version, chunk_start, objflags)
+            if msg.type in (HM_LINK_INFO, HM_GROUP_INFO, HM_LINK_MESSAGE, HM_SYMBOL_TABLE)
+                is_group = true
+                determined = true
+                break
+            elseif msg.type in (HM_DATASPACE, HM_DATATYPE, HM_FILL_VALUE, HM_DATA_LAYOUT)
+                determined = true
+                break
             end
-            chunk_number += 1
-
-            while position(io) < chunk_end - 4
-                # Message start 8byte aligned relative to object start
-                skip_to_aligned!(io, chunk_start)
-                # Version 1 header message is padded
-                msg = HeaderMessage(UInt8(jlread(io, UInt16)), jlread(io, UInt16), jlread(io, UInt8))
-                skip(io, 3)
-                endpos = position(io) + msg.size
-
-                if HeaderMessageTypes(msg.msg_type) in (HM_LINK_INFO, HM_GROUP_INFO, HM_LINK_MESSAGE, HM_SYMBOL_TABLE)
-                    return true
-                elseif HeaderMessageTypes(msg.msg_type) in (HM_DATASPACE, HM_DATATYPE, HM_FILL_VALUE, HM_DATA_LAYOUT)
-                    return false
-                elseif HeaderMessageTypes(msg.msg_type) == HM_OBJECT_HEADER_CONTINUATION
-                    cont_chunk_start = fileoffset(f, jlread(io, RelOffset))
-                    chunk_length = jlread(io, Length)
-                    push!(chunks, (; chunk_start=cont_chunk_start, chunk_end=cont_chunk_start+chunk_length))
-                end
-                seek(io, endpos)
+            if msg.type == HM_OBJECT_HEADER_CONTINUATION
+                push!(chunks, (; chunk_start = fileoffset(f, msg.continuation_offset),
+                                 chunk_end = fileoffset(f, msg.continuation_offset + msg.continuation_length)))
             end
+        end
+        seek(cio, chunk_end)
+        if header_version == 2
+            end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException("Invalid Checksum"))
         end
     end
-    return false
+    return is_group
 end
 
 function print_header_messages(f::JLDFile, name::AbstractString)
@@ -154,7 +138,7 @@ function print_header_messages(g::Group, name::AbstractString)
 end
 
 
-function print_header_messages(f::JLDFile, roffset::RelOffset)
+function print_header_messages(f::JLDFile, offset::RelOffset)
     io = f.io
     cio, header_version, chunk, groupflags = start_obj_read(f, offset)
     chunk_start, chunk_end = chunk

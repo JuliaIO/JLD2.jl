@@ -80,21 +80,3 @@ function jlwrite(io::IO, dspace::WriteDataspace{N}) where N
         jlwrite(io, x::Length)
     end
 end
-
-# Reads a dataspace from the file and returns a
-# (dataspace_type::UInt8, dataspace_dimensions:G:Vector{Length})
-# tuple, where dataspace_type is one of the DS_* constants and
-# dataspace_dimensions are the corresponding dimensions
-function read_dataspace_message(io::IO)
-    dspace_start = jlread(io, DataspaceStart)
-    if dspace_start.version == 1 || dspace_start.version == 0 
-        skip(io, 4) # skip another 4 bytes
-        dataspace_type = DS_V1
-        return ReadDataspace(dataspace_type, dspace_start.dimensionality, position(io))
-    elseif dspace_start.version == 2
-        dataspace_type = dspace_start.dataspace_type
-        return ReadDataspace(dataspace_type, dspace_start.dimensionality, position(io))
-    else
-        throw(UnsupportedVersionException("Dataspace Messages version $(dspace_start.version)"))
-    end
-end

@@ -23,10 +23,6 @@ function Hmessage(type::HeaderMessageTypes, hflags=0x00, size=0; kwargs...)
     Hmessage(type, length(payload), hflags, payload, UNDEFINED_ADDRESS,UNDEFINED_ADDRESS)
 end
 
-function read_msg(io, header_version, flags)
-
-end
-
 mutable struct Dataset
     parent::Group #param..
     name::String

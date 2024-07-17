@@ -58,26 +58,6 @@ function Base.:(==)(dt1::BasicDatatype, dt2::BasicDatatype)
     ret &= dt1.size == dt2.size
     ret
 end
-# Reads a datatype message and returns a (offset::RelOffset, class::UInt8)
-# tuple. If the datatype is committed, the offset is the offset of the
-# committed datatype and the class is typemax(UInt8). Otherwise, the
-# offset is the offset of the datatype in the file, and the class is
-# the corresponding datatype class.
-function read_datatype_message(io::IO, f::JLDFile, committed)
-    if committed
-        # Shared datatype
-        version = jlread(io, UInt8)
-        msgtype = jlread(io, UInt8)
-        # supported combinations are 
-        (version == 3 && msgtype == 2) || (version == 2) || throw(UnsupportedVersionException("Unsupported shared message"))
-
-        (typemax(UInt8), Int64(fileoffset(f, jlread(io, RelOffset))))
-    else
-        # Datatype stored here
-        class = jlread(io, UInt8)
-        (class, Int64(position(io)-1))
-    end
-end
 
 # Replace a symbol or expression in an AST with a new one
 function replace_expr(x, from, to)
