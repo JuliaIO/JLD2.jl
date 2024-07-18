@@ -164,10 +164,11 @@ function uintofsize(sz)
         UInt16
     elseif sz == 4
         UInt32
-    else 
+    elseif sz == 8 
         UInt64
+    else
+        throw(ArgumentError("There is no UInt type with $sz bytes"))
     end
-    throw(ArgumentError("There is no UInt type with $sz bytes"))
 end
 
 """

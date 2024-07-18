@@ -18,8 +18,8 @@ end
 Base.convert(::Type{UInt8}, l::DatatypeClass) = UInt8(l)
 
 jlwrite(io::IO, dt::DatatypeClass) = jlwrite(io, UInt8(dt) | UInt8(3) << 4)
-Base.:(==)(dt::DatatypeClass, x::UInt8) = UInt8(dt) == x%16
-Base.:(==)(x::UInt8, dt::DatatypeClass) = UInt8(dt) == x%16
+Base.:(==)(dt::DatatypeClass, x::Integer) = UInt8(dt) == x%16
+Base.:(==)(x::Integer, dt::DatatypeClass) = UInt8(dt) == x%16
 
 # This is the description for:
 #    Strings
