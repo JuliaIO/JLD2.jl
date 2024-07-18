@@ -1,39 +1,7 @@
-using MacroTools
-
-function jlwrite(io::IOBuffer, x::Tuple) 
-    for y in x
-        jlwrite(io, y)
-    end
-end
-
-function write_zerobytes(io, n)
-    for i in 1:n
-        jlwrite(io, UInt8(0))
-    end
-end
-
 function getprop end
 function construct_hm_payload end
-function write_directly end
-
-function isset(flag, bit)
-    #return !iszero(flag & UInt8(2^(bit-1)))
-    return Bool(flag >> (bit) & 1)
-end
-
-function flag2uint(flag)
-    # use lowest two bits
-    value = flag << 6 >> 6
-    if value == 0
-        UInt8
-    elseif value == 1
-        UInt16
-    elseif value == 2
-        UInt32
-    else
-        UInt64
-    end
-end
+function sizefun end
+function messageshow end
 
 function linefun(ex)
     v = nothing
@@ -198,11 +166,8 @@ macro pseudostruct(name, blck)
     return Expr(:block, getpropfun, constructfun, size_fun, message_show, nothing)
 end
 
-
-#MacroTools.@expand 
 @pseudostruct HM_NIL begin @skip(hsize) end
 
-#@MacroTools.expand 
 @pseudostruct HM_DATASPACE begin
     version::UInt8 = 2
     dimensionality::UInt8 = length(kw.dimensions)
@@ -214,7 +179,6 @@ end
     dimensions::NTuple{Int(dimensionality), Int64}
     isset(flags,0) && max_dimension_size::NTuple{Int(dimensionality), Int64}
 end
-
 
 @pseudostruct HM_LINK_INFO begin
     version::UInt8 = 0x00
@@ -237,8 +201,6 @@ end
         dt::@read(H5Datatype)
     end
 end
-
-
 
 @pseudostruct HM_FILL_VALUE_OLD begin
     size::UInt32

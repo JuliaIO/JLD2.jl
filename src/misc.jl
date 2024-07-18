@@ -65,8 +65,12 @@ function read_size(io::IO, flags::UInt8)
     end
 end
 
-# Determine what the size flag should be
-# Same rules as above
+"""
+    size_flag(sz::Integer)::UInt8
+
+Return the flag that represents the smallest integer type that can represent `sz`.
+0 -> UInt8, 1 -> UInt16, 2 -> UInt32, 3 -> UInt64
+"""
 function size_flag(sz::Integer)
     if sz <= typemax(UInt8)
         UInt8(0)
@@ -79,7 +83,11 @@ function size_flag(sz::Integer)
     end
 end
 
-# Store a size
+"""
+    write_size(io::IO, sz::Integer)
+
+Write the mininum number of bytes required to represent `sz` as (valid) unsigned integer.
+"""
 function write_size(io::IO, sz::Integer)
     if sz <= typemax(UInt8)
         jlwrite(io, UInt8(sz))
@@ -92,7 +100,12 @@ function write_size(io::IO, sz::Integer)
     end
 end
 
-# Get the size of the size
+"""
+    size_size(sz::Integer)
+
+Return the number of bytes required to represent `sz` as an unsigned integer
+that actually exists. (e.g. UInt8, UInt16, UInt32, UInt64)
+"""
 function size_size(sz::Integer)
     if sz <= typemax(UInt8)
         1
@@ -105,7 +118,12 @@ function size_size(sz::Integer)
     end
 end
 
-# Get the size of the size
+"""
+    size_size2(sz::Integer)
+
+Return the number of bytes required to represent `sz` as an unsigned integer.
+Note: this does not check if the integer is a valid julia integer.
+"""
 function size_size2(sz::Integer)
     if sz < 2^8
         1
@@ -134,6 +152,11 @@ Returns the length of the string represented by `x`.
 """
 symbol_length(x::Symbol) = ccall(:strlen, Int, (Cstring,), x)
 
+"""
+    uintofsize(sz::Integer)
+
+Return the `UInt` type that has `sz` bytes.
+"""
 function uintofsize(sz)
     if sz == 1
         UInt8 
@@ -144,8 +167,15 @@ function uintofsize(sz)
     else 
         UInt64
     end
+    throw(ArgumentError("There is no UInt type with $sz bytes"))
 end
 
+"""
+    to_uint64(bts::Vector{UInt8})
+
+Generate a `UInt64` from a vector of `UInt8` assuming little-endian encoding.
+Vector may be shorter than 8 bytes. In that case, the remaining bytes are assumed to be zero.
+"""
 function to_uint64(bts::Vector{UInt8})
     bts2 = append!(zeros(UInt8, 8-length(bts)), reverse(bts))
     u = zero(UInt64)
@@ -166,4 +196,56 @@ function skip_to_aligned!(io, rel=0)
     pos += 8 - mod1(pos-rel, 8)
     seek(io, pos)
     return nothing
+end
+
+
+"""
+    jlwrite(io::IO, x::Tuple)
+
+Attempt to write a tuple to `io` by writing each element of the tuple in order.
+"""
+function jlwrite(io::IO, x::Tuple) 
+    for y in x
+        jlwrite(io, y)
+    end
+end
+
+"""
+    write_zerobytes(io, n)
+
+Write `n` zero bytes to `io`.
+"""
+function write_zerobytes(io, n)
+    for i in 1:n
+        jlwrite(io, UInt8(0))
+    end
+end
+
+"""
+    isset(flag, bit)
+
+Return true if the bit-th bit of `flag` is set. (starting from 0)   
+"""
+function isset(flag, bit)
+    #return !iszero(flag & UInt8(2^(bit-1)))
+    return Bool(flag >> (bit) & 1)
+end
+
+"""
+    flag2uint(flag::UInt8)
+I
+Map the lowest to bits of `flag` to a `UInt` type, mapping 0 to `UInt8`, 1 to `UInt16`, 2 to `UInt32`, and 3 to `UInt64`.
+"""
+function flag2uint(flag::UInt8)
+    # use lowest two bits
+    value = flag << 6 >> 6
+    if value == 0
+        UInt8
+    elseif value == 1
+        UInt16
+    elseif value == 2
+        UInt32
+    else
+        UInt64
+    end
 end
