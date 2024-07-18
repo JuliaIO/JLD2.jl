@@ -39,6 +39,7 @@ function linefun(ex)
     v = nothing
     kw = esc(:kw)
     ptr = esc(:ptr)
+    offset = esc(:offset)
     if ex isa LineNumberNode
         return [ex, ex, ex, ex]
     elseif @capture(ex, cond_ && body_)
@@ -48,35 +49,57 @@ function linefun(ex)
         accs = build_fun_body((Any[], Any[], Any[], Any[]), body)
         return [ Expr(:if, esc(cond), Expr(:block, accs[i]...)) for i in 1:4 ]
     elseif @capture(ex, s_Symbol::T_) || @capture(ex, s_Symbol::T_ = v_)
+        getprop_ = :($(esc(s)) = $kw.$(s))
+        default = Symbol(s,"_default")
+        default_ = :($default = $(esc(v)))
+        get_ = :($(esc(s)) = get($kw, $(QuoteNode(s)), $default))
+        haskey_ = :(haskey($kw, $(QuoteNode(s))) || throw(ArgumentError($("Argument $(QuoteNode(s)) is required"))))
+
         if @capture(T, @FixedLengthString(len_))
             len = esc(len)
-            read_statement = :(unsafe_string($ptr+offset, $len))
+            read_statement = :(unsafe_string($ptr+$offset, $len))
             increment = :($len)
             write_statement = :(jlwrite(io, $(esc(s))))
         elseif @capture(T, @Blob(len_))
             len = esc(len)
-            read_statement = :(getfield(hm,:body)[(offset+1):(offset+$len)])
+            read_statement = :(getfield(hm,:body)[($offset+1):($offset+$len)])
             increment = :($len)
             write_statement = :(jlwrite(io, $(esc(s))))
         elseif @capture(T, @Offset)
-            read_statement = :(getfield(hm,:payload_offset) + offset)
+            read_statement = :(getfield(hm,:payload_offset) + $offset)
+            increment = 0
+            getprop_ = nothing
+            haskey_=nothing
+            write_statement = nothing
+        elseif @capture(T, @computed(expr_))
+            @assert isnothing(v) "Defaults for @computed fields are not supported"
+            read_statement = esc(expr)
+            getprop_ = :($(esc(s)) = $(esc(expr)))
             increment = 0
             write_statement = nothing
+            haskey_ = nothing
+        elseif @capture(T, @read(type_, rsize_)) || @capture(T, @read(type_))
+            read_statement = quote
+                _io = IOBuffer(getfield(hm,:body))
+                seek(_io, $offset)
+                jlread(_io, $(esc(type)))
+            end
+            write_statement = :(jlwrite(_io, $(esc(s))))
+            if !isnothing(rsize)
+                increment = esc(rsize)
+            else
+                increment = :(sizeof(typeof($(esc(s)))))
+            end
         else
             T = esc(T)
-            read_statement = :(unsafe_load(Ptr{$T}($ptr+offset)))
+            read_statement = :(unsafe_load(Ptr{$T}($ptr+$offset)))
             increment = :(sizeof($(T)))
             write_statement = :(jlwrite(io, $T($(esc(s)))))
         end
 
         assign_statement = :($(esc(s)) = $read_statement)
-        offset_incr = :(offset += $increment)
-        haskey_ = :(haskey($kw, $(QuoteNode(s))) || throw(ArgumentError($("Argument $(QuoteNode(s)) is required"))))
-        getprop_ = :($(esc(s)) = $kw.$(s))
-        default = Symbol(s,"_default")
-        default_ = :($default = $(esc(v)))
-        get_ = :($(esc(s)) = get($kw, $(QuoteNode(s)), $default))
-
+        offset_incr = :($offset += $increment)
+        
         return [
             # getproperty function
             Expr(:block,
@@ -103,12 +126,12 @@ function linefun(ex)
         ]
     elseif @capture(ex, @skip(n_))
         increment = esc(n)
-        off_inc = :(offset += $increment)
+        off_inc = :($offset += $increment)
         write_inc = :(write_zerobytes(io, $increment))
         return [off_inc, write_inc, off_inc, off_inc]
     elseif @capture(ex, @skiptoaligned(n_))
-        increment = :(8 - mod1(offset-$(esc(n)), 8))
-        off_inc = :(offset += $increment)
+        increment = :(8 - mod1($offset-$(esc(n)), 8))
+        off_inc = :($offset += $increment)
         write_inc = :(write_zerobytes(io, $increment))
         return [off_inc, write_inc, off_inc, off_inc]
     end
@@ -132,7 +155,7 @@ macro pseudostruct(name, blck)
     getpropfun = (quote
         function $(esc(:getprop))(::Val{$name}, $(esc(:hm))::Hmessage, s::Symbol)
             $(__source__)
-            offset=0
+            $(esc(:offset)) = 0
             $(:($(esc(:ptr)) = pointer(getfield(hm,:body))))
             $(:($(esc(:hflags)) = getfield(hm, :hflags)))
             $(:($(esc(:hsize)) = getfield(hm, :size)))
@@ -153,17 +176,17 @@ macro pseudostruct(name, blck)
     size_fun = (quote
         function $(esc(:sizefun))(::Val{$name}, $(esc(:hflags)), $(esc(:hsize)), $(esc(:kw)))
             $(__source__)
-            offset = 0
+            $(esc(:offset)) = 0
             $(sizefun...)
-            return offset
+            return $(esc(:offset))
         end
     end).args[2]
 
     message_show = (quote
         function $(esc(:messageshow))(::Val{$name}, $(esc(:hm))::Hmessage)
             $(__source__)
-            offset=0
-            $(:($(esc(:ptr)) = pointer(getfield(hm,:body))))
+            $(esc(:offset)) = 0
+            $(esc(:ptr)) = pointer(getfield(hm,:body))
             $(:($(esc(:hflags)) = getfield(hm, :hflags)))
             $(:($(esc(:hsize)) = getfield(hm, :size)))
             keyvalue = Pair{Symbol,Any}[]
@@ -185,78 +208,37 @@ end
     dimensionality::UInt8 = length(kw.dimensions)
     flags::UInt8
     (version == 2) && dataspace_type::UInt8
+    (version == 1) && dataspace_type::@computed(DS_V1)
     version == 1 && @skip(5)
     dim_offset::@Offset
     dimensions::NTuple{Int(dimensionality), Int64}
     isset(flags,0) && max_dimension_size::NTuple{Int(dimensionality), Int64}
 end
 
-function ReadDataspace(f, msg::Hmessage)
-    v = msg.version
-    ReadDataspace(v == 2 ? msg.dataspace_type : DS_V1, 
-        msg.dimensionality, 
-        fileoffset(f, msg.dim_offset))
-end
 
 @pseudostruct HM_LINK_INFO begin
     version::UInt8 = 0x00
-    # zero-bit: creation order tracked, 1-bit: creation order is indexed
     flags::UInt8 = 0x00 
     isset(flags,0) && max_creation_index::Int64
     fractal_heap_address::RelOffset = UNDEFINED_ADDRESS
     v2_btree_name_index::RelOffset = UNDEFINED_ADDRESS
     isset(flags, 1) && (v2_btree_creation_order_index::RelOffset = UNDEFINED_ADDRESS)
 end
-
+ 
 @pseudostruct HM_DATATYPE begin
-    if isset(hflags, 1) # shared message
+    if isset(hflags,1)
         version::UInt8
         msgtype::UInt8
-        datatype_offset::RelOffset
+        dt::SharedDatatype
+        datatype_offset::@computed(dt.header_offset)
     end
-    if !isset(hflags, 1)
+    if !isset(hflags,1)
         datatype_offset::@Offset
-        tc::UInt8 # typeclass (low four bits) and version (upper four bits)
+        dt::@read(H5Datatype)
     end
-    # class1::UInt8
-    # class2::UInt8
-    # class3::UInt8
-    # size::UInt32
-    # # Properties
-    # # Class 0: Fixed-point
-    # # Class 1: Floating-point
-    # # Class 4: Bitfield Types
-    # (hm.tc in (0, 1, 4,)) && bitoffset::UInt16
-    # (hm.tc in (0, 1, 4,)) && bitprecision::UInt16
-    # # further fields
-    # # Class 3: String (but no properties)
-    # # Class 5: Opaque
-    # # Class 6: Compound
-    # (hm.tc == 6) && name::String # null-terminated
-    #skip to aligned
-    # Class 8: Enumeration
-    # Class 9: Variable Length Types
-    #@skip(hsize-1)
 end
 
-# Reads a datatype message and returns a (offset::RelOffset, class::UInt8)
-# tuple. If the datatype is committed, the offset is the offset of the
-# committed datatype and the class is typemax(UInt8). Otherwise, the
-# offset is the offset of the datatype in the file, and the class is
-# the corresponding datatype class.
-function datatype_from_message(f::JLDFile, msg)
-    committed = msg.hflags & 2 == 2
-    if committed
-        version = msg.version
-        msgtype = msg.msgtype
-        # supported combinations are 
-        (version == 3 && msgtype == 2) || (version == 2) || throw(UnsupportedVersionException("Unsupported shared message"))
-        tc = typemax(UInt8)
-    else
-        tc = msg.tc
-    end
-    (tc, Int(fileoffset(f, msg.datatype_offset)))
-end
+
 
 @pseudostruct HM_FILL_VALUE_OLD begin
     size::UInt32
@@ -466,22 +448,21 @@ end
     version == 3 && name_charset_encoding::UInt8
     name::@FixedLengthString(name_size-1)
     @skip(1)
-    (version == 1) && @skiptoaligned(0)
-
+    (version == 1) && @skip(8-mod1(name_size,8))
     # committed if isset(hm.flags, 0)
     if isset(flags, 0) #this is slightly more complicated in general
         vshared::UInt8
         sharedtype::UInt8
-        datatype_offset::RelOffset
+        datatype::SharedDatatype
     end
     if !isset(flags, 0)
         datatype_offset::@Offset
-        datatype_message::NTuple{Int(datatype_size), UInt8}
+        datatype::@read(H5Datatype, datatype_size)
     end
-    (version == 1) && @skiptoaligned(0)
+    (version == 1) && @skip(8-mod1(datatype_size,8))
     dataspace_offset::@Offset
     dataspace_message::NTuple{Int(dataspace_size), UInt8}
-    (version == 1) && @skiptoaligned(0)
+    (version == 1) && @skip(8-mod1(dataspace_size,8))
     data_offset::@Offset
     data::@Blob(hsize-offset)
 end
@@ -490,15 +471,11 @@ function read_attribute(f::JLDFile, hm::Hmessage)
     committed = hm.flags == 1
     !committed && hm.flags != 0 && throw(UnsupportedFeatureException())
 
-    name = hm.name
-    datatype_class = committed ? typemax(UInt8) : hm.datatype_message[1]
-    datatype_offset = fileoffset(f, hm.datatype_offset)
-
     hm.hflags & 0x10 == 0x10 && @warn "We've got a shared dataspace"
     dshm = Hmessage(HM_DATASPACE, hm.dataspace_size, hm.hflags,  [hm.dataspace_message...], UNDEFINED_ADDRESS, hm.dataspace_offset)
     dataspace = ReadDataspace(f, dshm)
     data_offset = fileoffset(f, hm.data_offset)
-    ReadAttribute(Symbol(name), dataspace, datatype_class, datatype_offset, data_offset)
+    ReadAttribute(Symbol(hm.name), dataspace, hm.datatype, data_offset)
 end
 
 @pseudostruct HM_OBJECT_HEADER_CONTINUATION begin
@@ -617,3 +594,6 @@ function read_header(f, offset::RelOffset)
 end
 
 
+@pseudostruct HM_ATTRIBUTE_INFO begin
+    @skip(hsize)
+end

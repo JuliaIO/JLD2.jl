@@ -17,8 +17,7 @@ end
 struct ReadAttribute
     name::Symbol
     dataspace::ReadDataspace
-    datatype_class::UInt8
-    datatype_offset::Int64
+    datatype::H5Datatype
     data_offset::Int64
 end
 

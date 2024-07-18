@@ -199,8 +199,7 @@ end
 function read_dataset(dset::Dataset)
     read_data(dset.parent.f, 
         dset.dataspace, 
-        dset.datatype[1], #datatype_class
-        dset.datatype[2], #datatype_offset,
+        dset.datatype,
         dset.layout,
         isnothing(dset.filters) ? FilterPipeline() : FilterPipeline(dset.filters), 
         dset.offset, 
@@ -242,7 +241,7 @@ function get_dataset(f::JLDFile, offset::RelOffset, g, name)
         if msg.type == HM_DATASPACE
             dset.dataspace = ReadDataspace(f, msg)
         elseif msg.type == HM_DATATYPE
-            dset.datatype = datatype_from_message(f, msg)
+            dset.datatype = msg.dt
         elseif msg.type == HM_DATA_LAYOUT
             dset.layout = DataLayout(f, msg)
         elseif msg.type == HM_FILTER_PIPELINE

@@ -1,34 +1,25 @@
 #
 # Datatypes
 #
+@enum DatatypeClass::UInt8 begin
+    DT_FIXED_POINT = 0x00
+    DT_FLOATING_POINT = 0x01
+    DT_TIME = 0x02
+    DT_STRING = 0x03
+    DT_BITFIELD = 0x04
+    DT_OPAQUE = 0x05
+    DT_COMPOUND = 0x06
+    DT_REFERENCE = 0x07
+    DT_ENUMERATED = 0x08
+    DT_VARIABLE_LENGTH = 0x09
+    DT_ARRAY = 0x0a
+    DT_SHARED = 0xff # placeholder for shared datatypes
+end
+Base.convert(::Type{UInt8}, l::DatatypeClass) = UInt8(l)
 
-# Datatype is encoded in the lower four bytes (0-10)
-# upper four bytes encode variant used. JLD2 always uses variant 3
-# detail in the hdf5 format spec
-const DT_FIXED_POINT = UInt8(0) | (UInt8(3) << 4)
-const DT_FLOATING_POINT = UInt8(1) | (UInt8(3) << 4)
-const DT_TIME = UInt8(2) | (UInt8(3) << 4)
-const DT_STRING = UInt8(3) | (UInt8(3) << 4)
-const DT_BITFIELD = UInt8(4) | (UInt8(3) << 4)
-const DT_OPAQUE = UInt8(5) | (UInt8(3) << 4)
-const DT_COMPOUND = UInt8(6) | (UInt8(3) << 4)
-const DT_REFERENCE = UInt8(7) | (UInt8(3) << 4)
-const DT_ENUMERATED = UInt8(8) | (UInt8(3) << 4)
-const DT_VARIABLE_LENGTH = UInt8(9) | (UInt8(3) << 4)
-const DT_ARRAY = UInt8(10) | (UInt8(3) << 4)
-
-const DATATYPES = Dict{UInt8, String}(
-    0 => "DT_FIXED_POINT",
-    1 => "DT_FLOATING_POINT",
-    2 => "DT_TIME",
-    3 => "DT_STRING",
-    4 => "DT_BITFIELD",
-    5 => "DT_OPAQUE",
-    6 => "DT_COMPOUND",
-    7 => "DT_REFERENCE",
-    8 => "DT_ENUMERATED",
-    9 => "DT_VARIABLE_LENGTH",
-    10=> "DT_ARRAY")
+jlwrite(io::IO, dt::DatatypeClass) = jlwrite(io, UInt8(dt) | UInt8(3) << 4)
+Base.:(==)(dt::DatatypeClass, x::UInt8) = UInt8(dt) == x%16
+Base.:(==)(x::UInt8, dt::DatatypeClass) = UInt8(dt) == x%16
 
 # This is the description for:
 #    Strings
@@ -77,28 +68,36 @@ end
 # dispatch for all but variable length types
 macro read_datatype(io, datatype_class, datatype, then)
     esc(quote
-        if $datatype_class << 4 == DT_FIXED_POINT << 4
+        if $datatype_class%16== DT_FIXED_POINT
             $(replace_expr(then, datatype, :(jlread($io, FixedPointDatatype))))
-        elseif $datatype_class << 4 == DT_FLOATING_POINT << 4
+        elseif $datatype_class%16 == DT_FLOATING_POINT
             $(replace_expr(then, datatype, :(jlread($io, FloatingPointDatatype))))
-        elseif $datatype_class << 4 == DT_STRING << 4 || $datatype_class << 4 == DT_OPAQUE << 4 || $datatype_class << 4 == DT_REFERENCE << 4
+        elseif $datatype_class%16 in (DT_STRING, DT_OPAQUE, DT_REFERENCE)
             $(replace_expr(then, datatype, :(jlread($io, BasicDatatype))))
-        elseif $datatype_class << 4 == DT_COMPOUND << 4
+        elseif $datatype_class%16 == DT_COMPOUND
             $(replace_expr(then, datatype, :(jlread($io, CompoundDatatype))))
-        elseif $datatype_class << 4 == DT_VARIABLE_LENGTH << 4
+        elseif $datatype_class%16 == DT_VARIABLE_LENGTH
             $(replace_expr(then, datatype, :(jlread($io, VariableLengthDatatype))))
-        elseif $datatype_class << 4 == DT_BITFIELD << 4
+        elseif $datatype_class%16 == DT_BITFIELD
             $(replace_expr(then, datatype, :(jlread($io, BitFieldDatatype))))
-        elseif $datatype_class << 4 == DT_TIME << 4
+        elseif $datatype_class%16 == DT_TIME
             throw(UnsupportedFeatureException("Time datatype (rarely used) not supported"))
-        elseif $datatype_class << 4 == DT_ARRAY << 4
+        elseif $datatype_class%16 == DT_ARRAY
             $(replace_expr(then, datatype, :(jlread($io, ArrayDatatype))))
-        elseif $datatype_class << 4 == DT_ENUMERATED << 4
+        elseif $datatype_class%16 == DT_ENUMERATED
             $(replace_expr(then, datatype, :(jlread($io, EnumerationDatatype))))
         else
             throw(UnsupportedFeatureException("invalid datatype class $datatype_class"))
         end
     end)
+end
+
+function jlread(io::IO, ::Type{H5Datatype})
+    datatype_class = jlread(io, UInt8)
+    seek(io, position(io)-1)
+    @read_datatype io datatype_class dt begin
+        dt
+    end
 end
 
 struct FixedPointDatatype <: H5Datatype
@@ -112,7 +111,7 @@ struct FixedPointDatatype <: H5Datatype
 end
 define_packed(FixedPointDatatype)
 FixedPointDatatype(size::Integer, signed::Bool) =
-    FixedPointDatatype(DT_FIXED_POINT, ifelse(signed, 0x08, 0x00), 0x00, 0x00, size, 0, 8*size)
+    FixedPointDatatype(UInt8(DT_FIXED_POINT) | 3<<4, ifelse(signed, 0x08, 0x00), 0x00, 0x00, size, 0, 8*size)
 
 struct BitFieldDatatype <: H5Datatype
     class::UInt8
@@ -279,7 +278,7 @@ VariableLengthDatatype(class, bitfield1, bitfield2, bitfield3, size, basetype::H
     VariableLengthDatatype{typeof(basetype)}(class, bitfield1, bitfield2, bitfield3, size, basetype)
 
 Base.:(==)(x::VariableLengthDatatype, y::VariableLengthDatatype) =
-    x.class == y.class && x.bitfield1 == y.bitfield1 &&
+    x.class<<4 == y.class<<4 && x.bitfield1 == y.bitfield1 &&
     x.bitfield2 == y.bitfield2 && x.size == y.size &&
     x.basetype == y.basetype
 Base.hash(::VariableLengthDatatype) = throw(ArgumentError("hash not defined for CompoundDatatype"))
@@ -338,29 +337,25 @@ end
 
 # Read the actual datatype for a committed datatype
 function read_shared_datatype(f::JLDFile, cdt::Union{SharedDatatype, CommittedDatatype})
-    io = f.io
     msgs, _ = read_header(f, cdt.header_offset)
 
     # Messages
-    datatype_class::UInt8 = 0
-    datatype_offset::Int = 0
+    datatype::H5Datatype = PlaceholderH5Datatype()
     attrs = ReadAttribute[]
 
     for msg in msgs
         if msg.type == HM_DATATYPE
-            # Datatype stored here
-            datatype_class, datatype_offset = datatype_from_message(f, msg)
+            datatype = msg.dt
         elseif msg.type == HM_ATTRIBUTE
             push!(attrs, read_attribute(f, msg))
         elseif (msg.hflags & 2^3) != 0
             throw(UnsupportedFeatureException())
         end
     end
-
-    seek(io, datatype_offset)
-    @read_datatype io datatype_class dt begin
-        return (dt, attrs)
+    if datatype isa PlaceholderH5Datatype
+        throw(InvalidDataException("Did not find datatype message"))
     end
+    return datatype, attrs
 end
 
 struct FixedLengthString{T<:AbstractString}

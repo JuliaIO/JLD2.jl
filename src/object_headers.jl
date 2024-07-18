@@ -165,20 +165,14 @@ function print_header_messages(f::JLDFile, offset::RelOffset)
             msg = read_header_message(f, cio, header_version, chunk_start, groupflags)
             print(msg)
             if msg.type == HM_OBJECT_HEADER_CONTINUATION
-                push!(chunks, (; chunk_start = msg.continuation_offset,
-                                    chunk_end = msg.continuation_offset + msg.continuation_length))
+                push!(chunks, (; chunk_start = fileoffset(f, msg.continuation_offset),
+                                    chunk_end = fileoffset(f,msg.continuation_offset + msg.continuation_length)))
             elseif msg.type == HM_FILTER_PIPELINE
                 filter_pipeline = FilterPipeline(msg)
                 @info filter_pipeline
             elseif msg.type == HM_ATTRIBUTE
                 push!(attrs, read_attribute(f, msg))
                 attr = attrs[end]
-                println("""    name: \"$(attr.name)\" """)
-                if attr.datatype_class != 0xff
-                    println("""    datatype: $(DATATYPES[attr.datatype_class%16])""")
-                else
-                    println("""    datatype: committed at $(attr.datatype_offset)""")
-                end
                 #try
                     data = read_attr_data(f, attr)
                     println("""    data: "$data" """)

@@ -37,6 +37,9 @@ function define_packed(ty::DataType)
     nothing
 end
 
+define_packed(RelOffset)
+
+
 """
     read_size(io::IO, flags::UInt8)
 

@@ -20,15 +20,14 @@ function load_dataset(f::JLDFile, offset::RelOffset)
 
     dataspace = ReadDataspace()
     attrs = ReadAttribute[]
-    datatype_class::UInt8 = 0
-    datatype_offset::Int64 = 0
+    dt::H5Datatype = PlaceholderH5Datatype()
     layout::DataLayout = DataLayout(0,LC_COMPACT_STORAGE,0,-1)
     filter_pipeline::FilterPipeline = FilterPipeline(Filter[])
     for msg in msgs
         if msg.type == HM_DATASPACE
             dataspace = ReadDataspace(f, msg)
         elseif msg.type == HM_DATATYPE
-            datatype_class, datatype_offset = datatype_from_message(f, msg)
+            dt = msg.dt
         elseif msg.type == HM_DATA_LAYOUT
             layout = DataLayout(f, msg)
         elseif msg.type == HM_FILTER_PIPELINE
@@ -39,10 +38,13 @@ function load_dataset(f::JLDFile, offset::RelOffset)
             throw(UnsupportedFeatureException())
         end
     end
+    if dt isa PlaceholderH5Datatype
+        throw(InvalidDataException("No datatype message found"))
+    end
     iscompressed(filter_pipeline) && !ischunked(layout) && throw(InvalidDataException("Compressed data must be chunked"))
 
     # TODO verify that data length matches
-    read_data(f, dataspace, datatype_class, datatype_offset, layout,
+    read_data(f, dataspace, dt, layout,
                     filter_pipeline, offset, attrs)
 end
 
@@ -53,7 +55,7 @@ end
 [`jlread`](@ref) data from an attribute.
 """
 read_attr_data(f::JLDFile, attr::ReadAttribute) =
-    read_data(f, attr.dataspace, attr.datatype_class, attr.datatype_offset,
+    read_data(f, attr.dataspace, attr.datatype,
               DataLayout(0,LC_COMPACT_STORAGE,-1,attr.data_offset))
 
 """
@@ -67,15 +69,10 @@ simultaneously validating the data.
 """
 function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
                         rr::ReadRepresentation)
-    io = f.io
-    if (attr.datatype_class << 4) == (class(expected_datatype) << 4)
-        seek(io, attr.datatype_offset)
-        dt = jlread(io, typeof(expected_datatype))
-        if dt == expected_datatype
-            seek(f.io, attr.data_offset)
-            read_dataspace = (attr.dataspace, NULL_REFERENCE, DataLayout(0,LC_COMPACT_STORAGE,-1,attr.data_offset), FilterPipeline())
-            return read_data(f, rr, read_dataspace)
-        end
+    if attr.datatype == expected_datatype
+        seek(f.io, attr.data_offset)
+        read_dataspace = (attr.dataspace, NULL_REFERENCE, DataLayout(0,LC_COMPACT_STORAGE,-1,attr.data_offset), FilterPipeline())
+        return read_data(f, rr, read_dataspace)
     end
     throw(UnsupportedFeatureException())
 end
@@ -90,17 +87,16 @@ committed, and `datatype_offset` points to the offset of the committed datatype'
 Otherwise, `datatype_offset` points to the offset of the datatype attribute.
 """
 function read_data(f::JLDFile, dataspace::ReadDataspace,
-                   datatype_class::UInt8, datatype_offset::Int64,
+                   dt::H5Datatype,
                    layout::DataLayout, 
                    filters::FilterPipeline=FilterPipeline(),
                    header_offset::RelOffset=NULL_REFERENCE,
                    attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
     # See if there is a julia type attribute
     io = f.io
-    if datatype_class == typemax(UInt8) # shared datatype message
+    if dt isa SharedDatatype
         # this means that it is "committed" to `_types` if the file was written by JLD2  
-        offset = h5offset(f, datatype_offset)
-        rr = jltype(f, get(f.datatype_locations, offset, SharedDatatype(offset)))
+        rr = jltype(f, get(f.datatype_locations, dt.header_offset, dt))
 
         if layout.data_offset == -1
             # There was no layout message.
@@ -114,35 +110,29 @@ function read_data(f::JLDFile, dataspace::ReadDataspace,
         read_data(f, rr, read_dataspace, attributes)
         
     elseif layout.data_offset == typemax(Int64)
-        seek(io, datatype_offset)
-        @read_datatype io datatype_class dt begin
-            rr = jltype(f, dt)
-            T,S = typeof(rr).parameters
-            if layout.data_length > -1
-                # TODO: this could use the fill value message to populate the array
-                @warn "This array should be populated by a fill value. This is not (yet) implemented."
-            end
-            v = Array{T, 1}()
-            header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
-            return v
+        rr = jltype(f, dt)
+        T,S = typeof(rr).parameters
+        if layout.data_length > -1
+            # TODO: this could use the fill value message to populate the array
+            @warn "This array should be populated by a fill value. This is not (yet) implemented."
         end
+        v = Array{T, 1}()
+        header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
+        return v
     else
-        seek(io, datatype_offset)
-        @read_datatype io datatype_class dt begin
-            dtt = dt
-            rr = jltype(f, dtt)
+        dtt = dt
+        rr = jltype(f, dtt)
 
-            if layout.data_offset == -1
-                # There was no layout message.
-                # That means, this dataset is just a datatype
-                # return the Datatype
-                return typeof(rr).parameters[1]
-            end
-
-            seek(io, layout.data_offset)
-            read_dataspace = (dataspace, header_offset, layout, filters)
-            read_data(f, rr, read_dataspace, attributes)
+        if layout.data_offset == -1
+            # There was no layout message.
+            # That means, this dataset is just a datatype
+            # return the Datatype
+            return typeof(rr).parameters[1]
         end
+
+        seek(io, layout.data_offset)
+        read_dataspace = (dataspace, header_offset, layout, filters)
+        read_data(f, rr, read_dataspace, attributes)
     end
 end
 
@@ -241,14 +231,13 @@ end
 
 function read_empty(rr::ReadRepresentation{T}, f::JLDFile,
                  dimensions_attr::ReadAttribute, header_offset::RelOffset) where T
-    dimensions_attr.datatype_class == DT_FIXED_POINT || throw(UnsupportedFeatureException())
+    dimensions_attr.datatype.class == DT_FIXED_POINT || throw(UnsupportedFeatureException())
 
     io = f.io
     seek(io, dimensions_attr.dataspace.dimensions_offset)
     ndims = Int(jlread(io, Length))
 
-    seek(io, dimensions_attr.datatype_offset)
-    jlread(io, FixedPointDatatype) == h5fieldtype(f, Int64, Int64, Val{true}) || throw(UnsupportedFeatureException())
+    dimensions_attr.datatype == h5fieldtype(f, Int64, Int64, Val{true}) || throw(UnsupportedFeatureException())
 
     seek(io, dimensions_attr.data_offset)
     v = construct_array(io, T, Val(ndims))
