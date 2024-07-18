@@ -59,6 +59,7 @@ jlsizeof(x) = Base.sizeof(x)
 jlunsafe_store!(p, x) = Base.unsafe_store!(p, x)
 jlunsafe_load(p) = Base.unsafe_load(p)
 
+include("types.jl")
 include("julia_compat.jl")
 include("file_header.jl")
 include("Lookup3.jl")
@@ -89,6 +90,14 @@ Base.:(+)(x::RelOffset, y::Integer) = RelOffset(UInt64(x.offset + y))
 
 const UNDEFINED_ADDRESS = RelOffset(0xffffffffffffffff)
 const NULL_REFERENCE = RelOffset(0)
+
+function Base.show(io::IO, x::RelOffset) 
+    if x == UNDEFINED_ADDRESS
+        print(io, "UNDEFINED_ADDRESS")
+    else
+        print(io, "RelOffset(", x.offset, ")")
+    end
+end
 
 """
     JLDWriteSession{T}

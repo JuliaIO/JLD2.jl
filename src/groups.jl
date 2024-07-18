@@ -219,9 +219,6 @@ function jlwrite(io, ::LinkInfo)
     return nothing    
 end
 
-@enum(CharacterSet,
-      CSET_ASCII,
-      CSET_UTF8)
 
 const LM_CREATION_ORDER_PRESENT = UInt8(2^2)
 const LM_LINK_TYPE_FIELD_PRESENT = UInt8(2^3)
@@ -375,11 +372,10 @@ end
 """
     link_size(name::String)
 
-Returns the size of a link message, including message header.
+Returns the size of a link message, excluding message header.
 """
-link_size(name::String) =
-    3 + size_size(jlsizeof(name)) + jlsizeof(name) + jlsizeof(RelOffset)
-
+link_size(link_name::String) =
+    sizefun(Val(HM_LINK_MESSAGE), 0,0,(;link_name, target=UNDEFINED_ADDRESS))
 """
     links_size(pairs)
 
@@ -414,19 +410,8 @@ group_continuation_size(pairs) =
     write_link(cio, name, offset)
 Write a link message at current position in `cio`.
 """
-function write_link(cio, name, offset)
-    jlwrite(cio, HeaderMessage(HM_LINK_MESSAGE, link_size(name), 0))
-    jlwrite(cio, UInt8(1))             # Version
-
-    # Flags
-    flags = size_flag(jlsizeof(name)) | LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT
-    jlwrite(cio, flags::UInt8)
-
-    jlwrite(cio, UInt8(CSET_UTF8))     # Link name character set
-    write_size(cio, jlsizeof(name))    # Length of link name
-    jlwrite(cio, name)                 # Link name
-    jlwrite(cio, offset)               # Link target
-end
+write_link(cio, link_name, target) = 
+    jlwrite(cio, Hmessage(HM_LINK_MESSAGE;  link_name, target))
 
 function group_extra_space(g)
     remaining_entries = g.est_num_entries - length(g.unwritten_links)
@@ -436,14 +421,6 @@ function group_extra_space(g)
     end
      # Can't create a placeholder NIL message larger than that
     min(extraspace, typemax(UInt16))
-end
-
-function update_checksum(io, g)
-    seek(io, g.last_chunk_start_offset)
-    cio = begin_checksum_read(io)
-    seek(cio, g.last_chunk_checksum_offset)
-    seek(io, g.last_chunk_checksum_offset)
-    jlwrite(io, end_checksum(cio))
 end
 
 function group_info_message_size(g)
@@ -465,6 +442,7 @@ function write_group_info_message(cio, g)
         jlwrite(cio, UInt16(g.est_link_name_len))
     end
 end
+
 """
     save_group(g::Group) -> RelOffset
 

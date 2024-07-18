@@ -144,7 +144,6 @@ function print_header_messages(f::JLDFile, offset::RelOffset)
     chunk_start, chunk_end = chunk
 
     # Messages
-    continuation_message_goes_here::Int64 = -1
     chunks = [(; chunk_start, chunk_end)]
     chunk_number = 0
     next_link_offset::Int64 = -1
@@ -164,89 +163,30 @@ function print_header_messages(f::JLDFile, offset::RelOffset)
         @info "positions" position(cio) chunk_start chunk_end
         while (curpos = position(cio)) < chunk_end-4
             msg = read_header_message(f, cio, header_version, chunk_start, groupflags)
-            println("""
-            Message:  $(msg.type) ($(Int(msg.type)))
-                size: $(msg.size)
-                flags: $(msg.hflags)
-                offset: $(msg.offset)""")
-            if msg.type == HM_NIL
-                if continuation_message_goes_here == -1 && 
-                    chunk_end - curpos == CONTINUATION_MSG_SIZE
-                    continuation_message_goes_here = curpos
-                elseif endpos + CONTINUATION_MSG_SIZE == chunk_end
-                    # This is the remaining space at the end of a chunk
-                    # Use only if a message can potentially fit inside
-                    # Single Character Name Link Message has 13 bytes payload
-                    if msg.size >= 13 
-                        next_link_offset = curpos
-                    end
+            print(msg)
+            if msg.type == HM_OBJECT_HEADER_CONTINUATION
+                push!(chunks, (; chunk_start = msg.continuation_offset,
+                                    chunk_end = msg.continuation_offset + msg.continuation_length))
+            elseif msg.type == HM_FILTER_PIPELINE
+                filter_pipeline = FilterPipeline(msg)
+                @info filter_pipeline
+            elseif msg.type == HM_ATTRIBUTE
+                push!(attrs, read_attribute(f, msg))
+                attr = attrs[end]
+                println("""    name: \"$(attr.name)\" """)
+                if attr.datatype_class != 0xff
+                    println("""    datatype: $(DATATYPES[attr.datatype_class%16])""")
+                else
+                    println("""    datatype: committed at $(attr.datatype_offset)""")
                 end
-            else
-                continuation_message_goes_here = -1
-                if msg.type == HM_LINK_INFO
-                    if isset(msg.flags,0 )
-                        println("    max_creation_index: $(msg.max_creation_index)")
-                    end
-                    println("    fractal_heap_address: $(msg.fractal_heap_address)")
-                    println("    v2_btree_name_index: $(msg.v2_btree_name_index)")
-                    if isset(msg.flags, 1)
-                        println("    v2_btree_creation_index: $(msg.v2_btree_creation_index)")
-                    end
-                elseif msg.type == HM_GROUP_INFO
-                    if msg.size > 2
-                        flag = msg.flags
-                        if isset(flags, 0)
-                            println("    link_phase_change_max_compact = $(msg.link_phase_change_max_compact)")
-                            println("    link_phase_change_min_dense = $(msg.link_phase_change_min_dense)")
-                        end
-                        if isset(flags, 1)
-                            # Verify that non-default group size is given
-                            println("    est_num_entries = $(msg.est_num_entries)")
-                            println("    est_link_name_len = $(msg.est_link_name_len)")
-                        end
-                    end
-                elseif msg.type == HM_LINK_MESSAGE
-                    name, loffset = msg.link_name, msg.target
-                    println("   name = \"$name\"")
-                    println("   offset = $(Int(loffset.offset))")
-                elseif msg.type == HM_OBJECT_HEADER_CONTINUATION
-                    push!(chunks, (; chunk_start = msg.continuation_offset,
-                                     chunk_end = msg.continuation_offset + msg.continuation_length))
-                    println("""    offset = $(continuation_offset)\n    length = $(continuation_length)""")
-                    println("pos=$(position(cio)) $chunk_end")
-                elseif msg.type == HM_DATASPACE
-                    println("    $(ReadDataspace(f, msg))")
-                elseif msg.type == HM_DATATYPE
-                    datatype_class, datatype_offset = datatype_from_message(f, msg)
-                    println("""    class: $datatype_class\n    offset: $datatype_offset""")
-                elseif msg.type == HM_FILL_VALUE_OLD
-                elseif msg.type == HM_FILL_VALUE
-                elseif msg.type == HM_DATA_LAYOUT
-                    layout = DataLayout(f, msg)
-                    @info layout
-                elseif msg.type == HM_FILTER_PIPELINE
-                    filter_pipeline = FilterPipeline(msg)
-                    @info filter_pipeline
-                elseif msg.type == HM_SYMBOL_TABLE
-                    println("""    required for \"old style" groups\n    v1 B-Tree Address: $(msg.v1_btree_address)\n    Local Heap Address: $(msg.local_heap_address)""")
-                elseif msg.type == HM_ATTRIBUTE
-                    push!(attrs, read_attribute(f, msg))
-                    attr = attrs[end]
-                    println("""    name: \"$(attr.name)\" """)
-                    if attr.datatype_class != 0xff
-                        println("""    datatype: $(DATATYPES[attr.datatype_class%16])""")
-                    else
-                        println("""    datatype: committed at $(attr.datatype_offset)""")
-                    end
-                    #try
-                        data = read_attr_data(f, attr)
-                        println("""    data: "$data" """)
-                    #= catch e
-                        println("""    loading data failed""")
-                    end =#
-                elseif (msg.flags & 2^3) != 0
-                    throw(UnsupportedFeatureException())
-                end
+                #try
+                    data = read_attr_data(f, attr)
+                    println("""    data: "$data" """)
+                #= catch e
+                    println("""    loading data failed""")
+                end =#
+            elseif (msg.hflags & 2^3) != 0
+                throw(UnsupportedFeatureException())
             end
         end
 
@@ -262,7 +202,7 @@ end
 
 struct DataLayout
     version::UInt8
-    storage_type::UInt8
+    storage_type::LayoutClass
     data_length::Int64
     data_offset::Int64
     dimensionality::UInt8
@@ -274,7 +214,7 @@ struct DataLayout
         new(version, storage_type, data_length, data_offset, dimensionality, chunk_indexing_type, chunk_dimensions)
 end
 
-ischunked(dl::DataLayout) = dl.storage_type == 2
+ischunked(dl::DataLayout) = dl.storage_type == LC_CHUNKED_STORAGE
 
 function read_nb_uint(io::IO, nb)
     val = zero(UInt)

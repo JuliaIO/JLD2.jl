@@ -7,6 +7,8 @@ struct Hmessage
     payload_offset::RelOffset
 end
 
+jlsize(hm::Hmessage) = hm.size + 4
+
 @generated function Base.getproperty(hm::Hmessage, s::Symbol)
     ex = Expr(:block)
     for v in instances(HeaderMessageTypes)
@@ -19,8 +21,30 @@ end
 end
 
 function Hmessage(type::HeaderMessageTypes, hflags=0x00, size=0; kwargs...)
-    payload = construct_hm_payload(Val(type), hflags, size; kwargs...)
-    Hmessage(type, length(payload), hflags, payload, UNDEFINED_ADDRESS,UNDEFINED_ADDRESS)
+    kw = (; kwargs...)
+    size = sizefun(Val(type), hflags, size, kw)
+    payload = construct_hm_payload(Val(type), hflags, size, kw)
+    Hmessage(type, size, hflags, payload, UNDEFINED_ADDRESS,UNDEFINED_ADDRESS)
+end
+
+function Base.show(io::IO, hm::Hmessage)
+    println(io, 
+     """┌─ Header Message: $(hm.type)
+        │ ┌─ offset:\t$(hm.offset)
+        │ │  size:\t$(hm.size)
+        │ └─ flags:\t$(hm.hflags)""")
+    #│ \tpayload offset:\t$(hm.payload_offset)
+    keyvalue = messageshow(Val(hm.type), hm)
+
+    N = length(keyvalue)
+    for n = 1:N
+        k, v = keyvalue[n]
+        print(io, n < N ? "│    " : "└─   ") 
+        println(io, "$k:\t$v")
+    end
+    if N == 0
+        println(io, "└─")
+    end
 end
 
 mutable struct Dataset
@@ -183,7 +207,8 @@ function read_dataset(dset::Dataset)
         dset.attributes)
 end
 
-get_dataset(f::JLDFile, args...; kwargs...) = get_dataset(f.root_group, args...; kwargs...)
+get_dataset(f::JLDFile, args...; kwargs...) = 
+    get_dataset(f.root_group, args...; kwargs...)
 
 function get_dataset(g::Group, name::String)
     f = g.f
@@ -192,9 +217,7 @@ function get_dataset(g::Group, name::String)
     (g, name) = pathize(g, name, false)
 
     roffset = lookup_offset(g, name)
-    if roffset == UNDEFINED_ADDRESS
-        throw(KeyError(name))
-    end
+    roffset == UNDEFINED_ADDRESS && throw(KeyError(name))
 
     if isgroup(f, roffset)
         let loaded_groups = f.loaded_groups
@@ -272,7 +295,12 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
         msg = first(messages)
         sz = message_size(msg)
         if remaining_space ≥ sz + 4 || remaining_space == sz 
+            pos = position(io)
             write_message(io, f, msg)
+            rsz = position(io) - pos
+            if rsz != sz
+                throw(InternalError("Message size mismatch. Expected $sz, got $rsz for message $msg"))
+            end
             next_msg_offset += sz
             remaining_space -= sz
             popfirst!(messages)

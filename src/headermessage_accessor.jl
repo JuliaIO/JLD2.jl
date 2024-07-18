@@ -1,7 +1,20 @@
 using MacroTools
 
+function jlwrite(io::IOBuffer, x::Tuple) 
+    for y in x
+        jlwrite(io, y)
+    end
+end
+
+function write_zerobytes(io, n)
+    for i in 1:n
+        jlwrite(io, UInt8(0))
+    end
+end
+
 function getprop end
 function construct_hm_payload end
+function write_directly end
 
 function isset(flag, bit)
     #return !iszero(flag & UInt8(2^(bit-1)))
@@ -22,87 +35,159 @@ function flag2uint(flag)
     end
 end
 
-function build_lines(ex)
+function linefun(ex)
+    v = nothing
+    kw = esc(:kw)
     ptr = esc(:ptr)
     if ex isa LineNumberNode
-        return ex
-    elseif @capture(ex, cond_ && body_)# || @capture(ex, cond_ && body_::T_)
-        cond = esc(cond)
-        return Expr(:&&, cond, build_lines(ex.args[2]))
+        return [ex, ex, ex, ex]
+    elseif @capture(ex, cond_ && body_)
+        rets = linefun(ex.args[2])
+        return [ Expr(:&&, esc(cond), ret ) for ret in rets ]
+    elseif @capture(ex, if cond_; body_; end )
+        accs = build_fun_body((Any[], Any[], Any[], Any[]), body)
+        return [ Expr(:if, esc(cond), Expr(:block, accs[i]...)) for i in 1:4 ]
     elseif @capture(ex, s_Symbol::T_) || @capture(ex, s_Symbol::T_ = v_)
         if @capture(T, @FixedLengthString(len_))
             len = esc(len)
             read_statement = :(unsafe_string($ptr+offset, $len))
             increment = :($len)
+            write_statement = :(jlwrite(io, $(esc(s))))
         elseif @capture(T, @Blob(len_))
             len = esc(len)
-            read_statement = :(getfield(hm,:body)[(offset+1):(offset+1+$len)])
+            read_statement = :(getfield(hm,:body)[(offset+1):(offset+$len)])
             increment = :($len)
+            write_statement = :(jlwrite(io, $(esc(s))))
         elseif @capture(T, @Offset)
             read_statement = :(getfield(hm,:payload_offset) + offset)
             increment = 0
+            write_statement = nothing
         else
             T = esc(T)
             read_statement = :(unsafe_load(Ptr{$T}($ptr+offset)))
             increment = :(sizeof($(T)))
+            write_statement = :(jlwrite(io, $T($(esc(s)))))
         end
 
         assign_statement = :($(esc(s)) = $read_statement)
-        bl = Expr(:block,
-            assign_statement,
-            :(s == $(QuoteNode(s)) && return $(esc(s))),
-            :(offset += $increment)
-            )
-        return bl
+        offset_incr = :(offset += $increment)
+        haskey_ = :(haskey($kw, $(QuoteNode(s))) || throw(ArgumentError($("Argument $(QuoteNode(s)) is required"))))
+        getprop_ = :($(esc(s)) = $kw.$(s))
+        default = Symbol(s,"_default")
+        default_ = :($default = $(esc(v)))
+        get_ = :($(esc(s)) = get($kw, $(QuoteNode(s)), $default))
+
+        return [
+            # getproperty function
+            Expr(:block,
+                assign_statement,
+                :(s == $(QuoteNode(s)) && return $(esc(s))),
+                offset_incr
+                ),
+            # writing function
+            if !isnothing(v)
+                Expr(:block, default_, get_, write_statement)
+            else
+                Expr(:block, haskey_, getprop_, write_statement)
+            end,
+            # size function
+            if !isnothing(v)
+                Expr(:block, default_, get_, offset_incr)
+            else
+                Expr(:block, haskey_, getprop_, offset_incr)
+            end,
+            # pretty printer
+            Expr(:block, assign_statement,
+                :(push!(keyvalue, $(QuoteNode(s)) => $(esc(s)))),
+                offset_incr)
+        ]
     elseif @capture(ex, @skip(n_))
-        return :(offset += $(esc(n)))
+        increment = esc(n)
+        off_inc = :(offset += $increment)
+        write_inc = :(write_zerobytes(io, $increment))
+        return [off_inc, write_inc, off_inc, off_inc]
     elseif @capture(ex, @skiptoaligned(n_))
-        return :(offset += 8 - mod1(offset-$(esc(n)), 8))
-    elseif @capture(ex, if cond_; body_; end )
-        cond = esc(cond)
-        return Expr(:if, cond, Expr(:block, build_accessor!([], body)...))
-    else
-        throw(ArgumentError("Invalid field syntax: $ex"))
+        increment = :(8 - mod1(offset-$(esc(n)), 8))
+        off_inc = :(offset += $increment)
+        write_inc = :(write_zerobytes(io, $increment))
+        return [off_inc, write_inc, off_inc, off_inc]
     end
+    throw(ArgumentError("Invalid field syntax: $ex"))
 end
 
-function build_accessor!(getprop_body, blk)
+function build_fun_body(accs, blk)
     for ex in blk.args
-        push!(getprop_body, build_lines(ex))
+        rets = linefun(ex)
+        for i in 1:length(accs)
+            push!(accs[i], rets[i])
+        end
     end
-    return getprop_body
+    return accs
 end
 
 macro pseudostruct(name, blck)
-    getprop_body = Any[:(offset=0)]
-
-    build_accessor!(getprop_body, blck)
+    getprop_body, funbody, sizefun, messageshowfun = 
+        build_fun_body((Any[], Any[], Any[], Any[]), blck)
 
     getpropfun = (quote
         function $(esc(:getprop))(::Val{$name}, $(esc(:hm))::Hmessage, s::Symbol)
             $(__source__)
+            offset=0
             $(:($(esc(:ptr)) = pointer(getfield(hm,:body))))
             $(:($(esc(:hflags)) = getfield(hm, :hflags)))
+            $(:($(esc(:hsize)) = getfield(hm, :size)))
             $(getprop_body...)
             throw(ArgumentError("Field $s not found"))
         end
     end).args[2]
     
-    return Expr(:block, getpropfun, nothing)
+    constructfun = (quote
+        function $(esc(:construct_hm_payload))(::Val{$name}, $(esc(:hflags)), $(esc(:hsize)), $(esc(:kw)))
+            $(__source__)
+            io = IOBuffer()
+            $(funbody...)
+            take!(io)
+        end
+    end).args[2]
+
+    size_fun = (quote
+        function $(esc(:sizefun))(::Val{$name}, $(esc(:hflags)), $(esc(:hsize)), $(esc(:kw)))
+            $(__source__)
+            offset = 0
+            $(sizefun...)
+            return offset
+        end
+    end).args[2]
+
+    message_show = (quote
+        function $(esc(:messageshow))(::Val{$name}, $(esc(:hm))::Hmessage)
+            $(__source__)
+            offset=0
+            $(:($(esc(:ptr)) = pointer(getfield(hm,:body))))
+            $(:($(esc(:hflags)) = getfield(hm, :hflags)))
+            $(:($(esc(:hsize)) = getfield(hm, :size)))
+            keyvalue = Pair{Symbol,Any}[]
+            $(messageshowfun...)
+            return keyvalue
+        end
+    end).args[2]
+
+    return Expr(:block, getpropfun, constructfun, size_fun, message_show, nothing)
 end
 
 
-@pseudostruct HM_NIL begin end
-construct_hm_payload(::Val{HM_NIL}, hflags, size) = zeros(UInt8, size)
+#MacroTools.@expand 
+@pseudostruct HM_NIL begin @skip(hsize) end
 
+#@MacroTools.expand 
 @pseudostruct HM_DATASPACE begin
-    version::UInt8 = 1
-    dimensionality::UInt8
+    version::UInt8 = 2
+    dimensionality::UInt8 = length(kw.dimensions)
     flags::UInt8
     (version == 2) && dataspace_type::UInt8
     version == 1 && @skip(5)
     dim_offset::@Offset
-    dimension_size::NTuple{Int(dimensionality), Int64}
+    dimensions::NTuple{Int(dimensionality), Int64}
     isset(flags,0) && max_dimension_size::NTuple{Int(dimensionality), Int64}
 end
 
@@ -123,7 +208,6 @@ end
     isset(flags, 1) && (v2_btree_creation_order_index::RelOffset = UNDEFINED_ADDRESS)
 end
 
-#@MacroTools.expand 
 @pseudostruct HM_DATATYPE begin
     if isset(hflags, 1) # shared message
         version::UInt8
@@ -184,11 +268,11 @@ end
 
 @pseudostruct HM_LINK_MESSAGE begin 
     version::UInt8 = 1
-    flags::UInt8
+    flags::UInt8 = 0b10011
     isset(flags, 3) && link_type::UInt8
     isset(flags, 2) && creation_order::Int64
-    isset(flags, 4) && link_name_charset::UInt8
-    link_name_len::flag2uint(flags)
+    isset(flags, 4) && (link_name_charset::UInt8 = CSET_UTF8)
+    link_name_len::flag2uint(flags) = sizeof(kw.link_name)
     link_name::@FixedLengthString(link_name_len) # non-null-terminated
     (!isset(flags, 3) || link_type==0) && target::RelOffset
     if isset(flags, 3) && link_type == 1
@@ -214,35 +298,35 @@ end
     version::UInt8
     if version in (1,2)
         dimensionality::UInt8
-        layout_class::UInt8
+        layout_class::LayoutClass
         @skip(5)
-        (layout_class != 0) && data_address::RelOffset
+        (layout_class != LC_COMPACT_STORAGE) && data_address::RelOffset
         dimensions::NTuple{Int(dimensionality), Int32}
         (layout_class == 2) && element_size::UInt32
-        if (layout_class == 0) 
+        if (layout_class == LC_COMPACT_STORAGE) 
             data_size::UInt32
             data_address::@Offset
             data::@Blob(data_size)
         end
     end
     if version == 3 || version == 4
-        layout_class::UInt8
-        if layout_class == 0 # Compact Storage
+        layout_class::LayoutClass
+        if layout_class == LC_COMPACT_STORAGE
             data_size::UInt16
             data_address::@Offset
             data::@Blob(data_size)
         end
-        if layout_class == 1
+        if layout_class == LC_CONTIGUOUS_STORAGE
             data_address::RelOffset
             data_size::Int64# Lengths
         end
-        if version == 3 && layout_class == 2
+        if version == 3 && layout_class == LC_CHUNKED_STORAGE
             dimensionality::UInt8
             data_address::RelOffset
             dimensions::NTuple{Int(dimensionality), Int32}
             data_size::UInt32#element_size::UInt32
         end
-        if version == 4 && layout_class == 2
+        if version == 4 && layout_class == LC_CHUNKED_STORAGE
             flags::UInt8
             dimensionality::UInt8
             dim_size::UInt8
@@ -269,7 +353,7 @@ end
             end
             data_address::RelOffset
         end
-        if layout_class == 3 # Virtual Storage
+        if layout_class == LC_VIRTUAL_STORAGE # Virtual Storage
             data_address::RelOffset
             index::UInt32
         end
@@ -301,6 +385,19 @@ function DataLayout(f::JLD2.JLDFile, msg::Hmessage)
         end
     else
         throw(UnsupportedVersionException("Data layout message version $version is not supported"))
+    end
+end
+
+@pseudostruct HM_GROUP_INFO begin
+    version::UInt8 = 0
+    flags::UInt8 = 0
+    if isset(flags, 0)
+        link_phase_change_max_compact::UInt16
+        link_phase_change_min_dense::UInt16
+    end
+    if isset(flags, 1)
+        est_num_entries::UInt16
+        est_link_name_len::UInt16
     end
 end
 
@@ -358,8 +455,6 @@ function FilterPipeline(msg::Hmessage)
     else
         throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
     end
-
-
 end
 
 @pseudostruct HM_ATTRIBUTE begin
@@ -411,20 +506,19 @@ end
     continuation_length::Int64# Length
 end
 
-@pseudostruct HM_GROUP_INFO begin
-    version::UInt8 = 0
-    flags::UInt8 = 0
-    if isset(flags, 0)
-        link_phase_change_max_compact::UInt16
-        link_phase_change_min_dense::UInt16
-    end
-    if isset(flags, 1)
-        est_num_entries::UInt16
-        est_link_name_len::UInt16
-    end
+@pseudostruct HM_SYMBOL_TABLE begin
+    v1btree_address::RelOffset
+    name_index_heap::RelOffset
 end
 
 function write_message(io, f::JLDFile, msg::Hmessage)
+    write(io, msg.type)
+    write(io, msg.size)
+    write(io, msg.hflags)
+    write(io, msg.body)
+end
+
+function jlwrite(io, msg::Hmessage)
     write(io, msg.type)
     write(io, msg.size)
     write(io, msg.hflags)
@@ -523,7 +617,3 @@ function read_header(f, offset::RelOffset)
 end
 
 
-@pseudostruct HM_SYMBOL_TABLE begin
-    v1btree_address::RelOffset
-    name_index_heap::RelOffset
-end

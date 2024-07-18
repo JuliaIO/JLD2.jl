@@ -2,10 +2,7 @@
 # Datasets
 #
 
-# Use an Enum here when it doesn't make us allocate
-const LC_COMPACT_STORAGE = 0x00
-const LC_CONTIGUOUS_STORAGE = 0x01
-const LC_CHUNKED_STORAGE = 0x02
+
 
 function load_dataset(f::JLDFile, offset::RelOffset)
     if haskey(f.jloffset, offset)
@@ -25,7 +22,7 @@ function load_dataset(f::JLDFile, offset::RelOffset)
     attrs = ReadAttribute[]
     datatype_class::UInt8 = 0
     datatype_offset::Int64 = 0
-    layout::DataLayout = DataLayout(0,0,0,-1)
+    layout::DataLayout = DataLayout(0,LC_COMPACT_STORAGE,0,-1)
     filter_pipeline::FilterPipeline = FilterPipeline(Filter[])
     for msg in msgs
         if msg.type == HM_DATASPACE
@@ -57,7 +54,7 @@ end
 """
 read_attr_data(f::JLDFile, attr::ReadAttribute) =
     read_data(f, attr.dataspace, attr.datatype_class, attr.datatype_offset,
-              DataLayout(0,0,-1,attr.data_offset))
+              DataLayout(0,LC_COMPACT_STORAGE,-1,attr.data_offset))
 
 """
     read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
@@ -76,7 +73,7 @@ function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Da
         dt = jlread(io, typeof(expected_datatype))
         if dt == expected_datatype
             seek(f.io, attr.data_offset)
-            read_dataspace = (attr.dataspace, NULL_REFERENCE, DataLayout(0,0,-1,attr.data_offset), FilterPipeline())
+            read_dataspace = (attr.dataspace, NULL_REFERENCE, DataLayout(0,LC_COMPACT_STORAGE,-1,attr.data_offset), FilterPipeline())
             return read_data(f, rr, read_dataspace)
         end
     end
@@ -543,7 +540,7 @@ end
 struct CompactStorageMessage
     hm::HeaderMessage
     version::UInt8
-    layout_class::UInt8
+    layout_class::LayoutClass
     data_size::UInt16
 end
 define_packed(CompactStorageMessage)
@@ -556,7 +553,7 @@ CompactStorageMessage(datasz::Int) =
 struct ContiguousStorageMessage
     hm::HeaderMessage
     version::UInt8
-    layout_class::UInt8
+    layout_class::LayoutClass
     address::RelOffset
     data_size::Length
 end
