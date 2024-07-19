@@ -6,33 +6,35 @@
 
 function load_dataset(f::JLDFile, offset::RelOffset)
     if haskey(f.jloffset, offset)
+        # There is a known (loaded) dataset at offset
         # Stored as WeakRefs and may no longer exist
         val = f.jloffset[offset].value
         val !== nothing && return val
+    elseif haskey(f.loaded_groups, offset)
+        # There is a known (loaded) group at offset
+        return f.loaded_groups[offset]
+    elseif isgroup(f, offset)
+        # There is a not-yet loaded group at offset
+        get!(()->load_group(f, offset), f.loaded_groups, offset)
     end
-    if isgroup(f, offset)
-        return let loaded_groups = f.loaded_groups
-            get!(()->load_group(f, offset), loaded_groups, offset)
-        end
-    end
-
-    msgs, _ = read_header(f, offset)
 
     dataspace = ReadDataspace()
-    attrs = ReadAttribute[]
+    attrs = EMPTY_READ_ATTRIBUTES
     dt::H5Datatype = PlaceholderH5Datatype()
     layout::DataLayout = DataLayout(0,LC_COMPACT_STORAGE,0,-1)
     filter_pipeline::FilterPipeline = FilterPipeline(Filter[])
-    for msg in msgs
+
+    for msg in HeaderMessageIterator(f, offset, Val(true))
         if msg.type == HM_DATASPACE
             dataspace = ReadDataspace(f, msg)
         elseif msg.type == HM_DATATYPE
-            dt = msg.dt
+            dt = msg.dt::H5Datatype
         elseif msg.type == HM_DATA_LAYOUT
             layout = DataLayout(f, msg)
         elseif msg.type == HM_FILTER_PIPELINE
             filter_pipeline = FilterPipeline(msg)
         elseif msg.type == HM_ATTRIBUTE
+            isempty(attrs) && (attrs = ReadAttribute[]) 
             push!(attrs, read_attribute(f, msg))
         elseif (msg.hflags & 2^3) != 0
             throw(UnsupportedFeatureException())
@@ -86,8 +88,8 @@ Read data from a file. If `datatype_class` is `typemax(UInt8)`, the datatype is 
 committed, and `datatype_offset` points to the offset of the committed datatype's header.
 Otherwise, `datatype_offset` points to the offset of the datatype attribute.
 """
-function read_data(f::JLDFile, dataspace::ReadDataspace,
-                   dt::H5Datatype,
+@nospecializeinfer function read_data(f::JLDFile, dataspace::ReadDataspace,
+                   @nospecialize(dt::H5Datatype),
                    layout::DataLayout, 
                    filters::FilterPipeline=FilterPipeline(),
                    header_offset::RelOffset=NULL_REFERENCE,
@@ -307,7 +309,6 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     io = f.io
     data_offset = layout.data_offset
     if !ischunked(layout) || (layout.chunk_indexing_type == 1)
-        #data_offset = position(io)
         ndims, offset = get_ndims_offset(f, dataspace, attributes)
 
         seek(io, offset)

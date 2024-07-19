@@ -1,39 +1,6 @@
 #
 # Object headers
 #
-@enum HeaderMessageTypes::UInt8 begin
-    HM_NIL = 0x00
-    HM_DATASPACE = 0x01
-    HM_LINK_INFO = 0x02
-    HM_DATATYPE = 0x03
-    HM_FILL_VALUE_OLD = 0x04
-    HM_FILL_VALUE = 0x05
-    HM_LINK_MESSAGE = 0x06
-    HM_EXTERNAL_FILE_LIST = 0x07
-    HM_DATA_LAYOUT = 0x08
-    HM_BOGUS = 0x09
-    HM_GROUP_INFO = 0x0a
-    HM_FILTER_PIPELINE = 0x0b
-    HM_ATTRIBUTE = 0x0c
-    HM_OBJECT_COMMENT = 0x0d
-    HM_SHARED_MESSAGE_TABLE = 0x0f
-    HM_OBJECT_HEADER_CONTINUATION = 0x10
-    HM_SYMBOL_TABLE = 0x11
-    HM_MODIFICATION_TIME = 0x12
-    HM_BTREE_K_VALUES = 0x13
-    HM_DRIVER_INFO = 0x14
-    HM_ATTRIBUTE_INFO = 0x15
-    HM_REFERENCE_COUNT = 0x16
-end
-Base.convert(::Type{UInt8}, h::HeaderMessageTypes) = UInt8(h)
-
-const OH_ATTRIBUTE_CREATION_ORDER_TRACKED = 2^2
-const OH_ATTRIBUTE_CREATION_ORDER_INDEXED = 2^3
-const OH_ATTRIBUTE_PHASE_CHANGE_VALUES_STORED = 2^4
-const OH_TIMES_STORED = 2^5
-
-const OBJECT_HEADER_CONTINUATION_SIGNATURE = htol(0x4b48434f) # "OCHK"
-
 struct ObjectStart
     signature::UInt32
     version::UInt8
@@ -66,11 +33,65 @@ function read_obj_start(io::IO)
         skip(io, 1)
         num_messages = jlread(io, UInt16)
         obj_ref_count = jlread(io, UInt32)
-        obj_header_size = jlread(io, UInt32)
+        obj_header_size = Int(jlread(io, UInt32))
         return obj_header_size, 1, os.flags
     end
 end
 
+"""
+    start_obj_read(f::JLDFile, offset::RelOffset)
+
+Internal function that does some prep-work for reading a header.
+"""
+function start_obj_read(f, offset)
+    io = f.io
+    chunk_start::Int64 = fileoffset(f, offset)
+    seek(io, chunk_start)
+    # Version 1 object header have no signature and start with version
+    header_version = jlread(io, UInt8)#::UInt8
+    if header_version == 1
+        seek(io, chunk_start)
+        cio = io
+        sz,_,groupflags = read_obj_start(cio)
+        # Skip to nearest 8byte aligned position
+        #skip_to_aligned!(cio, fileoffset(f, offset))
+        skip(cio, 4)
+        chunk_end = position(cio) + sz
+    else
+        header_version = 0x2
+        seek(io, chunk_start)
+        cio = begin_checksum_read(io)
+        sz,_,groupflags = read_obj_start(cio)
+        chunk_end = position(cio) + sz
+    end
+    chunk = (; chunk_start, chunk_end)
+    return cio, header_version, chunk, groupflags
+end
+
+"""
+    start_chunk_read(io, chunk, header_version)
+
+Internal function that does some prep-work for reading a chunk
+(which is a continuation of a regular object header).
+"""
+function start_chunk_read(io, chunk, header_version)
+    seek(io, chunk.chunk_start)
+    if header_version == 2
+        cio = begin_checksum_read(io)
+        jlread(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
+        cio
+    else
+        cio = io
+    end
+    return cio
+end
+
+
+"""
+    HeaderMessage
+
+Helper struct to read and write the first part of a header message.
+"""
 struct HeaderMessage
     msg_type::UInt8
     size::UInt16
@@ -78,48 +99,103 @@ struct HeaderMessage
 end
 define_packed(HeaderMessage)
 
-
-function isgroup(f::JLDFile, offset::RelOffset)
-    io = f.io
-    is_group = false
-    determined = false
-    cio, header_version, chunk, objflags = start_obj_read(f, offset)
-    chunks = [chunk]
-    chunk_number = 1
-
-    while chunk_number <= length(chunks) && !determined
-        chunk = chunks[chunk_number]
-        chunk_start, chunk_end = chunk.chunk_start, chunk.chunk_end 
-
-        if chunk_number > 1 # Don't do this the first time around
-            cio = start_chunk_read(io, chunk, header_version)
-            header_version == 2 && (chunk_end -= 4)
-        end
-        chunk_number += 1
-
-        while position(cio) <= chunk_end-4
-            msg = read_header_message(f, cio, header_version, chunk_start, objflags)
-            if msg.type in (HM_LINK_INFO, HM_GROUP_INFO, HM_LINK_MESSAGE, HM_SYMBOL_TABLE)
-                is_group = true
-                determined = true
-                break
-            elseif msg.type in (HM_DATASPACE, HM_DATATYPE, HM_FILL_VALUE, HM_DATA_LAYOUT)
-                determined = true
-                break
-            end
-            if msg.type == HM_OBJECT_HEADER_CONTINUATION
-                push!(chunks, (; chunk_start = fileoffset(f, msg.continuation_offset),
-                                 chunk_end = fileoffset(f, msg.continuation_offset + msg.continuation_length)))
-            end
-        end
-        seek(cio, chunk_end)
-        if header_version == 2
-            end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException("Invalid Checksum"))
-        end
-    end
-    return is_group
+"""
+    LazyHmessage{IO} <: AbstractHeaderMessage
+    
+Lazy representation of a Header Message in a file.
+See also [`Hmessage`](@ref).
+"""
+struct LazyHmessage{IO} <: AbstractHeaderMessage
+    type::HeaderMessageTypes
+    size::UInt16
+    hflags::UInt8
+    offset::RelOffset
+    payload_offset::RelOffset
+    base_address::Int
+    io::IO
 end
 
+@generated function Base.getproperty(hm::LazyHmessage, s::Symbol)
+    ex = Expr(:block)
+    for v in instances(HeaderMessageTypes)
+        push!(ex.args, :(hm.type == $(v) && return iogetprop($(Val(v)), hm, s)))
+    end
+    return quote
+        s in (:type, :size, :hflags, :offset, :payload_offset, :base_address, :io) && return getfield(hm, s)
+        $(ex)
+    end
+end
+
+
+"""
+    Hmessage <: AbstractHeaderMessage
+
+Representation of a Header Message in memory. Provides `getproperty` access
+to the fields of the message.
+Can also be used to construct and write custom messages.
+"""
+struct Hmessage <: AbstractHeaderMessage
+    type::HeaderMessageTypes
+    size::UInt16
+    hflags::UInt8
+    body::Vector{UInt8}
+    offset::RelOffset
+    payload_offset::RelOffset
+end
+
+@generated function Base.getproperty(hm::Hmessage, s::Symbol)
+    ex = Expr(:block)
+    for v in instances(HeaderMessageTypes)
+        push!(ex.args, :(hm.type == $(v) && return getprop($(Val(v)), hm, s)))
+    end
+    return quote
+        s in (:type, :size, :hflags, :body, :offset, :payload_offset) && return getfield(hm, s)
+        $(ex)
+    end
+end
+
+function Hmessage(type::HeaderMessageTypes, hflags=0x00, size=0; kwargs...)
+    kw = (; kwargs...)
+    size = sizefun(Val(type), hflags, size, kw)
+    payload = construct_hm_payload(Val(type), hflags, size, kw)
+    Hmessage(type, size, hflags, payload, UNDEFINED_ADDRESS,UNDEFINED_ADDRESS)
+end
+
+write_message(io, f::JLDFile, msg::Hmessage) = jlwrite(io, msg)
+
+function jlwrite(io, msg::Hmessage)
+    write(io, msg.type)
+    write(io, msg.size)
+    write(io, msg.hflags)
+    write(io, msg.body)
+end
+
+function Base.show(io::IO, hm::Hmessage)
+    println(io, 
+     """┌─ Header Message: $(hm.type)
+        │ ┌─ offset:\t$(hm.offset)
+        │ │  size:\t$(hm.size)
+        │ └─ flags:\t$(hm.hflags)""")
+    keyvalue = messageshow(Val(hm.type), hm)
+
+    N = length(keyvalue)
+    for n = 1:N
+        k, v = keyvalue[n]
+        print(io, n < N ? "│    " : "└─   ") 
+        println(io, "$k:\t$v")
+    end
+    if N == 0
+        println(io, "└─")
+    end
+end
+
+"""
+    print_header_messages(f::JLDFile, name::AbstractString)
+    print_header_messages(g::Group, name::AbstractString)
+    print_header_messages(f::JLDFile, offset::RelOffset)
+
+Prints the header messages of a group or dataset in a file.
+"""
 function print_header_messages(f::JLDFile, name::AbstractString)
     if isempty(name) || name == "/"
         print_header_messages(f, f.root_group_offset)
@@ -137,62 +213,138 @@ function print_header_messages(g::Group, name::AbstractString)
     print_header_messages(f, roffset)
 end
 
-
 function print_header_messages(f::JLDFile, offset::RelOffset)
-    io = f.io
-    cio, header_version, chunk, groupflags = start_obj_read(f, offset)
-    chunk_start, chunk_end = chunk
-
-    # Messages
-    chunks = [(; chunk_start, chunk_end)]
-    chunk_number = 0
-    next_link_offset::Int64 = -1
-
-    chunk_end::Int64
-    attrs = ReadAttribute[]
-    while !isempty(chunks)
-        chunk = popfirst!(chunks)
-        chunk_start, chunk_end = chunk.chunk_start, chunk.chunk_end
-        @info "Starting to read chunk no $chunk_number of length $(chunk_end-chunk_start)"
-
-        if chunk_number > 0
-            cio = start_chunk_read(io, chunk, header_version)
-            header_version == 2 && (chunk_end -= 4)
-        end
-        chunk_number += 1
-        @info "positions" position(cio) chunk_start chunk_end
-        while (curpos = position(cio)) < chunk_end-4
-            msg = read_header_message(f, cio, header_version, chunk_start, groupflags)
-            print(msg)
-            if msg.type == HM_OBJECT_HEADER_CONTINUATION
-                push!(chunks, (; chunk_start = fileoffset(f, msg.continuation_offset),
-                                    chunk_end = fileoffset(f,msg.continuation_offset + msg.continuation_length)))
-            elseif msg.type == HM_FILTER_PIPELINE
-                filter_pipeline = FilterPipeline(msg)
-                @info filter_pipeline
-            elseif msg.type == HM_ATTRIBUTE
-                push!(attrs, read_attribute(f, msg))
-                attr = attrs[end]
-                #try
-                    data = read_attr_data(f, attr)
-                    println("""    data: "$data" """)
-                #= catch e
-                    println("""    loading data failed""")
-                end =#
-            elseif (msg.hflags & 2^3) != 0
-                throw(UnsupportedFeatureException())
-            end
-        end
-
-        # Checksum
-        seek(cio, chunk_end)
-        if header_version == 2
-            end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())
+    hmitr = HeaderMessageIterator(f, offset)
+    for msg in hmitr
+        print(msg)
+        if msg.type == HM_FILTER_PIPELINE
+            filter_pipeline = FilterPipeline(msg)
+            @info filter_pipeline
+        elseif msg.type == HM_ATTRIBUTE
+            attr = read_attribute(f, msg)
+            data = read_attr_data(f, attr)
+            println("""    data: "$data" """)
+        elseif (msg.hflags & 2^3) != 0
+            throw(UnsupportedFeatureException())
         end
     end
     nothing
 end
 
+
+function read_header_message(f, io, header_version, chunk_start, groupflags, lazy=Val(false))
+    msgpos = h5offset(f, position(io))
+    if header_version == 1
+        # Message start 8byte aligned relative to object start
+        skip_to_aligned!(io, chunk_start)
+        msgpos = h5offset(f, position(io))
+        # Version 1 header message is padded
+        msg = HeaderMessage(UInt8(jlread(io, UInt16)), jlread(io, UInt16), jlread(io, UInt8))
+        skip(io, 3)
+    else # header_version == 2
+        msg = jlread(io, HeaderMessage)
+        (groupflags & 4) == 4 && skip(io, 2) 
+    end
+    payload_offset = h5offset(f, position(io))
+    if lazy == Val(true)
+        skip(io, msg.size)
+        LazyHmessage(
+            HeaderMessageTypes(msg.msg_type),
+            msg.size, msg.flags, msgpos,
+            payload_offset,
+            Int(f.base_address), io)
+    else
+        payload = jlread(io, UInt8, msg.size)
+        Hmessage(
+            HeaderMessageTypes(msg.msg_type),
+            msg.size, msg.flags, payload,
+            msgpos, payload_offset)
+    end
+end
+
+
+
+"""
+    mutable struct HeaderMessageIterator{LAZY, IO}
+        HeaderMessageIterator(f::JLDFile, offset::RelOffset, lazy=Val(false))
+
+Implements an iterator over header messages.
+When `lazy == Val(true)` the iterator will return [`LazyHmessage`](@ref) objects
+instead of [`Hmessage`](@ref).
+"""
+mutable struct HeaderMessageIterator{LAZY, IO}
+    f::JLDFile{IO}
+    curpos::Int64
+    header_version::UInt8
+    objflags::UInt8
+    chunk::@NamedTuple{chunk_start::Int64, chunk_end::Int64}
+    next_chunk::@NamedTuple{chunk_start::Int64, chunk_end::Int64}
+    second_to_next_chunk::@NamedTuple{chunk_start::Int64, chunk_end::Int64}
+end
+
+function HeaderMessageIterator(f::JLDFile, offset::RelOffset, lazy=Val(false))
+    cio, header_version, chunk, objflags = start_obj_read(f, offset)
+    io = f.io
+    pos = position(cio)
+    if header_version == 2
+        # Verify correctness now
+        seek(cio, chunk.chunk_end)
+        end_checksum(cio) == jlread(io, UInt32)
+        seek(io, pos)
+    end
+    HeaderMessageIterator{lazy, typeof(io)}(
+        f, pos, header_version, objflags,
+        chunk, (; chunk_start = -1, chunk_end = -1), (; chunk_start = -1, chunk_end = -1))
+end
+    
+Base.IteratorSize(::HeaderMessageIterator) = Base.SizeUnknown()
+
+function Base.iterate(itr::HeaderMessageIterator{LAZY}, state=nothing) where LAZY
+    io = itr.f.io
+    chunk = itr.chunk
+    if itr.curpos > chunk.chunk_end
+        throw(InternalError("This should not happen"))
+    elseif itr.curpos > (chunk.chunk_end - 4 - 2*((itr.objflags & 4) == 4))
+        if itr.next_chunk.chunk_start == -1
+            return nothing
+        end
+        itr.chunk = chunk = itr.next_chunk
+        itr.next_chunk = itr.second_to_next_chunk
+        itr.second_to_next_chunk = (; chunk_start=-1, chunk_end=-1)
+
+        seek(io, chunk.chunk_start)
+        if itr.header_version == 2
+            # Verify integrity of new chunk
+            cio = begin_checksum_read(io)
+            jlread(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
+            seek(cio, chunk.chunk_end-4)
+            end_checksum(cio) == jlread(io, UInt32)
+            seek(io, chunk.chunk_start + 4)
+            chunk = itr.chunk = (; chunk.chunk_start, chunk_end=chunk.chunk_end-4)
+        end        
+        itr.curpos = position(io)
+    end
+    seek(io, itr.curpos)
+    msg = read_header_message(itr.f, io, itr.header_version, chunk.chunk_start, itr.objflags, LAZY)
+    #itr.curpos = position(io)
+    itr.curpos = fileoffset(itr.f, msg.payload_offset)+msg.size
+    if msg.type == HM_OBJECT_HEADER_CONTINUATION
+        new_chunk =  (;
+            chunk_start = fileoffset(itr.f, msg.continuation_offset),
+            chunk_end = fileoffset(itr.f, msg.continuation_offset + msg.continuation_length))
+        if itr.next_chunk.chunk_start == -1
+            itr.next_chunk = new_chunk
+        elseif itr.second_to_next_chunk.chunk_start == -1
+            itr.second_to_next_chunk = new_chunk
+        else
+            throw(InternalError("This should not happen"))
+        end
+    end
+    return msg, nothing
+end
+
+
+## Left over header message parsing that does not have a good place.
 
 struct DataLayout
     version::UInt8
@@ -210,11 +362,90 @@ end
 
 ischunked(dl::DataLayout) = dl.storage_type == LC_CHUNKED_STORAGE
 
-function read_nb_uint(io::IO, nb)
-    val = zero(UInt)
-    for n = 1:nb
-        #val = val << 8
-        val += jlread(io, UInt8)*(2^(8n))
+function DataLayout(f::JLD2.JLDFile, msg::AbstractHeaderMessage)
+    version = msg.version::UInt8
+    storage_type = msg.layout_class::LayoutClass
+    rf = msg.data_address::RelOffset
+    data_offset::Int64 = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
+    if version == 4 || version == 3
+        if storage_type in (LC_COMPACT_STORAGE, LC_CONTIGUOUS_STORAGE)
+            data_length = Int64(msg.data_size)
+
+            return DataLayout(version, storage_type, data_length, data_offset) 
+        elseif version == 4 && storage_type == LC_CHUNKED_STORAGE
+            chunk_dimensions = Int[msg.dimensions...]
+            chunk_indexing_type = msg.chunk_indexing_type
+            chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
+            data_length = Int64(msg.data_size)
+
+            #filters = msg.filters#jlread(cio, UInt32)
+            chunked_storage = true
+            DataLayout(version, storage_type, data_length, data_offset, msg.dimensionality, msg.chunk_indexing_type, chunk_dimensions) 
+        elseif version == 3 && storage_type == LC_CHUNKED_STORAGE
+            data_length = Int64(msg.data_size)
+
+            chunk_dimensions = Int[msg.dimensions[1:end-1]...] # drop element size as last dimension
+            chunked_storage = true
+            DataLayout(version, storage_type, data_length, data_offset, msg.dimensionality, 0, chunk_dimensions) 
+        else
+            throw(UnsupportedFeatureException("Unknown data layout"))
+        end
+    else
+        throw(UnsupportedVersionException("Data layout message version $version is not supported"))
     end
-    val
+end
+
+function FilterPipeline(msg::Union{Hmessage, LazyHmessage})
+    version = msg.version
+    nfilters = msg.nfilters
+    io = if msg isa Hmessage
+        io = IOBuffer(msg.body)
+        skip(io, 2)
+        io
+    else
+        msg.io
+    end
+    if version == 1
+        skip(io, 6)
+        filters = map(1:nfilters) do _
+            id = jlread(io, UInt16)
+            name_length = jlread(io, UInt16)
+            flags = jlread(io, UInt16)
+            nclient_vals = jlread(io, UInt16)
+            if iszero(name_length) 
+                name = ""
+            else
+                name = read_bytestring(io)
+                skip(io, 8-mod1(sizeof(name), 8)-1)
+            end
+            client_data = jlread(io, UInt32, nclient_vals)
+            isodd(nclient_vals) && skip(io, 4)
+            Filter(id, flags, name, client_data)
+        end
+        return FilterPipeline(filters)
+    elseif version == 2
+        filters = map(1:nfilters) do _
+            id = jlread(io, UInt16)
+            if id > 255
+                name_length = jlread(io, UInt16)
+                flags = jlread(io, UInt16)
+                nclient_vals = jlread(io, UInt16)
+                if iszero(name_length) 
+                    name = ""
+                else
+                    name = read_bytestring(io)
+                    skip(io, 8-mod1(sizeof(name), 8)-1)
+                end
+            else
+                name = ""
+                flags = jlread(io, UInt16)
+                nclient_vals = jlread(io, UInt16)
+            end
+            client_data = jlread(io, UInt32, nclient_vals)
+            Filter(id, flags, name, client_data)
+        end
+        return FilterPipeline(filters)
+    else
+        throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
+    end
 end

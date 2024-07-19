@@ -102,13 +102,7 @@ function Base.getindex(g::Group, name::AbstractString)
         throw(KeyError(name))
     end
 
-    if isgroup(f, roffset)
-        let loaded_groups = f.loaded_groups
-            get!(()->load_group(f, roffset), loaded_groups, roffset)
-        end
-    else
-        load_dataset(f, roffset)
-    end
+    load_dataset(f, roffset)
 end
 
 # function Base.write(g::Group, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession())
@@ -257,15 +251,10 @@ end
 const CONTINUATION_MSG_SIZE = jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
 
 function load_group(f::JLDFile, offset::RelOffset)
-    io = f.io
-    cio, header_version, chunk, groupflags = start_obj_read(f, offset)
-    chunk_start, chunk_end = chunk
     # Messages
     continuation_message_goes_here::Int64 = -1
     links = OrderedDict{String,RelOffset}()
-    chunks = [chunk]
-    chunk_number = 0
-
+    
     next_link_offset::Int64 = -1
     link_phase_change_max_compact::Int64 = -1 
     link_phase_change_min_dense::Int64 = -1
@@ -276,76 +265,55 @@ function load_group(f::JLDFile, offset::RelOffset)
 
     v1btree_address = UNDEFINED_ADDRESS
     name_index_heap = UNDEFINED_ADDRESS
+    hmitr = HeaderMessageIterator(f, offset, Val(true))
+    for msg in hmitr
+        chunk_start, chunk_end = hmitr.chunk
+        if msg.type == HM_NIL
+            if continuation_message_goes_here == -1 && 
+                chunk_end - fileoffset(f, msg.offset) == CONTINUATION_MSG_SIZE
+                #continuation_message_goes_here = curpos # also correct
+                continuation_message_goes_here = fileoffset(f, msg.offset)
 
-    while !isempty(chunks)
-        chunk = popfirst!(chunks)
-        chunk_start, chunk_end = chunk.chunk_start, chunk.chunk_end
-
-        if chunk_number > 0
-            cio = start_chunk_read(io, chunk, header_version)
-            header_version == 2 && (chunk_end -= 4)
-        end
-        chunk_number += 1
-        while (curpos = position(cio)) < chunk_end-4
-            msg = read_header_message(f, cio, header_version, chunk_start, groupflags)
-
-            if msg.type == HM_NIL
-                if continuation_message_goes_here == -1 && 
-                    chunk_end - curpos == CONTINUATION_MSG_SIZE
-                    #continuation_message_goes_here = curpos # also correct
-                    continuation_message_goes_here = fileoffset(f, msg.offset)
-
-                elseif position(cio) + CONTINUATION_MSG_SIZE == chunk_end
-                    # This is the remaining space at the end of a chunk
-                    # Use only if a message can potentially fit inside
-                    # Single Character Name Link Message has 13 bytes payload
-                    if msg.size >= 13 
-                        #next_link_offset = curpos # also correct
-                        next_link_offset = fileoffset(f, msg.offset)
-                    end
-                end
-            else
-                continuation_message_goes_here = -1
-                if msg.type == HM_LINK_INFO
-                    fractal_heap_address = msg.fractal_heap_address
-                    name_index_btree = msg.v2_btree_name_index
-                elseif msg.type == HM_GROUP_INFO
-                    if msg.size > 2
-                        # Version Flag
-                        msg.version == 0 || throw(UnsupportedFeatureException()) 
-                        flag = msg.flags
-                        if flag%2 == 1 # first bit set
-                            link_phase_change_max_compact = msg.link_phase_change_max_compact
-                            link_phase_change_min_dense = msg.link_phase_change_min_dense
-                        end
-                        if (flag >> 1)%2 == 1 # second bit set
-                            # Verify that non-default group size is given
-                            est_num_entries = msg.est_num_entries
-                            est_link_name_len = msg.est_link_name_len
-                        end
-                    end
-                elseif msg.type == HM_LINK_MESSAGE
-                    name, loffset = msg.link_name, msg.target
-                    links[name] = loffset
-                elseif msg.type == HM_OBJECT_HEADER_CONTINUATION
-                    push!(chunks, (; chunk_start = fileoffset(f, msg.continuation_offset),
-                                     chunk_end = fileoffset(f, msg.continuation_offset + msg.continuation_length)))
-                    # For correct behaviour, empty space can only be filled in the 
-                    # very last chunk. Forget about previously found empty space
-                    next_link_offset = -1
-                elseif msg.type == HM_SYMBOL_TABLE
-                    v1btree_address = msg.v1btree_address
-                    name_index_heap = msg.name_index_heap            
-                elseif (msg.hflags & 2^3) != 0
-                    throw(UnsupportedFeatureException())
+            elseif hmitr.curpos + CONTINUATION_MSG_SIZE == chunk_end
+                # This is the remaining space at the end of a chunk
+                # Use only if a message can potentially fit inside
+                # Single Character Name Link Message has 13 bytes payload
+                if msg.size >= 13 
+                    #next_link_offset = curpos # also correct
+                    next_link_offset = fileoffset(f, msg.offset)
                 end
             end
-        end
-
-        # Checksum
-        seek(cio, chunk_end)
-        if header_version == 2
-            end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())
+        else
+            continuation_message_goes_here = -1
+            if msg.type == HM_LINK_INFO
+                fractal_heap_address = msg.fractal_heap_address
+                name_index_btree = msg.v2_btree_name_index
+            elseif msg.type == HM_GROUP_INFO
+                if msg.size > 2
+                    # Version Flag
+                    msg.version == 0 || throw(UnsupportedFeatureException()) 
+                    flag = msg.flags
+                    if flag%2 == 1 # first bit set
+                        link_phase_change_max_compact = msg.link_phase_change_max_compact
+                        link_phase_change_min_dense = msg.link_phase_change_min_dense
+                    end
+                    if (flag >> 1)%2 == 1 # second bit set
+                        # Verify that non-default group size is given
+                        est_num_entries = msg.est_num_entries
+                        est_link_name_len = msg.est_link_name_len
+                    end
+                end
+            elseif msg.type == HM_LINK_MESSAGE
+                name, loffset = msg.link_name::String, msg.target::RelOffset
+                links[name] = loffset
+            elseif msg.type == HM_OBJECT_HEADER_CONTINUATION
+                next_link_offset = -1
+            elseif msg.type == HM_SYMBOL_TABLE
+                v1btree_address = msg.v1btree_address
+                name_index_heap = msg.name_index_heap            
+            elseif (msg.hflags & 2^3) != 0
+                throw(UnsupportedFeatureException())
+            end
         end
     end
 
@@ -363,8 +331,8 @@ function load_group(f::JLDFile, offset::RelOffset)
         end
     end
 
-    Group{typeof(f)}(f, chunk_start, continuation_message_goes_here,        
-                     chunk_end, next_link_offset, est_num_entries,
+    Group{typeof(f)}(f, hmitr.chunk.chunk_start, continuation_message_goes_here,        
+                     hmitr.chunk.chunk_end, next_link_offset, est_num_entries,
                      est_link_name_len,
                      OrderedDict{String,RelOffset}(), OrderedDict{String,Group}(), links)
 end
@@ -499,6 +467,26 @@ function save_group(g::Group)
     # TODO: this should always return the object start
     # but for "continued" versions this is not the case
     return h5offset(f, g.last_chunk_start_offset)
+end
+
+function isgroup(f::JLDFile, offset::RelOffset)
+    # trivial case -> It is already loaded
+    haskey(f.loaded_groups, offset) && return true
+
+    is_group = false
+    determined = false
+    hmitr = HeaderMessageIterator(f, offset, Val(true))
+    for msg in hmitr
+        if msg.type in (HM_LINK_INFO, HM_GROUP_INFO, HM_LINK_MESSAGE, HM_SYMBOL_TABLE)
+            is_group = true
+            determined = true
+            break
+        elseif msg.type in (HM_DATASPACE, HM_DATATYPE, HM_FILL_VALUE, HM_DATA_LAYOUT)
+            determined = true
+            break
+        end
+    end
+    return is_group
 end
 
 function show_group(io::IO, g::Group, maxnumlines::Int=10, prefix::String=" ", skiptypes::Bool=false)

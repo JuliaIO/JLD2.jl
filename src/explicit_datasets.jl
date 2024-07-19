@@ -1,52 +1,3 @@
-struct Hmessage
-    type::HeaderMessageTypes
-    size::UInt16
-    hflags::UInt8
-    body::Vector{UInt8}
-    offset::RelOffset
-    payload_offset::RelOffset
-end
-
-jlsize(hm::Hmessage) = hm.size + 4
-
-@generated function Base.getproperty(hm::Hmessage, s::Symbol)
-    ex = Expr(:block)
-    for v in instances(HeaderMessageTypes)
-        push!(ex.args, :(hm.type == $(v) && return getprop(Val($v), hm, s)))
-    end
-    return quote
-        s in fieldnames(Hmessage) && return getfield(hm, s)
-        $(ex)
-    end
-end
-
-function Hmessage(type::HeaderMessageTypes, hflags=0x00, size=0; kwargs...)
-    kw = (; kwargs...)
-    size = sizefun(Val(type), hflags, size, kw)
-    payload = construct_hm_payload(Val(type), hflags, size, kw)
-    Hmessage(type, size, hflags, payload, UNDEFINED_ADDRESS,UNDEFINED_ADDRESS)
-end
-
-function Base.show(io::IO, hm::Hmessage)
-    println(io, 
-     """┌─ Header Message: $(hm.type)
-        │ ┌─ offset:\t$(hm.offset)
-        │ │  size:\t$(hm.size)
-        │ └─ flags:\t$(hm.hflags)""")
-    #│ \tpayload offset:\t$(hm.payload_offset)
-    keyvalue = messageshow(Val(hm.type), hm)
-
-    N = length(keyvalue)
-    for n = 1:N
-        k, v = keyvalue[n]
-        print(io, n < N ? "│    " : "└─   ") 
-        println(io, "$k:\t$v")
-    end
-    if N == 0
-        println(io, "└─")
-    end
-end
-
 mutable struct Dataset
     parent::Group #param..
     name::String
@@ -228,16 +179,9 @@ function get_dataset(g::Group, name::String)
 end
 
 function get_dataset(f::JLDFile, offset::RelOffset, g, name)
-    msgs, chunks = read_header(f, offset)
     dset = Dataset(g, name, offset, nothing, nothing, nothing, ReadAttribute[], false, nothing, nothing)
     
-    chunk = chunks[end]
-    dset.header_chunk_info = (; 
-        chunk.chunk_start,
-        chunk.chunk_end, 
-        next_msg_offset = chunk.chunk_end-20)
-
-    for msg in msgs
+    for msg in HeaderMessageIterator(f, offset)
         if msg.type == HM_DATASPACE
             dset.dataspace = ReadDataspace(f, msg)
         elseif msg.type == HM_DATATYPE
@@ -249,7 +193,12 @@ function get_dataset(f::JLDFile, offset::RelOffset, g, name)
         elseif msg.type == HM_ATTRIBUTE
             push!(dset.attributes, read_attribute(f, msg))
         elseif msg.type == HM_OBJECT_HEADER_CONTINUATION
-            continue
+            chunk_start = fileoffset(f, msg.continuation_offset)
+            chunk_end = chunk_start + msg.continuation_length
+            dset.header_chunk_info = (; 
+                chunk_start,
+                chunk_end, 
+                next_msg_offset = chunk_end-20)
         else
             @warn "encountered unhandeled message type: $(msg.type)"
         end

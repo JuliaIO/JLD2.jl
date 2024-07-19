@@ -1,5 +1,10 @@
 ## Signatures
 const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
+const OH_ATTRIBUTE_CREATION_ORDER_TRACKED = 2^2
+const OH_ATTRIBUTE_CREATION_ORDER_INDEXED = 2^3
+const OH_ATTRIBUTE_PHASE_CHANGE_VALUES_STORED = 2^4
+const OH_TIMES_STORED = 2^5
+const OBJECT_HEADER_CONTINUATION_SIGNATURE = htol(0x4b48434f) # "OCHK"
 
 ## Enums
 @enum LayoutClass::UInt8 begin
@@ -14,6 +19,42 @@ Base.convert(::Type{UInt8}, l::LayoutClass) = UInt8(l)
       CSET_ASCII,
       CSET_UTF8)
 
+
+# Header Message Types
+# These are identified by their UInt8 value in the file
+@enum HeaderMessageTypes::UInt8 begin
+    HM_NIL = 0x00
+    HM_DATASPACE = 0x01
+    HM_LINK_INFO = 0x02
+    HM_DATATYPE = 0x03
+    HM_FILL_VALUE_OLD = 0x04
+    HM_FILL_VALUE = 0x05
+    HM_LINK_MESSAGE = 0x06
+    HM_EXTERNAL_FILE_LIST = 0x07
+    HM_DATA_LAYOUT = 0x08
+    HM_BOGUS = 0x09
+    HM_GROUP_INFO = 0x0a
+    HM_FILTER_PIPELINE = 0x0b
+    HM_ATTRIBUTE = 0x0c
+    HM_OBJECT_COMMENT = 0x0d
+    HM_SHARED_MESSAGE_TABLE = 0x0f
+    HM_OBJECT_HEADER_CONTINUATION = 0x10
+    HM_SYMBOL_TABLE = 0x11
+    HM_MODIFICATION_TIME = 0x12
+    HM_BTREE_K_VALUES = 0x13
+    HM_DRIVER_INFO = 0x14
+    HM_ATTRIBUTE_INFO = 0x15
+    HM_REFERENCE_COUNT = 0x16
+end
+
+Base.convert(::Type{UInt8}, h::HeaderMessageTypes) = UInt8(h)
+
+"""
+    abstract type AbstractHeaderMessage
+
+Abstract super type used for dispatch
+"""
+abstract type AbstractHeaderMessage end
 
 ## Exceptions 
 
@@ -52,6 +93,8 @@ that it is relative to the superblock base address. `fileoffset` and `h5offset` 
 struct RelOffset
     offset::UInt64
 end
+define_packed(RelOffset)
+
 RelOffset(r::RelOffset) = r
 Base.:(==)(x::RelOffset, y::RelOffset) = x === y
 Base.hash(x::RelOffset) = hash(x.offset)
@@ -115,6 +158,7 @@ Reference to a shared datatype message (stored elsewhere in a file).
 struct SharedDatatype <: H5Datatype
     header_offset::RelOffset
 end
+define_packed(SharedDatatype)
 
 """
     CommittedDatatype <: H5Datatype

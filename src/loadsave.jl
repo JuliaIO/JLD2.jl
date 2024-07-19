@@ -162,9 +162,9 @@ function loadtodict!(d::Dict, g::Union{JLDFile, Group}, prefix::String="")
     for k in keys(g)
         v = g[k]
         if v isa Group
-            loadtodict!(d, g[k], prefix*k*"/")
+            loadtodict!(d, v, prefix*k*"/")
         else
-            d[prefix*k] = g[k]
+            d[prefix*k] = v
         end
     end
     return d

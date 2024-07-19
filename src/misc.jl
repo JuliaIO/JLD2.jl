@@ -2,44 +2,6 @@
 # Miscellaneous functions
 #
 
-# Redefine unsafe_load, unsafe_store!, read, and write so that they pack the type
-function define_packed(ty::DataType)
-    @assert isbitstype(ty)
-    packed_offsets = cumsum([jlsizeof(x) for x in ty.types])
-    sz = pop!(packed_offsets)
-    pushfirst!(packed_offsets, 0)
-
-    if sz != jlsizeof(ty)
-        @eval begin
-            function jlunsafe_store!(p::Ptr{$ty}, x::$ty)
-                $([:(jlunsafe_store!(pconvert(Ptr{$(ty.types[i])}, p+$(packed_offsets[i])), getfield(x, $i)))
-                   for i = 1:length(packed_offsets)]...)
-            end
-            function jlunsafe_load(p::Ptr{$ty})
-                $(Expr(:new, ty, [:(jlunsafe_load(pconvert(Ptr{$(ty.types[i])}, p+$(packed_offsets[i]))))
-                                   for i = 1:length(packed_offsets)]...))
-            end
-            jlsizeof(::Union{$ty,Type{$ty}}) = $(Int(sz))::Int
-        end
-    end
-
-    @eval begin
-        @inline jlwrite(io::Union{MmapIO,BufferedWriter}, x::$ty) = _write(io, x)
-        @inline jlread(io::Union{MmapIO,BufferedReader}, x::Type{$ty}) = _read(io, x)
-        function jlread(io::IO, ::Type{$ty})
-            $(Expr(:new, ty, [:(jlread(io, $(ty.types[i]))) for i = 1:length(packed_offsets)]...))
-        end
-        function jlwrite(io::IO, x::$ty)
-            $([:(jlwrite(io, getfield(x, $i))) for i = 1:length(packed_offsets)]...)
-            nothing
-        end
-    end
-    nothing
-end
-
-define_packed(RelOffset)
-
-
 """
     read_size(io::IO, flags::UInt8)
 
@@ -99,6 +61,14 @@ function write_size(io::IO, sz::Integer)
         jlwrite(io, UInt64(sz))
     end
 end
+
+function write_nb_int(io::IO, sz::Integer, nb::Integer)
+    for _ = 1:nb
+        jlwrite(io, UInt8(sz & 0xff))
+        sz >>= 8
+    end
+end
+
 
 """
     size_size(sz::Integer)
@@ -249,4 +219,16 @@ function flag2uint(flag::UInt8)
     else
         UInt64
     end
+end
+
+
+jlread(io::IO, ::Type{NTuple{N,T}}) where {N,T} = ntuple(_->jlread(io, T), Val{N}())
+
+function read_nb_uint(io::IO, nb)
+    val = zero(UInt)
+    for n = 1:nb
+        #val = val << 8
+        val += jlread(io, UInt8)*(2^(8n))
+    end
+    val
 end
