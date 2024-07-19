@@ -15,7 +15,7 @@ function load_dataset(f::JLDFile, offset::RelOffset)
         return f.loaded_groups[offset]
     elseif isgroup(f, offset)
         # There is a not-yet loaded group at offset
-        get!(()->load_group(f, offset), f.loaded_groups, offset)
+        return get!(()->load_group(f, offset), f.loaded_groups, offset)
     end
 
     dataspace = ReadDataspace()
