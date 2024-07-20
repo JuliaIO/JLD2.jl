@@ -49,12 +49,7 @@ end
 
 Base.convert(::Type{UInt8}, h::HeaderMessageTypes) = UInt8(h)
 
-"""
-    abstract type AbstractHeaderMessage
 
-Abstract super type used for dispatch
-"""
-abstract type AbstractHeaderMessage end
 
 ## Exceptions 
 
@@ -99,6 +94,7 @@ RelOffset(r::RelOffset) = r
 Base.:(==)(x::RelOffset, y::RelOffset) = x === y
 Base.hash(x::RelOffset) = hash(x.offset)
 Base.:(+)(x::RelOffset, y::Integer) = RelOffset(UInt64(x.offset + y))
+Base.:(-)(x::RelOffset, y::Integer) = RelOffset(UInt64(x.offset - y))
 
 const UNDEFINED_ADDRESS = RelOffset(0xffffffffffffffff)
 const NULL_REFERENCE = RelOffset(0)
@@ -211,3 +207,24 @@ end
 
 FilterPipeline() = FilterPipeline(Filter[])
 iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
+
+"""
+    HeaderMessage
+
+Helper struct to read and write the first part of a header message.
+"""
+struct HeaderMessage
+    msg_type::UInt8
+    size::UInt16
+    flags::UInt8
+end
+define_packed(HeaderMessage)
+
+## Object header continuation
+# object headers can be split into multiple chunks
+# the HM_OBJECT_HEADER_CONTINUATION message is used to link them
+# it has constant size and a placeholder is put into every header
+# by JLD2 to allow later additions.
+const CONTINUATION_MSG_SIZE = jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
+
+

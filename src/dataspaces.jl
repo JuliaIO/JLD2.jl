@@ -21,7 +21,7 @@ struct ReadDataspace
 end
 ReadDataspace() = ReadDataspace(DS_SCALAR, 0, -1)
 
-function ReadDataspace(f, msg)#::Hmessage)
+function ReadDataspace(f, msg)
     ReadDataspace(msg.dataspace_type, msg.dimensionality, fileoffset(f, msg.dim_offset))
 end
 

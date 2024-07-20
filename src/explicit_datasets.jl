@@ -221,12 +221,14 @@ end
 
 # Links
 message_size(msg::Pair{String, RelOffset}) = jlsizeof(HeaderMessage) + link_size(msg.first)
-write_message(io, f, msg::Pair{String, RelOffset}, _=nothing) = write_link(io, msg...)
+write_message(io, f, msg::Pair{String, RelOffset}, _=nothing) = 
+    jlwrite(io, Hmessage(HM_LINK_MESSAGE; link_name = msg.first, target = msg.second))
+
 
 function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession();
-    chunk_start,# =UNDEFINED_ADDRESS,
-    chunk_end,#::RelOffset=UNDEFINED_ADDRESS,
-    next_msg_offset,#::RelOffset=UNDEFINED_ADDRESS,
+    chunk_start,
+    chunk_end,
+    next_msg_offset,
     minimum_continuation_size::Int = 0
     )
     if chunk_start == UNDEFINED_ADDRESS || chunk_end == UNDEFINED_ADDRESS ||

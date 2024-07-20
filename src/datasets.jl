@@ -24,7 +24,7 @@ function load_dataset(f::JLDFile, offset::RelOffset)
     layout::DataLayout = DataLayout(0,LC_COMPACT_STORAGE,0,-1)
     filter_pipeline::FilterPipeline = FilterPipeline(Filter[])
 
-    for msg in HeaderMessageIterator(f, offset, Val(true))
+    for msg in HeaderMessageIterator(f, offset)
         if msg.type == HM_DATASPACE
             dataspace = ReadDataspace(f, msg)
         elseif msg.type == HM_DATATYPE
@@ -613,46 +613,15 @@ end
 
 function delete_written_link!(f::JLDFile, roffset::RelOffset, name::AbstractString)
     # Location of written link in group structure is not known a priory
-    # Instead, we walk through the structure similar to `load_group`
-    # until the correct link message is found
     # The deletion is done by replacing that message by a placeholder nill message
-    io = f.io
-    cio, header_version, chunk, groupflags = start_obj_read(f, roffset)
-    chunk_start, chunk_end = chunk
-
-    # Messages
-    chunks = [(; chunk_start, chunk_end)]
-    chunk_number = 0
-
-    link_deleted = false
-    while !link_deleted && !isempty(chunks)
-        chunk = popfirst!(chunks)
-        chunk_start, chunk_end = chunk.chunk_start, chunk.chunk_end
-
-        if chunk_number > 0
-            cio = start_chunk_read(io, chunk, header_version)
-            header_version == 2 && (chunk_end -= 4)
-        end
-        chunk_number += 1
-        while position(cio) < chunk_end-4
-            msg = read_header_message(f, cio, header_version, chunk_start, groupflags)
-
-
-            if msg.type == HM_LINK_MESSAGE
-                if msg.link_name == name
-                    # delete link
-                    seek(io, fileoffset(f, msg.offset))
-                    jlwrite(io, HeaderMessage(HM_NIL, msg.size, 0))
-                    link_deleted = true
-                    break
-                end
-            elseif msg.type == HM_OBJECT_HEADER_CONTINUATION
-                push!(chunks, 
-                    (; chunk_start = fileoffset(f, msg.continuation_offset),
-                        chunk_end = fileoffset(f, msg.continuation_offset + msg.continuation_length)))
-            end
+    iter = HeaderMessageIterator(f, roffset)
+    for msg in iter
+        if msg.type == HM_LINK_MESSAGE && msg.link_name == name
+            # delete link
+            seek(f.io, fileoffset(f, msg.offset))
+            jlwrite(f.io, HeaderMessage(HM_NIL, msg.size, 0))
+            update_checksum(f.io, iter.chunk.chunk_start, iter.chunk.chunk_end)
         end
     end
-    update_checksum(io, chunk_start, chunk_end)
     return
 end

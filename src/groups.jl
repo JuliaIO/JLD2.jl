@@ -200,56 +200,6 @@ end
 
 Base.keytype(f::Group) = String
 
-# LinkInfo struct is used for dispatch
-struct LinkInfo end
-# In general the size depends on flags
-# when writing files we always use 18 bytes 
-# this function is only used for writing
-jlsizeof(::Type{LinkInfo}) = 18
-function jlwrite(io, ::LinkInfo)
-    jlwrite(io, zero(UInt16))
-    jlwrite(io, typemax(UInt64))
-    jlwrite(io, typemax(UInt64))
-    return nothing    
-end
-
-
-const LM_CREATION_ORDER_PRESENT = UInt8(2^2)
-const LM_LINK_TYPE_FIELD_PRESENT = UInt8(2^3)
-const LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT = UInt8(2^4)
-
-function read_link(io::IO)
-    # Version
-    version = jlread(io, UInt8)
-    version == 1 || throw(UnsupportedVersionException())
-
-    # Flags
-    flags = jlread(io, UInt8)
-
-    if (flags & LM_LINK_TYPE_FIELD_PRESENT) != 0
-        jlread(io, UInt8) == 0 || throw(UnsupportedFeatureException())
-    end
-
-    if (flags & LM_CREATION_ORDER_PRESENT) != 0
-        skip(io, 8)
-    end
-
-    # Link name character set
-    cset = CSET_ASCII
-    if (flags & LM_LINK_NAME_CHARACTER_SET_FIELD_PRESENT) != 0
-        cset_byte = jlread(io, UInt8)
-        cset = CharacterSet(cset_byte)
-    end
-
-    sz = read_size(io, flags)  # Size
-    name = jlread(io, UInt8, sz) # Link name
-    target = jlread(io, RelOffset)  # Link information
-
-    (String(name), target)
-end
-
-const CONTINUATION_MSG_SIZE = jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
-
 function load_group(f::JLDFile, offset::RelOffset)
     # Messages
     continuation_message_goes_here::Int64 = -1
@@ -265,7 +215,7 @@ function load_group(f::JLDFile, offset::RelOffset)
 
     v1btree_address = UNDEFINED_ADDRESS
     name_index_heap = UNDEFINED_ADDRESS
-    hmitr = HeaderMessageIterator(f, offset, Val(true))
+    hmitr = HeaderMessageIterator(f, offset)
     for msg in hmitr
         chunk_start, chunk_end = hmitr.chunk
         if msg.type == HM_NIL
@@ -358,58 +308,13 @@ function links_size(pairs)
     sz
 end
 
-"""
-    group_payload_size(g)
-
-Returns the size of a group payload, including link info, group info, and link messages,
-but not the object header. Provides
-space after the last object message for a continuation message.
-"""
-group_payload_size(g) =
-    jlsizeof(HeaderMessage) + jlsizeof(LinkInfo) + group_info_message_size(g) + links_size(g.unwritten_links) +
-    jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
-
-group_continuation_size(pairs) =
-    jlsizeof(OBJECT_HEADER_CONTINUATION_SIGNATURE) + links_size(pairs) +
-    jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length) + 4 # Checksum is included
-
-
-"""
-    write_link(cio, name, offset)
-Write a link message at current position in `cio`.
-"""
-write_link(cio, link_name, target) = 
-    jlwrite(cio, Hmessage(HM_LINK_MESSAGE;  link_name, target))
-
 function group_extra_space(g)
     remaining_entries = g.est_num_entries - length(g.unwritten_links)
-    extraspace = 0
-    if remaining_entries > 0
-        extraspace += remaining_entries * (12 + g.est_link_name_len + 4)
-    end
-     # Can't create a placeholder NIL message larger than that
-    min(extraspace, typemax(UInt16))
+    extraspace = remaining_entries * (12 + g.est_link_name_len + 4)
+    # Can't create a placeholder NIL message larger than that
+    clamp(extraspace, 0, typemax(UInt16))
 end
 
-function group_info_message_size(g)
-    jlsizeof(HeaderMessage) + 2 + 4*(g.est_num_entries != 4 || g.est_link_name_len != 8)
-end
-
-function write_group_info_message(cio, g)
-    # Check for non standard value of 
-    # est_num_entries [== 4]
-    # est_link_name_len [== 8]
-    if g.est_num_entries == 4 && g.est_link_name_len == 8
-        jlwrite(cio, HeaderMessage(HM_GROUP_INFO, 2, 0))
-        jlwrite(cio, UInt16(0))
-    else
-        jlwrite(cio, HeaderMessage(HM_GROUP_INFO, 6, 0))
-        jlwrite(cio, UInt8(0)) # Version
-        jlwrite(cio, UInt8(2)) # Flags (non-default sizes)
-        jlwrite(cio, UInt16(g.est_num_entries))
-        jlwrite(cio, UInt16(g.est_link_name_len))
-    end
-end
 
 """
     save_group(g::Group) -> RelOffset
@@ -433,30 +338,33 @@ function save_group(g::Group)
     io = f.io
     # If the group has not been saved yet
     if g.last_chunk_start_offset == -1
-        totalsize = group_payload_size(g)
+
+        link_info = Hmessage(HM_LINK_INFO)
+        group_info = Hmessage(HM_GROUP_INFO; g.est_num_entries, g.est_link_name_len)
+
+        totalsize = jlsizeof(link_info) + jlsizeof(group_info)
+        # Object header continuation placeholder
+        totalsize += (jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length))
+        # Link messages
+        totalsize += links_size(g.unwritten_links)
+        
         # add to size to make space for additional links
-        extraspace = group_extra_space(g)
-        totalsize += extraspace
+        totalsize += group_extra_space(g)
         sz = jlsizeof(ObjectStart) + size_size(totalsize) + totalsize
 
         g.last_chunk_start_offset = f.end_of_data
-        g.last_chunk_checksum_offset = f.end_of_data + sz #- 4
-
+        g.last_chunk_checksum_offset = f.end_of_data + sz
         f.end_of_data += sz + 4
+
         seek(io, g.last_chunk_start_offset)
-        #cio = begin_checksum_write(io, sz)
-        cio = io
+        
         # Object header
-        jlwrite(cio, ObjectStart(size_flag(totalsize)))
-        write_size(cio, totalsize)
+        jlwrite(io, ObjectStart(size_flag(totalsize)))
+        write_size(io, totalsize)
+        jlwrite(io, link_info)
+        jlwrite(io, group_info)
 
-        # Link info message
-        jlwrite(cio, HeaderMessage(HM_LINK_INFO, jlsizeof(LinkInfo), 0))
-        jlwrite(cio, LinkInfo())
-
-        # Group info message
-        write_group_info_message(cio, g)
-        g.next_link_offset = position(cio)
+        g.next_link_offset = position(io)
     end
     next_msg_offset = g.next_link_offset == -1 ? g.continuation_message_goes_here : g.next_link_offset
     attach_message(f, g.last_chunk_start_offset, collect(g.unwritten_links);
@@ -475,7 +383,7 @@ function isgroup(f::JLDFile, offset::RelOffset)
 
     is_group = false
     determined = false
-    hmitr = HeaderMessageIterator(f, offset, Val(true))
+    hmitr = HeaderMessageIterator(f, offset)
     for msg in hmitr
         if msg.type in (HM_LINK_INFO, HM_GROUP_INFO, HM_LINK_MESSAGE, HM_SYMBOL_TABLE)
             is_group = true

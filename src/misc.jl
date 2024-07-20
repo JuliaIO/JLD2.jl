@@ -223,6 +223,7 @@ end
 
 
 jlread(io::IO, ::Type{NTuple{N,T}}) where {N,T} = ntuple(_->jlread(io, T), Val{N}())
+jlread(io::IO, ::Type{Tuple{}}) = ()
 
 function read_nb_uint(io::IO, nb)
     val = zero(UInt)

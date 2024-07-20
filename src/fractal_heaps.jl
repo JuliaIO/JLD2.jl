@@ -346,7 +346,7 @@ function get_block_offset(f, iblock, roffset, hh)
     K = length(iblock.dblocks)
     if block_num < K
         dblock = iblock.dblocks[block_num+1]
-        return fileoffset(f,dblock.offset) + roffset - block_start
+        return dblock.offset + roffset - block_start
     end
     sub_iblock =  iblock.iblocks[block_num-K+1]
     get_block_offset(f, sub_iblock, roffset-block_start, hh)
@@ -361,14 +361,14 @@ function read_btree(f, offset_hh, offset_bh)
         indirect_rb = read_indirect_block(f, hh.root_block_address, hh, hh.cur_num_rows_in_root_iblock)
         links = map(records) do r
             offset = get_block_offset(f, indirect_rb, r.offset, hh)
-            seek(f.io, offset)
-            read_link(f.io)
+            m = Message(HM_LINK_MESSAGE, f, offset)
+            m.link_name, m.target
         end
     else # there's only a single direct block at hh.root_block_address
         links = map(records) do r
-            offset = fileoffset(f,hh.root_block_address) + r.offset
-            seek(f.io, offset)
-            read_link(f.io)
+            offset = hh.root_block_address + r.offset
+            m = Message(HM_LINK_MESSAGE, f, offset)
+            m.link_name, m.target
         end
     end
     links

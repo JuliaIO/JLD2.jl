@@ -51,12 +51,12 @@ function linefun(ex)
     io = esc(:io)
     offset = esc(:offset)
     if ex isa LineNumberNode
-        return [ex, ex, ex, ex, ex]
+        return [ex, ex, ex, ex]
     elseif @capture(ex, cond_ && body_)
         rets = linefun(ex.args[2])
         return [ Expr(:&&, esc(cond), ret ) for ret in rets ]
     elseif @capture(ex, if cond_; body_; end )
-        accs = build_fun_body((Any[], Any[], Any[], Any[], Any[]), body)
+        accs = build_fun_body((Any[], Any[], Any[], Any[]), body)
         return [ Expr(:if, esc(cond), Expr(:block, accs[i]...)) for i in 1:length(accs) ]
     elseif @capture(ex, s_Symbol::T_) || @capture(ex, s_Symbol::T_ = v_)
         getprop_ = :($(esc(s)) = $kw.$(s))
@@ -73,14 +73,19 @@ function linefun(ex)
             write_statement = :(jlwrite(io, $(esc(s))))
         elseif @capture(T, @Blob(len_))
             len = esc(len)
-            read_statement = :(getfield(hm,:body)[($offset+1):($offset+$len)])
+            read_statement = quote
+                ptr = Ptr{UInt8}($ptr + $offset)
+                blob = Vector{UInt8}(undef, $len)
+                unsafe_copyto!(pointer(blob), ptr, $len)
+                blob
+            end
             read_io = :(jlread($io, UInt8, $(len)))
             increment = :($len)
             write_statement = :(jlwrite(io, $(esc(s))))
         elseif @capture(T, @Int(len_))
             len = esc(len)
             read_statement = quote
-                ptr = Ptr{UInt8}(pointer(getfield(hm,:body), $offset+1))
+                ptr = Ptr{UInt8}($ptr + $offset)
                 uint = zero(UInt64)
                 for i in 1:$len
                     uint = uint | unsafe_load(ptr+i-1) << ((i-1)*8)
@@ -99,7 +104,7 @@ function linefun(ex)
             write_statement = :(write_nb_int(io, $(esc(s)), $len))
         elseif @capture(T, @Offset)
             read_statement = :(getfield(hm,:payload_offset) + $offset)
-            read_io = :(RelOffset(position($io) - getfield(hm,:base_address)))
+            read_io = :(RelOffset(getfield(m,:offset) + position($io) - getfield(m,:address)))
             increment = 0
             getprop_ = nothing
             haskey_=nothing
@@ -139,12 +144,6 @@ function linefun(ex)
         offset_incr = :($offset += $increment)
         
         return [
-            # getproperty function
-            Expr(:block,
-                assign_statement,
-                :(s == $(QuoteNode(s)) && return $(esc(s))),
-                offset_incr
-                ),
             # io_based getproperty function
             Expr(:block,
                 io_assign,
@@ -164,22 +163,21 @@ function linefun(ex)
                 Expr(:block, haskey_, getprop_, offset_incr)
             end,
             # pretty printer
-            Expr(:block, assign_statement,
-                :(push!(keyvalue, $(QuoteNode(s)) => $(esc(s)))),
-                offset_incr)
+            Expr(:block, io_assign,
+                :(push!(keyvalue, $(QuoteNode(s)) => $(esc(s)))))
         ]
     elseif @capture(ex, @skip(n_))
         increment = esc(n)
         off_inc = :($offset += $increment)
         io_inc = :(skip($io, $increment))
         write_inc = :(write_zerobytes(io, $increment))
-        return [off_inc, io_inc, write_inc, off_inc, off_inc]
+        return [io_inc, write_inc, off_inc, off_inc]
     elseif @capture(ex, @skiptoaligned(n_))
         increment = :(8 - mod1($offset-$(esc(n)), 8))
         off_inc = :($offset += $increment)
         io_inc = :(skip($io, $increment))
         write_inc = :(write_zerobytes(io, $increment))
-        return [off_inc, io_inc, write_inc, off_inc, off_inc]
+        return [io_inc, write_inc, off_inc, io_inc]
     end
     throw(ArgumentError("Invalid field syntax: $ex"))
 end
@@ -195,41 +193,28 @@ function build_fun_body(accs, blk)
 end
 
 macro pseudostruct(name, blck)
-    getprop_body, iogetprop, funbody, sizefun, messageshowfun = 
-        build_fun_body((Any[], Any[], Any[], Any[], Any[]), blck)
+    iogetprop, funbody, sizefun, messageshowfun = 
+        build_fun_body((Any[], Any[], Any[], Any[]), blck)
 
-    getpropfun = (quote
-        function $(esc(:getprop))(::Val{$name}, $(esc(:hm))::Hmessage, s::Symbol)
-            $(__source__)
-            $(esc(:offset)) = 0
-            $(:($(esc(:ptr)) = pointer(getfield(hm,:body))))
-            $(:($(esc(:hflags)) = getfield(hm, :hflags)))
-            $(:($(esc(:hsize)) = getfield(hm, :size)))
-            $(getprop_body...)
-            throw(ArgumentError("Field $s not found"))
-        end
-    end).args[2]
-    
     iogetpropfun = (quote
-        function $(esc(:iogetprop))(::Val{$name}, $(esc(:hm))::LazyHmessage, s::Symbol)
+        function $(esc(:iogetprop))(::Val{$name}, $(esc(:m))::Message, s::Symbol, $(esc(:hflags))=0x0, $(esc(:hsize))=0x0000)
             $(__source__)
-            $(esc(:io)) = getfield(hm, :io)
-            seek($(esc(:io)), getfield(hm, :payload_offset).offset+getfield(hm, :base_address))
-            $(:($(esc(:hflags)) = getfield(hm, :hflags)))
-            $(:($(esc(:hsize)) = getfield(hm, :size)))
+            $(esc(:io)) = getfield(m, :io)
+            seek($(esc(:io)), getfield(m, :address))
             $(iogetprop...)
-            print(hm, hm.version, hm.layout_class)
             throw(ArgumentError("Field $s not found"))
         end
     end).args[2]
+
     constructfun = (quote
         function $(esc(:construct_hm_payload))(::Val{$name}, $(esc(:hflags)), $(esc(:hsize)), $(esc(:kw)))
             $(__source__)
             io = IOBuffer()
             $(funbody...)
-            take!(io)
+            io
         end
     end).args[2]
+
 
     size_fun = (quote
         function $(esc(:sizefun))(::Val{$name}, $(esc(:hflags)), $(esc(:hsize)), $(esc(:kw)))
@@ -241,17 +226,16 @@ macro pseudostruct(name, blck)
     end).args[2]
 
     message_show = (quote
-        function $(esc(:messageshow))(::Val{$name}, $(esc(:hm))::Hmessage)
+        function $(esc(:messageshow))(::Val{$name}, $(esc(:m))::Message, $(esc(:hflags))=0x0, $(esc(:hsize))=0x0000)
             $(__source__)
+            $(esc(:io)) = m.io
+            seek($(esc(:io)), m.address)
             $(esc(:offset)) = 0
-            $(esc(:ptr)) = pointer(getfield(hm,:body))
-            $(:($(esc(:hflags)) = getfield(hm, :hflags)))
-            $(:($(esc(:hsize)) = getfield(hm, :size)))
             keyvalue = Pair{Symbol,Any}[]
             $(messageshowfun...)
             return keyvalue
         end
     end).args[2]
 
-    return Expr(:block, getpropfun, iogetpropfun, constructfun, size_fun, message_show, nothing)
+    return Expr(:block, iogetpropfun, constructfun, size_fun, message_show, nothing)
 end

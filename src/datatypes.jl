@@ -340,7 +340,7 @@ function read_shared_datatype(f::JLDFile, cdt::Union{SharedDatatype, CommittedDa
     datatype::H5Datatype = PlaceholderH5Datatype()
     attrs = ReadAttribute[]
 
-    for msg in HeaderMessageIterator(f, cdt.header_offset, Val(true))
+    for msg in HeaderMessageIterator(f, cdt.header_offset)
         if msg.type == HM_DATATYPE
             datatype = msg.dt
         elseif msg.type == HM_ATTRIBUTE

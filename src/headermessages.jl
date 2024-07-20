@@ -141,7 +141,7 @@ end
 
 @pseudostruct HM_GROUP_INFO begin
     version::UInt8 = 0
-    flags::UInt8 = 0
+    flags::UInt8 = 0b10*(get(kw, :est_num_entries, 4) != 4 || get(kw, :est_link_name_len, 8) != 8)
     if isset(flags, 0)
         link_phase_change_max_compact::UInt16
         link_phase_change_min_dense::UInt16
@@ -183,7 +183,7 @@ end
     dataspace_message::@Blob(Int(dataspace_size))
     (version == 1) && @skip(8-mod1(dataspace_size,8))
     data_offset::@Offset
-    data::@Blob(hsize- (data_offset.offset - getfield(hm,:payload_offset).offset))#+getfield(hm,:base_address)+hsize-position(io))
+    #data::@Blob(hsize- (data_offset.offset - getfield(hm,:payload_offset).offset))#+getfield(hm,:base_address)+hsize-position(io))
 end
 
 @pseudostruct HM_OBJECT_HEADER_CONTINUATION begin

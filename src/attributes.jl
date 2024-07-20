@@ -47,13 +47,14 @@ function write_attribute(io::IO, f::JLDFile, attr::WrittenAttribute, wsession::J
     write_data(io, f, attr.data, odr, datamode(odr), wsession)
 end
 
-function read_attribute(f::JLDFile, hm::AbstractHeaderMessage)
+function read_attribute(f::JLDFile, hm)
     committed = hm.flags == 1
     !committed && hm.flags != 0 && throw(UnsupportedFeatureException())
 
     hm.hflags & 0x10 == 0x10 && @warn "We've got a shared dataspace"
-    dshm = Hmessage(HM_DATASPACE, hm.dataspace_size, hm.hflags,  [hm.dataspace_message...], UNDEFINED_ADDRESS, hm.dataspace_offset)
-    dataspace = ReadDataspace(f, dshm)
+    dsm = Message(HM_DATASPACE, f, hm.dataspace_offset)
+    dataspace = ReadDataspace(f, dsm)
+
     data_offset = fileoffset(f, hm.data_offset)
     ReadAttribute(Symbol(hm.name), dataspace, hm.datatype, data_offset)
 end

@@ -86,70 +86,59 @@ function start_chunk_read(io, chunk, header_version)
     return cio
 end
 
+"""
 
 """
-    HeaderMessage
-
-Helper struct to read and write the first part of a header message.
-"""
-struct HeaderMessage
-    msg_type::UInt8
-    size::UInt16
-    flags::UInt8
-end
-define_packed(HeaderMessage)
-
-"""
-    LazyHmessage{IO} <: AbstractHeaderMessage
-    
-Lazy representation of a Header Message in a file.
-See also [`Hmessage`](@ref).
-"""
-struct LazyHmessage{IO} <: AbstractHeaderMessage
+struct Message{IO}
     type::HeaderMessageTypes
-    size::UInt16
-    hflags::UInt8
+    address::UInt64
     offset::RelOffset
-    payload_offset::RelOffset
-    base_address::Int
     io::IO
+    Message(type::HeaderMessageTypes, address::Integer, o::RelOffset, io::IO) =
+        new{typeof(io)}(type, UInt64(address), o, io)
 end
+Message(type::UInt8, args...) = Message(HeaderMessageTypes(type), args...)
+Message(type::HeaderMessageTypes, f::JLDFile, offset::RelOffset) = 
+    Message(type, fileoffset(f, offset), offset, f.io)
+Message(type::HeaderMessageTypes, io::IO) = Message(type, position(io), UNDEFINED_ADDRESS, io)
+Message(type::HeaderMessageTypes, data::Vector{UInt8}) = Message(type, 0, UNDEFINED_ADDRESS, IOBuffer(data))
 
-@generated function Base.getproperty(hm::LazyHmessage, s::Symbol)
+
+@generated function Base.getproperty(m::Message, s::Symbol)
     ex = Expr(:block)
     for v in instances(HeaderMessageTypes)
-        push!(ex.args, :(hm.type == $(v) && return iogetprop($(Val(v)), hm, s)))
+        push!(ex.args, :(getfield(m, :type) == $(v) && return iogetprop($(Val(v)), m, s)))
     end
     return quote
-        s in (:type, :size, :hflags, :offset, :payload_offset, :base_address, :io) && return getfield(hm, s)
+        s in (:type, :address, :io) && return getfield(m, s)
         $(ex)
     end
 end
 
-
 """
-    Hmessage <: AbstractHeaderMessage
+    Hmessage{IO}
 
 Representation of a Header Message in memory. Provides `getproperty` access
 to the fields of the message.
 Can also be used to construct and write custom messages.
 """
-struct Hmessage <: AbstractHeaderMessage
+struct Hmessage{IO}
     type::HeaderMessageTypes
     size::UInt16
     hflags::UInt8
-    body::Vector{UInt8}
     offset::RelOffset
     payload_offset::RelOffset
+    m::Message{IO}
 end
 
 @generated function Base.getproperty(hm::Hmessage, s::Symbol)
     ex = Expr(:block)
     for v in instances(HeaderMessageTypes)
-        push!(ex.args, :(hm.type == $(v) && return getprop($(Val(v)), hm, s)))
+        push!(ex.args, :(getfield(hm,:type) == $(v) && return iogetprop($(Val(v)), getfield(hm,:m), s,
+            getfield(hm, :hflags), getfield(hm, :size))))
     end
     return quote
-        s in (:type, :size, :hflags, :body, :offset, :payload_offset) && return getfield(hm, s)
+        s in (:type, :size, :hflags, :offset, :payload_offset, :m) && return getfield(hm, s)
         $(ex)
     end
 end
@@ -158,7 +147,8 @@ function Hmessage(type::HeaderMessageTypes, hflags=0x00, size=0; kwargs...)
     kw = (; kwargs...)
     size = sizefun(Val(type), hflags, size, kw)
     payload = construct_hm_payload(Val(type), hflags, size, kw)
-    Hmessage(type, size, hflags, payload, UNDEFINED_ADDRESS,UNDEFINED_ADDRESS)
+    Hmessage(type, UInt16(size), UInt8(hflags), UNDEFINED_ADDRESS,UNDEFINED_ADDRESS,
+        Message(type, 0, UNDEFINED_ADDRESS, payload))
 end
 
 write_message(io, f::JLDFile, msg::Hmessage) = jlwrite(io, msg)
@@ -167,8 +157,13 @@ function jlwrite(io, msg::Hmessage)
     write(io, msg.type)
     write(io, msg.size)
     write(io, msg.hflags)
-    write(io, msg.body)
+    m = msg.m
+    mio = m.io
+    seek(mio, m.address)
+    write(io, take!(mio))
 end
+
+jlsizeof(msg::Hmessage) = jlsizeof(HeaderMessage) + msg.size
 
 function Base.show(io::IO, hm::Hmessage)
     println(io, 
@@ -176,7 +171,7 @@ function Base.show(io::IO, hm::Hmessage)
         │ ┌─ offset:\t$(hm.offset)
         │ │  size:\t$(hm.size)
         │ └─ flags:\t$(hm.hflags)""")
-    keyvalue = messageshow(Val(hm.type), hm)
+    keyvalue = messageshow(Val(hm.type), hm.m, hm.hflags, hm.size)
 
     N = length(keyvalue)
     for n = 1:N
@@ -232,7 +227,7 @@ function print_header_messages(f::JLDFile, offset::RelOffset)
 end
 
 
-function read_header_message(f, io, header_version, chunk_start, groupflags, lazy=Val(false))
+function read_header_message(f, io, header_version, chunk_start, groupflags, lazy=true)
     msgpos = h5offset(f, position(io))
     if header_version == 1
         # Message start 8byte aligned relative to object start
@@ -245,44 +240,43 @@ function read_header_message(f, io, header_version, chunk_start, groupflags, laz
         msg = jlread(io, HeaderMessage)
         (groupflags & 4) == 4 && skip(io, 2) 
     end
+    payload_address = position(io)
     payload_offset = h5offset(f, position(io))
-    if lazy == Val(true)
-        skip(io, msg.size)
-        LazyHmessage(
-            HeaderMessageTypes(msg.msg_type),
-            msg.size, msg.flags, msgpos,
-            payload_offset,
-            Int(f.base_address), io)
-    else
-        payload = jlread(io, UInt8, msg.size)
+    if lazy == true
+        #skip(io, msg.size)
         Hmessage(
             HeaderMessageTypes(msg.msg_type),
-            msg.size, msg.flags, payload,
-            msgpos, payload_offset)
+            msg.size, msg.flags, msgpos, payload_offset,
+            Message(HeaderMessageTypes(msg.msg_type), payload_address, payload_offset, io))
+    else
+        payload = IOBuffer(jlread(io, UInt8, msg.size))
+        Hmessage(
+            HeaderMessageTypes(msg.msg_type),
+            msg.size, msg.flags, msgpos, payload_offset,
+            Message(HeaderMessageTypes(msg.msg_type), 0, payload_offset, payload))
     end
 end
 
 
 
 """
-    mutable struct HeaderMessageIterator{LAZY, IO}
-        HeaderMessageIterator(f::JLDFile, offset::RelOffset, lazy=Val(false))
+    mutable struct HeaderMessageIterator{IO}
+        HeaderMessageIterator(f::JLDFile, offset::RelOffset, lazy=true)
 
 Implements an iterator over header messages.
-When `lazy == Val(true)` the iterator will return [`LazyHmessage`](@ref) objects
-instead of [`Hmessage`](@ref).
 """
-mutable struct HeaderMessageIterator{LAZY, IO}
+mutable struct HeaderMessageIterator{IO}
     f::JLDFile{IO}
     curpos::Int64
     header_version::UInt8
     objflags::UInt8
+    lazy::Bool
     chunk::@NamedTuple{chunk_start::Int64, chunk_end::Int64}
     next_chunk::@NamedTuple{chunk_start::Int64, chunk_end::Int64}
     second_to_next_chunk::@NamedTuple{chunk_start::Int64, chunk_end::Int64}
 end
 
-function HeaderMessageIterator(f::JLDFile, offset::RelOffset, lazy=Val(false))
+function HeaderMessageIterator(f::JLDFile, offset::RelOffset, lazy=true)
     cio, header_version, chunk, objflags = start_obj_read(f, offset)
     io = f.io
     pos = position(cio)
@@ -292,14 +286,14 @@ function HeaderMessageIterator(f::JLDFile, offset::RelOffset, lazy=Val(false))
         end_checksum(cio) == jlread(io, UInt32)
         seek(io, pos)
     end
-    HeaderMessageIterator{lazy, typeof(io)}(
-        f, pos, header_version, objflags,
+    HeaderMessageIterator{typeof(io)}(
+        f, pos, header_version, objflags, lazy,
         chunk, (; chunk_start = -1, chunk_end = -1), (; chunk_start = -1, chunk_end = -1))
 end
     
 Base.IteratorSize(::HeaderMessageIterator) = Base.SizeUnknown()
 
-function Base.iterate(itr::HeaderMessageIterator{LAZY}, state=nothing) where LAZY
+function Base.iterate(itr::HeaderMessageIterator, state=nothing)
     io = itr.f.io
     chunk = itr.chunk
     if itr.curpos > chunk.chunk_end
@@ -325,7 +319,7 @@ function Base.iterate(itr::HeaderMessageIterator{LAZY}, state=nothing) where LAZ
         itr.curpos = position(io)
     end
     seek(io, itr.curpos)
-    msg = read_header_message(itr.f, io, itr.header_version, chunk.chunk_start, itr.objflags, LAZY)
+    msg = read_header_message(itr.f, io, itr.header_version, chunk.chunk_start, itr.objflags, itr.lazy)
     #itr.curpos = position(io)
     itr.curpos = fileoffset(itr.f, msg.payload_offset)+msg.size
     if msg.type == HM_OBJECT_HEADER_CONTINUATION
@@ -362,7 +356,7 @@ end
 
 ischunked(dl::DataLayout) = dl.storage_type == LC_CHUNKED_STORAGE
 
-function DataLayout(f::JLD2.JLDFile, msg::AbstractHeaderMessage)
+function DataLayout(f::JLD2.JLDFile, msg::Hmessage)
     version = msg.version::UInt8
     storage_type = msg.layout_class::LayoutClass
     rf = msg.data_address::RelOffset
@@ -395,16 +389,11 @@ function DataLayout(f::JLD2.JLDFile, msg::AbstractHeaderMessage)
     end
 end
 
-function FilterPipeline(msg::Union{Hmessage, LazyHmessage})
+function FilterPipeline(msg::Hmessage)
     version = msg.version
     nfilters = msg.nfilters
-    io = if msg isa Hmessage
-        io = IOBuffer(msg.body)
-        skip(io, 2)
-        io
-    else
-        msg.io
-    end
+    io = msg.m.io
+    seek(io, msg.m.address+2)
     if version == 1
         skip(io, 6)
         filters = map(1:nfilters) do _
