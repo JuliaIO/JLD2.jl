@@ -210,7 +210,7 @@ function read_header_message(f, io, header_version, chunk_start, groupflags)#, l
         skip_to_aligned!(io, chunk_start)
         msgpos = h5offset(f, position(io))
         # Version 1 header message is padded
-        msg = HeaderMessage(UInt8(jlread(io, UInt16)), jlread(io, UInt16), jlread(io, UInt8))
+        msg = HeaderMessage(HeaderMessageTypes(jlread(io, UInt16)), jlread(io, UInt16), jlread(io, UInt8))
         skip(io, 3)
     else # header_version == 2
         msg = jlread(io, HeaderMessage)
@@ -221,9 +221,9 @@ function read_header_message(f, io, header_version, chunk_start, groupflags)#, l
     # if lazy == true
     #     #skip(io, msg.size)
         Hmessage(
-            HeaderMessageTypes(msg.msg_type),
+            msg.msg_type,
             msg.size, msg.flags, msgpos, payload_offset,
-            Message(HeaderMessageTypes(msg.msg_type), payload_address, payload_offset, io))
+            Message(msg.msg_type, payload_address, payload_offset, io))
     # else
     #     payload = IOBuffer(jlread(io, UInt8, msg.size))
     #     Hmessage(
