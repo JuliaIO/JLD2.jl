@@ -47,6 +47,7 @@ Base.convert(::Type{UInt8}, l::LayoutClass) = UInt8(l)
     HM_REFERENCE_COUNT = 0x16
 end
 
+HeaderMessageTypes(x::HeaderMessageTypes) = x
 Base.convert(::Type{UInt8}, h::HeaderMessageTypes) = UInt8(h)
 
 
@@ -214,7 +215,7 @@ iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
 Helper struct to read and write the first part of a header message.
 """
 struct HeaderMessage
-    msg_type::UInt8
+    msg_type::HeaderMessageTypes
     size::UInt16
     flags::UInt8
 end

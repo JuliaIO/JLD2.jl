@@ -203,7 +203,7 @@ function print_header_messages(f::JLDFile, offset::RelOffset)
 end
 
 
-function read_header_message(f, io, header_version, chunk_start, groupflags, lazy=true)
+function read_header_message(f, io, header_version, chunk_start, groupflags)#, lazy=true)
     msgpos = h5offset(f, position(io))
     if header_version == 1
         # Message start 8byte aligned relative to object start
@@ -218,41 +218,40 @@ function read_header_message(f, io, header_version, chunk_start, groupflags, laz
     end
     payload_address = position(io)
     payload_offset = h5offset(f, position(io))
-    if lazy == true
-        #skip(io, msg.size)
+    # if lazy == true
+    #     #skip(io, msg.size)
         Hmessage(
             HeaderMessageTypes(msg.msg_type),
             msg.size, msg.flags, msgpos, payload_offset,
             Message(HeaderMessageTypes(msg.msg_type), payload_address, payload_offset, io))
-    else
-        payload = IOBuffer(jlread(io, UInt8, msg.size))
-        Hmessage(
-            HeaderMessageTypes(msg.msg_type),
-            msg.size, msg.flags, msgpos, payload_offset,
-            Message(HeaderMessageTypes(msg.msg_type), 0, payload_offset, payload))
-    end
+    # else
+    #     payload = IOBuffer(jlread(io, UInt8, msg.size))
+    #     Hmessage(
+    #         HeaderMessageTypes(msg.msg_type),
+    #         msg.size, msg.flags, msgpos, payload_offset,
+    #         Message(HeaderMessageTypes(msg.msg_type), 0, payload_offset, payload))
+    # end
 end
 
 
 
 """
     mutable struct HeaderMessageIterator{IO}
-        HeaderMessageIterator(f::JLDFile, offset::RelOffset, lazy=true)
+        HeaderMessageIterator(f::JLDFile, offset::RelOffset)
 
 Implements an iterator over header messages.
 """
-mutable struct HeaderMessageIterator{IO}
-    f::JLDFile{IO}
+mutable struct HeaderMessageIterator{IOT}
+    f::JLDFile{IOT}
     curpos::Int64
     header_version::UInt8
     objflags::UInt8
-    lazy::Bool
     chunk::@NamedTuple{chunk_start::Int64, chunk_end::Int64}
     next_chunk::@NamedTuple{chunk_start::Int64, chunk_end::Int64}
     second_to_next_chunk::@NamedTuple{chunk_start::Int64, chunk_end::Int64}
 end
 
-function HeaderMessageIterator(f::JLDFile, offset::RelOffset, lazy=true)
+function HeaderMessageIterator(f::JLDFile{IOT}, offset::RelOffset) where {IOT}
     cio, header_version, chunk, objflags = start_obj_read(f, offset)
     io = f.io
     pos = position(cio)
@@ -262,14 +261,14 @@ function HeaderMessageIterator(f::JLDFile, offset::RelOffset, lazy=true)
         end_checksum(cio) == jlread(io, UInt32)
         seek(io, pos)
     end
-    HeaderMessageIterator{typeof(io)}(
-        f, pos, header_version, objflags, lazy,
+    HeaderMessageIterator{IOT}(
+        f, pos, header_version, objflags,
         chunk, (; chunk_start = -1, chunk_end = -1), (; chunk_start = -1, chunk_end = -1))
 end
     
 Base.IteratorSize(::HeaderMessageIterator) = Base.SizeUnknown()
 
-function Base.iterate(itr::HeaderMessageIterator, state=nothing)
+function Base.iterate(itr::HeaderMessageIterator{IO}, state=nothing) where IO
     io = itr.f.io
     chunk = itr.chunk
     if itr.curpos > chunk.chunk_end
@@ -295,13 +294,12 @@ function Base.iterate(itr::HeaderMessageIterator, state=nothing)
         itr.curpos = position(io)
     end
     seek(io, itr.curpos)
-    msg = read_header_message(itr.f, io, itr.header_version, chunk.chunk_start, itr.objflags, itr.lazy)
-    #itr.curpos = position(io)
+    msg = read_header_message(itr.f, io, itr.header_version, chunk.chunk_start, itr.objflags)::Hmessage{IO}
     itr.curpos = fileoffset(itr.f, msg.payload_offset)+msg.size
     if msg.type == HM_OBJECT_HEADER_CONTINUATION
-        new_chunk =  (;
-            chunk_start = fileoffset(itr.f, msg.continuation_offset),
-            chunk_end = fileoffset(itr.f, msg.continuation_offset + msg.continuation_length))
+        chunk_start = fileoffset(itr.f, msg.continuation_offset::RelOffset)
+        chunk_end = chunk_start + msg.continuation_length::Int64
+        new_chunk =  (; chunk_start, chunk_end)
         if itr.next_chunk.chunk_start == -1
             itr.next_chunk = new_chunk
         elseif itr.second_to_next_chunk.chunk_start == -1

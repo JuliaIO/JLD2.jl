@@ -1,7 +1,7 @@
 #
 # Datasets
 #
-function load_dataset(f::JLDFile, offset::RelOffset)
+function load_dataset(f::JLDFile{IO}, offset::RelOffset) where IO
     if haskey(f.jloffset, offset)
         # There is a known (loaded) dataset at offset
         # Stored as WeakRefs and may no longer exist
@@ -10,9 +10,6 @@ function load_dataset(f::JLDFile, offset::RelOffset)
     elseif haskey(f.loaded_groups, offset)
         # There is a known (loaded) group at offset
         return f.loaded_groups[offset]
-    elseif isgroup(f, offset)
-        # There is a not-yet loaded group at offset
-        return get!(()->load_group(f, offset), f.loaded_groups, offset)
     end
 
     dataspace = ReadDataspace()
@@ -38,13 +35,20 @@ function load_dataset(f::JLDFile, offset::RelOffset)
         end
     end
     if dt isa PlaceholderH5Datatype
+        # checking whether something is a group is not cheap.
+        # Do it only when it is not a dataset
+        if isgroup(f, offset)
+
+            # There is a not-yet loaded group at offset
+            return get!(()->load_group(f, offset), f.loaded_groups, offset)
+        end
+
         throw(InvalidDataException("No datatype message found"))
     end
     iscompressed(filter_pipeline) && !ischunked(layout) && throw(InvalidDataException("Compressed data must be chunked"))
 
     # TODO verify that data length matches
-    read_data(f, dataspace, dt, layout,
-                    filter_pipeline, offset, attrs)
+    read_data(f, dataspace, dt, layout, filter_pipeline, offset, attrs)
 end
 
 
@@ -109,7 +113,7 @@ end
 
 # Most types can only be scalars or arrays
 function read_data(f::JLDFile,
-     @nospecialize(rr),
+     rr,#@nospecialize(rr),
      read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,FilterPipeline},
      attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
 

@@ -210,11 +210,11 @@ function load_group(f::JLDFile, offset::RelOffset)
     link_phase_change_min_dense::Int64 = -1
     est_num_entries::Int64 = 4
     est_link_name_len::Int64 = 8
-    fractal_heap_address = UNDEFINED_ADDRESS
-    name_index_btree = UNDEFINED_ADDRESS
+    fractal_heap_address::RelOffset = UNDEFINED_ADDRESS
+    name_index_btree::RelOffset = UNDEFINED_ADDRESS
 
-    v1btree_address = UNDEFINED_ADDRESS
-    name_index_heap = UNDEFINED_ADDRESS
+    v1btree_address::RelOffset = UNDEFINED_ADDRESS
+    name_index_heap::RelOffset = UNDEFINED_ADDRESS
     hmitr = HeaderMessageIterator(f, offset)
     for msg in hmitr
         chunk_start, chunk_end = hmitr.chunk
@@ -242,7 +242,7 @@ function load_group(f::JLDFile, offset::RelOffset)
                 if msg.size > 2
                     # Version Flag
                     msg.version == 0 || throw(UnsupportedFeatureException()) 
-                    flag = msg.flags
+                    flag = msg.flags::UInt8
                     if flag%2 == 1 # first bit set
                         link_phase_change_max_compact = msg.link_phase_change_max_compact
                         link_phase_change_min_dense = msg.link_phase_change_min_dense
