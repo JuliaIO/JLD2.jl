@@ -481,11 +481,13 @@ printtoc(io::IO, f::JLDFile; numlines = typemax(Int64)) =
 
 
 
+include("headermessages.jl")
 include("object_headers.jl")
 include("groups.jl")
 include("dataspaces.jl")
 include("attributes.jl")
 include("datatypes.jl")
+include("datalayouts.jl")
 include("datasets.jl")
 include("global_heaps.jl")
 include("fractal_heaps.jl")
@@ -505,7 +507,7 @@ include("inlineunion.jl")
 include("fileio.jl")
 include("compression.jl")
 include("explicit_datasets.jl")
-include("headermessages.jl")
+
 
 # if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
 #     include("precompile.jl")

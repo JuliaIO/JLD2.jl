@@ -228,3 +228,33 @@ define_packed(HeaderMessage)
 const CONTINUATION_MSG_SIZE = jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
 
 
+"""
+    Message{IO}
+
+Representation of a Message in memory. Provides `getproperty` access
+"""
+struct Message{IO}
+    type::HeaderMessageTypes
+    address::UInt64
+    offset::RelOffset
+    io::IO
+    Message(type::HeaderMessageTypes, address::Integer, o::RelOffset, io::IO) =
+        new{typeof(io)}(type, UInt64(address), o, io)
+end
+Message(type::UInt8, args...) = Message(HeaderMessageTypes(type), args...)
+Message(type::HeaderMessageTypes, f, offset::RelOffset) = 
+    Message(type, fileoffset(f, offset), offset, f.io)
+Message(type::HeaderMessageTypes, io::IO) = Message(type, position(io), UNDEFINED_ADDRESS, io)
+Message(type::HeaderMessageTypes, data::Vector{UInt8}) = Message(type, 0, UNDEFINED_ADDRESS, IOBuffer(data))
+
+
+@generated function Base.getproperty(m::Message, s::Symbol)
+    ex = Expr(:block)
+    for v in instances(HeaderMessageTypes)
+        push!(ex.args, :(getfield(m, :type) == $(v) && return iogetprop($(Val(v)), m, s)))
+    end
+    return quote
+        s in (:type, :address, :io) && return getfield(m, s)
+        $(ex)
+    end
+end

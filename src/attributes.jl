@@ -100,3 +100,32 @@ function load_attributes(f::Union{JLDFile, Group}, offset::RelOffset)
     dset = get_dataset(f, offset)
     attributes(dset)
 end
+
+
+"""
+    read_attr_data(f::JLDFile, attr::ReadAttribute)
+
+[`jlread`](@ref) data from an attribute.
+"""
+read_attr_data(f::JLDFile, attr::ReadAttribute) =
+    read_data(f, attr.dataspace, attr.datatype,
+              DataLayout(0,LC_COMPACT_STORAGE,-1,attr.data_offset))
+
+"""
+    read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
+                   rr::ReadRepresentation)
+
+[`jlread`](@ref) data from an attribute, assuming a specific HDF5 datatype and
+[`ReadRepresentation`](@ref). If the HDF5 datatype does not match, throws an
+`UnsupportedFeatureException`. This allows better type stability while
+simultaneously validating the data.
+"""
+function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
+                        rr::ReadRepresentation)
+    if attr.datatype == expected_datatype
+        seek(f.io, attr.data_offset)
+        read_dataspace = (attr.dataspace, NULL_REFERENCE, DataLayout(0,LC_COMPACT_STORAGE,-1,attr.data_offset), FilterPipeline())
+        return read_data(f, rr, read_dataspace)
+    end
+    throw(UnsupportedFeatureException())
+end

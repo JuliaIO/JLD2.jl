@@ -86,34 +86,6 @@ function start_chunk_read(io, chunk, header_version)
     return cio
 end
 
-"""
-
-"""
-struct Message{IO}
-    type::HeaderMessageTypes
-    address::UInt64
-    offset::RelOffset
-    io::IO
-    Message(type::HeaderMessageTypes, address::Integer, o::RelOffset, io::IO) =
-        new{typeof(io)}(type, UInt64(address), o, io)
-end
-Message(type::UInt8, args...) = Message(HeaderMessageTypes(type), args...)
-Message(type::HeaderMessageTypes, f::JLDFile, offset::RelOffset) = 
-    Message(type, fileoffset(f, offset), offset, f.io)
-Message(type::HeaderMessageTypes, io::IO) = Message(type, position(io), UNDEFINED_ADDRESS, io)
-Message(type::HeaderMessageTypes, data::Vector{UInt8}) = Message(type, 0, UNDEFINED_ADDRESS, IOBuffer(data))
-
-
-@generated function Base.getproperty(m::Message, s::Symbol)
-    ex = Expr(:block)
-    for v in instances(HeaderMessageTypes)
-        push!(ex.args, :(getfield(m, :type) == $(v) && return iogetprop($(Val(v)), m, s)))
-    end
-    return quote
-        s in (:type, :address, :io) && return getfield(m, s)
-        $(ex)
-    end
-end
 
 """
     Hmessage{IO}
@@ -151,6 +123,8 @@ function Hmessage(type::HeaderMessageTypes, hflags=0x00, size=0; kwargs...)
         Message(type, 0, UNDEFINED_ADDRESS, payload))
 end
 
+const CONTINUATION_PLACEHOLDER = Hmessage(HM_NIL, 0, 16)
+
 write_message(io, f::JLDFile, msg::Hmessage) = jlwrite(io, msg)
 
 function jlwrite(io, msg::Hmessage)
@@ -160,7 +134,9 @@ function jlwrite(io, msg::Hmessage)
     m = msg.m
     mio = m.io
     seek(mio, m.address)
-    write(io, take!(mio))
+    for _ in 1:msg.size
+        write(io, jlread(mio, UInt8))
+    end
 end
 
 jlsizeof(msg::Hmessage) = jlsizeof(HeaderMessage) + msg.size
@@ -335,106 +311,4 @@ function Base.iterate(itr::HeaderMessageIterator, state=nothing)
         end
     end
     return msg, nothing
-end
-
-
-## Left over header message parsing that does not have a good place.
-
-struct DataLayout
-    version::UInt8
-    storage_type::LayoutClass
-    data_length::Int64
-    data_offset::Int64
-    dimensionality::UInt8
-    chunk_indexing_type::UInt8 # only in version 4
-    chunk_dimensions::Vector{UInt64} # only defined if dimensionality > 0
-    DataLayout(version, storage_type, data_length, data_offset) = 
-        new(version, storage_type, data_length, data_offset, 0, 0)
-    DataLayout(version, storage_type, data_length, data_offset, dimensionality, chunk_indexing_type, chunk_dimensions) = 
-        new(version, storage_type, data_length, data_offset, dimensionality, chunk_indexing_type, chunk_dimensions)
-end
-
-ischunked(dl::DataLayout) = dl.storage_type == LC_CHUNKED_STORAGE
-
-function DataLayout(f::JLD2.JLDFile, msg::Hmessage)
-    version = msg.version::UInt8
-    storage_type = msg.layout_class::LayoutClass
-    rf = msg.data_address::RelOffset
-    data_offset::Int64 = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
-    if version == 4 || version == 3
-        if storage_type in (LC_COMPACT_STORAGE, LC_CONTIGUOUS_STORAGE)
-            data_length = Int64(msg.data_size)
-
-            return DataLayout(version, storage_type, data_length, data_offset) 
-        elseif version == 4 && storage_type == LC_CHUNKED_STORAGE
-            chunk_dimensions = Int[msg.dimensions...]
-            chunk_indexing_type = msg.chunk_indexing_type
-            chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
-            data_length = Int64(msg.data_size)
-
-            #filters = msg.filters#jlread(cio, UInt32)
-            chunked_storage = true
-            DataLayout(version, storage_type, data_length, data_offset, msg.dimensionality, msg.chunk_indexing_type, chunk_dimensions) 
-        elseif version == 3 && storage_type == LC_CHUNKED_STORAGE
-            data_length = Int64(msg.data_size)
-
-            chunk_dimensions = Int[msg.dimensions[1:end-1]...] # drop element size as last dimension
-            chunked_storage = true
-            DataLayout(version, storage_type, data_length, data_offset, msg.dimensionality, 0, chunk_dimensions) 
-        else
-            throw(UnsupportedFeatureException("Unknown data layout"))
-        end
-    else
-        throw(UnsupportedVersionException("Data layout message version $version is not supported"))
-    end
-end
-
-function FilterPipeline(msg::Hmessage)
-    version = msg.version
-    nfilters = msg.nfilters
-    io = msg.m.io
-    seek(io, msg.m.address+2)
-    if version == 1
-        skip(io, 6)
-        filters = map(1:nfilters) do _
-            id = jlread(io, UInt16)
-            name_length = jlread(io, UInt16)
-            flags = jlread(io, UInt16)
-            nclient_vals = jlread(io, UInt16)
-            if iszero(name_length) 
-                name = ""
-            else
-                name = read_bytestring(io)
-                skip(io, 8-mod1(sizeof(name), 8)-1)
-            end
-            client_data = jlread(io, UInt32, nclient_vals)
-            isodd(nclient_vals) && skip(io, 4)
-            Filter(id, flags, name, client_data)
-        end
-        return FilterPipeline(filters)
-    elseif version == 2
-        filters = map(1:nfilters) do _
-            id = jlread(io, UInt16)
-            if id > 255
-                name_length = jlread(io, UInt16)
-                flags = jlread(io, UInt16)
-                nclient_vals = jlread(io, UInt16)
-                if iszero(name_length) 
-                    name = ""
-                else
-                    name = read_bytestring(io)
-                    skip(io, 8-mod1(sizeof(name), 8)-1)
-                end
-            else
-                name = ""
-                flags = jlread(io, UInt16)
-                nclient_vals = jlread(io, UInt16)
-            end
-            client_data = jlread(io, UInt32, nclient_vals)
-            Filter(id, flags, name, client_data)
-        end
-        return FilterPipeline(filters)
-    else
-        throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
-    end
 end

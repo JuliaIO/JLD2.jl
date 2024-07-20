@@ -1,9 +1,6 @@
 #
 # Datasets
 #
-
-
-
 function load_dataset(f::JLDFile, offset::RelOffset)
     if haskey(f.jloffset, offset)
         # There is a known (loaded) dataset at offset
@@ -50,34 +47,6 @@ function load_dataset(f::JLDFile, offset::RelOffset)
                     filter_pipeline, offset, attrs)
 end
 
-
-"""
-    read_attr_data(f::JLDFile, attr::ReadAttribute)
-
-[`jlread`](@ref) data from an attribute.
-"""
-read_attr_data(f::JLDFile, attr::ReadAttribute) =
-    read_data(f, attr.dataspace, attr.datatype,
-              DataLayout(0,LC_COMPACT_STORAGE,-1,attr.data_offset))
-
-"""
-    read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
-                   rr::ReadRepresentation)
-
-[`jlread`](@ref) data from an attribute, assuming a specific HDF5 datatype and
-[`ReadRepresentation`](@ref). If the HDF5 datatype does not match, throws an
-`UnsupportedFeatureException`. This allows better type stability while
-simultaneously validating the data.
-"""
-function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
-                        rr::ReadRepresentation)
-    if attr.datatype == expected_datatype
-        seek(f.io, attr.data_offset)
-        read_dataspace = (attr.dataspace, NULL_REFERENCE, DataLayout(0,LC_COMPACT_STORAGE,-1,attr.data_offset), FilterPipeline())
-        return read_data(f, rr, read_dataspace)
-    end
-    throw(UnsupportedFeatureException())
-end
 
 """
     read_data(f::JLDFile, dataspace::ReadDataspace, datatype_class::UInt8,
@@ -221,7 +190,6 @@ end
 
 function find_dimensions_attr(attributes::Vector{ReadAttribute})
     dimensions_attr_index = 0
-    julia_type_attr_index = 0
     for i = 1:length(attributes)
         x = attributes[i]
         if x.name == :dimensions
@@ -379,32 +347,24 @@ function payload_size_without_storage_message(dataspace::WriteDataspace, datatyp
     sz
 end
 
-
-@nospecializeinfer function write_dataset(
-        f::JLDFile,
-        dataspace::WriteDataspace,
-        datatype::H5Datatype,
-        @nospecialize(odr),
-        @nospecialize(data::Array),
+@nospecializeinfer function write_dataset(f::JLDFile, 
+        dataspace::WriteDataspace, 
+        datatype::H5Datatype, 
+        @nospecialize(odr), 
+        @nospecialize(data), 
         wsession::JLDWriteSession,
-        @nospecialize(compress = f.compress),
-        )
-    T = eltype(data)
+        @nospecialize(compress = f.compress),)
     io = f.io
-    datasz = odr_sizeof(odr)::Int * numel(dataspace)::Int
-    #layout_class
-    if datasz < 8192
-        layout_class = LC_COMPACT_STORAGE
-    elseif compress != false
-        layout_class = LC_CHUNKED_STORAGE
-    else
-        layout_class = LC_CONTIGUOUS_STORAGE
-    end
-    psz = payload_size_without_storage_message(dataspace, datatype)::Int
-    if datasz < 8192
+    datasz = (odr_sizeof(odr)::Int * numel(dataspace))::Int
+    psz = payload_size_without_storage_message(dataspace, datatype)
+    psz += CONTINUATION_MSG_SIZE
+
+    # Figure out the layout 
+    # The simplest CompactStorageMessage only supports data sets < 2^16
+    if datasz < 8192 || (!(data isa Array) && datasz < typemax(UInt16))
         layout_class = LC_COMPACT_STORAGE
         psz += jlsizeof(CompactStorageMessage) + datasz
-    elseif compress != false && isconcretetype(T) && isbitstype(T)
+    elseif data isa Array && compress != false && isconcretetype(eltype(data)) && isbitstype(eltype(data))
         # Only now figure out if the compression argument is valid
         invoke_again, filter_id, compressor = get_compressor(compress)
         if invoke_again
@@ -414,58 +374,6 @@ end
         psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(filter_id::UInt16)
     else
         layout_class = LC_CONTIGUOUS_STORAGE
-        psz += jlsizeof(ContiguousStorageMessage)
-    end
-    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
-
-    header_offset = f.end_of_data
-    seek(io, header_offset)
-    f.end_of_data = header_offset + fullsz
-
-    if !isa(wsession, JLDWriteSession{Union{}})
-        wsession.h5offset[objectid(data)] = h5offset(f, header_offset)
-        push!(wsession.objects, data)
-    end
-
-    cio = begin_checksum_write(io, fullsz - 4)
-    write_object_header_and_dataspace_message(cio, f, psz, dataspace)
-    write_datatype_message(cio, datatype)
-
-    # Data storage layout
-    if layout_class == LC_COMPACT_STORAGE
-        jlwrite(cio, CompactStorageMessage(datasz))
-        if datasz != 0
-            write_data(cio, f, data, odr, datamode(odr), wsession)
-        end
-        jlwrite(io, end_checksum(cio))
-    elseif layout_class == LC_CHUNKED_STORAGE
-
-        write_compressed_data(cio, f, data, odr, wsession, filter_id, compressor)
-
-    else
-        jlwrite(cio, ContiguousStorageMessage(datasz, h5offset(f, f.end_of_data)))
-        jlwrite(io, end_checksum(cio))
-
-        f.end_of_data += datasz
-        write_data(io, f, data, odr, datamode(odr), wsession)
-    end
-
-    h5offset(f, header_offset)
-end
-
-@nospecializeinfer function write_dataset(f::JLDFile, dataspace::WriteDataspace, datatype::H5Datatype, @nospecialize(odr), @nospecialize(data), wsession::JLDWriteSession)
-    io = f.io
-    datasz = (odr_sizeof(odr)::Int * numel(dataspace))
-    psz = payload_size_without_storage_message(dataspace, datatype)
-
-    # The simplest CompactStorageMessage only supports data sets < 2^16
-    if datasz < typemax(UInt16)
-        layout_class = LC_COMPACT_STORAGE
-        storage_message = CompactStorageMessage
-        psz += jlsizeof(CompactStorageMessage) + datasz
-    else
-        layout_class = LC_CONTIGUOUS_STORAGE
-        storage_message = ContiguousStorageMessage
         psz += jlsizeof(ContiguousStorageMessage)
     end
 
@@ -490,9 +398,27 @@ end
         if datasz != 0
             write_data(cio, f, data, odr, datamode(odr), wsession)
         end
+        jlwrite(cio, CONTINUATION_PLACEHOLDER)
         jlwrite(io, end_checksum(cio))
+    elseif layout_class == LC_CHUNKED_STORAGE
+    
+        write_filter_pipeline_message(cio, filter_id)
+
+        # deflate first
+        deflated = deflate_data(f, data, odr, wsession, compressor)
+
+        write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
+        
+        # Add NIL message replacable by continuation message
+        jlwrite(cio, CONTINUATION_PLACEHOLDER)
+        jlwrite(f.io, end_checksum(cio))
+    
+        seek(f.io, f.end_of_data)
+        f.end_of_data += length(deflated)
+        jlwrite(f.io, deflated)
     else
         jlwrite(cio, ContiguousStorageMessage(datasz, h5offset(f, f.end_of_data)))
+        jlwrite(cio, CONTINUATION_PLACEHOLDER)
         jlwrite(io, end_checksum(cio))
 
         f.end_of_data += datasz
@@ -527,32 +453,6 @@ function write_datatype_message(cio::IO, datatype::H5Datatype)
     jlwrite(cio, datatype)
 end
 
-struct CompactStorageMessage
-    hm::HeaderMessage
-    version::UInt8
-    layout_class::LayoutClass
-    data_size::UInt16
-end
-define_packed(CompactStorageMessage)
-CompactStorageMessage(datasz::Int) =
-    CompactStorageMessage(
-            HeaderMessage(HM_DATA_LAYOUT, jlsizeof(CompactStorageMessage) - jlsizeof(HeaderMessage) + datasz, 0),
-            4, LC_COMPACT_STORAGE, datasz
-    )
-    
-struct ContiguousStorageMessage
-    hm::HeaderMessage
-    version::UInt8
-    layout_class::LayoutClass
-    address::RelOffset
-    data_size::Length
-end
-define_packed(ContiguousStorageMessage)
-ContiguousStorageMessage(datasz::Int, offset::RelOffset) =
-    ContiguousStorageMessage(
-        HeaderMessage(HM_DATA_LAYOUT, jlsizeof(ContiguousStorageMessage) - jlsizeof(HeaderMessage), 0),
-        4, LC_CONTIGUOUS_STORAGE, offset, datasz
-    )
 
 @nospecializeinfer function write_dataset(f::JLDFile, @nospecialize(x), wsession::JLDWriteSession)::RelOffset
     if ismutabletype(typeof(x)) && !isa(wsession, JLDWriteSession{Union{}})

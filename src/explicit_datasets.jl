@@ -106,8 +106,7 @@ function write_dataset(dataset::Dataset, data)
         end
         dataset.header_chunk_info = (header_offset, position(cio)+20, position(cio))
         # Add NIL message replacable by continuation message
-        jlwrite(cio, HeaderMessage(HM_NIL, 16, 0))
-        jlwrite(cio, zeros(UInt8, 16))
+        jlwrite(cio, CONTINUATION_PLACEHOLDER)
         jlwrite(io, end_checksum(cio))
     elseif layout_class == LC_CHUNKED_STORAGE
         # this thing is a bit weird
@@ -125,8 +124,7 @@ function write_dataset(dataset::Dataset, data)
         
         dataset.header_chunk_info = (header_offset, position(cio)+20, position(cio))
         # Add NIL message replacable by continuation message
-        jlwrite(cio, HeaderMessage(HM_NIL, 16, 0))
-        jlwrite(cio, zeros(UInt8, 16))
+        jlwrite(cio, CONTINUATION_PLACEHOLDER)
         jlwrite(f.io, end_checksum(cio))
     
     else
@@ -134,8 +132,7 @@ function write_dataset(dataset::Dataset, data)
 
         dataset.header_chunk_info = (header_offset, position(cio)+20, position(cio))
         # Add NIL message replacable by continuation message
-        jlwrite(io, HeaderMessage(HM_NIL, 16, 0))
-        jlwrite(io, zeros(UInt8, 16))
+        jlwrite(io, CONTINUATION_PLACEHOLDER)
         jlwrite(io, end_checksum(cio))
 
         f.end_of_data += datasz
@@ -317,14 +314,10 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
     end
     if remaining_space > 0
         @assert remaining_space ≥ 4 "Gaps smaller than 4 bytes should not occur"
-        jlwrite(cio, HeaderMessage(HM_NIL, remaining_space, 0))
-        jlwrite(cio, zeros(UInt8, remaining_space))
+        jlwrite(cio, Hmessage(HM_NIL, 0, remaining_space))
     end
     # Extra space for object continuation
-    #g.continuation_message_goes_here = position(cio)
-    jlwrite(cio, HeaderMessage(HM_NIL, 16, 0))
-    jlwrite(cio, RelOffset(0))
-    jlwrite(cio, Length(0))
+    jlwrite(cio, CONTINUATION_PLACEHOLDER)
     # Checksum
     jlwrite(io, end_checksum(cio))
     f.end_of_data = position(io)
