@@ -36,7 +36,7 @@ function stringify_committed_datatype(f, cdt; showfields=false)
     do_report = false
     for i = 1:length(dt.names)
         if !isempty(field_datatypes) && (ref = field_datatypes[i]) != NULL_REFERENCE
-            fieldtype = stringify_committed_datatype(f, f.datatype_locations[ref])
+            fieldtype = stringify_committed_datatype(f, f.datatype_locations[ref])[1]
             do_report = true
         else
             # These are normal julia types
@@ -86,8 +86,8 @@ function stringify_object(f, offset)
         rr = jltype(f, f.datatype_locations[datatype.header_offset])
         jlconvert_string_wrap(rr, f, layout.data_offset)
     else
-        rr = jltype(f, dt)
-        seek(io, layout.data_offset)
+        rr = jltype(f, datatype)
+        seek(f.io, layout.data_offset)
         read_dataspace = (dataspace, NULL_REFERENCE, layout, filter_pipeline)
         res = read_data(f, rr, read_dataspace, nothing)
         string(res)
@@ -105,7 +105,7 @@ function typestring_from_refs(f::JLDFile, ptr::Ptr)
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
             res = if cdt !== nulldt 
-                stringify_committed_datatype(f, cdt)
+                stringify_committed_datatype(f, cdt)[1]
             else
                 stringify_object(f, ref)
             end
