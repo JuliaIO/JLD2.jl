@@ -38,7 +38,6 @@ Converts a path to a group and name object. If `create` is true, any intermediat
 will be created, and the dataset name will be checked for uniqueness with existing names.
 """
 function pathize(g::Group, name::AbstractString, create::Bool)
-    name = Unicode.normalize(name)
     G = typeof(g)
     if '/' in name
         f = g.f
@@ -142,7 +141,6 @@ end
 
 function Base.haskey(g::Group, name::AbstractString)
     G = typeof(g)
-    name = Unicode.normalize(name)
     if '/' in name
         f = g.f
         dirs = split(name, '/')
