@@ -69,16 +69,16 @@ function write_dataset(dataset::Dataset, data)
     # determine layout class
     # DataLayout object is only available after the data is written
     if datasz < 8192
-        layout_class = LC_COMPACT_STORAGE
+        layout_class = LcCompact
         psz += jlsizeof(CompactStorageMessage) + datasz
 
     elseif !isnothing(dataset.chunk) || !isempty(dataset.filters)
         # Do some additional checks on the data here
-        layout_class = LC_CHUNKED_STORAGE
+        layout_class = LcChunked
         # improve filter support here
         psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(filter_id::UInt16)
     else
-        layout_class = LC_CONTIGUOUS_STORAGE
+        layout_class = LcContiguous
         psz += jlsizeof(ContiguousStorageMessage)
     end
     fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4 # why do I need to correct here?
@@ -99,7 +99,7 @@ function write_dataset(dataset::Dataset, data)
         write_message(cio, f, a, wsession)
     end
     # Data storage layout
-    if layout_class == LC_COMPACT_STORAGE
+    if layout_class == LcCompact
         jlwrite(cio, CompactStorageMessage(datasz))
         if datasz != 0
             write_data(cio, f, data, odr, datamode(odr), wsession)
@@ -108,7 +108,7 @@ function write_dataset(dataset::Dataset, data)
         # Add NIL message replacable by continuation message
         jlwrite(cio, CONTINUATION_PLACEHOLDER)
         jlwrite(io, end_checksum(cio))
-    elseif layout_class == LC_CHUNKED_STORAGE
+    elseif layout_class == LcChunked
         # this thing is a bit weird
         write_compressed_data(cio, f, data, odr, wsession, filter_id, compressor)
         write_filter_pipeline_message(cio, filter_id)
@@ -179,19 +179,20 @@ function get_dataset(f::JLDFile, offset::RelOffset, g, name)
     dset = Dataset(g, name, offset, nothing, nothing, nothing, ReadAttribute[], false, nothing, nothing)
     
     for msg in HeaderMessageIterator(f, offset)
-        if msg.type == HM_DATASPACE
+        if msg.type == HmDataspace
             dset.dataspace = ReadDataspace(f, msg)
-        elseif msg.type == HM_DATATYPE
-            dset.datatype = msg.dt
-        elseif msg.type == HM_DATA_LAYOUT
+        elseif msg.type == HmDatatype
+            dset.datatype = HmWrap(HmDatatype, msg).dt
+        elseif msg.type == HmDataLayout
             dset.layout = DataLayout(f, msg)
-        elseif msg.type == HM_FILTER_PIPELINE
+        elseif msg.type == HmFilterPipeline
             dset.filters = FilterPipeline(msg)
-        elseif msg.type == HM_ATTRIBUTE
+        elseif msg.type == HmAttribute
             push!(dset.attributes, read_attribute(f, msg))
-        elseif msg.type == HM_OBJECT_HEADER_CONTINUATION
-            chunk_start = fileoffset(f, msg.continuation_offset)
-            chunk_end = chunk_start + msg.continuation_length
+        elseif msg.type == HmObjectHeaderContinuation
+            wmsg = HmWrap(HmObjectHeaderContinuation, msg)
+            chunk_start = fileoffset(f, wmsg.continuation_offset)
+            chunk_end = chunk_start + wmsg.continuation_length
             dset.header_chunk_info = (; 
                 chunk_start,
                 chunk_end, 
@@ -211,7 +212,7 @@ end
 # Attributes
 message_size(msg::WrittenAttribute) = jlsizeof(HeaderMessage) + jlsizeof(msg)
 function write_message(io,f::JLDFile, msg::WrittenAttribute, wsession=JLDWriteSession())
-    jlwrite(io, HeaderMessage(HM_ATTRIBUTE, jlsizeof(msg), 0))
+    jlwrite(io, HeaderMessage(HmAttribute, jlsizeof(msg), 0))
     write_attribute(io, f, msg, wsession)
     return nothing
 end
@@ -219,7 +220,7 @@ end
 # Links
 message_size(msg::Pair{String, RelOffset}) = jlsizeof(HeaderMessage) + link_size(msg.first)
 write_message(io, f, msg::Pair{String, RelOffset}, _=nothing) = 
-    jlwrite(io, Hmessage(HM_LINK_MESSAGE; link_name = msg.first, target = msg.second))
+    jlwrite(io, Hmessage(HmLinkMessage; link_name = msg.first, target = msg.second))
 
 
 function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession();
@@ -263,10 +264,10 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
         empty_space = chunk_end-position(io)-4 - 20
         if empty_space != -4
             empty_space < 0 && throw(InternalError("Negative empty space. This should not happen"))
-            write_message(io, f, Hmessage(HM_NIL, 0, empty_space))
+            write_message(io, f, Hmessage(HmNil, 0, empty_space))
         end
         # continuation space
-        write_message(io, f, Hmessage(HM_NIL, 0, 16))
+        write_message(io, f, Hmessage(HmNil, 0, 16))
 
         # Re-calculate checksum
         update_checksum(io, chunk_start, chunk_end)
@@ -275,7 +276,7 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
     end
     if !iszero(remaining_space)
         # Mark remaining free space with a NIL message
-        write_message(io, f, Hmessage(HM_NIL, 0, remaining_space-4))
+        write_message(io, f, Hmessage(HmNil, 0, remaining_space-4))
     end
     # If we got to here then a new continuation needs to be created
     continuation_start = f.end_of_data
@@ -290,7 +291,7 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
     # Object continuation message
     # could re-use next_msg_offset for this
     #seek(io, continuation_message_goes_here)
-    jlwrite(io, HeaderMessage(HM_OBJECT_HEADER_CONTINUATION, jlsizeof(RelOffset) + jlsizeof(Length), 0))
+    jlwrite(io, HeaderMessage(HmObjectHeaderContinuation, jlsizeof(RelOffset) + jlsizeof(Length), 0))
     jlwrite(io, h5offset(f, continuation_start))
     jlwrite(io, Length(continuation_size))
 
@@ -314,7 +315,7 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
     end
     if remaining_space > 0
         @assert remaining_space ≥ 4 "Gaps smaller than 4 bytes should not occur"
-        jlwrite(cio, Hmessage(HM_NIL, 0, remaining_space))
+        jlwrite(cio, Hmessage(HmNil, 0, remaining_space))
     end
     # Extra space for object continuation
     jlwrite(cio, CONTINUATION_PLACEHOLDER)

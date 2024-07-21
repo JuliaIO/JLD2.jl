@@ -21,7 +21,8 @@ struct ReadDataspace
 end
 ReadDataspace() = ReadDataspace(DS_SCALAR, 0, -1)
 
-function ReadDataspace(f, msg)
+function ReadDataspace(f, msg_)
+    msg = HmWrap(HmDataspace, msg_)
     ReadDataspace(msg.dataspace_type, msg.dimensionality, fileoffset(f, msg.dim_offset))
 end
 

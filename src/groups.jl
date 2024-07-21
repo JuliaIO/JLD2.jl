@@ -218,7 +218,7 @@ function load_group(f::JLDFile, offset::RelOffset)
     hmitr = HeaderMessageIterator(f, offset)
     for msg in hmitr
         chunk_start, chunk_end = hmitr.chunk
-        if msg.type == HM_NIL
+        if msg.type == HmNil
             if continuation_message_goes_here == -1 && 
                 chunk_end - fileoffset(f, msg.offset) == CONTINUATION_MSG_SIZE
                 #continuation_message_goes_here = curpos # also correct
@@ -235,32 +235,36 @@ function load_group(f::JLDFile, offset::RelOffset)
             end
         else
             continuation_message_goes_here = -1
-            if msg.type == HM_LINK_INFO
-                fractal_heap_address = msg.fractal_heap_address
-                name_index_btree = msg.v2_btree_name_index
-            elseif msg.type == HM_GROUP_INFO
-                if msg.size > 2
+            if msg.type == HmLinkInfo
+                wmsg = HmWrap(HmLinkInfo, msg)
+                fractal_heap_address = wmsg.fractal_heap_address
+                name_index_btree = wmsg.v2_btree_name_index
+            elseif msg.type == HmGroupInfo
+                wmsg = HmWrap(HmGroupInfo, msg)
+                if wmsg.size > 2
                     # Version Flag
-                    msg.version == 0 || throw(UnsupportedFeatureException()) 
-                    flag = msg.flags::UInt8
+                    wmsg.version == 0 || throw(UnsupportedFeatureException()) 
+                    flag = wmsg.flags::UInt8
                     if flag%2 == 1 # first bit set
-                        link_phase_change_max_compact = msg.link_phase_change_max_compact
-                        link_phase_change_min_dense = msg.link_phase_change_min_dense
+                        link_phase_change_max_compact = wmsg.link_phase_change_max_compact
+                        link_phase_change_min_dense = wmsg.link_phase_change_min_dense
                     end
                     if (flag >> 1)%2 == 1 # second bit set
                         # Verify that non-default group size is given
-                        est_num_entries = msg.est_num_entries
-                        est_link_name_len = msg.est_link_name_len
+                        est_num_entries = wmsg.est_num_entries
+                        est_link_name_len = wmsg.est_link_name_len
                     end
                 end
-            elseif msg.type == HM_LINK_MESSAGE
-                name, loffset = msg.link_name::String, msg.target::RelOffset
+            elseif msg.type == HmLinkMessage
+                wmsg = HmWrap(HmLinkMessage, msg)
+                name, loffset = wmsg.link_name::String, wmsg.target::RelOffset
                 links[name] = loffset
-            elseif msg.type == HM_OBJECT_HEADER_CONTINUATION
+            elseif msg.type == HmObjectHeaderContinuation
                 next_link_offset = -1
-            elseif msg.type == HM_SYMBOL_TABLE
-                v1btree_address = msg.v1btree_address
-                name_index_heap = msg.name_index_heap            
+            elseif msg.type == HmSymbolTable
+                wmsg = HmWrap(HmSymbolTable, msg)
+                v1btree_address = wmsg.v1btree_address
+                name_index_heap = wmsg.name_index_heap            
             elseif (msg.hflags & 2^3) != 0
                 throw(UnsupportedFeatureException())
             end
@@ -293,7 +297,7 @@ end
 Returns the size of a link message, excluding message header.
 """
 link_size(link_name::String) =
-    sizefun(Val(HM_LINK_MESSAGE), 0,0,(;link_name, target=UNDEFINED_ADDRESS))
+    sizefun(Val(HmLinkMessage), 0,0,(;link_name, target=UNDEFINED_ADDRESS))
 """
     links_size(pairs)
 
@@ -339,8 +343,8 @@ function save_group(g::Group)
     # If the group has not been saved yet
     if g.last_chunk_start_offset == -1
 
-        link_info = Hmessage(HM_LINK_INFO)
-        group_info = Hmessage(HM_GROUP_INFO; g.est_num_entries, g.est_link_name_len)
+        link_info = Hmessage(HmLinkInfo)
+        group_info = Hmessage(HmGroupInfo; g.est_num_entries, g.est_link_name_len)
 
         totalsize = jlsizeof(link_info) + jlsizeof(group_info)
         # Object header continuation placeholder
@@ -385,11 +389,11 @@ function isgroup(f::JLDFile, offset::RelOffset)
     determined = false
     hmitr = HeaderMessageIterator(f, offset)
     for msg in hmitr
-        if msg.type in (HM_LINK_INFO, HM_GROUP_INFO, HM_LINK_MESSAGE, HM_SYMBOL_TABLE)
+        if msg.type in (HmLinkInfo, HmGroupInfo, HmLinkMessage, HmSymbolTable)
             is_group = true
             determined = true
             break
-        elseif msg.type in (HM_DATASPACE, HM_DATATYPE, HM_FILL_VALUE, HM_DATA_LAYOUT)
+        elseif msg.type in (HmDataspace, HmDatatype, HmFillValue, HmDataLayout)
             determined = true
             break
         end

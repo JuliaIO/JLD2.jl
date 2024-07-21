@@ -326,10 +326,10 @@ function commit(f::JLDFile,
     cio = begin_checksum_write(io, sz)
     jlwrite(cio, ObjectStart(size_flag(psz)))
     write_size(cio, psz)
-    jlwrite(cio, HeaderMessage(HM_DATATYPE, jlsizeof(dt), 64))
+    jlwrite(cio, HeaderMessage(HmDatatype, jlsizeof(dt), 64))
     jlwrite(cio, dt)
     for attr in attrs
-        jlwrite(cio, HeaderMessage(HM_ATTRIBUTE, jlsizeof(attr), 0))
+        jlwrite(cio, HeaderMessage(HmAttribute, jlsizeof(attr), 0))
         write_attribute(cio, f, attr, f.datatype_wsession)
     end
     jlwrite(io, end_checksum(cio))
@@ -341,9 +341,9 @@ function read_shared_datatype(f::JLDFile, cdt::Union{SharedDatatype, CommittedDa
     attrs = ReadAttribute[]
 
     for msg in HeaderMessageIterator(f, cdt.header_offset)
-        if msg.type == HM_DATATYPE
-            datatype = msg.dt
-        elseif msg.type == HM_ATTRIBUTE
+        if msg.type == HmDatatype
+            datatype = HmWrap(HmDatatype, msg).dt
+        elseif msg.type == HmAttribute
             push!(attrs, read_attribute(f, msg))
         elseif (msg.hflags & 2^3) != 0
             throw(UnsupportedFeatureException())

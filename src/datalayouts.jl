@@ -7,8 +7,8 @@ end
 define_packed(CompactStorageMessage)
 CompactStorageMessage(datasz::Int) =
     CompactStorageMessage(
-            HeaderMessage(HM_DATA_LAYOUT, jlsizeof(CompactStorageMessage) - jlsizeof(HeaderMessage) + datasz, 0),
-            4, LC_COMPACT_STORAGE, datasz
+            HeaderMessage(HmDataLayout, jlsizeof(CompactStorageMessage) - jlsizeof(HeaderMessage) + datasz, 0),
+            4, LcCompact, datasz
     )
     
 struct ContiguousStorageMessage
@@ -21,8 +21,8 @@ end
 define_packed(ContiguousStorageMessage)
 ContiguousStorageMessage(datasz::Int, offset::RelOffset) =
     ContiguousStorageMessage(
-        HeaderMessage(HM_DATA_LAYOUT, jlsizeof(ContiguousStorageMessage) - jlsizeof(HeaderMessage), 0),
-        4, LC_CONTIGUOUS_STORAGE, offset, datasz
+        HeaderMessage(HmDataLayout, jlsizeof(ContiguousStorageMessage) - jlsizeof(HeaderMessage), 0),
+        4, LcContiguous, offset, datasz
     )
 
 
@@ -42,21 +42,22 @@ struct DataLayout
         new(version, storage_type, data_length, data_offset, dimensionality, chunk_indexing_type, chunk_dimensions)
 end
 
-ischunked(dl::DataLayout) = dl.storage_type == LC_CHUNKED_STORAGE
+ischunked(dl::DataLayout) = dl.storage_type == LcChunked
 
-function DataLayout(f::JLD2.JLDFile, msg::Hmessage)
+function DataLayout(f::JLD2.JLDFile, msg_::Hmessage)
+    msg = HmWrap(HmDataLayout, msg_)
     version = msg.version::UInt8
     storage_type = msg.layout_class::LayoutClass
     rf = msg.data_address::RelOffset
     data_offset::Int64 = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
     if version == 4 || version == 3
-        if storage_type == LC_COMPACT_STORAGE
+        if storage_type == LcCompact
             data_length = Int64(msg.data_size::UInt16)
             return DataLayout(version, storage_type, data_length, data_offset) 
-        elseif storage_type == LC_CONTIGUOUS_STORAGE
+        elseif storage_type == LcContiguous
             data_length = Int64(msg.data_size::Int64)
             return DataLayout(version, storage_type, data_length, data_offset) 
-        elseif version == 4 && storage_type == LC_CHUNKED_STORAGE
+        elseif version == 4 && storage_type == LcChunked
             chunk_dimensions = Int[msg.dimensions...]
             chunk_indexing_type = msg.chunk_indexing_type
             chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
@@ -65,7 +66,7 @@ function DataLayout(f::JLD2.JLDFile, msg::Hmessage)
             #filters = msg.filters#jlread(cio, UInt32)
             chunked_storage = true
             DataLayout(version, storage_type, data_length, data_offset, msg.dimensionality, msg.chunk_indexing_type, chunk_dimensions) 
-        elseif version == 3 && storage_type == LC_CHUNKED_STORAGE
+        elseif version == 3 && storage_type == LcChunked
             data_length = Int64(msg.data_size)
 
             chunk_dimensions = Int[msg.dimensions[1:end-1]...] # drop element size as last dimension
@@ -79,7 +80,8 @@ function DataLayout(f::JLD2.JLDFile, msg::Hmessage)
     end
 end
 
-function FilterPipeline(msg::Hmessage)
+function FilterPipeline(msg_::Hmessage)
+    msg = HmWrap(HmFilterPipeline, msg_)
     version = msg.version
     nfilters = msg.nfilters
     io = msg.m.io

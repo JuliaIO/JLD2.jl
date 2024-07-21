@@ -95,7 +95,7 @@ to the fields of the message.
 Can also be used to construct and write custom messages.
 """
 struct Hmessage{IO}
-    type::HeaderMessageTypes
+    type::HeaderMessageType
     size::UInt16
     hflags::UInt8
     offset::RelOffset
@@ -103,19 +103,7 @@ struct Hmessage{IO}
     m::Message{IO}
 end
 
-@generated function Base.getproperty(hm::Hmessage, s::Symbol)
-    ex = Expr(:block)
-    for v in instances(HeaderMessageTypes)
-        push!(ex.args, :(getfield(hm,:type) == $(v) && return iogetprop($(Val(v)), getfield(hm,:m), s,
-            getfield(hm, :hflags), getfield(hm, :size))))
-    end
-    return quote
-        s in (:type, :size, :hflags, :offset, :payload_offset, :m) && return getfield(hm, s)
-        $(ex)
-    end
-end
-
-function Hmessage(type::HeaderMessageTypes, hflags=0x00, size=0; kwargs...)
+function Hmessage(type::HeaderMessageType, hflags=0x00, size=0; kwargs...)
     kw = (; kwargs...)
     size = sizefun(Val(type), hflags, size, kw)
     payload = construct_hm_payload(Val(type), hflags, size, kw)
@@ -123,7 +111,29 @@ function Hmessage(type::HeaderMessageTypes, hflags=0x00, size=0; kwargs...)
         Message(type, 0, UNDEFINED_ADDRESS, payload))
 end
 
-const CONTINUATION_PLACEHOLDER = Hmessage(HM_NIL, 0, 16)
+struct HmWrap{HM, IOT}
+    m::Message{IOT}
+    hflags::UInt8
+    size::UInt16
+    HmWrap(type::HeaderMessageType, hm::Hmessage{IOT}) where IOT =
+        new{type,IOT}(hm.m, hm.hflags, hm.size)
+    HmWrap(type::HeaderMessageType, m::Message{IOT}) where IOT =
+        new{type,IOT}(m, 0x0, 0x0)
+end
+
+for HM in instances(HeaderMessageType)
+    @eval function Base.getproperty(tw::HmWrap{$HM}, s::Symbol)
+        s in (:size, :hflags, :m) && return getfield(tw, s)
+        m = getfield(tw, :m)
+        hflags = getfield(tw, :hflags)
+        hsize = getfield(tw, :size)
+        io = getfield(m, :io)
+        $(ioexpr(Val(HM)))
+        throw(ArgumentError("property $s not found"))
+    end
+end
+
+const CONTINUATION_PLACEHOLDER = Hmessage(HmNil, 0, 16)
 
 write_message(io, f::JLDFile, msg::Hmessage) = jlwrite(io, msg)
 
@@ -188,10 +198,10 @@ function print_header_messages(f::JLDFile, offset::RelOffset)
     hmitr = HeaderMessageIterator(f, offset)
     for msg in hmitr
         print(msg)
-        if msg.type == HM_FILTER_PIPELINE
+        if msg.type == HmFilterPipeline
             filter_pipeline = FilterPipeline(msg)
             @info filter_pipeline
-        elseif msg.type == HM_ATTRIBUTE
+        elseif msg.type == HmAttribute
             attr = read_attribute(f, msg)
             data = read_attr_data(f, attr)
             println("""    data: "$data" """)
@@ -210,7 +220,7 @@ function read_header_message(f, io, header_version, chunk_start, groupflags)#, l
         skip_to_aligned!(io, chunk_start)
         msgpos = h5offset(f, position(io))
         # Version 1 header message is padded
-        msg = HeaderMessage(HeaderMessageTypes(jlread(io, UInt16)), jlread(io, UInt16), jlread(io, UInt8))
+        msg = HeaderMessage(HeaderMessageType(jlread(io, UInt16)), jlread(io, UInt16), jlread(io, UInt8))
         skip(io, 3)
     else # header_version == 2
         msg = jlread(io, HeaderMessage)
@@ -218,19 +228,10 @@ function read_header_message(f, io, header_version, chunk_start, groupflags)#, l
     end
     payload_address = position(io)
     payload_offset = h5offset(f, position(io))
-    # if lazy == true
-    #     #skip(io, msg.size)
-        Hmessage(
-            msg.msg_type,
-            msg.size, msg.flags, msgpos, payload_offset,
-            Message(msg.msg_type, payload_address, payload_offset, io))
-    # else
-    #     payload = IOBuffer(jlread(io, UInt8, msg.size))
-    #     Hmessage(
-    #         HeaderMessageTypes(msg.msg_type),
-    #         msg.size, msg.flags, msgpos, payload_offset,
-    #         Message(HeaderMessageTypes(msg.msg_type), 0, payload_offset, payload))
-    # end
+    Hmessage(
+        msg.msg_type,
+        msg.size, msg.flags, msgpos, payload_offset,
+        Message(msg.msg_type, payload_address, payload_offset, io))
 end
 
 
@@ -296,9 +297,10 @@ function Base.iterate(itr::HeaderMessageIterator{IO}, state=nothing) where IO
     seek(io, itr.curpos)
     msg = read_header_message(itr.f, io, itr.header_version, chunk.chunk_start, itr.objflags)::Hmessage{IO}
     itr.curpos = fileoffset(itr.f, msg.payload_offset)+msg.size
-    if msg.type == HM_OBJECT_HEADER_CONTINUATION
-        chunk_start = fileoffset(itr.f, msg.continuation_offset::RelOffset)
-        chunk_end = chunk_start + msg.continuation_length::Int64
+    if msg.type == HmObjectHeaderContinuation
+        wmsg = HmWrap(HmObjectHeaderContinuation, msg)
+        chunk_start = fileoffset(itr.f, wmsg.continuation_offset::RelOffset)
+        chunk_end = chunk_start + wmsg.continuation_length::Int64
         new_chunk =  (; chunk_start, chunk_end)
         if itr.next_chunk.chunk_start == -1
             itr.next_chunk = new_chunk

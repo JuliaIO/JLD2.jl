@@ -1,8 +1,9 @@
 # This file declares the format specification for header messages.
 
-@pseudostruct HM_NIL begin @skip(hsize) end
 
-@pseudostruct HM_DATASPACE begin
+@pseudostruct HmNil begin @skip(hsize) end
+
+@pseudostruct HmDataspace begin
     version::UInt8 = 2
     dimensionality::UInt8 = length(kw.dimensions)
     flags::UInt8
@@ -14,7 +15,7 @@
     isset(flags,0) && max_dimension_size::NTuple{Int(dimensionality), Int64}
 end
 
-@pseudostruct HM_LINK_INFO begin
+@pseudostruct HmLinkInfo begin
     version::UInt8 = 0x00
     flags::UInt8 = 0x00 
     isset(flags,0) && max_creation_index::Int64
@@ -23,7 +24,7 @@ end
     isset(flags, 1) && (v2_btree_creation_order_index::RelOffset = UNDEFINED_ADDRESS)
 end
  
-@pseudostruct HM_DATATYPE begin
+@pseudostruct HmDatatype begin
     if isset(hflags,1)
         version::UInt8
         msgtype::UInt8
@@ -36,16 +37,16 @@ end
     end
 end
 
-@pseudostruct HM_FILL_VALUE_OLD begin
+@pseudostruct HmFillValueOld begin
     size::UInt32
     fill_value::@Blob(size)
 end
 
-@pseudostruct HM_FILL_VALUE begin
+@pseudostruct HmFillValue begin
     @skip(hsize)
 end
 
-@pseudostruct HM_LINK_MESSAGE begin 
+@pseudostruct HmLinkMessage begin 
     version::UInt8 = 1
     flags::UInt8 = (0x10 | size_flag(sizeof(kw.link_name)))
     isset(flags, 3) && link_type::UInt8
@@ -64,7 +65,7 @@ end
     end
 end
 
-@pseudostruct HM_EXTERNAL_FILE_LIST begin 
+@pseudostruct HmExternalFileList begin 
     version::UInt8
     @skip(3)
     allocated_slots::UInt16
@@ -73,16 +74,16 @@ end
     external_file_list::@Blob(allocated_slots*3*8)
 end
 
-@pseudostruct HM_DATA_LAYOUT begin
+@pseudostruct HmDataLayout begin
     version::UInt8
     if version in (1,2)
         dimensionality::UInt8
         layout_class::LayoutClass
         @skip(5)
-        (layout_class != LC_COMPACT_STORAGE) && data_address::RelOffset
+        (layout_class != LcCompact) && data_address::RelOffset
         dimensions::NTuple{Int(dimensionality), Int32}
-        (layout_class == LC_CHUNKED_STORAGE) && element_size::UInt32
-        if (layout_class == LC_COMPACT_STORAGE) 
+        (layout_class == LcChunked) && element_size::UInt32
+        if (layout_class == LcCompact) 
             data_size::UInt32
             data_address::@Offset
             data::@Blob(data_size)
@@ -90,22 +91,22 @@ end
     end
     if version == 3 || version == 4
         layout_class::LayoutClass
-        if layout_class == LC_COMPACT_STORAGE
+        if layout_class == LcCompact
             data_size::UInt16
             data_address::@Offset
             data::@Blob(data_size)
         end
-        if layout_class == LC_CONTIGUOUS_STORAGE
+        if layout_class == LcContiguous
             data_address::RelOffset
             data_size::Int64# Lengths
         end
-        if version == 3 && layout_class == LC_CHUNKED_STORAGE
+        if version == 3 && layout_class == LcChunked
             dimensionality::UInt8
             data_address::RelOffset
             dimensions::NTuple{Int(dimensionality), Int32}
             data_size::UInt32#element_size::UInt32
         end
-        if version == 4 && layout_class == LC_CHUNKED_STORAGE
+        if version == 4 && layout_class == LcChunked
             flags::UInt8
             dimensionality::UInt8
             dim_size::UInt8
@@ -132,14 +133,14 @@ end
             end
             data_address::RelOffset
         end
-        if layout_class == LC_VIRTUAL_STORAGE # Virtual Storage
+        if layout_class == LcVirtual # Virtual Storage
             data_address::RelOffset
             index::UInt32
         end
     end
 end
 
-@pseudostruct HM_GROUP_INFO begin
+@pseudostruct HmGroupInfo begin
     version::UInt8 = 0
     flags::UInt8 = 0b10*(get(kw, :est_num_entries, 4) != 4 || get(kw, :est_link_name_len, 8) != 8)
     if isset(flags, 0)
@@ -152,13 +153,13 @@ end
     end
 end
 
-@pseudostruct HM_FILTER_PIPELINE begin
+@pseudostruct HmFilterPipeline begin
     version::UInt8
     nfilters::UInt8
     @skip(hsize-2)
 end
 
-@pseudostruct HM_ATTRIBUTE begin
+@pseudostruct HmAttribute begin
     version::UInt8
     flags::UInt8
     name_size::UInt16
@@ -186,16 +187,24 @@ end
     #data::@Blob(hsize- (data_offset.offset - getfield(hm,:payload_offset).offset))#+getfield(hm,:base_address)+hsize-position(io))
 end
 
-@pseudostruct HM_OBJECT_HEADER_CONTINUATION begin
+@pseudostruct HmObjectHeaderContinuation begin
     continuation_offset::RelOffset
     continuation_length::Int64# Length
 end
 
-@pseudostruct HM_SYMBOL_TABLE begin
+@pseudostruct HmSymbolTable begin
     v1btree_address::RelOffset
     name_index_heap::RelOffset
 end
 
-@pseudostruct HM_ATTRIBUTE_INFO begin
+@pseudostruct HmAttributeInfo begin
     @skip(hsize)
 end
+
+@pseudostruct HmBogus begin @skip(hsize) end
+@pseudostruct HmObjectComment begin @skip(hsize) end
+@pseudostruct HmSharedMessageTable begin @skip(hsize) end
+@pseudostruct HmModificationTime begin @skip(hsize) end
+@pseudostruct HmBtreeKValues begin @skip(hsize) end
+@pseudostruct HmDriverInfo begin @skip(hsize) end
+@pseudostruct HmReferenceCount begin @skip(hsize) end

@@ -8,12 +8,11 @@ const OBJECT_HEADER_CONTINUATION_SIGNATURE = htol(0x4b48434f) # "OCHK"
 
 ## Enums
 @enum LayoutClass::UInt8 begin
-    LC_COMPACT_STORAGE = 0x00
-    LC_CONTIGUOUS_STORAGE = 0x01
-    LC_CHUNKED_STORAGE = 0x02
-    LC_VIRTUAL_STORAGE = 0x03
+    LcCompact = 0x00
+    LcContiguous = 0x01
+    LcChunked = 0x02
+    LcVirtual = 0x03
 end
-Base.convert(::Type{UInt8}, l::LayoutClass) = UInt8(l)
 
 @enum(CharacterSet::UInt8,
       CSET_ASCII,
@@ -22,34 +21,30 @@ Base.convert(::Type{UInt8}, l::LayoutClass) = UInt8(l)
 
 # Header Message Types
 # These are identified by their UInt8 value in the file
-@enum HeaderMessageTypes::UInt8 begin
-    HM_NIL = 0x00
-    HM_DATASPACE = 0x01
-    HM_LINK_INFO = 0x02
-    HM_DATATYPE = 0x03
-    HM_FILL_VALUE_OLD = 0x04
-    HM_FILL_VALUE = 0x05
-    HM_LINK_MESSAGE = 0x06
-    HM_EXTERNAL_FILE_LIST = 0x07
-    HM_DATA_LAYOUT = 0x08
-    HM_BOGUS = 0x09
-    HM_GROUP_INFO = 0x0a
-    HM_FILTER_PIPELINE = 0x0b
-    HM_ATTRIBUTE = 0x0c
-    HM_OBJECT_COMMENT = 0x0d
-    HM_SHARED_MESSAGE_TABLE = 0x0f
-    HM_OBJECT_HEADER_CONTINUATION = 0x10
-    HM_SYMBOL_TABLE = 0x11
-    HM_MODIFICATION_TIME = 0x12
-    HM_BTREE_K_VALUES = 0x13
-    HM_DRIVER_INFO = 0x14
-    HM_ATTRIBUTE_INFO = 0x15
-    HM_REFERENCE_COUNT = 0x16
+@enum HeaderMessageType::UInt8 begin
+    HmNil = 0x00
+    HmDataspace = 0x01
+    HmLinkInfo = 0x02
+    HmDatatype = 0x03
+    HmFillValueOld = 0x04
+    HmFillValue = 0x05
+    HmLinkMessage = 0x06
+    HmExternalFileList = 0x07
+    HmDataLayout = 0x08
+    HmBogus = 0x09
+    HmGroupInfo = 0x0a
+    HmFilterPipeline = 0x0b
+    HmAttribute = 0x0c
+    HmObjectComment = 0x0d
+    HmSharedMessageTable = 0x0f
+    HmObjectHeaderContinuation = 0x10
+    HmSymbolTable = 0x11
+    HmModificationTime = 0x12
+    HmBtreeKValues = 0x13
+    HmDriverInfo = 0x14
+    HmAttributeInfo = 0x15
+    HmReferenceCount = 0x16
 end
-
-HeaderMessageTypes(x::HeaderMessageTypes) = x
-Base.convert(::Type{UInt8}, h::HeaderMessageTypes) = UInt8(h)
-
 
 
 ## Exceptions 
@@ -208,6 +203,7 @@ end
 
 FilterPipeline() = FilterPipeline(Filter[])
 iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
+const EMPTY_FILTER_PIPELINE = FilterPipeline()
 
 """
     HeaderMessage
@@ -215,7 +211,7 @@ iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
 Helper struct to read and write the first part of a header message.
 """
 struct HeaderMessage
-    msg_type::HeaderMessageTypes
+    msg_type::HeaderMessageType
     size::UInt16
     flags::UInt8
 end
@@ -223,7 +219,7 @@ define_packed(HeaderMessage)
 
 ## Object header continuation
 # object headers can be split into multiple chunks
-# the HM_OBJECT_HEADER_CONTINUATION message is used to link them
+# the HmObjectHeaderContinuation message is used to link them
 # it has constant size and a placeholder is put into every header
 # by JLD2 to allow later additions.
 const CONTINUATION_MSG_SIZE = jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
@@ -235,27 +231,16 @@ const CONTINUATION_MSG_SIZE = jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jl
 Representation of a Message in memory. Provides `getproperty` access
 """
 struct Message{IO}
-    type::HeaderMessageTypes
+    type::HeaderMessageType
     address::UInt64
     offset::RelOffset
     io::IO
-    Message(type::HeaderMessageTypes, address::Integer, o::RelOffset, io::IO) =
+    Message(type::HeaderMessageType, address::Integer, o::RelOffset, io::IO) =
         new{typeof(io)}(type, UInt64(address), o, io)
 end
-Message(type::UInt8, args...) = Message(HeaderMessageTypes(type), args...)
-Message(type::HeaderMessageTypes, f, offset::RelOffset) = 
+Message(type::UInt8, args...) = Message(HeaderMessageType(type), args...)
+Message(type::HeaderMessageType, f, offset::RelOffset) = 
     Message(type, fileoffset(f, offset), offset, f.io)
-Message(type::HeaderMessageTypes, io::IO) = Message(type, position(io), UNDEFINED_ADDRESS, io)
-Message(type::HeaderMessageTypes, data::Vector{UInt8}) = Message(type, 0, UNDEFINED_ADDRESS, IOBuffer(data))
+Message(type::HeaderMessageType, io::IO) = Message(type, position(io), UNDEFINED_ADDRESS, io)
+Message(type::HeaderMessageType, data::Vector{UInt8}) = Message(type, 0, UNDEFINED_ADDRESS, IOBuffer(data))
 
-
-@generated function Base.getproperty(m::Message, s::Symbol)
-    ex = Expr(:block)
-    for v in instances(HeaderMessageTypes)
-        push!(ex.args, :(getfield(m, :type) == $(v) && return iogetprop($(Val(v)), m, s)))
-    end
-    return quote
-        s in (:type, :address, :io) && return getfield(m, s)
-        $(ex)
-    end
-end

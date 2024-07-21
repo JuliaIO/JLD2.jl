@@ -47,12 +47,13 @@ function write_attribute(io::IO, f::JLDFile, attr::WrittenAttribute, wsession::J
     write_data(io, f, attr.data, odr, datamode(odr), wsession)
 end
 
-function read_attribute(f::JLDFile, hm)
+function read_attribute(f::JLDFile, msg)
+    hm = HmWrap(HmAttribute, msg)
     committed = hm.flags == 1
     !committed && hm.flags != 0 && throw(UnsupportedFeatureException())
 
-    hm.hflags & 0x10 == 0x10 && @warn "We've got a shared dataspace"
-    dsm = Message(HM_DATASPACE, f, hm.dataspace_offset)
+    hm.flags & 0x10 == 0x10 && @warn "We've got a shared dataspace"
+    dsm = Message(HmDataspace, f, hm.dataspace_offset)
     dataspace = ReadDataspace(f, dsm)
 
     data_offset = fileoffset(f, hm.data_offset)
@@ -109,7 +110,7 @@ end
 """
 read_attr_data(f::JLDFile, attr::ReadAttribute) =
     read_data(f, attr.dataspace, attr.datatype,
-              DataLayout(0,LC_COMPACT_STORAGE,-1,attr.data_offset))
+              DataLayout(0,LcCompact,-1,attr.data_offset))
 
 """
     read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
@@ -124,7 +125,7 @@ function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Da
                         rr::ReadRepresentation)
     if attr.datatype == expected_datatype
         seek(f.io, attr.data_offset)
-        read_dataspace = (attr.dataspace, NULL_REFERENCE, DataLayout(0,LC_COMPACT_STORAGE,-1,attr.data_offset), FilterPipeline())
+        read_dataspace = (attr.dataspace, NULL_REFERENCE, DataLayout(0,LcCompact,-1,attr.data_offset), FilterPipeline())
         return read_data(f, rr, read_dataspace)
     end
     throw(UnsupportedFeatureException())

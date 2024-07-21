@@ -144,7 +144,7 @@ function write_filter_pipeline_message(io, filter_id::UInt16)
         padding = fnamelen - length(filter_name)
         hmsize += 2 + fnamelen
     end
-    jlwrite(io, HeaderMessage(HM_FILTER_PIPELINE, hmsize, 0))
+    jlwrite(io, HeaderMessage(HmFilterPipeline, hmsize, 0))
     jlwrite(io, UInt8(2))                 # Version
     jlwrite(io, UInt8(1))                 # Number of Filters
     jlwrite(io, filter_id)                # Filter Identification Value
@@ -183,9 +183,9 @@ function write_chunked_storage_message( io::IO,
                                         dims::NTuple{N,Int},
                                         filtered_size::Int,
                                         offset::RelOffset) where N
-    jlwrite(io, HeaderMessage(HM_DATA_LAYOUT, chunked_storage_message_size(N) - jlsizeof(HeaderMessage), 0))
+    jlwrite(io, HeaderMessage(HmDataLayout, chunked_storage_message_size(N) - jlsizeof(HeaderMessage), 0))
     jlwrite(io, UInt8(4))                     # Version
-    jlwrite(io, UInt8(LC_CHUNKED_STORAGE))    # Layout Class
+    jlwrite(io, UInt8(LcChunked))    # Layout Class
     jlwrite(io, UInt8(2))                     # Flags (= SINGLE_INDEX_WITH_FILTER)
     jlwrite(io, UInt8(N+1))                   # Dimensionality
     jlwrite(io, UInt8(jlsizeof(Length)))        # Dimensionality Size

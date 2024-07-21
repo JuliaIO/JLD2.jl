@@ -15,19 +15,19 @@ function load_dataset(f::JLDFile{IO}, offset::RelOffset) where IO
     dataspace = ReadDataspace()
     attrs = EMPTY_READ_ATTRIBUTES
     dt::H5Datatype = PlaceholderH5Datatype()
-    layout::DataLayout = DataLayout(0,LC_COMPACT_STORAGE,0,-1)
-    filter_pipeline::FilterPipeline = FilterPipeline(Filter[])
+    layout::DataLayout = DataLayout(0,LcCompact,0,-1)
+    filter_pipeline::FilterPipeline = EMPTY_FILTER_PIPELINE
 
     for msg in HeaderMessageIterator(f, offset)
-        if msg.type == HM_DATASPACE
+        if msg.type == HmDataspace
             dataspace = ReadDataspace(f, msg)
-        elseif msg.type == HM_DATATYPE
-            dt = msg.dt::H5Datatype
-        elseif msg.type == HM_DATA_LAYOUT
+        elseif msg.type == HmDatatype
+            dt = HmWrap(HmDatatype, msg).dt::H5Datatype
+        elseif msg.type == HmDataLayout
             layout = DataLayout(f, msg)
-        elseif msg.type == HM_FILTER_PIPELINE
+        elseif msg.type == HmFilterPipeline
             filter_pipeline = FilterPipeline(msg)
-        elseif msg.type == HM_ATTRIBUTE
+        elseif msg.type == HmAttribute
             isempty(attrs) && (attrs = ReadAttribute[]) 
             push!(attrs, read_attribute(f, msg))
         elseif (msg.hflags & 2^3) != 0
@@ -366,7 +366,7 @@ end
     # Figure out the layout 
     # The simplest CompactStorageMessage only supports data sets < 2^16
     if datasz < 8192 || (!(data isa Array) && datasz < typemax(UInt16))
-        layout_class = LC_COMPACT_STORAGE
+        layout_class = LcCompact
         psz += jlsizeof(CompactStorageMessage) + datasz
     elseif data isa Array && compress != false && isconcretetype(eltype(data)) && isbitstype(eltype(data))
         # Only now figure out if the compression argument is valid
@@ -374,10 +374,10 @@ end
         if invoke_again
             return Base.invokelatest(write_dataset, f, dataspace, datatype, odr, data, wsession, compress)::RelOffset
         end
-        layout_class = LC_CHUNKED_STORAGE
+        layout_class = LcChunked
         psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(filter_id::UInt16)
     else
-        layout_class = LC_CONTIGUOUS_STORAGE
+        layout_class = LcContiguous
         psz += jlsizeof(ContiguousStorageMessage)
     end
 
@@ -397,14 +397,14 @@ end
     write_datatype_message(cio, datatype)
 
     # Data storage layout
-    if layout_class == LC_COMPACT_STORAGE
+    if layout_class == LcCompact
         jlwrite(cio, CompactStorageMessage(datasz))
         if datasz != 0
             write_data(cio, f, data, odr, datamode(odr), wsession)
         end
         jlwrite(cio, CONTINUATION_PLACEHOLDER)
         jlwrite(io, end_checksum(cio))
-    elseif layout_class == LC_CHUNKED_STORAGE
+    elseif layout_class == LcChunked
     
         write_filter_pipeline_message(cio, filter_id)
 
@@ -437,23 +437,23 @@ function write_object_header_and_dataspace_message(cio::IO, f::JLDFile, psz::Int
     write_size(cio, psz)
 
     # Fill value
-    jlwrite(cio, HeaderMessage(HM_FILL_VALUE, 2, 0))
+    jlwrite(cio, HeaderMessage(HmFillValue, 2, 0))
     jlwrite(cio, UInt8(3)) # Version
     jlwrite(cio, 0x09)     # Flags
 
     # Dataspace
-    jlwrite(cio, HeaderMessage(HM_DATASPACE, jlsizeof(dataspace), 0))
+    jlwrite(cio, HeaderMessage(HmDataspace, jlsizeof(dataspace), 0))
     jlwrite(cio, dataspace)
 
     # Attributes
     for attr in dataspace.attributes
-        jlwrite(cio, HeaderMessage(HM_ATTRIBUTE, jlsizeof(attr), 0))
+        jlwrite(cio, HeaderMessage(HmAttribute, jlsizeof(attr), 0))
         write_attribute(cio, f, attr, f.datatype_wsession)
     end
 end
 
 function write_datatype_message(cio::IO, datatype::H5Datatype)
-    jlwrite(cio, HeaderMessage(HM_DATATYPE, jlsizeof(datatype), 1 | (2*isa(datatype, CommittedDatatype))))
+    jlwrite(cio, HeaderMessage(HmDatatype, jlsizeof(datatype), 1 | (2*isa(datatype, CommittedDatatype))))
     jlwrite(cio, datatype)
 end
 
@@ -520,10 +520,10 @@ function delete_written_link!(f::JLDFile, roffset::RelOffset, name::AbstractStri
     # The deletion is done by replacing that message by a placeholder nill message
     iter = HeaderMessageIterator(f, roffset)
     for msg in iter
-        if msg.type == HM_LINK_MESSAGE && msg.link_name == name
+        if msg.type == HmLinkMessage && HmWrap(HmLinkMessage, msg).link_name == name
             # delete link
             seek(f.io, fileoffset(f, msg.offset))
-            jlwrite(f.io, HeaderMessage(HM_NIL, msg.size, 0))
+            jlwrite(f.io, HeaderMessage(HmNil, msg.size, 0))
             update_checksum(f.io, iter.chunk.chunk_start, iter.chunk.chunk_end)
         end
     end

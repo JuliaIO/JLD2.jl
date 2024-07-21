@@ -361,13 +361,13 @@ function read_btree(f, offset_hh, offset_bh)
         indirect_rb = read_indirect_block(f, hh.root_block_address, hh, hh.cur_num_rows_in_root_iblock)
         links = map(records) do r
             offset = get_block_offset(f, indirect_rb, r.offset, hh)
-            m = Message(HM_LINK_MESSAGE, f, offset)
+            m = HmWrap(HmLinkMessage, Message(HmLinkMessage, f, offset))
             m.link_name, m.target
         end
     else # there's only a single direct block at hh.root_block_address
         links = map(records) do r
             offset = hh.root_block_address + r.offset
-            m = Message(HM_LINK_MESSAGE, f, offset)
+            m = HmWrap(HmLinkMessage, Message(HmLinkMessage, f, offset))
             m.link_name, m.target
         end
     end
