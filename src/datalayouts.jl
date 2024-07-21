@@ -43,9 +43,10 @@ struct DataLayout
 end
 
 ischunked(dl::DataLayout) = dl.storage_type == LcChunked
+DataLayout(f::JLD2.JLDFile, msg_::Hmessage) =
+    DataLayout(f, HmWrap(HmDataLayout, msg_))
 
-function DataLayout(f::JLD2.JLDFile, msg_::Hmessage)
-    msg = HmWrap(HmDataLayout, msg_)
+function DataLayout(f::JLD2.JLDFile, msg::HmWrap{HmDataLayout})
     version = msg.version::UInt8
     storage_type = msg.layout_class::LayoutClass
     rf = msg.data_address::RelOffset

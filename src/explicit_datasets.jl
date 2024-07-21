@@ -33,6 +33,72 @@ end
 
 iswritten(dset::Dataset) = (dset.offset != UNDEFINED_ADDRESS)
 
+function Base.show(io::IO, ::MIME"text/plain", dset::Dataset)
+    f = dset.parent.f
+    print(io, "┌─ Dataset:")
+    print(io, isempty(dset.name) ? " (unnamed)" : " \"$(dset.name)\"")
+    print(io, iswritten(dset) ? " at $(dset.offset)" : " (unwritten)", "\n")
+    prefix = "│  "
+    #println(io, prefix*"parent: $(dset.parent)")
+    if !isnothing(dset.datatype)
+        dt = dset.datatype
+        iscommitted = dt isa SharedDatatype && haskey(f.datatype_locations, dt.header_offset)
+        print(io, prefix*"datatype: $(typeof(dt))", iscommitted ? " (committed)\n" : "\n")
+        iscommitted && println(io, prefix*"\tcommitted at: $(dt.header_offset)")
+        rr = jltype(dset.parent.f, dt)
+        jt = typeof(rr).parameters[1]
+        println(io, prefix*"\twritten structure: $jt")
+        if iscommitted
+            juliatype, writtentype, fields = stringify_committed_datatype(f, f.datatype_locations[dt.header_offset], showfields=true)
+            println(io, prefix*"\ttype name: $(juliatype)")
+            if !isempty(writtentype)
+                println(io, prefix*"\twritten type name: $(writtentype)")
+            end
+            for field in fields
+                println(io, prefix*"\t\t$(field)")
+            end
+        end
+    end
+    if !isnothing(dset.dataspace)
+        ds = dset.dataspace
+        if ds isa HmWrap{HmDataspace}#Hmessage
+            println(io, prefix*"dataspace:")
+            spacetype = ("Scalar", "Simple", "Null", "V1")[Int(ds.dataspace_type)+1]
+            println(io, prefix*"\ttype: $(spacetype)")
+            println(io, prefix*"\tdimensions: $(ds.dimensions)")            
+        else
+            println(io, prefix*"dataspace: $(dset.dataspace)")
+        end
+    end
+    if !isnothing(dset.layout)
+        layout = dset.layout
+        if layout isa HmWrap{HmDataLayout}
+            println(io, prefix*"layout:")
+            println(io, prefix*"\tclass: $(layout.layout_class)")
+        else
+            println(io, prefix*"layout: $(dset.layout)")
+        end
+    end
+    if !isnothing(dset.filters) && !isempty(dset.filters.filters)
+        println(io, prefix*"filters: $(dset.filters)")
+    end
+    if !isempty(dset.attributes)
+        println(io, prefix*"Attributes:")
+        for attr in dset.attributes
+            if attr isa ReadAttribute
+                data = read_attr_data(dset.parent.f, attr)
+                println(io, prefix*"\t$(attr.name) = ",
+                    data isa String ? "\"$data\"" : data)
+            elseif typeof(attr) <: (Pair{Symbol,T} where T)
+                println(io, prefix*"\t$(attr.first) = $(attr.second)")
+            else
+                throw(ArgumentError("Invalid attribute: $attr"))
+            end
+        end
+    end
+    println(io, "└─")
+end
+
 function write_dataset(dataset::Dataset, data)
     f = dataset.parent.f
     if dataset.offset != UNDEFINED_ADDRESS
@@ -145,11 +211,12 @@ function write_dataset(dataset::Dataset, data)
 end
 
 function read_dataset(dset::Dataset)
-    read_data(dset.parent.f, 
-        dset.dataspace, 
+    f = dset.parent.f
+    read_data(f,
+        ReadDataspace(f, dset.dataspace), 
         dset.datatype,
-        dset.layout,
-        isnothing(dset.filters) ? FilterPipeline() : FilterPipeline(dset.filters), 
+        DataLayout(f, dset.layout),
+        isnothing(dset.filters) ? FilterPipeline() : dset.filters, 
         dset.offset, 
         dset.attributes)
 end
@@ -175,16 +242,16 @@ function get_dataset(g::Group, name::String)
     end
 end
 
-function get_dataset(f::JLDFile, offset::RelOffset, g, name)
-    dset = Dataset(g, name, offset, nothing, nothing, nothing, ReadAttribute[], false, nothing, nothing)
+function get_dataset(f::JLDFile, offset::RelOffset, g=f.root_group, name="")
+    dset = Dataset(g, name, offset, nothing, nothing, nothing, ReadAttribute[], false, FilterPipeline(), nothing)
     
     for msg in HeaderMessageIterator(f, offset)
         if msg.type == HmDataspace
-            dset.dataspace = ReadDataspace(f, msg)
+            dset.dataspace = HmWrap(HmDataspace, msg)#ReadDataspace(f, msg)
         elseif msg.type == HmDatatype
             dset.datatype = HmWrap(HmDatatype, msg).dt
         elseif msg.type == HmDataLayout
-            dset.layout = DataLayout(f, msg)
+            dset.layout = HmWrap(HmDataLayout, msg)
         elseif msg.type == HmFilterPipeline
             dset.filters = FilterPipeline(msg)
         elseif msg.type == HmAttribute
@@ -197,8 +264,8 @@ function get_dataset(f::JLDFile, offset::RelOffset, g, name)
                 chunk_start,
                 chunk_end, 
                 next_msg_offset = chunk_end-20)
-        else
-            @warn "encountered unhandeled message type: $(msg.type)"
+        #else
+        #    @warn "encountered unhandeled message type: $(msg.type)"
         end
     end
     return dset

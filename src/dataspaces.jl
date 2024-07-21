@@ -21,10 +21,10 @@ struct ReadDataspace
 end
 ReadDataspace() = ReadDataspace(DS_SCALAR, 0, -1)
 
-function ReadDataspace(f, msg_)
-    msg = HmWrap(HmDataspace, msg_)
+ReadDataspace(f, msg_::Union{Hmessage, Message}) = 
+    ReadDataspace(f,  HmWrap(HmDataspace, msg_))
+ReadDataspace(f, msg::HmWrap{HmDataspace}) =
     ReadDataspace(msg.dataspace_type, msg.dimensionality, fileoffset(f, msg.dim_offset))
-end
 
 struct DataspaceStart
     version::UInt8

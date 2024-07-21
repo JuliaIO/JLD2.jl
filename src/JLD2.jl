@@ -507,11 +507,12 @@ include("inlineunion.jl")
 include("fileio.jl")
 include("compression.jl")
 include("explicit_datasets.jl")
+include("committed_datatype_introspection.jl")
 
 
-# if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
-#     include("precompile.jl")
-# end
+if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
+    include("precompile.jl")
+end
 
 function __init__()
     # If UnPack.jl package is loaded, extend @unpack, @pack! for file-like interface
