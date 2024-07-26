@@ -347,7 +347,7 @@ function _resolve_type(rr::ReadRepresentation{T,DataTypeODR()},
                        hasparams::Bool,
                        params) where T
     parts = split(mypath, '.')
-    modules = vcat([Main], collect(keys(Base.module_keys)), stdlibmodules(Main))
+    modules = vcat([Main], collect(keys(Base.module_keys)))
     unique!(modules)
     for mod in modules
         resolution_attempt = _resolve_type_singlemodule(rr,
