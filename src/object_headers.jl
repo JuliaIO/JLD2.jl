@@ -1,3 +1,11 @@
+struct ObjectStart
+    signature::UInt32
+    version::UInt8
+    flags::UInt8
+end
+ObjectStart(flags::UInt8) = ObjectStart(OBJECT_HEADER_SIGNATURE, 2, flags)
+define_packed(ObjectStart)
+
 """
     Hmessage{IO}
 
