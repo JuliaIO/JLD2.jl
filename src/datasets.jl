@@ -112,8 +112,8 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
 end
 
 # Most types can only be scalars or arrays
-function read_data(f::JLDFile,
-     rr,#@nospecialize(rr),
+@nospecializeinfer function read_data(f::JLDFile,
+     @nospecialize(rr),
      read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,FilterPipeline},
      attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
 
@@ -273,7 +273,7 @@ function construct_array(io::IO, ::Type{T}, ::Val{N})::Array{T,N} where {T,N}
     Array{T,N}(undef, ds...)
 end
 
-function read_array(f::JLDFile, dataspace::ReadDataspace,
+@nospecializeinfer function read_array(f::JLDFile, dataspace::ReadDataspace,
                     @nospecialize(rr::ReadRepresentation), layout::DataLayout,
                     filters::FilterPipeline, header_offset::RelOffset,
                     attributes::Union{Vector{ReadAttribute},Nothing})

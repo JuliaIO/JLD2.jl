@@ -70,7 +70,7 @@ end
 #############################################################################################################
 
 # jld2.jl 341
-Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession(); compress=nothing) =
+@nospecializeinfer Base.write(f::JLDFile, name::AbstractString, @nospecialize(obj), wsession::JLDWriteSession=JLDWriteSession(); compress=nothing) =
     write(f.root_group, name, obj, wsession; compress=compress)
 
 # groups.jl 112
