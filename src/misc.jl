@@ -202,14 +202,14 @@ jlread(io::IO, ::Type{NTuple{N,T}}) where {N,T} = ntuple(_->jlread(io, T), Val{N
 jlread(io::IO, ::Type{Tuple{}}) = ()
 
 function write_nb_int(io::IO, sz::Integer, nb::Integer)
-    for i = nb:-1:1
+    for i = 1:nb
         jlwrite(io, UInt8((sz >> (8*(i-1))) & 0xff))
     end
 end
 
 function read_nb_uint(io::IO, nb)
     val = zero(UInt)
-    for i = nb:-1:1
+    for i = 1:nb
         val += jlread(io, UInt8) * 2^(8*(i-1))
     end
     val
