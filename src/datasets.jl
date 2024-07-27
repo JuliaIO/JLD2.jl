@@ -38,7 +38,6 @@ function load_dataset(f::JLDFile{IO}, offset::RelOffset) where IO
         # checking whether something is a group is not cheap.
         # Do it only when it is not a dataset
         if isgroup(f, offset)
-
             # There is a not-yet loaded group at offset
             return get!(()->load_group(f, offset), f.loaded_groups, offset)
         end
@@ -92,7 +91,7 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
             @warn "This array should be populated by a fill value. This is not (yet) implemented."
         end
         v = Array{T, 1}()
-        header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
+        track_weakref!(f, header_offset, v)
         return v
     else
         dtt = dt
@@ -220,7 +219,7 @@ function read_empty(rr::ReadRepresentation{T}, f::JLDFile,
             @inbounds v[i] = jlconvert(rr, f, Ptr{Cvoid}(0), header_offset)
         end
     end
-    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
+    track_weakref!(f, header_offset, v)
     v
 end
 
@@ -292,7 +291,7 @@ end
         else
             read_array!(v, f, rr)
         end
-        header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
+        track_weakref!(f, header_offset, v)
         v
     else
         ndims, offset = get_ndims_offset(f, dataspace, attributes)

@@ -43,18 +43,13 @@ function pathize(g::Group, name::AbstractString, create::Bool)
         f = g.f
         dirs = split(name, '/')
 
-        # Handles the absolute path case where the name starts with /
-        if isempty(first(dirs))
-            g = g.f.root_group::G
-            start = 2
-        else
-            start = 1
-        end
-
-        for i = start:length(dirs)-1
+        for i = 1:length(dirs)-1
             dir = dirs[i]
-            isempty(dir) && continue
-
+            if isempty(dir)
+                # Handles the absolute path case where the name starts with /
+                i == 1 && (g = g.f.root_group::G)
+                continue
+            end
             # See if a group already exists
             offset = lookup_offset(g, dir)
             if offset == UNDEFINED_ADDRESS
@@ -94,7 +89,7 @@ function Base.getindex(g::Group, name::AbstractString)
     f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
 
     (g, name) = pathize(g, name, false)
-
+    isempty(name) && return g
     roffset = lookup_offset(g, name)
     if roffset == UNDEFINED_ADDRESS
         haskey(g.unwritten_child_groups, name) && return g.unwritten_child_groups[name]
@@ -103,17 +98,6 @@ function Base.getindex(g::Group, name::AbstractString)
 
     load_dataset(f, roffset)
 end
-
-# function Base.write(g::Group, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession())
-#     if g.last_chunk_start_offset != -1 && g.continuation_message_goes_here == -1
-#         error("objects cannot be added to this group because it was created with a previous version of JLD2")
-#     end
-#     f = g.f
-#     prewrite(f)
-#     (g, name) = pathize(g, name, true)
-#     g[name] = write_dataset(f, obj, wsession)
-#     nothing
-# end
 
 function Base.setindex!(g::Group, obj, name::AbstractString)
     write(g, name, obj)
@@ -145,17 +129,13 @@ function Base.haskey(g::Group, name::AbstractString)
         f = g.f
         dirs = split(name, '/')
 
-        # Handles the absolute path case where the name starts with /
-        if isempty(first(dirs))
-            g = f.root_group::G
-            start = 2
-        else
-            start = 1
-        end
-
-        for i = start:length(dirs)-1
+        for i = 1:length(dirs)-1
             dir = dirs[i]
-            isempty(dir) && continue
+            if isempty(dir)
+                # Handles the absolute path case where the name starts with /
+                i == 1 && (g = g.f.root_group::G)
+                continue
+            end
 
             # See if a group already exists
             offset = lookup_offset(g, dir)
@@ -196,11 +176,10 @@ function Base.keys(g::Group)
     ks
 end
 
-Base.keytype(f::Group) = String
+Base.keytype(::Group) = String
 
 function load_group(f::JLDFile, offset::RelOffset)
     # Messages
-    continuation_message_goes_here::Int64 = -1
     links = OrderedDict{String,RelOffset}()
     
     next_link_offset::Int64 = -1
@@ -216,56 +195,38 @@ function load_group(f::JLDFile, offset::RelOffset)
     hmitr = HeaderMessageIterator(f, offset)
     for msg in hmitr
         chunk_start, chunk_end = hmitr.chunk
-        if msg.type == HmNil
-            if continuation_message_goes_here == -1 && 
-                chunk_end - fileoffset(f, msg.offset) == CONTINUATION_MSG_SIZE
-                #continuation_message_goes_here = curpos # also correct
-                continuation_message_goes_here = fileoffset(f, msg.offset)
-
-            elseif hmitr.curpos + CONTINUATION_MSG_SIZE == chunk_end
+        if msg.type == HmNil && hmitr.curpos + CONTINUATION_MSG_SIZE == chunk_end && msg.size >= 13
                 # This is the remaining space at the end of a chunk
                 # Use only if a message can potentially fit inside
                 # Single Character Name Link Message has 13 bytes payload
-                if msg.size >= 13 
-                    #next_link_offset = curpos # also correct
-                    next_link_offset = fileoffset(f, msg.offset)
+                next_link_offset = fileoffset(f, msg.offset)
+        elseif msg.type == HmLinkInfo
+            wmsg = HmWrap(HmLinkInfo, msg)
+            fractal_heap_address = wmsg.fractal_heap_address
+            name_index_btree = wmsg.v2_btree_name_index
+        elseif msg.type == HmGroupInfo
+            wmsg = HmWrap(HmGroupInfo, msg)
+            if wmsg.size > 2
+                # Version Flag
+                wmsg.version == 0 || throw(UnsupportedFeatureException()) 
+                flag = wmsg.flags::UInt8
+                if flag%2 == 1 # first bit set
+                    link_phase_change_max_compact = wmsg.link_phase_change_max_compact
+                    link_phase_change_min_dense = wmsg.link_phase_change_min_dense
+                end
+                if (flag >> 1)%2 == 1 # second bit set
+                    # Verify that non-default group size is given
+                    est_num_entries = wmsg.est_num_entries
+                    est_link_name_len = wmsg.est_link_name_len
                 end
             end
-        else
-            continuation_message_goes_here = -1
-            if msg.type == HmLinkInfo
-                wmsg = HmWrap(HmLinkInfo, msg)
-                fractal_heap_address = wmsg.fractal_heap_address
-                name_index_btree = wmsg.v2_btree_name_index
-            elseif msg.type == HmGroupInfo
-                wmsg = HmWrap(HmGroupInfo, msg)
-                if wmsg.size > 2
-                    # Version Flag
-                    wmsg.version == 0 || throw(UnsupportedFeatureException()) 
-                    flag = wmsg.flags::UInt8
-                    if flag%2 == 1 # first bit set
-                        link_phase_change_max_compact = wmsg.link_phase_change_max_compact
-                        link_phase_change_min_dense = wmsg.link_phase_change_min_dense
-                    end
-                    if (flag >> 1)%2 == 1 # second bit set
-                        # Verify that non-default group size is given
-                        est_num_entries = wmsg.est_num_entries
-                        est_link_name_len = wmsg.est_link_name_len
-                    end
-                end
-            elseif msg.type == HmLinkMessage
-                wmsg = HmWrap(HmLinkMessage, msg)
-                name, loffset = wmsg.link_name::String, wmsg.target::RelOffset
-                links[name] = loffset
-            elseif msg.type == HmObjectHeaderContinuation
-                next_link_offset = -1
-            elseif msg.type == HmSymbolTable
-                wmsg = HmWrap(HmSymbolTable, msg)
-                v1btree_address = wmsg.v1btree_address
-                name_index_heap = wmsg.name_index_heap            
-            elseif (msg.hflags & 2^3) != 0
-                throw(UnsupportedFeatureException())
-            end
+        elseif msg.type == HmLinkMessage
+            wmsg = HmWrap(HmLinkMessage, msg)
+            links[wmsg.link_name] = wmsg.target
+        elseif msg.type == HmSymbolTable
+            wmsg = HmWrap(HmSymbolTable, msg)
+            v1btree_address = wmsg.v1btree_address
+            name_index_heap = wmsg.name_index_heap            
         end
     end
 
@@ -283,9 +244,12 @@ function load_group(f::JLDFile, offset::RelOffset)
         end
     end
 
-    Group{typeof(f)}(f, hmitr.chunk.chunk_start, continuation_message_goes_here,        
-                     hmitr.chunk.chunk_end, next_link_offset, est_num_entries,
-                     est_link_name_len,
+    chunk_start, chunk_end = hmitr.chunk
+    continuation_msg_address = chunk_end - CONTINUATION_MSG_SIZE
+    chunk_start < next_link_offset < chunk_end || (next_link_offset = -1)
+
+    Group{typeof(f)}(f, chunk_start, continuation_msg_address, chunk_end, next_link_offset, 
+                     est_num_entries, est_link_name_len,
                      OrderedDict{String,RelOffset}(), OrderedDict{String,Group}(), links)
 end
 
@@ -294,8 +258,8 @@ end
 
 Returns the size of a link message, excluding message header.
 """
-link_size(link_name::String) =
-    sizefun(Val(HmLinkMessage), 0,0,(;link_name, target=UNDEFINED_ADDRESS))
+link_size(link_name::String) = sizefun(Val(HmLinkMessage), 0,0,(;link_name, target=UNDEFINED_ADDRESS))
+
 """
     links_size(pairs)
 

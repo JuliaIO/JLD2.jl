@@ -5,7 +5,7 @@ mutable struct Dataset
     datatype
     dataspace
     layout
-    attributes
+    attributes::OrderedDict{String, Any}
     chunk
     filters#::Vector{Filter}
     #external
@@ -21,14 +21,13 @@ function create_dataset(
     layout = nothing,
     chunk=nothing,
     filters=Filter[],
-    attributes=[],
 )  
     if !isnothing(name)
         (parent, name) = pathize(parent, name, true)
     end
 
     return Dataset(parent, name, UNDEFINED_ADDRESS, datatype, dataspace,
-            layout, attributes, chunk, filters, nothing)
+            layout, OrderedDict{String,Any}(), chunk, filters, nothing)
 end
 
 iswritten(dset::Dataset) = (dset.offset != UNDEFINED_ADDRESS)
@@ -84,15 +83,13 @@ function Base.show(io::IO, ::MIME"text/plain", dset::Dataset)
     end
     if !isempty(dset.attributes)
         println(io, prefix*"Attributes:")
-        for attr in dset.attributes
+        for (k, attr) in pairs(dset.attributes)
             if attr isa ReadAttribute
                 data = read_attr_data(dset.parent.f, attr)
                 println(io, prefix*"\t$(attr.name) = ",
                     data isa String ? "\"$data\"" : data)
-            elseif typeof(attr) <: (Pair{Symbol,T} where T)
-                println(io, prefix*"\t$(attr.first) = $(attr.second)")
             else
-                throw(ArgumentError("Invalid attribute: $attr"))
+                println(io, prefix*"\t$(k) = $(attr)")
             end
         end
     end
@@ -116,9 +113,9 @@ function write_dataset(dataset::Dataset, data)
     end
     dataspace = dataset.dataspace
     # Attributes
-    attributes = map(dataset.attributes) do a
-        a isa WrittenAttribute && return a
-        typeof(a) <: (Pair{Symbol,T} where T) && return WrittenAttribute(dataset.parent.f, a.first, a.second)
+    attributes = map(collect(dataset.attributes)) do (name, attr)
+        attr isa WrittenAttribute && return attr
+        return WrittenAttribute(dataset.parent.f, name, attr)
         throw(ArgumentError("Invalid attribute: $a"))
     end
     io = f.io
@@ -218,7 +215,7 @@ function read_dataset(dset::Dataset)
         DataLayout(f, dset.layout),
         isnothing(dset.filters) ? FilterPipeline() : dset.filters, 
         dset.offset, 
-        dset.attributes)
+        collect(values(dset.attributes)))
 end
 
 get_dataset(f::JLDFile, args...; kwargs...) = 
@@ -229,23 +226,22 @@ function get_dataset(g::Group, name::String)
     f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
 
     (g, name) = pathize(g, name, false)
-
     roffset = lookup_offset(g, name)
-    roffset == UNDEFINED_ADDRESS && throw(KeyError(name))
-
-    if isgroup(f, roffset)
-        let loaded_groups = f.loaded_groups
-            get!(()->load_group(f, roffset), loaded_groups, roffset)
+    if roffset == UNDEFINED_ADDRESS
+        if isempty(name)
+            # this is a group
+            return get_dataset(f, group_offset(g), g, name)
         end
-    else
-        get_dataset(f, roffset, g, name)
+        throw(KeyError(name))
     end
+    get_dataset(f, roffset, g, name)
 end
 
 function get_dataset(f::JLDFile, offset::RelOffset, g=f.root_group, name="")
-    dset = Dataset(g, name, offset, nothing, nothing, nothing, ReadAttribute[], false, FilterPipeline(), nothing)
+    dset = Dataset(g, name, offset, nothing, nothing, nothing, OrderedDict{String,Any}(), false, FilterPipeline(), nothing)
     
-    for msg in HeaderMessageIterator(f, offset)
+    hmitr = HeaderMessageIterator(f, offset)
+    for msg in hmitr
         if msg.type == HmDataspace
             dset.dataspace = HmWrap(HmDataspace, msg)#ReadDataspace(f, msg)
         elseif msg.type == HmDatatype
@@ -255,19 +251,15 @@ function get_dataset(f::JLDFile, offset::RelOffset, g=f.root_group, name="")
         elseif msg.type == HmFilterPipeline
             dset.filters = FilterPipeline(msg)
         elseif msg.type == HmAttribute
-            push!(dset.attributes, read_attribute(f, msg))
-        elseif msg.type == HmObjectHeaderContinuation
-            wmsg = HmWrap(HmObjectHeaderContinuation, msg)
-            chunk_start = fileoffset(f, wmsg.continuation_offset)
-            chunk_end = chunk_start + wmsg.continuation_length
-            dset.header_chunk_info = (; 
-                chunk_start,
-                chunk_end, 
-                next_msg_offset = chunk_end-20)
-        #else
-        #    @warn "encountered unhandeled message type: $(msg.type)"
+            attr = read_attribute(f, msg)
+            dset.attributes[string(attr.name)] = attr
         end
     end
+
+    dset.header_chunk_info = (; 
+                hmitr.chunk.chunk_start,
+                hmitr.chunk.chunk_end, 
+                next_msg_offset = hmitr.chunk.chunk_end-CONTINUATION_MSG_SIZE)
     return dset
 end
 
@@ -349,18 +341,15 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
     continuation_start = f.end_of_data
     continuation_size = jlsizeof(OBJECT_HEADER_CONTINUATION_SIGNATURE)
     continuation_size += sum(message_size(msg) for msg in messages)
-    continuation_size += jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
-    continuation_size += 4 # checksum
+    continuation_size += CONTINUATION_MSG_SIZE + 4 # Checksum
     tmp = max(continuation_size, minimum_continuation_size)
     # only replace if the gap is larger than 4 bytes
     tmp - continuation_size > 4 && (continuation_size = tmp)
     
     # Object continuation message
-    # could re-use next_msg_offset for this
-    #seek(io, continuation_message_goes_here)
-    jlwrite(io, HeaderMessage(HmObjectHeaderContinuation, jlsizeof(RelOffset) + jlsizeof(Length), 0))
-    jlwrite(io, h5offset(f, continuation_start))
-    jlwrite(io, Length(continuation_size))
+    jlwrite(io, Hmessage(HmObjectHeaderContinuation; 
+        continuation_offset=h5offset(f, continuation_start),
+        continuation_length=Length(continuation_size)))
 
     # Re-calculate checksum
     update_checksum(io, chunk_start, chunk_end)
@@ -371,8 +360,7 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
     chunk_end = continuation_start + continuation_size -4
     cio = begin_checksum_write(io, continuation_size - 4)
     jlwrite(cio, OBJECT_HEADER_CONTINUATION_SIGNATURE)
-    remaining_space = continuation_size - jlsizeof(OBJECT_HEADER_CONTINUATION_SIGNATURE)
-    remaining_space -= (jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length) +4)
+    remaining_space = continuation_size - jlsizeof(OBJECT_HEADER_CONTINUATION_SIGNATURE) - CONTINUATION_MSG_SIZE -4
     while !isempty(messages)
         msg = popfirst!(messages)
         sz = message_size(msg)
@@ -397,29 +385,30 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
         position(io)-24)
 end
 
-function add_attribute(dset::Dataset, name::Symbol, data, wsession=JLDWriteSession())
+function add_attribute(dset::Dataset, name::String, data, wsession=JLDWriteSession())
     f = dset.parent.f
     prewrite(f) # assert writability
 
-    if !iswritten(dset)
-        # Dataset only lives in memory so far 
-        push!(dset.attributes, name=>data)
-        return nothing
-    else
+    for attr in dset.attributes
+        if (attr isa ReadAttribute && attr.name == name) || (attr isa Pair && attr.first == name)
+            throw(ArgumentError("Attribute $name already exists. Attribute names must be unique."))
+        end
+    end
+    dset.attributes[name] = data
+    if iswritten(dset)
         dset.header_chunk_info = 
-            attach_message(f, dset.offset, [WrittenAttribute(f,name,data)], wsession;
-                chunk_start=dset.header_chunk_info[1],
-                chunk_end=dset.header_chunk_info[2],
-                next_msg_offset=dset.header_chunk_info[3],
-                )
-        #TODO  add attr to dset.attributes
+        attach_message(f, dset.offset, [WrittenAttribute(f,name,data)], wsession;
+            chunk_start=dset.header_chunk_info[1],
+            chunk_end=dset.header_chunk_info[2],
+            next_msg_offset=dset.header_chunk_info[3],
+            )
         return nothing
     end
 end
 
 function attributes(dset::Dataset; plain::Bool=false)
     plain && return dset.attributes
-    map(dset.attributes) do attr
-        attr.name => read_attr_data(dset.parent.f, attr)
+    map(values(dset.attributes)) do attr
+        read_attr_data(dset.parent.f, attr)
     end
 end

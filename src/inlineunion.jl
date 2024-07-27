@@ -72,6 +72,6 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     # Union{T1, T2}[v;]
     # The above syntax is not compatible to julia v1.0
     u = Union{T1, T2}[convert2union.(v);]
-    header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(u))
+    track_weakref!(f, header_offset, u)
     return u
 end

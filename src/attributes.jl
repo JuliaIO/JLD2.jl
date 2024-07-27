@@ -4,14 +4,14 @@
 
 # TODO: fix inference when there are attributes
 struct WrittenAttribute{DS<:WriteDataspace,H5T<:H5Datatype,T}
-    name::Symbol
+    name::String
     dataspace::DS
     datatype::H5T
     data::T
 end
-
-function WrittenAttribute(f::JLDFile, name::Symbol, data::T) where T
-    WrittenAttribute(name, WriteDataspace(f, data, objodr(data)), h5type(f, data), data)
+WrittenAttribute(name, dataspace, datatype, data) = WrittenAttribute(String(name), dataspace, datatype, data)
+function WrittenAttribute(f::JLDFile, name, data::T) where T
+    WrittenAttribute(String(name), WriteDataspace(f, data, objodr(data)), h5type(f, data), data)
 end
 
 struct ReadAttribute
@@ -32,14 +32,14 @@ struct AttributeHeader
 end
 define_packed(AttributeHeader)
 
-jlsizeof(attr::WrittenAttribute) = 8 + symbol_length(attr.name) + 1 + jlsizeof(attr.datatype) + jlsizeof(attr.dataspace) +
+jlsizeof(attr::WrittenAttribute) = 8 + sizeof(attr.name) + 1 + jlsizeof(attr.datatype) + jlsizeof(attr.dataspace) +
                                      numel(attr.dataspace) * odr_sizeof(objodr(attr.data))
 
 function write_attribute(io::IO, f::JLDFile, attr::WrittenAttribute, wsession::JLDWriteSession)
-    namelen = symbol_length(attr.name)
+    namelen = sizeof(attr.name)
     jlwrite(io, AttributeHeader(0x02, isa(attr.datatype, CommittedDatatype), namelen+1,
                               jlsizeof(attr.datatype), jlsizeof(attr.dataspace)))
-    unsafe_write(io, Base.unsafe_convert(Ptr{Cchar}, attr.name), namelen)
+    jlwrite(io, attr.name)
     jlwrite(io, UInt8(0))
     jlwrite(io, attr.datatype)
     jlwrite(io, attr.dataspace)
@@ -70,37 +70,17 @@ Return a list of attributes attached to the dataset or group.
 """
 function load_attributes end
 
-function load_attributes(f::JLDFile, name::AbstractString)
-    if isempty(name) || name == "/"
-        load_attributes(f, f.root_group_offset)
-    else 
-        load_attributes(f.root_group,name)
-    end
-end
-
-function load_attributes(g::Group, name::AbstractString)
-    dset = get_dataset(g, name)
-    attributes(dset)
-end
+load_attributes(g::Union{JLDFile,Group}, name::AbstractString) =
+    attributes(get_dataset(g, name))
 
 function load_attributes(g::JLD2.Group)
-    f = g.f
-    # get offset of group in the file (file handle keeps track)
-    if g == f.root_group
-        reloffset = f.root_group_offset
-    else
-        reloffset = findfirst(==(g), f.loaded_groups)
-    end
-    isnothing(reloffset) && throw(InternalError("Unable to find group in file."))
-    # load attributes using file handle and offset
-    dset = get_dataset(f, reloffset, g, "")
-    attributes(dset)
+    offset = group_offset(g)
+    offset == UNDEFINED_ADDRESS && throw(InternalError("Unable to find group in file."))
+    attributes(get_dataset(g.f, offset, g, ""))
 end
 
-function load_attributes(f::Union{JLDFile, Group}, offset::RelOffset)
-    dset = get_dataset(f, offset)
-    attributes(dset)
-end
+load_attributes(f::Union{JLDFile, Group}, offset::RelOffset) =
+    attributes(get_dataset(f, offset))
 
 
 """
