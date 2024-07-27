@@ -142,22 +142,6 @@ function uintofsize(sz)
 end
 
 """
-    to_uint64(bts::Vector{UInt8})
-
-Generate a `UInt64` from a vector of `UInt8` assuming little-endian encoding.
-Vector may be shorter than 8 bytes. In that case, the remaining bytes are assumed to be zero.
-"""
-function to_uint64(bts::Vector{UInt8})
-    bts2 = append!(zeros(UInt8, 8-length(bts)), reverse(bts))
-    u = zero(UInt64)
-    for b in bts2
-        u = u << 8
-        u += b
-    end
-    u
-end
-
-"""
     skip_to_aligned!(io, rel=0)
 
 Skip to nearest position aligned to a multiple of 8 bytes relative to `rel`.
@@ -227,9 +211,9 @@ jlread(io::IO, ::Type{Tuple{}}) = ()
 
 function read_nb_uint(io::IO, nb)
     val = zero(UInt)
-    for n = 1:nb
-        #val = val << 8
-        val += jlread(io, UInt8)*(2^(8n))
+    for _ = 1:nb
+        val = val << 8
+        val += jlread(io, UInt8)
     end
     val
 end
