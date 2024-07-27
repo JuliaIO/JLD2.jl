@@ -47,10 +47,11 @@ end
 struct FixedLengthAsciiString{TERM, N} end
 
 function jltype(f::JLDFile, dt::BasicDatatype)
-    if dt.class >> 4 == 1
-        if dt.class << 4 == DT_REFERENCE  << 4
+    class = dt.class
+    if class >> 4 == 1
+        if class%16 == DT_REFERENCE
             return ReadRepresentation{Any,RelOffset}()
-        elseif dt.class << 4 == DT_STRING  << 4
+        elseif class%16 == DT_STRING
             if dt.bitfield1 == 0x00 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
                 #return AsciiString{NullTerminated}(dt.size)
                 return ReadRepresentation{String, FixedLengthAsciiString{NullTerminated, dt.size}}()
@@ -61,14 +62,14 @@ function jltype(f::JLDFile, dt::BasicDatatype)
             else
                 throw(UnsupportedFeatureException("Encountered an unsupported string type. $dt"))
             end
-        elseif dt.class << 4 == DT_OPAQUE  << 4
+        elseif class%16 == DT_OPAQUE
             return ReadRepresentation{OpaqueData{Int(dt.size)},NTuple{Int(dt.size),UInt8}}()
 
         else
             throw(UnsupportedFeatureException("Encountered an unsupported type."))
         end
     end
-    if dt.class << 4 == DT_STRING  << 4
+    if class%16 == DT_STRING
         if (dt.bitfield1 == 0x01 || dt.bitfield1 == 0x11) && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
             return FixedLengthString{String}(dt.size)
         elseif dt.bitfield1 == 0x10 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
@@ -76,9 +77,9 @@ function jltype(f::JLDFile, dt::BasicDatatype)
         else
             throw(UnsupportedFeatureException("Encountered an unsupported string type."))
         end
-    elseif dt.class << 4 == DT_OPAQUE  << 4
+    elseif class%16 == DT_OPAQUE
         return ReadRepresentation{OpaqueData{Int(dt.size)},NTuple{Int(dt.size),UInt8}}()
-    elseif dt.class << 4 == DT_REFERENCE  << 4
+    elseif class%16 == DT_REFERENCE
         return ReadRepresentation{Any,RelOffset}()
     else
         throw(UnsupportedFeatureException())

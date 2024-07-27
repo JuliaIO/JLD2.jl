@@ -1,53 +1,3 @@
-function jlread(io, ::Type{FilterPipeline})
-    version = jlread(io, UInt8)
-    nfilters = jlread(io, UInt8)
-    if version == 1
-        skip(io, 6)
-        filters = map(1:nfilters) do _
-            id = jlread(io, UInt16)
-            name_length = jlread(io, UInt16)
-            flags = jlread(io, UInt16)
-            nclient_vals = jlread(io, UInt16)
-            if iszero(name_length) 
-                name = ""
-            else
-                name = read_bytestring(io)
-                skip(io, 8-mod1(sizeof(name), 8)-1)
-            end
-            client_data = jlread(io, UInt32, nclient_vals)
-            isodd(nclient_vals) && skip(io, 4)
-            Filter(id, flags, name, client_data)
-        end
-        return FilterPipeline(filters)
-    elseif version == 2
-        filters = map(1:nfilters) do _
-            id = jlread(io, UInt16)
-            if id > 255
-                name_length = jlread(io, UInt16)
-                flags = jlread(io, UInt16)
-                nclient_vals = jlread(io, UInt16)
-                if iszero(name_length) 
-                    name = ""
-                else
-                    name = read_bytestring(io)
-                    skip(io, 8-mod1(sizeof(name), 8)-1)
-                end
-            else
-                name = ""
-                flags = jlread(io, UInt16)
-                nclient_vals = jlread(io, UInt16)
-            end
-            client_data = jlread(io, UInt32, nclient_vals)
-            Filter(id, flags, name, client_data)
-        end
-        return FilterPipeline(filters)
-    else
-        throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
-    end
-
-
-end
-
 const COMPRESSOR_TO_ID = Dict(
     :ZlibCompressor => UInt16(1),
     :ShuffleFilter => UInt16(2),
@@ -118,7 +68,7 @@ end
 #############################################################################################################
 
 # jld2.jl 341
-Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession(); compress=nothing) =
+@nospecializeinfer Base.write(f::JLDFile, name::AbstractString, @nospecialize(obj), wsession::JLDWriteSession=JLDWriteSession(); compress=nothing) =
     write(f.root_group, name, obj, wsession; compress=compress)
 
 # groups.jl 112
@@ -172,23 +122,36 @@ function get_decompressor(filters::FilterPipeline)
     return invoke_again, decompressors
 end
 
-pipeline_message_size(filter_id) = 4 + 12 + (filter_id > 255)*(2 + length(ID_TO_DECOMPRESSOR[filter_id][4]))
-
+function pipeline_message_size(filter_id) 
+    sz = 4 + 12
+    if (filter_id > 255)
+        sz += 2
+        filter_name = ID_TO_DECOMPRESSOR[filter_id][4]
+        fnamelen = length(filter_name)+1
+        fnamelen += 8-mod1(fnamelen, 8)
+        sz += fnamelen
+    end
+    sz
+end
 function write_filter_pipeline_message(io, filter_id::UInt16)
     hmsize = 12
     if filter_id > 255
         filter_name = ID_TO_DECOMPRESSOR[filter_id][4]
-        hmsize += 2 + length(filter_name)
+        fnamelen = length(filter_name)+1
+        fnamelen += 8-mod1(fnamelen, 8)
+        padding = fnamelen - length(filter_name)
+        hmsize += 2 + fnamelen
     end
-    jlwrite(io, HeaderMessage(HM_FILTER_PIPELINE, hmsize, 0))
+    jlwrite(io, HeaderMessage(HmFilterPipeline, hmsize, 0))
     jlwrite(io, UInt8(2))                 # Version
     jlwrite(io, UInt8(1))                 # Number of Filters
     jlwrite(io, filter_id)                # Filter Identification Value
-    filter_id > 255 && jlwrite(io, UInt16(length(filter_name)))
+    filter_id > 255 && jlwrite(io, UInt16(fnamelen))
                                         # Length of Filter Name
     jlwrite(io, UInt16(0))                # Flags
     jlwrite(io, UInt16(1))                # Number of Client Data Values
     filter_id > 255 && jlwrite(io, filter_name) # Filter Name
+    filter_id > 255 && (padding > 0) && jlwrite(io, zeros(UInt8, padding))
     jlwrite(io, UInt32(5))                # Client Data (Compression Level)
     nothing
 end
@@ -218,9 +181,9 @@ function write_chunked_storage_message( io::IO,
                                         dims::NTuple{N,Int},
                                         filtered_size::Int,
                                         offset::RelOffset) where N
-    jlwrite(io, HeaderMessage(HM_DATA_LAYOUT, chunked_storage_message_size(N) - jlsizeof(HeaderMessage), 0))
+    jlwrite(io, HeaderMessage(HmDataLayout, chunked_storage_message_size(N) - jlsizeof(HeaderMessage), 0))
     jlwrite(io, UInt8(4))                     # Version
-    jlwrite(io, UInt8(LC_CHUNKED_STORAGE))    # Layout Class
+    jlwrite(io, UInt8(LcChunked))    # Layout Class
     jlwrite(io, UInt8(2))                     # Flags (= SINGLE_INDEX_WITH_FILTER)
     jlwrite(io, UInt8(N+1))                   # Dimensionality
     jlwrite(io, UInt8(jlsizeof(Length)))        # Dimensionality Size

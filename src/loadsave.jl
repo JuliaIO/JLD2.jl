@@ -162,9 +162,9 @@ function loadtodict!(d::Dict, g::Union{JLDFile, Group}, prefix::String="")
     for k in keys(g)
         v = g[k]
         if v isa Group
-            loadtodict!(d, g[k], prefix*k*"/")
+            loadtodict!(d, v, prefix*k*"/")
         else
-            d[prefix*k] = g[k]
+            d[prefix*k] = v
         end
     end
     return d
@@ -281,8 +281,8 @@ end
 To choose the io type `IOStream` instead of the default `MmapIO` use 
 `jldsave(fn, IOStream; kwargs...)`.
 """
-function jldsave(filename::AbstractString, compress=false, iotype::Union{Type{IOStream},Type{MmapIO}}=DEFAULT_IOTYPE; 
-                    kwargs...
+@nospecializeinfer function jldsave(filename::AbstractString, compress=false, iotype::Union{Type{IOStream},Type{MmapIO}}=DEFAULT_IOTYPE; 
+                    @nospecialize(kwargs...)
                     )
     f = jldopen(filename, "w"; compress, iotype)
     try

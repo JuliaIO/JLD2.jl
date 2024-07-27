@@ -120,7 +120,7 @@ function read_indirect_block(f, offset, hh, nrows::Int)
     heap_header_address = jlread(cio, RelOffset)
     # number of bytes for block offset
     offset_byte_num = ceil(Int, hh.max_heap_size / 8)
-    block_offset = to_uint64(jlread(cio, UInt8, offset_byte_num))
+    block_offset = read_nb_uint(cio, offset_byte_num)
 
     # Read child direct blocks
     block_start = block_offset
@@ -274,10 +274,10 @@ function read_v2btree_node(f, offset, num_records, depth, bh, hh)
     numbytes_total = size_size2(max_records_total)
     child_nodes = map(1:num_records+1) do _
         child_node_pointer = jlread(cio, RelOffset) # offset type
-        num_records = Int(to_uint64(jlread(cio, UInt8, numbytes)))
+        num_records = Int(read_nb_uint(cio, numbytes))
         if depth > 1
-            total_records = Int(to_uint64(jlread(cio, UInt8, numbytes_total)))
-            return (; child_node_pointer, num_records,total_records)
+            total_records = Int(read_nb_uint(cio, numbytes_total))
+            return (; child_node_pointer, num_records, total_records)
         end
         (; child_node_pointer, num_records)
     end
@@ -313,9 +313,9 @@ function read_record(io, type, hh)
         version_type = jlread(io, UInt8)
 
         offbytes = hh.max_heap_size÷8
-        offset =Int(to_uint64(jlread(io, UInt8, offbytes)))
+        offset =Int(read_nb_uint(io, offbytes))
         lnbytes = min(hh.max_direct_block_size, hh.max_size_managed_objects) |> size_size2
-        length = Int(to_uint64(jlread(io, UInt8, lnbytes)))
+        length = Int(read_nb_uint(io, lnbytes))
         skip(io, 6-offbytes-lnbytes)
         return BTreeType5RecordV2(hash_of_name, offset, length)
     else
@@ -346,7 +346,7 @@ function get_block_offset(f, iblock, roffset, hh)
     K = length(iblock.dblocks)
     if block_num < K
         dblock = iblock.dblocks[block_num+1]
-        return fileoffset(f,dblock.offset) + roffset - block_start
+        return dblock.offset + roffset - block_start
     end
     sub_iblock =  iblock.iblocks[block_num-K+1]
     get_block_offset(f, sub_iblock, roffset-block_start, hh)
@@ -361,14 +361,14 @@ function read_btree(f, offset_hh, offset_bh)
         indirect_rb = read_indirect_block(f, hh.root_block_address, hh, hh.cur_num_rows_in_root_iblock)
         links = map(records) do r
             offset = get_block_offset(f, indirect_rb, r.offset, hh)
-            seek(f.io, offset)
-            read_link(f.io)
+            m = HmWrap(HmLinkMessage, Message(HmLinkMessage, f, offset))
+            m.link_name, m.target
         end
     else # there's only a single direct block at hh.root_block_address
         links = map(records) do r
-            offset = fileoffset(f,hh.root_block_address) + r.offset
-            seek(f.io, offset)
-            read_link(f.io)
+            offset = hh.root_block_address + r.offset
+            m = HmWrap(HmLinkMessage, Message(HmLinkMessage, f, offset))
+            m.link_name, m.target
         end
     end
     links

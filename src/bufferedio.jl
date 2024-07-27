@@ -2,11 +2,6 @@
 # BufferedIO
 #
 
-const Plain = Union{Int16,Int32,Int64,Int128,UInt16,UInt32,UInt64,UInt128,Float16,Float32,
-                    Float64}
-const PlainType = Union{Type{Int16},Type{Int32},Type{Int64},Type{Int128},Type{UInt16},
-                        Type{UInt32},Type{UInt64},Type{UInt128},Type{Float16},
-                        Type{Float32},Type{Float64}}
 const DEFAULT_BUFFER_SIZE = 1024
 
 struct BufferedWriter <: IO
@@ -58,8 +53,6 @@ function Base.unsafe_write(io::BufferedWriter, x::Ptr{UInt8}, n::UInt64)
     n + position <= length(buffer) || throw(EOFError())
     unsafe_copyto!(pointer(buffer, position+1), x, n)
     io.position[] = position + n
-    # Base.show_backtrace(STDOUT, backtrace())
-    # gc()
     return n
 end
 
@@ -76,7 +69,7 @@ BufferedReader(io::IOStream) =
     BufferedReader(io, Vector{UInt8}(), position(io), Ref{Int}(0))
 Base.show(io::IO, ::BufferedReader) = print(io, "BufferedReader")
 
-function readmore!(io::BufferedReader, n::Int)
+function readmore!(io::BufferedReader, n::Integer)
     f = io.f
     amount = max(bytesavailable(f), n)
     buffer = io.buffer
@@ -154,4 +147,12 @@ function end_checksum(io::Union{BufferedReader,BufferedWriter})
     ret = Lookup3.hash(io.buffer, 1, io.position[])
     finish!(io)
     ret
+end
+
+function update_checksum(io, chunk_start, chunk_end)
+    seek(io, chunk_start)
+    cio = begin_checksum_read(io)
+    seek(cio, chunk_end)
+    seek(io, chunk_end)
+    jlwrite(io, end_checksum(cio))
 end

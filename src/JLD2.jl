@@ -12,29 +12,6 @@ using PrecompileTools: @setup_workload, @compile_workload
 export jldopen, @load, @save, save_object, load_object, printtoc
 export jldsave
 
-const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
-
-# Currently we specify that all offsets and lengths are 8 bytes
-const Length = UInt64
-
-struct UnsupportedVersionException <: Exception
-    msg::String
-end
-struct UnsupportedFeatureException <: Exception
-    msg::String
-end
-struct InvalidDataException <: Exception
-    msg::String
-end
-struct InternalError <: Exception
-    msg::String
-end
-
-# In the future a more descriptive error should be returned
-UnsupportedVersionException() = UnsupportedVersionException("")
-UnsupportedFeatureException() = UnsupportedFeatureException("")
-InvalidDataException() = InvalidDataException("")
-InternalError() = InternalError("")
 
 # Due to custom overrides we do not use Base functions directly
 # but define our own to avoid type piracy
@@ -59,133 +36,20 @@ jlsizeof(x) = Base.sizeof(x)
 jlunsafe_store!(p, x) = Base.unsafe_store!(p, x)
 jlunsafe_load(p) = Base.unsafe_load(p)
 
+include("mmapio.jl")
+include("bufferedio.jl")
+include("macros_utils.jl")
+include("types.jl")
 include("julia_compat.jl")
 include("file_header.jl")
 include("Lookup3.jl")
-include("mmapio.jl")
-include("bufferedio.jl")
-include("misc.jl")
 include("superblock.jl")
+include("misc.jl")
+
 
 is_win7() = Sys.iswindows() && Sys.windows_version().major <= 6 && Sys.windows_version().minor <= 1
 # Windows 7 doesn't support mmap, falls back to IOStream
 const DEFAULT_IOTYPE = is_win7() ? IOStream : MmapIO
-
-"""
-    RelOffset
-
-Represents an HDF5 relative offset. This differs from a file offset (used elsewhere) in
-that it is relative to the superblock base address. `fileoffset` and `h5offset` convert between
-`RelOffset`s and file offsets.
-"""
-struct RelOffset
-    offset::UInt64
-end
-define_packed(RelOffset)
-Base.:(==)(x::RelOffset, y::RelOffset) = x === y
-Base.hash(x::RelOffset) = hash(x.offset)
-Base.:(+)(x::RelOffset, y::Integer) = RelOffset(UInt64(x.offset + y))
-
-const UNDEFINED_ADDRESS = RelOffset(0xffffffffffffffff)
-const NULL_REFERENCE = RelOffset(0)
-
-"""
-    JLDWriteSession{T}
-
-A `JLDWriteSession` keeps track of references to serialized objects. If `T` is a Dict,
-`h5offset` maps an object ID (returned by calling `objectid`) to th `RelOffset` of the
-written dataset. If it is `Union{}`, then references are not tracked, and objects
-referenced multiple times are written multiple times.
-"""
-struct JLDWriteSession{T<:Union{Dict{UInt,RelOffset},Union{}}}
-    h5offset::T
-    objects::Vector{Any}
-
-    JLDWriteSession{T}() where T = new()
-    JLDWriteSession{T}(h5offset, objects) where T = new(h5offset, objects)
-end
-JLDWriteSession() = JLDWriteSession{Dict{UInt,RelOffset}}(Dict{UInt,RelOffset}(), Any[])
-
-
-"""
-    GlobalHeap
-
-Represents an HDF5 global heap structure.
-"""
-mutable struct GlobalHeap
-    offset::Int64
-    length::Length
-    free::Length
-    objects::Vector{Int64}
-end
-
-"""
-    abstract type H5Datatype
-
-Supertype of all HDF5 datatypes.
-"""
-abstract type H5Datatype end
-
-"""
-    SharedDatatype <: H5Datatype
-
-Reference to a shared datatype message (stored elsewhere in a file).
-"""
-struct SharedDatatype <: H5Datatype
-    header_offset::RelOffset
-end
-
-"""
-    CommittedDatatype <: H5Datatype
-
-Reference to a shared datatype message (stored elsewhere in a file).
-These are stored in the `_types` group and indexed.
-"""
-struct CommittedDatatype <: H5Datatype
-    header_offset::RelOffset
-    index::Int
-end
-
-
-"""
-    ReadRepresentation{T,ODR}
-
-A type encoding both the Julia type `T` and the on-disk (HDF5) representation `ODR`.
-"""
-struct ReadRepresentation{T,ODR} end
-Base.eltype(::Type{<:ReadRepresentation{T}}) where T = T
-
-"""
-    CustomSerialization{T,S}
-
-On-disk representation for data that is written as if it were of Julia type `T`, but is
-read as type `S`.
-"""
-struct CustomSerialization{T,S} end
-
-"""
-    Upgrade(T)
-
-Specify an upgrade path for serialized structs using the `typemap` keyword argument
-and `rconvert`.
-"""
-struct Upgrade
-    target
-end
-
-struct Filter
-    id::UInt16
-    flags::UInt16
-    name::String
-    client_data::Vector{UInt32}
-end
-
-struct FilterPipeline
-    filters::Vector{Filter}
-end
-
-FilterPipeline() = FilterPipeline(Filter[])
-iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
 
 """
     Group{T}
@@ -314,7 +178,7 @@ FallbackType(::Type{MmapIO}) = IOStream
 FallbackType(::Type{IOStream}) = nothing
 
 # The delimiter is excluded by default
-read_bytestring(io::IOStream) = String(readuntil(io, 0x00))
+read_bytestring(io::Union{IOStream, IOBuffer}) = String(readuntil(io, 0x00))
 
 const OPEN_FILES = Dict{String,WeakRef}()
 const OPEN_FILES_LOCK = ReentrantLock()
@@ -401,7 +265,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
             load_file_metadata!(f)
         catch e
             close(f)
-            rethrow(e)
+            throw(e)
         end
     end
     merge!(f.typemap, typemap)
@@ -422,25 +286,25 @@ function load_file_metadata!(f)
             throw(UnsupportedVersionException("This file can not be edited by JLD2. Please open in read-only mode."))
         end
     end
-    try
+    #try
         f.root_group = load_group(f, f.root_group_offset)
 
-    if haskey(f.root_group.written_links, "_types")
-        types_group_offset = f.root_group.written_links["_types"]::RelOffset
-        f.types_group = f.loaded_groups[types_group_offset] = load_group(f, types_group_offset)
-        i = 0
-        for (offset::RelOffset) in values(f.types_group.written_links)
-            f.datatype_locations[offset] = CommittedDatatype(offset, i += 1)
+        if haskey(f.root_group.written_links, "_types")
+            types_group_offset = f.root_group.written_links["_types"]::RelOffset
+            f.types_group = f.loaded_groups[types_group_offset] = load_group(f, types_group_offset)
+            i = 0
+            for (offset::RelOffset) in values(f.types_group.written_links)
+                f.datatype_locations[offset] = CommittedDatatype(offset, i += 1)
+            end
+            resize!(f.datatypes, length(f.datatype_locations))
+        else
+            f.types_group = Group{typeof(f)}(f)
         end
-        resize!(f.datatypes, length(f.datatype_locations))
-    else
-        f.types_group = Group{typeof(f)}(f)
-    end
-    catch e
-        show(e)
-        f.types_group = Group{typeof(f)}(f)
+    # catch e
+    #     show(e)
+    #     f.types_group = Group{typeof(f)}(f)
 
-    end
+    # end
     nothing
 end
 
@@ -617,11 +481,13 @@ printtoc(io::IO, f::JLDFile; numlines = typemax(Int64)) =
 
 
 
+include("headermessages.jl")
 include("object_headers.jl")
 include("groups.jl")
 include("dataspaces.jl")
 include("attributes.jl")
 include("datatypes.jl")
+include("datalayouts.jl")
 include("datasets.jl")
 include("global_heaps.jl")
 include("fractal_heaps.jl")
@@ -639,6 +505,9 @@ include("backwards_compatibility.jl")
 include("inlineunion.jl")
 include("fileio.jl")
 include("compression.jl")
+include("explicit_datasets.jl")
+include("committed_datatype_introspection.jl")
+
 
 if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
     include("precompile.jl")

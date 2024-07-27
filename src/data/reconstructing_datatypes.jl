@@ -83,7 +83,8 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
 
     # If type of datatype is this datatype, then this is the committed
     # datatype that describes a datatype
-    if h5offset(f, julia_type_attr.datatype_offset) == cdt.header_offset
+    if julia_type_attr.datatype isa SharedDatatype && 
+       julia_type_attr.datatype.header_offset == cdt.header_offset
         # Verify that the datatype matches our expectations
         if dt != H5TYPE_DATATYPE
             error("""The HDF5 datatype representing a Julia datatype does not match
