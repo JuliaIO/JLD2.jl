@@ -1,5 +1,3 @@
-import Pkg.Types: VersionRange
-
 # Currently we specify a 512 byte header
 const FILE_HEADER_LENGTH = 512
 
@@ -7,7 +5,7 @@ const FORMAT_VERSION = v"0.1.1"
 # Range of file format versions that can be read
 # Publish patch release relaxing upper version bound
 # if the imminent major release is not breaking
-const COMPATIBLE_VERSIONS = VersionRange("0.1")
+const COMPATIBLE_VERSIONS = (lower=v"0.1", upper=v"0.2")
 const REQUIRED_FILE_HEADER = "HDF5-based Julia Data Format, version "
 const FILE_HEADER = "$(REQUIRED_FILE_HEADER)$(FORMAT_VERSION)\x00 (Julia $(VERSION) $(sizeof(Int)*8)-bit $(htol(1) == 1 ? "LE" : "BE"))\x00"
 @assert length(FILE_HEADER) <= FILE_HEADER_LENGTH
@@ -39,7 +37,7 @@ function verify_file_header(f)
         @warn("""This file was written in a newer version of the JLD2 file format.
         Please consider updating JLD2.""", maxlog=1)
     end
-    if ver ∉ COMPATIBLE_VERSIONS
+    if !(COMPATIBLE_VERSIONS.lower <= ver < COMPATIBLE_VERSIONS.upper)
         @warn("""This file was written with a different version of JLD2 that may not be compatible.
          Attempting to load data.""", maxlog=1)
     end

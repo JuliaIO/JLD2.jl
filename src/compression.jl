@@ -83,8 +83,6 @@ end
 # Dynamic Package Loading Logic copied from FileIO
 const load_locker = Base.ReentrantLock()
 
-is_installed(pkg::Symbol) = get(Pkg.installed(), string(pkg), nothing) != nothing
-
 function _findmod(f::Symbol)
     for (u,v) in Base.loaded_modules
         (Symbol(v) == f) && return u
