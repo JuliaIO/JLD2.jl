@@ -96,22 +96,19 @@ end
 
 Prints the header messages of a group or dataset in a file.
 """
-function print_header_messages(f::JLDFile, name::AbstractString)
-    if isempty(name) || name == "/"
-        print_header_messages(f, f.root_group_offset)
-    else 
-        print_header_messages(f.root_group,name)
-    end
-end
+print_header_messages(f::JLDFile, name::AbstractString) = 
+    print_header_messages(f.root_group, name)
 
 function print_header_messages(g::Group, name::AbstractString)
     g.f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
     (g, name) = pathize(g, name, false)
     roffset = lookup_offset(g, name)
-    if roffset == UNDEFINED_ADDRESS && isempty(name)
-        roffset = g.f.root_group_offset
-    else
-        throw(ArgumentError("did not find a group or dataset named \"$name\""))
+    if roffset == UNDEFINED_ADDRESS
+        if isempty(name)
+            roffset = g.f.root_group_offset
+        else
+            throw(ArgumentError("did not find a group or dataset named \"$name\""))
+        end
     end
     return print_header_messages(g.f, roffset)
 end
@@ -181,7 +178,6 @@ function HeaderMessageIterator(f::JLDFile{IOT}, offset::RelOffset) where {IOT}
     # Version 1 object header have no signature and start with version
     header_version = jlread(io, UInt8)
     if header_version == 1
-        seek(io, chunk_start)
         cio = io
         skip(cio, 7)
         sz = jlread(cio, UInt32)
@@ -195,10 +191,10 @@ function HeaderMessageIterator(f::JLDFile{IOT}, offset::RelOffset) where {IOT}
         jlread(cio, UInt8) == 2 || throw(InvalidDataException("Invalid Object header version"))
         flags = jlread(cio, UInt8)
         # Skip access, modification, change and birth times
-        (flags & OH_TIMES_STORED) != 0 && skip(io, 16)
+        (flags & OH_TIMES_STORED) != 0 && skip(cio, 16)
         # Skip maximum # of attributes fields
-        (flags & OH_ATTRIBUTE_PHASE_CHANGE_VALUES_STORED) != 0 && skip(io, 4)
-        sz = read_size(io, flags)
+        (flags & OH_ATTRIBUTE_PHASE_CHANGE_VALUES_STORED) != 0 && skip(cio, 4)
+        sz = read_size(cio, flags)
     end
     chunk = (; chunk_start, chunk_end = position(cio) + sz)
     pos = position(cio)
