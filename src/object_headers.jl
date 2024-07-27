@@ -1,92 +1,3 @@
-#
-# Object headers
-#
-struct ObjectStart
-    signature::UInt32
-    version::UInt8
-    flags::UInt8
-end
-ObjectStart(flags::UInt8) = ObjectStart(OBJECT_HEADER_SIGNATURE, 2, flags)
-define_packed(ObjectStart)
-
-# Reads the start of an object including the signature, version, flags,
-# and (payload) size. Returns the size.
-function read_obj_start(io::IO)
-    curpos = position(io)
-    os = jlread(io, ObjectStart)
-    if os.version == 2 && os.signature == OBJECT_HEADER_SIGNATURE
-        if (os.flags & OH_TIMES_STORED) != 0
-            # Skip access, modification, change and birth times
-            skip(io, 16)
-        end
-        if (os.flags & OH_ATTRIBUTE_PHASE_CHANGE_VALUES_STORED) != 0
-            # Skip maximum # of attributes fields
-            skip(io, 4)
-        end
-
-        return read_size(io, os.flags), 2, os.flags
-    else
-        seek(io, curpos)
-        version = jlread(io, UInt8)
-        version == 1 || throw(error("This should not have happened"))
-        
-        skip(io, 1)
-        num_messages = jlread(io, UInt16)
-        obj_ref_count = jlread(io, UInt32)
-        obj_header_size = Int(jlread(io, UInt32))
-        return obj_header_size, 1, os.flags
-    end
-end
-
-"""
-    start_obj_read(f::JLDFile, offset::RelOffset)
-
-Internal function that does some prep-work for reading a header.
-"""
-function start_obj_read(f, offset)
-    io = f.io
-    chunk_start::Int64 = fileoffset(f, offset)
-    seek(io, chunk_start)
-    # Version 1 object header have no signature and start with version
-    header_version = jlread(io, UInt8)#::UInt8
-    if header_version == 1
-        seek(io, chunk_start)
-        cio = io
-        sz,_,groupflags = read_obj_start(cio)
-        # Skip to nearest 8byte aligned position
-        #skip_to_aligned!(cio, fileoffset(f, offset))
-        skip(cio, 4)
-        chunk_end = position(cio) + sz
-    else
-        header_version = 0x2
-        seek(io, chunk_start)
-        cio = begin_checksum_read(io)
-        sz,_,groupflags = read_obj_start(cio)
-        chunk_end = position(cio) + sz
-    end
-    chunk = (; chunk_start, chunk_end)
-    return cio, header_version, chunk, groupflags
-end
-
-"""
-    start_chunk_read(io, chunk, header_version)
-
-Internal function that does some prep-work for reading a chunk
-(which is a continuation of a regular object header).
-"""
-function start_chunk_read(io, chunk, header_version)
-    seek(io, chunk.chunk_start)
-    if header_version == 2
-        cio = begin_checksum_read(io)
-        jlread(cio, UInt32) == OBJECT_HEADER_CONTINUATION_SIGNATURE || throw(InvalidDataException())
-        cio
-    else
-        cio = io
-    end
-    return cio
-end
-
-
 """
     Hmessage{IO}
 
@@ -186,12 +97,15 @@ function print_header_messages(f::JLDFile, name::AbstractString)
 end
 
 function print_header_messages(g::Group, name::AbstractString)
-    f = g.f
-    f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
+    g.f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
     (g, name) = pathize(g, name, false)
     roffset = lookup_offset(g, name)
-    roffset != UNDEFINED_ADDRESS || throw(ArgumentError("did not find a group or dataset named \"$name\""))
-    print_header_messages(f, roffset)
+    if roffset == UNDEFINED_ADDRESS && isempty(name)
+        roffset = g.f.root_group_offset
+    else
+        throw(ArgumentError("did not find a group or dataset named \"$name\""))
+    end
+    return print_header_messages(g.f, roffset)
 end
 
 function print_header_messages(f::JLDFile, offset::RelOffset)
@@ -213,7 +127,7 @@ function print_header_messages(f::JLDFile, offset::RelOffset)
 end
 
 
-function read_header_message(f, io, header_version, chunk_start, groupflags)#, lazy=true)
+function read_header_message(f, io, header_version, chunk_start, groupflags)
     msgpos = h5offset(f, position(io))
     if header_version == 1
         # Message start 8byte aligned relative to object start
@@ -253,17 +167,43 @@ mutable struct HeaderMessageIterator{IOT}
 end
 
 function HeaderMessageIterator(f::JLDFile{IOT}, offset::RelOffset) where {IOT}
-    cio, header_version, chunk, objflags = start_obj_read(f, offset)
     io = f.io
+    chunk_start::Int64 = fileoffset(f, offset)
+    seek(io, chunk_start)
+    # Version 1 object header have no signature and start with version
+    header_version = jlread(io, UInt8)
+    if header_version == 1
+        seek(io, chunk_start)
+        cio = io
+        skip(cio, 7)
+        sz = jlread(cio, UInt32)
+        skip(cio, 4)
+        flags = 0x0
+    else
+        header_version = 0x2
+        seek(io, chunk_start)
+        cio = begin_checksum_read(io)
+        jlread(cio, UInt32) == OBJECT_HEADER_SIGNATURE || throw(InvalidDataException("Invalid Object header signature"))
+        jlread(cio, UInt8) == 2 || throw(InvalidDataException("Invalid Object header version"))
+        flags = jlread(cio, UInt8)
+        # Skip access, modification, change and birth times
+        (flags & OH_TIMES_STORED) != 0 && skip(io, 16)
+        # Skip maximum # of attributes fields
+        (flags & OH_ATTRIBUTE_PHASE_CHANGE_VALUES_STORED) != 0 && skip(io, 4)
+        sz = read_size(io, flags)
+    end
+    chunk = (; chunk_start, chunk_end = position(cio) + sz)
     pos = position(cio)
+
     if header_version == 2
         # Verify correctness now
         seek(cio, chunk.chunk_end)
         end_checksum(cio) == jlread(io, UInt32)
         seek(io, pos)
     end
+
     HeaderMessageIterator{IOT}(
-        f, pos, header_version, objflags,
+        f, pos, header_version, flags,
         chunk, (; chunk_start = -1, chunk_end = -1), (; chunk_start = -1, chunk_end = -1))
 end
     
