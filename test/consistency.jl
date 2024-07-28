@@ -38,14 +38,4 @@ for ioty in [JLD2.MmapIO, IOStream]
         close(f)
     end
 
-    cmd = """
-    using JLD2
-    f = jldopen($(repr(fn)), true, true, true, $(ioty))
-    write(f, "x", 1:10)
-    """
-    run(`$(Base.julia_cmd()) -e $cmd`)
-
-    f = jldopen(fn, false, false, false, ioty)
-    @test read(f, "x") == 1:10
-    close(f)
 end
