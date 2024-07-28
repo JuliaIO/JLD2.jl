@@ -136,7 +136,6 @@ macro load(filename, vars...)
             throw(ArgumentError("filename argument must be a string literal unless variable names are specified"))
         end
         # Load all variables in the top level of the file
-        readexprs = Expr[]
         vars = Symbol[]
         f = jldopen(filename)
         try
