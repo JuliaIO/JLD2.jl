@@ -1,3 +1,15 @@
+## 0.4.51
+ - remove Unicode normalization support due to excessive performance loss
+ - rework of header message internals
+ - Implement addition and loading of attributes to datasets and groups
+ - Add preliminary `Dataset` structure and API
+ - cleanup tests
+ - remove `Pkg` dependency
+ - fix `Upgrade` for Singleton types
+
+## 0.4.50
+ - Don't hide exception data during loading and saving (#569) 
+
 ## 0.4.49
  - update compat bounds
  - add support Zstdcompression
