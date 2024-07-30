@@ -408,7 +408,7 @@ end
 
 function attributes(dset::Dataset; plain::Bool=false)
     plain && return dset.attributes
-    map(values(dset.attributes)) do attr
+    OrderedDict(keys(dset.attributes) .=> map(values(dset.attributes)) do attr
         read_attr_data(dset.parent.f, attr)
-    end
+    end)
 end
