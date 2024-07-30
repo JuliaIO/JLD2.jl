@@ -226,7 +226,7 @@ end
 get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Nothing) =
     (dataspace.dimensionality, dataspace.dimensions_offset)
 
-function get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Vector{ReadAttribute})
+function get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::AbstractVector)
     ndims = dataspace.dimensionality
     offset = dataspace.dimensions_offset
     if !isempty(attributes)
@@ -420,11 +420,13 @@ end
         f.end_of_data += length(deflated)
         jlwrite(f.io, deflated)
     else
-        jlwrite(cio, ContiguousStorageMessage(datasz, h5offset(f, f.end_of_data)))
+        data_address = f.end_of_data + 8 - mod1(f.end_of_data, 8)
+        jlwrite(cio, ContiguousStorageMessage(datasz, h5offset(f, data_address)))
         jlwrite(cio, CONTINUATION_PLACEHOLDER)
         jlwrite(io, end_checksum(cio))
 
-        f.end_of_data += datasz
+        f.end_of_data = data_address + datasz
+        seek(io, data_address)
         write_data(io, f, data, odr, datamode(odr), wsession)
     end
 
