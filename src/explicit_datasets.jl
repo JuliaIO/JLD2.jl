@@ -12,18 +12,35 @@ mutable struct Dataset
     header_chunk_info # chunk_start, chunk_end, next_msg_offset
 end
 
+
+"""
+    create_dataset(parent, path, datatype, dataspace; kwargs...)
+
+Arguments:
+    - `parent::Union{JLDfile, Group}`: Containing group of new dataset
+    - `path`: Path to new dataset relative to `parent`. If `path` is `nothing`, the dataset is unnamed.
+    - `datatype`: Datatype of new dataset (element type in case of arrays)
+    - `dataspace`: Dimensions or `Dataspace` of new dataset
+
+Keyword arguments:
+    - `layout`: `DataLayout` of new dataset
+    - `filters`: `FilterPipeline` for describing the compression pipeline
+"""
 create_dataset(f::JLDFile, args...; kwargs...) = create_dataset(f.root_group, args...; kwargs...)
 function create_dataset(
-    parent::Group,
-    name::Union{Nothing,String},
+    g::Group,
+    path::Union{Nothing,String},
     datatype=nothing,
     dataspace=nothing;
     layout = nothing,
     chunk=nothing,
     filters=FilterPipeline(),
 )  
-    if !isnothing(name)
-        (parent, name) = pathize(parent, name, true)
+    if !isnothing(path)
+        (parent, name) = pathize(g, path, true)
+    else
+        name = ""
+        parent = g.f
     end
 
     return Dataset(parent, name, UNDEFINED_ADDRESS, datatype, dataspace,
@@ -119,6 +136,7 @@ function write_dataset(dataset::Dataset, data)
         throw(ArgumentError("Invalid attribute: $a"))
     end
     io = f.io
+    odr = objodr(data)
     datasz = odr_sizeof(odr)::Int * numel(dataspace)::Int
 
     psz = payload_size_without_storage_message(dataspace, datatype)::Int
@@ -131,7 +149,7 @@ function write_dataset(dataset::Dataset, data)
 
     # determine layout class
     # DataLayout object is only available after the data is written
-    if datasz < 8192
+    if datasz == 0 || (!(data isa Array) && datasz < 8192)
         layout_class = LcCompact
         psz += jlsizeof(CompactStorageMessage) + datasz
 
@@ -144,7 +162,7 @@ function write_dataset(dataset::Dataset, data)
         layout_class = LcContiguous
         psz += jlsizeof(ContiguousStorageMessage)
     end
-    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4 # why do I need to correct here?
+    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
 
     header_offset = f.end_of_data
     seek(io, header_offset)
@@ -247,7 +265,7 @@ function get_dataset(f::JLDFile, offset::RelOffset, g=f.root_group, name="")
     hmitr = HeaderMessageIterator(f, offset)
     for msg in hmitr
         if msg.type == HmDataspace
-            dset.dataspace = HmWrap(HmDataspace, msg)#ReadDataspace(f, msg)
+            dset.dataspace = HmWrap(HmDataspace, msg)
         elseif msg.type == HmDatatype
             dset.datatype = HmWrap(HmDatatype, msg).dt
         elseif msg.type == HmDataLayout
@@ -437,7 +455,7 @@ function ismmappable(dset::Dataset)
     return false
 end
 
-function mmaparray(dset::Dataset)
+function readmmap(dset::Dataset)
     ismmappable(dset) || throw(ArgumentError("Dataset is not mmappable"))
     f = dset.parent.f
 

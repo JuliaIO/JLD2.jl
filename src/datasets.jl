@@ -363,8 +363,7 @@ end
     psz += CONTINUATION_MSG_SIZE
 
     # Figure out the layout 
-    # The simplest CompactStorageMessage only supports data sets < 2^16
-    if datasz < 8192 || (!(data isa Array) && datasz < typemax(UInt16))
+    if datasz == 0 || (!(data isa Array) && datasz < 8192)
         layout_class = LcCompact
         psz += jlsizeof(CompactStorageMessage) + datasz
     elseif data isa Array && compress != false && isconcretetype(eltype(data)) && isbitstype(eltype(data))
