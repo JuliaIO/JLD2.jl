@@ -11,52 +11,78 @@ using JLD2, Test
         fn = "test.jld2"
         jldsave(fn; a, b, c, d)
 
-        jldopen(fn, "a") do f
+        jldopen(fn, "r") do f
             dset = JLD2.get_dataset(f, "a")
             @test JLD2.ismmappable(dset)
             @test JLD2.readmmap(dset) == a
-            JLD2.readmmap(dset)[1,1] = 42.0
-
             dset = JLD2.get_dataset(f, "b")
             @test JLD2.ismmappable(dset)
             @test JLD2.readmmap(dset) == b
-            JLD2.readmmap(dset)[1,1] = 4.0 + 2.0im
-
             dset = JLD2.get_dataset(f, "c")
             @test JLD2.ismmappable(dset) == false
-
             dset = JLD2.get_dataset(f, "d")
             @test JLD2.ismmappable(dset) == true
         end
 
-        jldopen(fn, "r") do f
-            @test f["a"][1,1] == 42.0
-            @test f["b"][1,1] == 4.0 + 2.0im
-            @test f["d"] == d
+        if Sys.iswindows()
+            jldopen(fn, "a") do f
+                dset = JLD2.get_dataset(f, "a")
+                @test JLD2.ismmappable(dset) == false
+                @test_warn contains("Windows") JLD2.ismmappable(dset)
+                dset = JLD2.get_dataset(f, "c")
+                @test JLD2.ismmappable(dset) == false
+                @test_nowarn JLD2.ismmappable(dset)
+            end
+        else
+            jldopen(fn, "a") do f
+                dset = JLD2.get_dataset(f, "a")
+                @test JLD2.ismmappable(dset)
+                @test JLD2.readmmap(dset) == a
+                JLD2.readmmap(dset)[1,1] = 42.0
+
+                dset = JLD2.get_dataset(f, "b")
+                @test JLD2.ismmappable(dset)
+                @test JLD2.readmmap(dset) == b
+                JLD2.readmmap(dset)[1,1] = 4.0 + 2.0im
+
+                dset = JLD2.get_dataset(f, "c")
+                @test JLD2.ismmappable(dset) == false
+
+                dset = JLD2.get_dataset(f, "d")
+                @test JLD2.ismmappable(dset) == true
+            end
+        
+            jldopen(fn, "r") do f
+                @test f["a"][1,1] == 42.0
+                @test f["b"][1,1] == 4.0 + 2.0im
+                @test f["d"] == d
+            end
         end
     end
 end
 
-@testset "Early Allocation" begin
-    # Update this for proper API eventually
-    jldopen(fn, "w") do f
-        dset = JLD2.create_dataset(f, "data")
+if !Sys.iswindows()
+    @testset "Early Allocation" begin
+        # Update this for proper API eventually
+        jldopen(fn, "w") do f
+            dset = JLD2.create_dataset(f, "data")
 
-        dset.datatype = JLD2.h5fieldtype(f, Float64, Float64, Val{false})
+            dset.datatype = JLD2.h5fieldtype(f, Float64, Float64, Val{false})
 
-        dims = (100,100)
-        dset.dataspace = JLD2.WriteDataspace(JLD2.DS_SIMPLE, UInt64.(reverse(dims)), ())
+            dims = (100,100)
+            dset.dataspace = JLD2.WriteDataspace(JLD2.DS_SIMPLE, UInt64.(reverse(dims)), ())
 
-        JLD2.allocate_early(dset, Float64)
+            JLD2.allocate_early(dset, Float64)
 
-        @test JLD2.ismmappable(dset)
+            @test JLD2.ismmappable(dset)
 
-        emptyarr = JLD2.readmmap(dset)
+            emptyarr = JLD2.readmmap(dset)
 
-        emptyarr[1:2:100] .= 1:50
+            emptyarr[1:2:100] .= 1:50
+        end
+
+        data = JLD2.load(fn, "data")
+        @test all(data[2:2:100] .== 0.0)
+        @test all(data[1:2:100] .== 1:50)
     end
-
-    data = JLD2.load(fn, "data")
-    @test all(data[2:2:100] .== 0.0)
-    @test all(data[1:2:100] .== 1:50)
 end

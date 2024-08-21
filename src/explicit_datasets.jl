@@ -436,7 +436,6 @@ function attributes(dset::Dataset; plain::Bool=false)
 end
 
 ## Mmap Arrays
-
 function ismmappable(dset::Dataset)
     iswritten(dset) || return false
     f = dset.parent.f
@@ -449,10 +448,15 @@ function ismmappable(dset::Dataset)
     T = typeof(rr).parameters[1]
     !(samelayout(T)) && return false
     !isempty(dset.filters.filters) && return false
+    ret = false
     if (layout = dset.layout) isa HmWrap{HmDataLayout}
-        return layout.layout_class == LcContiguous && layout.data_address != UNDEFINED_ADDRESS
+        ret = (layout.layout_class == LcContiguous && layout.data_address != UNDEFINED_ADDRESS)
     end
-    return false
+    if ret == true && Sys.iswindows() && dset.parent.f.writable
+        @warn "On Windows memory-mapping is only possible for files in read-only mode."
+        ret = false
+    end
+    return ret
 end
 
 function readmmap(dset::Dataset)
@@ -477,6 +481,7 @@ function readmmap(dset::Dataset)
     return Mmap.mmap(iobackend, Array{T, Int(ndims)}, (reverse(dims)..., ))
 end
 
+@static if !Sys.iswindows()
 function allocate_early(dset::Dataset, T::DataType)
     iswritten(dset) && throw(ArgumentError("Dataset has already been written to file"))
     # for this to work, require all information to be provided
@@ -538,4 +543,5 @@ function allocate_early(dset::Dataset, T::DataType)
         setproperty!(dset, field, getfield(ddset, field))
     end
     return offset
+end
 end
