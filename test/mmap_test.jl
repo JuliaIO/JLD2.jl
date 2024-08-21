@@ -28,7 +28,7 @@ using JLD2, Test
             jldopen(fn, "a") do f
                 dset = JLD2.get_dataset(f, "a")
                 @test JLD2.ismmappable(dset) == false
-                @test_warn contains("Windows") JLD2.ismmappable(dset)
+                @test_logs (:warn, "On Windows memory-mapping is only possible for files in read-only mode.") JLD2.ismmappable(dset)
                 dset = JLD2.get_dataset(f, "c")
                 @test JLD2.ismmappable(dset) == false
                 @test_nowarn JLD2.ismmappable(dset)
