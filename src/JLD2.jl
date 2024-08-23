@@ -1,11 +1,10 @@
 module JLD2
 using OrderedCollections: OrderedDict
-using Reexport: @reexport
 using MacroTools: MacroTools, @capture
 using Mmap: Mmap
-using Unicode: Unicode
 using TranscodingStreams: TranscodingStreams
-@reexport using FileIO: load, save
+using FileIO: load, save
+export load, save
 using Requires: @require
 using PrecompileTools: @setup_workload, @compile_workload
 
