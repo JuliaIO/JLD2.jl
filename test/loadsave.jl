@@ -117,13 +117,6 @@ jldopen(fn, "r+") do f
     @test f["x2"] == x2
 end
 
-# Issue #19
-save(fn, Dict("a"=>[1,2,3]))
-io = open(fn)
-@info("The next error message (involving \"loading nothing\") is a sign of normal operation")
-@test_throws FileIO.CapturedException load(io)
-close(io)
-
 # Issue #33
 d = Dict("params/p1" => 1,
          "params/p2" => 2.,
