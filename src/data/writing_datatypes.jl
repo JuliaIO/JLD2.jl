@@ -144,8 +144,8 @@ h5type(f::JLDFile, @nospecialize(x)) = h5type(f, writeas(typeof(x)), x)
 # Make a compound datatype from a set of names and types
 @nospecializeinfer  function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
                          @nospecialize(writtenas::DataType), @nospecialize(readas::Type))
-    if DISABLE_COMMIT[]
-        error("Attempted to commit DataType $writtenas but committing is disabled. (`JLD2.DISABLE_COMMIT[]==true`)")
+    if f.disable_commit
+        throw(ArgumentError("Attempted to commit DataType $writtenas but committing is disabled."))
     end
     types = writtenas.types
     offsets = Int[]
@@ -195,8 +195,8 @@ end
         @nospecialize(writeas::DataType),
         @nospecialize(readas::DataType),
         attributes::WrittenAttribute...)
-    if DISABLE_COMMIT[]
-        error("Attempted to commit DataType $readas but committing is disabled. (`JLD2.DISABLE_COMMIT[]==true`)")
+    if f.disable_commit
+        throw(ArgumentError("Attempted to commit DataType $readas but committing is disabled."))
     end
     io = f.io
 
@@ -368,8 +368,8 @@ function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T
     end
     
     @lookup_committed f DataType
-    if DISABLE_COMMIT[]
-        error("Attempted to commit DataType $readas but committing is disabled. (`JLD2.DISABLE_COMMIT[]==true`)")
+    if f.disable_commit
+        throw(ArgumentError("Attempted to commit DataType $readas but committing is disabled."))
     end
     io = f.io
     offset = f.end_of_data
