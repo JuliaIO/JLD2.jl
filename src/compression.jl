@@ -180,23 +180,16 @@ function write_chunked_storage_message( io::IO,
                                         elsize::Int,
                                         dims::NTuple{N,Int},
                                         filtered_size::Int,
-                                        offset::RelOffset) where N
-    jlwrite(io, HeaderMessage(HmDataLayout, chunked_storage_message_size(N) - jlsizeof(HeaderMessage), 0))
-    jlwrite(io, UInt8(4))                     # Version
-    jlwrite(io, UInt8(LcChunked))    # Layout Class
-    jlwrite(io, UInt8(2))                     # Flags (= SINGLE_INDEX_WITH_FILTER)
-    jlwrite(io, UInt8(N+1))                   # Dimensionality
-    jlwrite(io, UInt8(jlsizeof(Length)))        # Dimensionality Size
-    for i = N:-1:1
-        jlwrite(io, Length(dims[i]))          # Dimensions 1...N
-    end
-    jlwrite(io, Length(elsize))               # Element size (last dimension)
-    jlwrite(io, UInt8(1))                     # Chunk Indexing Type (= Single Chunk)
-    jlwrite(io, Length(filtered_size))        # Size of filtered chunk
-    jlwrite(io, UInt32(0))                    # Filters for chunk
-    jlwrite(io, offset)                       # Address
+                                        data_address::RelOffset) where N
+    write_header_message(io, Val(HmDataLayout);
+        layout_class = LcChunked,
+        flags = 2,  # (= SINGLE_INDEX_WITH_FILTER)
+        dimensions = UInt64.((reverse(dims)..., elsize)), # Reversed dimensions with element size as last dim
+        chunk_indexing_type = 1,  # (= Single Chunk)
+        data_size = filtered_size,
+        filters = 0, # Filters for chunk
+        data_address)  
 end
-
 
 function write_compressed_data(cio, f, data, odr, wsession, filter_id, compressor)
     write_filter_pipeline_message(cio, filter_id)

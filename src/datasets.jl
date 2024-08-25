@@ -400,7 +400,7 @@ end
         if datasz != 0
             write_data(cio, f, data, odr, datamode(odr), wsession)
         end
-        jlwrite(cio, CONTINUATION_PLACEHOLDER)
+        write_continuation_placeholder(cio)
         jlwrite(io, end_checksum(cio))
     elseif layout_class == LcChunked
     
@@ -412,7 +412,7 @@ end
         write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
         
         # Add NIL message replacable by continuation message
-        jlwrite(cio, CONTINUATION_PLACEHOLDER)
+        write_continuation_placeholder(cio)
         jlwrite(f.io, end_checksum(cio))
     
         seek(f.io, f.end_of_data)
@@ -421,7 +421,7 @@ end
     else
         data_address = f.end_of_data + 8 - mod1(f.end_of_data, 8)
         jlwrite(cio, ContiguousStorageMessage(datasz, h5offset(f, data_address)))
-        jlwrite(cio, CONTINUATION_PLACEHOLDER)
+        write_continuation_placeholder(cio)
         jlwrite(io, end_checksum(cio))
 
         f.end_of_data = data_address + datasz
@@ -436,26 +436,17 @@ function write_object_header_and_dataspace_message(cio::IO, f::JLDFile, psz::Int
     jlwrite(cio, ObjectStart(size_flag(psz)))
     write_size(cio, psz)
 
-    # Fill value
-    jlwrite(cio, HeaderMessage(HmFillValue, 2, 0))
-    jlwrite(cio, UInt8(3)) # Version
-    jlwrite(cio, 0x09)     # Flags
-
-    # Dataspace
-    jlwrite(cio, HeaderMessage(HmDataspace, jlsizeof(dataspace), 0))
-    jlwrite(cio, dataspace)
+    write_header_message(cio, Val(HmFillValue); flags=0x09)
+    write_header_message(cio, Val(HmDataspace); dataspace.dataspace_type, dimensions=dataspace.size)
 
     # Attributes
     for attr in dataspace.attributes
-        jlwrite(cio, HeaderMessage(HmAttribute, jlsizeof(attr), 0))
-        write_attribute(cio, f, attr, f.datatype_wsession)
+        write_header_message(cio, f, attr)
     end
 end
 
-function write_datatype_message(cio::IO, datatype::H5Datatype)
-    jlwrite(cio, HeaderMessage(HmDatatype, jlsizeof(datatype), 1 | (2*isa(datatype, CommittedDatatype))))
-    jlwrite(cio, datatype)
-end
+write_datatype_message(cio::IO, dt::H5Datatype) = 
+    write_header_message(cio, Val(HmDatatype), 1 | (2*isa(dt, CommittedDatatype)); dt)
 
 
 @nospecializeinfer function write_dataset(f::JLDFile, @nospecialize(x), wsession::JLDWriteSession)::RelOffset
@@ -523,7 +514,7 @@ function delete_written_link!(f::JLDFile, roffset::RelOffset, name::AbstractStri
         if msg.type == HmLinkMessage && HmWrap(HmLinkMessage, msg).link_name == name
             # delete link
             seek(f.io, fileoffset(f, msg.offset))
-            jlwrite(f.io, HeaderMessage(HmNil, msg.size, 0))
+            write_header_message(f.io, Val(HmNil), 0, msg.size)
             update_checksum(f.io, iter.chunk.chunk_start, iter.chunk.chunk_end)
         end
     end

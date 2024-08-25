@@ -482,8 +482,8 @@ printtoc(io::IO, f::JLDFile; numlines = typemax(Int64)) =
 
 
 
-include("headermessages.jl")
 include("object_headers.jl")
+include("headermessages.jl")
 include("groups.jl")
 include("dataspaces.jl")
 include("attributes.jl")
