@@ -258,3 +258,15 @@ end
     @test getfoo("readas_foo_a.jld2") isa Readas.Foo{Readas.UndefinedFunction}
     @test getfoo("readas_foo_n_a.jld2") isa Readas.FooNSerialization
 end
+
+
+@testset "plain reconstruction" begin
+    fn = joinpath(testfiles,"struct_reconstruction.jld2")
+    data = load(fn; plain=true)
+    # This is somewhat broken: Tuples are committed with field names "1", "2",...
+    # these are valid names but break most of the common API incl. the @NamedTuple macro
+    #@test data["tms"] == @NamedTuple{1::Int64, 2}((1, (a = 1,)))
+    @test getproperty(data["tms"], Symbol(1)) == 1
+    @test data["s"]   == (a = 1,)
+    @test data["ds"].kvvec[1]  == (; first = "a", second = (a = 1,))
+end
