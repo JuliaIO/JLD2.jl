@@ -13,6 +13,7 @@ const OBJECT_HEADER_CONTINUATION_SIGNATURE = htol(0x4b48434f) # "OCHK"
     LcChunked = 0x02
     LcVirtual = 0x03
 end
+LayoutClass(lc::LayoutClass) = lc
 
 @enum(CharacterSet::UInt8,
       CSET_ASCII,
@@ -162,6 +163,9 @@ struct CommittedDatatype <: H5Datatype
     header_offset::RelOffset
     index::Int
 end
+
+# Allow dropping the index field
+SharedDatatype(dt::CommittedDatatype) = SharedDatatype(dt.header_offset)
 
 
 """

@@ -312,7 +312,8 @@ end
 function commit(f::JLDFile,
         @nospecialize(dt::H5Datatype), 
         attrs::Tuple{Vararg{WrittenAttribute}}=())
-    psz = jlsizeof(HeaderMessage) * (length(attrs) + 1) + jlsizeof(dt)
+    psz = jlsizeof(Val(HmDatatype), 64; dt)
+    psz += jlsizeof(HeaderMessage) * (length(attrs))
     for attr in attrs
         psz += jlsizeof(attr)
     end
@@ -326,11 +327,9 @@ function commit(f::JLDFile,
     cio = begin_checksum_write(io, sz)
     jlwrite(cio, ObjectStart(size_flag(psz)))
     write_size(cio, psz)
-    jlwrite(cio, HeaderMessage(HmDatatype, jlsizeof(dt), 64))
-    jlwrite(cio, dt)
+    write_header_message(cio, Val(HmDatatype), 64;  dt)
     for attr in attrs
-        jlwrite(cio, HeaderMessage(HmAttribute, jlsizeof(attr), 0))
-        write_attribute(cio, f, attr, f.datatype_wsession)
+        write_header_message(cio, f, attr)
     end
     jlwrite(io, end_checksum(cio))
 end

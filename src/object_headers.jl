@@ -22,13 +22,19 @@ struct Hmessage{IO}
     m::Message{IO}
 end
 
-function Hmessage(type::HeaderMessageType, hflags=0x00, size=0; kwargs...)
+function write_header_message(io, vtype::Val{HMT}, hflags=0x00, size=0; kwargs...) where HMT
     kw = (; kwargs...)
-    size = sizefun(Val(type), hflags, size, kw)
-    payload = construct_hm_payload(Val(type), hflags, size, kw)
-    Hmessage(type, UInt16(size), UInt8(hflags), UNDEFINED_ADDRESS,UNDEFINED_ADDRESS,
-        Message(type, 0, UNDEFINED_ADDRESS, payload))
+    size = compute_size(vtype, hflags, size, kw)
+    jlwrite(io, UInt8(HMT))
+    jlwrite(io, UInt16(size))
+    jlwrite(io, UInt8(hflags))
+    jlwrite(io, vtype, hflags, size, kw)
+    nothing
 end
+
+# Returns size of the actual message + 4 bytes for the type, size, and flags
+jlsizeof(vtype::Val, hflags=0x00, size=0; kwargs...) = 
+    compute_size(vtype, hflags, size, (; kwargs...)) + 4
 
 struct HmWrap{HM, IOT}
     m::Message{IOT}
@@ -40,35 +46,7 @@ struct HmWrap{HM, IOT}
         new{type,IOT}(m, 0x0, 0x0)
 end
 
-for HM in instances(HeaderMessageType)
-    @eval function Base.getproperty(tw::HmWrap{$HM}, s::Symbol)
-        s in (:size, :hflags, :m) && return getfield(tw, s)
-        m = getfield(tw, :m)
-        hflags = getfield(tw, :hflags)
-        hsize = getfield(tw, :size)
-        io = getfield(m, :io)
-        $(ioexpr(Val(HM)))
-        throw(ArgumentError("property $s not found"))
-    end
-end
-
-const CONTINUATION_PLACEHOLDER = Hmessage(HmNil, 0, 16)
-
-write_message(io, f::JLDFile, msg::Hmessage) = jlwrite(io, msg)
-
-function jlwrite(io, msg::Hmessage)
-    write(io, msg.type)
-    write(io, msg.size)
-    write(io, msg.hflags)
-    m = msg.m
-    mio = m.io
-    seek(mio, m.address)
-    for _ in 1:msg.size
-        write(io, jlread(mio, UInt8))
-    end
-end
-
-jlsizeof(msg::Hmessage) = jlsizeof(HeaderMessage) + msg.size
+write_continuation_placeholder(io::IO) = write_header_message(io, Val(HmNil), 0, 16)
 
 function Base.show(io::IO, hm::Hmessage)
     println(io, 
@@ -131,7 +109,6 @@ function print_header_messages(f::JLDFile, offset::RelOffset)
     nothing
 end
 
-
 function read_header_message(f, io, header_version, chunk_start, groupflags)
     msgpos = h5offset(f, position(io))
     if header_version == 1
@@ -152,8 +129,6 @@ function read_header_message(f, io, header_version, chunk_start, groupflags)
         msg.size, msg.flags, msgpos, payload_offset,
         Message(msg.msg_type, payload_address, payload_offset, io))
 end
-
-
 
 """
     mutable struct HeaderMessageIterator{IO}

@@ -6,7 +6,7 @@
 @pseudostruct HmDataspace begin
     version::UInt8 = 2
     dimensionality::UInt8 = length(kw.dimensions)
-    flags::UInt8
+    flags::UInt8 = 0
     (version == 2) && dataspace_type::UInt8
     (version == 1) && dataspace_type::@computed(DS_V1)
     version == 1 && @skip(5)
@@ -26,8 +26,8 @@ end
  
 @pseudostruct HmDatatype begin
     if isset(hflags,1)
-        version::UInt8
-        msgtype::UInt8
+        version::UInt8 = 3
+        msgtype::UInt8 = 2
         dt::SharedDatatype
         datatype_offset::@computed(dt.header_offset)
     end
@@ -43,7 +43,21 @@ end
 end
 
 @pseudostruct HmFillValue begin
-    @skip(hsize)
+    version::UInt8 = 3
+    if version == 1 || version == 2
+        space_allocation_time::UInt8
+        fill_value_write_time::UInt8
+        fill_value_defined::UInt8
+        if !(version > 1 && fill_value_defined==0) 
+            size::UInt32
+            fill_value::@Blob(size)
+        end
+    end
+    if version == 3
+        flags::UInt8
+        isset(flags, 5) && size::UInt32
+        isset(flags, 5) && fill_value::@Blob(size)
+    end
 end
 
 @pseudostruct HmLinkMessage begin 
@@ -54,7 +68,7 @@ end
     isset(flags, 4) && (link_name_charset::UInt8 = CSET_UTF8)
     link_name_len::@Int(2^(flags%4)) = sizeof(kw.link_name)
     link_name::@FixedLengthString(link_name_len) # non-null-terminated
-    (!isset(flags, 3) || link_type==0) && target::RelOffset
+    (!isset(flags, 3) || link_type==0) && (target::RelOffset = UNDEFINED_ADDRESS)
     if isset(flags, 3) && link_type == 1
         link_info_size::UInt16
         soft_link::@Blob(link_info_size) # non-null terminated string
@@ -75,7 +89,7 @@ end
 end
 
 @pseudostruct HmDataLayout begin
-    version::UInt8
+    version::UInt8 = 4
     if version in (1,2)
         dimensionality::UInt8
         layout_class::LayoutClass
@@ -94,11 +108,11 @@ end
         if layout_class == LcCompact
             data_size::UInt16
             data_address::@Offset
-            data::@Blob(data_size)
+            data::@Blob(data_size) = UInt8[] # don't write anything if nothing is passed
         end
         if layout_class == LcContiguous
-            data_address::RelOffset
-            data_size::Int64# Lengths
+            data_address::RelOffset = UNDEFINED_ADDRESS
+            data_size::Int64 = 0# Lengths
         end
         if version == 3 && layout_class == LcChunked
             dimensionality::UInt8
@@ -108,8 +122,8 @@ end
         end
         if version == 4 && layout_class == LcChunked
             flags::UInt8
-            dimensionality::UInt8
-            dim_size::UInt8
+            dimensionality::UInt8 = length(kw.dimensions) 
+            dim_size::UInt8 = 8 # 8 bytes per dimension
             dimensions::NTuple{Int(dimensionality), uintofsize(dim_size)}
             chunk_indexing_type::UInt8
             if chunk_indexing_type == 1 # Single Chunk
