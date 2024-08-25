@@ -59,47 +59,21 @@ function FilterPipeline(msg_::Hmessage)
     nfilters = msg.nfilters
     io = msg.m.io
     seek(io, msg.m.address+2)
-    if version == 1
-        skip(io, 6)
-        filters = map(1:nfilters) do _
-            id = jlread(io, UInt16)
-            name_length = jlread(io, UInt16)
-            flags = jlread(io, UInt16)
-            nclient_vals = jlread(io, UInt16)
-            if iszero(name_length) 
-                name = ""
-            else
-                name = read_bytestring(io)
-                skip(io, 8-mod1(sizeof(name), 8)-1)
-            end
-            client_data = jlread(io, UInt32, nclient_vals)
-            isodd(nclient_vals) && skip(io, 4)
-            Filter(id, flags, name, client_data)
+    version == 1 && skip(io, 6)
+    filters = map(1:nfilters) do _
+        id = jlread(io, UInt16)
+        name_length = (version == 2 && id < 255) ? zero(UInt16) : jlread(io, UInt16)
+        flags = jlread(io, UInt16)
+        nclient_vals = jlread(io, UInt16)
+        if iszero(name_length) 
+            name = ""
+        else
+            name = read_bytestring(io)
+            skip(io, 8-mod1(sizeof(name), 8)-1)
         end
-        return FilterPipeline(filters)
-    elseif version == 2
-        filters = map(1:nfilters) do _
-            id = jlread(io, UInt16)
-            if id > 255
-                name_length = jlread(io, UInt16)
-                flags = jlread(io, UInt16)
-                nclient_vals = jlread(io, UInt16)
-                if iszero(name_length) 
-                    name = ""
-                else
-                    name = read_bytestring(io)
-                    skip(io, 8-mod1(sizeof(name), 8)-1)
-                end
-            else
-                name = ""
-                flags = jlread(io, UInt16)
-                nclient_vals = jlread(io, UInt16)
-            end
-            client_data = jlread(io, UInt32, nclient_vals)
-            Filter(id, flags, name, client_data)
-        end
-        return FilterPipeline(filters)
-    else
-        throw(UnsupportedVersionException("Filter Pipeline Message version $version is not implemented"))
+        client_data = jlread(io, UInt32, nclient_vals)
+        (version == 1 && isodd(nclient_vals)) && skip(io, 4)
+        Filter(id, flags, name, client_data)
     end
+    return FilterPipeline(filters)
 end
