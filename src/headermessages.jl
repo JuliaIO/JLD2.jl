@@ -108,11 +108,11 @@ end
         if layout_class == LcCompact
             data_size::UInt16
             data_address::@Offset
-            data::@Blob(data_size)
+            data::@Blob(data_size) = UInt8[] # don't write anything if nothing is passed
         end
         if layout_class == LcContiguous
-            data_address::RelOffset
-            data_size::Int64# Lengths
+            data_address::RelOffset = UNDEFINED_ADDRESS
+            data_size::Int64 = 0# Lengths
         end
         if version == 3 && layout_class == LcChunked
             dimensionality::UInt8

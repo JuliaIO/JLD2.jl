@@ -151,8 +151,7 @@ function write_dataset(dataset::Dataset, data)
     # DataLayout object is only available after the data is written
     if datasz == 0 || (!(data isa Array) && datasz < 8192)
         layout_class = LcCompact
-        psz += jlsizeof(CompactStorageMessage) + datasz
-
+        psz += jlsizeof(Val(HmDataLayout); layout_class, data_size=datasz)
     elseif !isnothing(dataset.chunk) || !isempty(dataset.filters.filters)
         # Do some additional checks on the data here
         layout_class = LcChunked
@@ -160,7 +159,7 @@ function write_dataset(dataset::Dataset, data)
         psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(filter_id::UInt16)
     else
         layout_class = LcContiguous
-        psz += jlsizeof(ContiguousStorageMessage)
+        psz += jlsizeof(Val(HmDataLayout); layout_class)
     end
     fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
 
@@ -181,7 +180,7 @@ function write_dataset(dataset::Dataset, data)
     end
     # Data storage layout
     if layout_class == LcCompact
-        jlwrite(cio, CompactStorageMessage(datasz))
+        write_header_message(cio, Val(HmDataLayout); layout_class, data_size=datasz)
         if datasz != 0
             write_data(cio, f, data, odr, datamode(odr), wsession)
         end
@@ -211,8 +210,9 @@ function write_dataset(dataset::Dataset, data)
     else
         # Align contiguous chunk to 8 bytes in the file
         address = f.end_of_data + 8 - mod1(f.end_of_data, 8)
-        offset = h5offset(f, address)
-        jlwrite(cio, ContiguousStorageMessage(datasz, offset))
+        data_address = h5offset(f, address)
+        write_header_message(cio, Val(HmDataLayout); 
+            layout_class, data_address, data_size=datasz)
 
         dataset.header_chunk_info = (header_offset, position(cio)+20, position(cio))
         # Add NIL message replacable by continuation message
@@ -505,7 +505,7 @@ function allocate_early(dset::Dataset, T::DataType)
 
     # Layout class: Use contiguous for now
     layout_class = LcContiguous
-    psz += jlsizeof(ContiguousStorageMessage)
+    psz += jlsizeof(Val(HmDataLayout); layout_class)
     fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
 
     header_offset = f.end_of_data
@@ -521,8 +521,9 @@ function allocate_early(dset::Dataset, T::DataType)
     end
     # Align contiguous chunk to 8 bytes in the file
     address = f.end_of_data + 8 - mod1(f.end_of_data, 8)
-    offset = h5offset(f, address)
-    jlwrite(cio, ContiguousStorageMessage(datasz, offset))
+    data_address = h5offset(f, address)
+    write_header_message(cio, Val(HmDataLayout); 
+        layout_class, data_address, data_size=datasz)
 
     dset.header_chunk_info = (header_offset, position(cio)+20, position(cio))
     # Add NIL message replacable by continuation message

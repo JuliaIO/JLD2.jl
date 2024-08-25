@@ -1,31 +1,3 @@
-struct CompactStorageMessage
-    hm::HeaderMessage
-    version::UInt8
-    layout_class::LayoutClass
-    data_size::UInt16
-end
-define_packed(CompactStorageMessage)
-CompactStorageMessage(datasz::Int) =
-    CompactStorageMessage(
-            HeaderMessage(HmDataLayout, jlsizeof(CompactStorageMessage) - jlsizeof(HeaderMessage) + datasz, 0),
-            4, LcCompact, datasz
-    )
-    
-struct ContiguousStorageMessage
-    hm::HeaderMessage
-    version::UInt8
-    layout_class::LayoutClass
-    address::RelOffset
-    data_size::Length
-end
-define_packed(ContiguousStorageMessage)
-ContiguousStorageMessage(datasz::Int, offset::RelOffset) =
-    ContiguousStorageMessage(
-        HeaderMessage(HmDataLayout, jlsizeof(ContiguousStorageMessage) - jlsizeof(HeaderMessage), 0),
-        4, LcContiguous, offset, datasz
-    )
-
-
 ## Left over header message parsing that does not have a good place.
 
 struct DataLayout

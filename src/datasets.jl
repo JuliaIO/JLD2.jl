@@ -365,7 +365,7 @@ end
     # Figure out the layout 
     if datasz == 0 || (!(data isa Array) && datasz < 8192)
         layout_class = LcCompact
-        psz += jlsizeof(CompactStorageMessage) + datasz
+        psz += jlsizeof(Val(HmDataLayout); layout_class, data_size=datasz)
     elseif data isa Array && compress != false && isconcretetype(eltype(data)) && isbitstype(eltype(data))
         # Only now figure out if the compression argument is valid
         invoke_again, filter_id, compressor = get_compressor(compress)
@@ -376,7 +376,7 @@ end
         psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(filter_id::UInt16)
     else
         layout_class = LcContiguous
-        psz += jlsizeof(ContiguousStorageMessage)
+        psz += jlsizeof(Val(HmDataLayout); layout_class)
     end
 
     fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
@@ -396,7 +396,7 @@ end
 
     # Data storage layout
     if layout_class == LcCompact
-        jlwrite(cio, CompactStorageMessage(datasz))
+        write_header_message(cio, Val(HmDataLayout); layout_class, data_size=datasz)
         if datasz != 0
             write_data(cio, f, data, odr, datamode(odr), wsession)
         end
@@ -420,7 +420,8 @@ end
         jlwrite(f.io, deflated)
     else
         data_address = f.end_of_data + 8 - mod1(f.end_of_data, 8)
-        jlwrite(cio, ContiguousStorageMessage(datasz, h5offset(f, data_address)))
+        write_header_message(cio, Val(HmDataLayout); 
+            layout_class, data_address=h5offset(f, data_address), data_size=datasz)
         write_continuation_placeholder(cio)
         jlwrite(io, end_checksum(cio))
 
