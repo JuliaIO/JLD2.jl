@@ -153,6 +153,11 @@ function write_dataset(dataset::Dataset, data)
         layout_class = LcCompact
         psz += jlsizeof(Val(HmDataLayout); layout_class, data_size=datasz)
     elseif !isnothing(dataset.chunk) || !isempty(dataset.filters.filters)
+        filter_id = dataset.filters.filters[1].id
+        invoke_again, compressor = get_compressor(filter_id)
+        if invoke_again
+            return Base.invokelatest(write_dataset, dset, data)::RelOffset
+        end
         # Do some additional checks on the data here
         layout_class = LcChunked
         # improve filter support here
@@ -189,24 +194,19 @@ function write_dataset(dataset::Dataset, data)
         write_continuation_placeholder(cio)
         jlwrite(io, end_checksum(cio))
     elseif layout_class == LcChunked
-        # this thing is a bit weird
-        write_compressed_data(cio, f, data, odr, wsession, filter_id, compressor)
         write_filter_pipeline_message(cio, filter_id)
 
         # deflate first
         deflated = deflate_data(f, data, odr, wsession, compressor)
-        seek(f.io, h5offset(f, f.end_of_data))
-        f.end_of_data += length(deflated)
-        jlwrite(f.io, deflated)
-
 
         write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
-        
         dataset.header_chunk_info = (header_offset, position(cio)+20, position(cio))
-        # Add NIL message replacable by continuation message
         write_continuation_placeholder(cio)
         jlwrite(f.io, end_checksum(cio))
-    
+
+        seek(f.io, f.end_of_data)
+        f.end_of_data += length(deflated)
+        jlwrite(f.io, deflated)    
     else
         # Align contiguous chunk to 8 bytes in the file
         address = f.end_of_data + 8 - mod1(f.end_of_data, 8)

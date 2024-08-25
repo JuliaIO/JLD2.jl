@@ -23,6 +23,12 @@ using JLD2, Test
             # Check that double attributes are not allowed
             @test_throws ArgumentError JLD2.add_attribute(dset, "addition", "A very different description.")
         end
-    end
 
+        jldopen(fn, "w") do f
+            dset = JLD2.create_dataset(f, "d")
+            dset.filters = JLD2.FilterPipeline([JLD2.Filter(1, 0, "", [])])
+            JLD2.write_dataset(dset, zeros(1000,1000))
+        end
+        @test load(fn)["d"] == zeros(1000,1000)
+    end
 end

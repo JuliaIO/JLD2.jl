@@ -403,15 +403,11 @@ end
         write_continuation_placeholder(cio)
         jlwrite(io, end_checksum(cio))
     elseif layout_class == LcChunked
-    
         write_filter_pipeline_message(cio, filter_id)
 
-        # deflate first
         deflated = deflate_data(f, data, odr, wsession, compressor)
 
-        write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
-        
-        # Add NIL message replacable by continuation message
+        write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))        
         write_continuation_placeholder(cio)
         jlwrite(f.io, end_checksum(cio))
     
@@ -436,11 +432,8 @@ end
 function write_object_header_and_dataspace_message(cio::IO, f::JLDFile, psz::Int, dataspace::WriteDataspace)
     jlwrite(cio, ObjectStart(size_flag(psz)))
     write_size(cio, psz)
-
     write_header_message(cio, Val(HmFillValue); flags=0x09)
     write_header_message(cio, Val(HmDataspace); dataspace.dataspace_type, dimensions=dataspace.size)
-
-    # Attributes
     for attr in dataspace.attributes
         write_header_message(cio, f, attr)
     end

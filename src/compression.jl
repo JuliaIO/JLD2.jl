@@ -106,6 +106,15 @@ function get_compressor(::Bool)
     false, COMPRESSOR_TO_ID[:ZlibCompressor], m.ZlibCompressor()
 end
 
+function get_compressor(filter_id::UInt16)
+    modname, compressorname, decompressorname, = ID_TO_DECOMPRESSOR[filter_id]
+    invoke_again, m = checked_import(modname)
+    if invoke_again || !applicable(getproperty(m,compressorname))
+        _, compressor = Base.invokelatest(get_compressor, filter_id)
+        return true, compressor
+    end
+    return invoke_again, getproperty(m,compressorname)()
+end
 function get_decompressor(filter_id::UInt16)
     modname, compressorname, decompressorname, = ID_TO_DECOMPRESSOR[filter_id]
     invoke_again, m = checked_import(modname)
@@ -189,19 +198,6 @@ function write_chunked_storage_message( io::IO,
         data_size = filtered_size,
         filters = 0, # Filters for chunk
         data_address)  
-end
-
-function write_compressed_data(cio, f, data, odr, wsession, filter_id, compressor)
-    write_filter_pipeline_message(cio, filter_id)
-
-    # deflate first
-    deflated = deflate_data(f, data, odr, wsession, compressor)
-
-    write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
-    jlwrite(f.io, end_checksum(cio))
-
-    f.end_of_data += length(deflated)
-    jlwrite(f.io, deflated)
 end
 
 function decompress!(inptr::Ptr, data_length, element_size, n, decompressor::TranscodingStreams.Codec)
