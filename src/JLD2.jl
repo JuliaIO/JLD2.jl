@@ -108,6 +108,8 @@ mutable struct JLDFile{T<:IO}
     compress#::Union{Bool,Symbol}
     mmaparrays::Bool
     n_times_opened::Int
+    # Experimental feature: disable committing structs
+    disable_commit::Bool
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
@@ -127,7 +129,7 @@ mutable struct JLDFile{T<:IO}
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
                         compress,#::Union{Bool,Symbol},
                         mmaparrays::Bool) where T
-        f = new(io, path, writable, written, compress, mmaparrays, 1,
+        f = new(io, path, writable, written, compress, mmaparrays, 1, false,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), Dict{String,Any}(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             DATA_START, Dict{RelOffset,GlobalHeap}(),

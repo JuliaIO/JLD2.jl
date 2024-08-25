@@ -744,3 +744,16 @@ end
     end
 end
 
+@testset "Disable committing datatypes" begin
+    cd(mktempdir()) do
+        jldopen("test.jld2", "w") do f
+            f.disable_commit = true
+
+            @test_throws ArgumentError f["1"] = Dict(1=>2)
+            @test_throws ArgumentError f["2"] = Vector{Float64}
+            @test_throws ArgumentError f["3"] = (1,2,3)
+            # this could eventually be allowed
+            @test_throws ArgumentError f["4"] = (; a=1, b=2)
+        end
+    end
+end
