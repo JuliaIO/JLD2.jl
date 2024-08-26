@@ -120,8 +120,21 @@ struct JLDWriteSession{T<:Union{Dict{UInt,RelOffset},Union{}}}
     JLDWriteSession{T}(h5offset, objects) where T = new(h5offset, objects)
 end
 JLDWriteSession() = JLDWriteSession{Dict{UInt,RelOffset}}(Dict{UInt,RelOffset}(), Any[])
-
-
+track!(s::JLDWriteSession{Union{}}, args...) = nothing
+function track!(s::JLDWriteSession, data, offset::RelOffset)
+    if ismutabletype(typeof(data))
+        wsession.h5offset[objectid(data)] = h5offset(f, header_offset)
+        push!(wsession.objects, data)
+    end
+    nothing
+end
+get_tracked(wsession::JLDWriteSession{Union{}}, data) = UNDEFINED_ADDRESS
+function get_tracked(wsession::JLDWriteSession, data)
+    if ismutabletype(typeof(data))
+        return get(wsession.h5offset, objectid(data), UNDEFINED_ADDRESS)
+    end
+    return UNDEFINED_ADDRESS
+end
 """
     GlobalHeap
 

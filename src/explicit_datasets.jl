@@ -118,12 +118,11 @@ end
 
 Write data to file using metadata prepared in the `dataset`.
 """
-function write_dataset(dataset::Dataset, data)
+function write_dataset(dataset::Dataset, data, wsession::JLDWriteSession=JLDWriteSession())
     f = dataset.parent.f
     if dataset.offset != UNDEFINED_ADDRESS
         throw(ArgumentError("Dataset has already been written to file"))
     end
-    wsession = JLDWriteSession()
     # first need to figure out if data type and dataspace are defined / correct
     if isnothing(dataset.datatype)
         dataset.datatype = h5type(f, data)
@@ -134,103 +133,24 @@ function write_dataset(dataset::Dataset, data)
         dataset.dataspace = WriteDataspace(f, data, odr)
     end
     dataspace = dataset.dataspace
-    # Attributes
-    attributes = map(collect(dataset.attributes)) do (name, attr)
-        attr isa WrittenAttribute && return attr
-        return WrittenAttribute(dataset.parent.f, name, attr)
-        throw(ArgumentError("Invalid attribute: $a"))
-    end
-    io = f.io
-    odr = objodr(data)
-    datasz = odr_sizeof(odr)::Int * numel(dataspace)::Int
-
-    psz = payload_size_without_storage_message(dataspace, datatype)::Int
-
-    psz += sum(message_size.(attributes), init=0)
-
-    # minimum extra space for continuation message
-    psz += jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
-
-
-    # determine layout class
-    # DataLayout object is only available after the data is written
-    if datasz == 0 || (!(data isa Array) && datasz < 8192)
-        layout_class = LcCompact
-        psz += jlsizeof(Val(HmDataLayout); layout_class, data_size=datasz)
-    elseif !isnothing(dataset.chunk) || !isempty(dataset.filters.filters)
+    if !isempty(dataset.filters.filters)
         filter_id = dataset.filters.filters[1].id
         invoke_again, compressor = get_compressor(filter_id)
         if invoke_again
             return Base.invokelatest(write_dataset, dset, data)::RelOffset
         end
-        # Do some additional checks on the data here
-        layout_class = LcChunked
-        # improve filter support here
-        psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(filter_id::UInt16)
     else
-        layout_class = LcContiguous
-        psz += jlsizeof(Val(HmDataLayout); layout_class)
+        compressor = nothing
     end
-    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
-
-    header_offset = f.end_of_data
-    seek(io, header_offset)
-    f.end_of_data = header_offset + fullsz
-    
-    if ismutabletype(typeof(data)) && !isa(wsession, JLDWriteSession{Union{}})
-        wsession.h5offset[objectid(data)] = h5offset(f, header_offset)
-        push!(wsession.objects, data)
-    end
-    
-    cio = begin_checksum_write(io, fullsz - 4)
-    write_object_header_and_dataspace_message(cio, f, psz, dataspace)
-    write_datatype_message(cio, datatype)
-    for a in attributes
-        write_header_message(cio, f, a, wsession)
-    end
-    # Data storage layout
-    if layout_class == LcCompact
-        write_header_message(cio, Val(HmDataLayout); layout_class, data_size=datasz)
-        if datasz != 0
-            write_data(cio, f, data, odr, datamode(odr), wsession)
-        end
-        dataset.header_chunk_info = (header_offset, position(cio)+20, position(cio))
-        # Add NIL message replacable by continuation message
-        write_continuation_placeholder(cio)
-        jlwrite(io, end_checksum(cio))
-    elseif layout_class == LcChunked
-        write_filter_pipeline_message(cio, filter_id)
-
-        # deflate first
-        deflated = deflate_data(f, data, odr, wsession, compressor)
-
-        write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
-        dataset.header_chunk_info = (header_offset, position(cio)+20, position(cio))
-        write_continuation_placeholder(cio)
-        jlwrite(f.io, end_checksum(cio))
-
-        seek(f.io, f.end_of_data)
-        f.end_of_data += length(deflated)
-        jlwrite(f.io, deflated)    
-    else
-        # Align contiguous chunk to 8 bytes in the file
-        address = f.end_of_data + 8 - mod1(f.end_of_data, 8)
-        data_address = h5offset(f, address)
-        write_header_message(cio, Val(HmDataLayout); 
-            layout_class, data_address, data_size=datasz)
-
-        dataset.header_chunk_info = (header_offset, position(cio)+20, position(cio))
-        # Add NIL message replacable by continuation message
-        write_continuation_placeholder(cio)
-        jlwrite(io, end_checksum(cio))
-
-        f.end_of_data = address + datasz
-        seek(io, address)
-        write_data(io, f, data, odr, datamode(odr), wsession)
-    end
-
-    offset = h5offset(f, header_offset)
+    offset = write_dataset(f, dataspace, datatype, odr, data, wsession, compressor)
     !isempty(dataset.name) && (dataset.parent[dataset.name] = offset)
+
+    # Attributes
+    # TODO: this can be optimized by writing all attributes at once
+    for (name, attr) in pairs(dataset.attributes)
+        add_attribute(dataset, name, value, wsession)
+    end
+
     return offset
 end
 
@@ -299,11 +219,6 @@ function get_dataset(f::JLDFile, offset::RelOffset, g=f.root_group, name="")
                 hmitr.chunk.chunk_end, 
                 next_msg_offset = hmitr.chunk.chunk_end-CONTINUATION_MSG_SIZE)
     return dset
-end
-
-function add_attribute(dset::Dataset, name::String, data::Dataset)
-    # link an existing dataset as attribute
-    throw(UnsupportedFeatureException("Not implemented"))
 end
 
 # Attributes
@@ -562,8 +477,14 @@ function allocate_early(dset::Dataset, T::DataType)
     f.end_of_data = header_offset + fullsz
 
     cio = begin_checksum_write(io, fullsz - 4)
-    write_object_header_and_dataspace_message(cio, f, psz, dataspace)
-    write_datatype_message(cio, datatype)
+    jlwrite(cio, ObjectStart(size_flag(psz)))
+    write_size(cio, psz)
+    write_header_message(cio, Val(HmFillValue); flags=0x09)
+    write_header_message(cio, Val(HmDataspace); dataspace.dataspace_type, dimensions=dataspace.size)
+    for attr in dataspace.attributes
+        write_header_message(cio, f, attr)
+    end
+    write_header_message(cio, Val(HmDatatype), 1 | (2*isa(dt, CommittedDatatype)); dt)
     for a in attributes
         write_header_message(cio, f, a, wsession)
     end
