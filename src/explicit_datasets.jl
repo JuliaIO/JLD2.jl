@@ -113,6 +113,11 @@ function Base.show(io::IO, ::MIME"text/plain", dset::Dataset)
     println(io, "└─")
 end
 
+"""
+    write_dataset(dataset::Dataset, data)
+
+Write data to file using metadata prepared in the `dataset`.
+"""
 function write_dataset(dataset::Dataset, data)
     f = dataset.parent.f
     if dataset.offset != UNDEFINED_ADDRESS
@@ -229,6 +234,11 @@ function write_dataset(dataset::Dataset, data)
     return offset
 end
 
+"""
+    read_dataset(dset::Dataset)
+
+Read the data referenced by a dataset.
+"""
 function read_dataset(dset::Dataset)
     f = dset.parent.f
     read_data(f,
@@ -240,6 +250,12 @@ function read_dataset(dset::Dataset)
         collect(values(dset.attributes)))
 end
 
+"""
+    get_dataset(parent::Union{JLDFile, Group}, name::String)
+
+Get a stored dataset from a file by name or path as a `Dataset` object.
+This may be useful for inspecting the metadata incl. types of a dataset.
+"""
 get_dataset(f::JLDFile, args...; kwargs...) = 
     get_dataset(f.root_group, args...; kwargs...)
 
@@ -427,6 +443,12 @@ function add_attribute(dset::Dataset, name::String, data, wsession=JLDWriteSessi
     end
 end
 
+"""
+    attributes(dset::Dataset; plain::Bool=false)
+
+Return the attributes of a dataset as an `OrderedDict`.
+If `plain` is set to `true` then the values are returned as stored in the dataset object.  
+"""
 function attributes(dset::Dataset; plain::Bool=false)
     plain && return dset.attributes
     OrderedDict(keys(dset.attributes) .=> map(values(dset.attributes)) do attr
@@ -434,7 +456,18 @@ function attributes(dset::Dataset; plain::Bool=false)
     end)
 end
 
-## Mmap Arrays
+"""
+    ismmappable(dset::Dataset)
+
+Check if a dataset can be memory-mapped. This can be useful for large arrays and for editing written arrays.
+
+An Array dataset may be mmapped if:
+    - `JLD2.samelayout(T) == true`: The element type is `isbits` and has a size that is a multiple of 8 bytes.
+    - Uncompressed: Compressed arrays cannot be memory-mapped
+    - Uses a contiguous layout: This is true for all array datasets written by JLD2 with version ≥ v0.4.52
+    - Offset in file is a multiple of 8 bytes: This is a requirement for Mmap.
+    - Windows: The file must be opened in read-only mode. This is a limitation of Mmap on Windows. 
+"""
 function ismmappable(dset::Dataset)
     iswritten(dset) || return false
     f = dset.parent.f
@@ -458,6 +491,13 @@ function ismmappable(dset::Dataset)
     return ret
 end
 
+
+"""
+    readmmap(dset::Dataset)
+
+Memory-map a dataset. This can be useful for large arrays and for editing written arrays.
+See [`ismmappable`](@ref) for requirements.
+"""
 function readmmap(dset::Dataset)
     ismmappable(dset) || throw(ArgumentError("Dataset is not mmappable"))
     f = dset.parent.f
@@ -481,6 +521,14 @@ function readmmap(dset::Dataset)
 end
 
 @static if !Sys.iswindows()
+"""
+    allocate_early(dset::Dataset, T::DataType)
+
+Write a dataset to file without any actual data. Reserve space according to element type and dimensions.
+This may be useful in conjunction with [`readmmap`](@ref).
+
+Note: Not available on Windows.
+"""
 function allocate_early(dset::Dataset, T::DataType)
     iswritten(dset) && throw(ArgumentError("Dataset has already been written to file"))
     # for this to work, require all information to be provided
