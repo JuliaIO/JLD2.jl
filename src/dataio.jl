@@ -227,6 +227,14 @@ function write_data(io::IOStream, f::JLDFile, data::Array{T}, odr::Type{T}, ::Re
     nothing
 end
 
+function write_data(io::IOStream, f::JLDFile, data, odr, _, wsession::JLDWriteSession)
+    buf = Vector{UInt8}(undef, odr_sizeof(odr))
+    cp = Ptr{Cvoid}(pointer(buf))
+    h5convert!(cp, odr, f, data, wsession)
+    unsafe_write(io, Ptr{UInt8}(pointer(buf)), odr_sizeof(odr))
+    nothing
+end
+
 function write_data(io::BufferedWriter, f::JLDFile, data::Array{T}, odr::S,
                     ::DataMode, wsession::JLDWriteSession) where {T,S}
     position = io.position[]

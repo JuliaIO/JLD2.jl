@@ -1,11 +1,10 @@
 module JLD2
 using OrderedCollections: OrderedDict
-using Reexport: @reexport
 using MacroTools: MacroTools, @capture
 using Mmap: Mmap
-using Unicode: Unicode
 using TranscodingStreams: TranscodingStreams
-@reexport using FileIO: load, save
+using FileIO: load, save
+export load, save
 using Requires: @require
 using PrecompileTools: @setup_workload, @compile_workload
 
@@ -106,9 +105,12 @@ mutable struct JLDFile{T<:IO}
     path::String
     writable::Bool
     written::Bool
+    plain::Bool
     compress#::Union{Bool,Symbol}
     mmaparrays::Bool
     n_times_opened::Int
+    # Experimental feature: disable committing structs
+    disable_commit::Bool
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
@@ -124,11 +126,13 @@ mutable struct JLDFile{T<:IO}
     root_group::Group{JLDFile{T}}
     types_group::Group{JLDFile{T}}
     base_address::UInt64
+    
 
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
+                        plain::Bool,
                         compress,#::Union{Bool,Symbol},
                         mmaparrays::Bool) where T
-        f = new(io, path, writable, written, compress, mmaparrays, 1,
+        f = new(io, path, writable, written, plain, compress, mmaparrays, 1, false,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), Dict{String,Any}(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             DATA_START, Dict{RelOffset,GlobalHeap}(),
@@ -137,8 +141,8 @@ mutable struct JLDFile{T<:IO}
         f
     end
 end
-JLDFile(io::IO, path::AbstractString, writable::Bool, written::Bool, compress, mmaparrays::Bool) =
-    JLDFile{typeof(io)}(io, path, writable, written, compress, mmaparrays)
+JLDFile(io::IO, path::AbstractString, writable::Bool, written::Bool, plain::Bool, compress, mmaparrays::Bool) =
+    JLDFile{typeof(io)}(io, path, writable, written, plain, compress, mmaparrays)
 
 """
     fileoffset(f::JLDFile, x::RelOffset)
@@ -188,6 +192,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                  mmaparrays::Bool=false,
                  typemap::Dict{String}=Dict{String,Any}(),
                  parallel_read::Bool=false,
+                 plain::Bool=false
                  ) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
     verify_compressor(compress)
@@ -239,7 +244,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         io = openfile(iotype, fname, wr, create, truncate, fallback)
         created = !exists || truncate
         rname = realpath(fname)
-        f = JLDFile(io, rname, wr, created, compress, mmaparrays)
+        f = JLDFile(io, rname, wr, created, plain, compress, mmaparrays)
 
         if !parallel_read
             OPEN_FILES[rname] = WeakRef(f)
@@ -481,8 +486,8 @@ printtoc(io::IO, f::JLDFile; numlines = typemax(Int64)) =
 
 
 
-include("headermessages.jl")
 include("object_headers.jl")
+include("headermessages.jl")
 include("groups.jl")
 include("dataspaces.jl")
 include("attributes.jl")

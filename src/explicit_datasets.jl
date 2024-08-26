@@ -12,18 +12,35 @@ mutable struct Dataset
     header_chunk_info # chunk_start, chunk_end, next_msg_offset
 end
 
+
+"""
+    create_dataset(parent, path, datatype, dataspace; kwargs...)
+
+Arguments:
+    - `parent::Union{JLDfile, Group}`: Containing group of new dataset
+    - `path`: Path to new dataset relative to `parent`. If `path` is `nothing`, the dataset is unnamed.
+    - `datatype`: Datatype of new dataset (element type in case of arrays)
+    - `dataspace`: Dimensions or `Dataspace` of new dataset
+
+Keyword arguments:
+    - `layout`: `DataLayout` of new dataset
+    - `filters`: `FilterPipeline` for describing the compression pipeline
+"""
 create_dataset(f::JLDFile, args...; kwargs...) = create_dataset(f.root_group, args...; kwargs...)
 function create_dataset(
-    parent::Group,
-    name::Union{Nothing,String},
+    g::Group,
+    path::Union{Nothing,String},
     datatype=nothing,
     dataspace=nothing;
     layout = nothing,
     chunk=nothing,
-    filters=Filter[],
+    filters=FilterPipeline(),
 )  
-    if !isnothing(name)
-        (parent, name) = pathize(parent, name, true)
+    if !isnothing(path)
+        (parent, name) = pathize(g, path, true)
+    else
+        name = ""
+        parent = g.f
     end
 
     return Dataset(parent, name, UNDEFINED_ADDRESS, datatype, dataspace,
@@ -96,6 +113,11 @@ function Base.show(io::IO, ::MIME"text/plain", dset::Dataset)
     println(io, "└─")
 end
 
+"""
+    write_dataset(dataset::Dataset, data)
+
+Write data to file using metadata prepared in the `dataset`.
+"""
 function write_dataset(dataset::Dataset, data)
     f = dataset.parent.f
     if dataset.offset != UNDEFINED_ADDRESS
@@ -119,6 +141,7 @@ function write_dataset(dataset::Dataset, data)
         throw(ArgumentError("Invalid attribute: $a"))
     end
     io = f.io
+    odr = objodr(data)
     datasz = odr_sizeof(odr)::Int * numel(dataspace)::Int
 
     psz = payload_size_without_storage_message(dataspace, datatype)::Int
@@ -131,20 +154,24 @@ function write_dataset(dataset::Dataset, data)
 
     # determine layout class
     # DataLayout object is only available after the data is written
-    if datasz < 8192
+    if datasz == 0 || (!(data isa Array) && datasz < 8192)
         layout_class = LcCompact
-        psz += jlsizeof(CompactStorageMessage) + datasz
-
-    elseif !isnothing(dataset.chunk) || !isempty(dataset.filters)
+        psz += jlsizeof(Val(HmDataLayout); layout_class, data_size=datasz)
+    elseif !isnothing(dataset.chunk) || !isempty(dataset.filters.filters)
+        filter_id = dataset.filters.filters[1].id
+        invoke_again, compressor = get_compressor(filter_id)
+        if invoke_again
+            return Base.invokelatest(write_dataset, dset, data)::RelOffset
+        end
         # Do some additional checks on the data here
         layout_class = LcChunked
         # improve filter support here
         psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(filter_id::UInt16)
     else
         layout_class = LcContiguous
-        psz += jlsizeof(ContiguousStorageMessage)
+        psz += jlsizeof(Val(HmDataLayout); layout_class)
     end
-    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4 # why do I need to correct here?
+    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
 
     header_offset = f.end_of_data
     seek(io, header_offset)
@@ -159,46 +186,46 @@ function write_dataset(dataset::Dataset, data)
     write_object_header_and_dataspace_message(cio, f, psz, dataspace)
     write_datatype_message(cio, datatype)
     for a in attributes
-        write_message(cio, f, a, wsession)
+        write_header_message(cio, f, a, wsession)
     end
     # Data storage layout
     if layout_class == LcCompact
-        jlwrite(cio, CompactStorageMessage(datasz))
+        write_header_message(cio, Val(HmDataLayout); layout_class, data_size=datasz)
         if datasz != 0
             write_data(cio, f, data, odr, datamode(odr), wsession)
         end
         dataset.header_chunk_info = (header_offset, position(cio)+20, position(cio))
         # Add NIL message replacable by continuation message
-        jlwrite(cio, CONTINUATION_PLACEHOLDER)
+        write_continuation_placeholder(cio)
         jlwrite(io, end_checksum(cio))
     elseif layout_class == LcChunked
-        # this thing is a bit weird
-        write_compressed_data(cio, f, data, odr, wsession, filter_id, compressor)
         write_filter_pipeline_message(cio, filter_id)
 
         # deflate first
         deflated = deflate_data(f, data, odr, wsession, compressor)
-        seek(f.io, h5offset(f, f.end_of_data))
-        f.end_of_data += length(deflated)
-        jlwrite(f.io, deflated)
-
 
         write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
-        
         dataset.header_chunk_info = (header_offset, position(cio)+20, position(cio))
-        # Add NIL message replacable by continuation message
-        jlwrite(cio, CONTINUATION_PLACEHOLDER)
+        write_continuation_placeholder(cio)
         jlwrite(f.io, end_checksum(cio))
-    
+
+        seek(f.io, f.end_of_data)
+        f.end_of_data += length(deflated)
+        jlwrite(f.io, deflated)    
     else
-        jlwrite(cio, ContiguousStorageMessage(datasz, h5offset(f, f.end_of_data)))
+        # Align contiguous chunk to 8 bytes in the file
+        address = f.end_of_data + 8 - mod1(f.end_of_data, 8)
+        data_address = h5offset(f, address)
+        write_header_message(cio, Val(HmDataLayout); 
+            layout_class, data_address, data_size=datasz)
 
         dataset.header_chunk_info = (header_offset, position(cio)+20, position(cio))
         # Add NIL message replacable by continuation message
-        jlwrite(io, CONTINUATION_PLACEHOLDER)
+        write_continuation_placeholder(cio)
         jlwrite(io, end_checksum(cio))
 
-        f.end_of_data += datasz
+        f.end_of_data = address + datasz
+        seek(io, address)
         write_data(io, f, data, odr, datamode(odr), wsession)
     end
 
@@ -207,6 +234,11 @@ function write_dataset(dataset::Dataset, data)
     return offset
 end
 
+"""
+    read_dataset(dset::Dataset)
+
+Read the data referenced by a dataset.
+"""
 function read_dataset(dset::Dataset)
     f = dset.parent.f
     read_data(f,
@@ -218,6 +250,12 @@ function read_dataset(dset::Dataset)
         collect(values(dset.attributes)))
 end
 
+"""
+    get_dataset(parent::Union{JLDFile, Group}, name::String)
+
+Get a stored dataset from a file by name or path as a `Dataset` object.
+This may be useful for inspecting the metadata incl. types of a dataset.
+"""
 get_dataset(f::JLDFile, args...; kwargs...) = 
     get_dataset(f.root_group, args...; kwargs...)
 
@@ -243,7 +281,7 @@ function get_dataset(f::JLDFile, offset::RelOffset, g=f.root_group, name="")
     hmitr = HeaderMessageIterator(f, offset)
     for msg in hmitr
         if msg.type == HmDataspace
-            dset.dataspace = HmWrap(HmDataspace, msg)#ReadDataspace(f, msg)
+            dset.dataspace = HmWrap(HmDataspace, msg)
         elseif msg.type == HmDatatype
             dset.datatype = HmWrap(HmDatatype, msg).dt
         elseif msg.type == HmDataLayout
@@ -270,17 +308,16 @@ end
 
 # Attributes
 message_size(msg::WrittenAttribute) = jlsizeof(HeaderMessage) + jlsizeof(msg)
-function write_message(io,f::JLDFile, msg::WrittenAttribute, wsession=JLDWriteSession())
+function write_header_message(io,f::JLDFile, msg::WrittenAttribute, wsession=JLDWriteSession())
     jlwrite(io, HeaderMessage(HmAttribute, jlsizeof(msg), 0))
     write_attribute(io, f, msg, wsession)
     return nothing
 end
 
 # Links
-message_size(msg::Pair{String, RelOffset}) = jlsizeof(HeaderMessage) + link_size(msg.first)
-write_message(io, f, msg::Pair{String, RelOffset}, _=nothing) = 
-    jlwrite(io, Hmessage(HmLinkMessage; link_name = msg.first, target = msg.second))
-
+message_size(msg::Pair{String, RelOffset}) = jlsizeof(Val(HmLinkMessage); link_name=msg.first)
+write_header_message(io, f, msg::Pair{String, RelOffset}, _=nothing) = 
+    write_header_message(io, Val(HmLinkMessage); link_name=msg.first, target=msg.second)
 
 function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession();
     chunk_start,
@@ -303,7 +340,7 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
         sz = message_size(msg)
         if remaining_space ≥ sz + 4 || remaining_space == sz 
             pos = position(io)
-            write_message(io, f, msg)
+            write_header_message(io, f, msg)
             rsz = position(io) - pos
             if rsz != sz
                 throw(InternalError("Message size mismatch. Expected $sz, got $rsz for message $msg"))
@@ -323,10 +360,10 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
         empty_space = chunk_end-position(io)-4 - 20
         if empty_space != -4
             empty_space < 0 && throw(InternalError("Negative empty space. This should not happen"))
-            write_message(io, f, Hmessage(HmNil, 0, empty_space))
+            write_header_message(io, Val(HmNil), 0, empty_space)
         end
         # continuation space
-        write_message(io, f, Hmessage(HmNil, 0, 16))
+        write_continuation_placeholder(io)
 
         # Re-calculate checksum
         update_checksum(io, chunk_start, chunk_end)
@@ -335,7 +372,7 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
     end
     if !iszero(remaining_space)
         # Mark remaining free space with a NIL message
-        write_message(io, f, Hmessage(HmNil, 0, remaining_space-4))
+        write_header_message(io, Val(HmNil), 0, remaining_space-4)
     end
     # If we got to here then a new continuation needs to be created
     continuation_start = f.end_of_data
@@ -347,9 +384,9 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
     tmp - continuation_size > 4 && (continuation_size = tmp)
     
     # Object continuation message
-    jlwrite(io, Hmessage(HmObjectHeaderContinuation; 
+    write_header_message(io, Val(HmObjectHeaderContinuation);
         continuation_offset=h5offset(f, continuation_start),
-        continuation_length=Length(continuation_size)))
+        continuation_length=Length(continuation_size))
 
     # Re-calculate checksum
     update_checksum(io, chunk_start, chunk_end)
@@ -364,16 +401,16 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
     while !isempty(messages)
         msg = popfirst!(messages)
         sz = message_size(msg)
-        write_message(io, f, msg, wsession)
+        write_header_message(io, f, msg, wsession)
         next_msg_offset += sz
         remaining_space -= sz
     end
     if remaining_space > 0
         @assert remaining_space ≥ 4 "Gaps smaller than 4 bytes should not occur"
-        jlwrite(cio, Hmessage(HmNil, 0, remaining_space))
+        write_header_message(cio, Val(HmNil), 0, remaining_space)
     end
     # Extra space for object continuation
-    jlwrite(cio, CONTINUATION_PLACEHOLDER)
+    write_continuation_placeholder(cio)
     # Checksum
     jlwrite(io, end_checksum(cio))
     f.end_of_data = position(io)
@@ -406,9 +443,153 @@ function add_attribute(dset::Dataset, name::String, data, wsession=JLDWriteSessi
     end
 end
 
+"""
+    attributes(dset::Dataset; plain::Bool=false)
+
+Return the attributes of a dataset as an `OrderedDict`.
+If `plain` is set to `true` then the values are returned as stored in the dataset object.  
+"""
 function attributes(dset::Dataset; plain::Bool=false)
     plain && return dset.attributes
-    map(values(dset.attributes)) do attr
+    OrderedDict(keys(dset.attributes) .=> map(values(dset.attributes)) do attr
         read_attr_data(dset.parent.f, attr)
+    end)
+end
+
+"""
+    ismmappable(dset::Dataset)
+
+Check if a dataset can be memory-mapped. This can be useful for large arrays and for editing written arrays.
+
+An Array dataset may be mmapped if:
+    - `JLD2.samelayout(T) == true`: The element type is `isbits` and has a size that is a multiple of 8 bytes.
+    - Uncompressed: Compressed arrays cannot be memory-mapped
+    - Uses a contiguous layout: This is true for all array datasets written by JLD2 with version ≥ v0.4.52
+    - Offset in file is a multiple of 8 bytes: This is a requirement for Mmap.
+    - Windows: The file must be opened in read-only mode. This is a limitation of Mmap on Windows. 
+"""
+function ismmappable(dset::Dataset)
+    iswritten(dset) || return false
+    f = dset.parent.f
+    dt = dset.datatype
+    if dt isa SharedDatatype
+        rr = jltype(f, get(f.datatype_locations, dt.header_offset, dt))
+    else
+        rr = jltype(f, dt)
     end
+    T = typeof(rr).parameters[1]
+    !(samelayout(T)) && return false
+    !isempty(dset.filters.filters) && return false
+    ret = false
+    if (layout = dset.layout) isa HmWrap{HmDataLayout}
+        ret = (layout.layout_class == LcContiguous && layout.data_address != UNDEFINED_ADDRESS)
+    end
+    if ret == true && Sys.iswindows() && dset.parent.f.writable
+        @warn "On Windows memory-mapping is only possible for files in read-only mode."
+        ret = false
+    end
+    return ret
+end
+
+
+"""
+    readmmap(dset::Dataset)
+
+Memory-map a dataset. This can be useful for large arrays and for editing written arrays.
+See [`ismmappable`](@ref) for requirements.
+"""
+function readmmap(dset::Dataset)
+    ismmappable(dset) || throw(ArgumentError("Dataset is not mmappable"))
+    f = dset.parent.f
+
+    # figure out the element type
+    dt = dset.datatype
+    if dt isa SharedDatatype
+        rr = jltype(f, get(f.datatype_locations, dt.header_offset, dt))
+    else
+        rr = jltype(f, dt)
+    end
+    T = typeof(rr).parameters[1]
+    ndims, offset = get_ndims_offset(f, ReadDataspace(f, dset.dataspace), collect(values(dset.attributes)))
+    
+    io = f.io
+    seek(io, offset)
+    dims = [jlread(io, Int64) for i in 1:ndims]
+    iobackend = io isa IOStream ? io : io.f
+    seek(iobackend, DataLayout(f, dset.layout).data_offset)
+    return Mmap.mmap(iobackend, Array{T, Int(ndims)}, (reverse(dims)..., ))
+end
+
+@static if !Sys.iswindows()
+"""
+    allocate_early(dset::Dataset, T::DataType)
+
+Write a dataset to file without any actual data. Reserve space according to element type and dimensions.
+This may be useful in conjunction with [`readmmap`](@ref).
+
+Note: Not available on Windows.
+"""
+function allocate_early(dset::Dataset, T::DataType)
+    iswritten(dset) && throw(ArgumentError("Dataset has already been written to file"))
+    # for this to work, require all information to be provided
+    isnothing(dset.datatype) && throw(ArgumentError("datatype must be provided"))
+    isnothing(dset.dataspace) && throw(ArgumentError("dataspace must be provided"))
+    datatype = dset.datatype
+    dataspace = dset.dataspace
+
+    f = dset.parent.f
+    attributes = map(collect(dset.attributes)) do (name, attr)
+        attr isa WrittenAttribute && return attr
+        return WrittenAttribute(f, name, attr)
+        throw(ArgumentError("Invalid attribute: $a"))
+    end
+    writtenas = writeas(T)
+    odr_ = _odr(writtenas, T, odr(writtenas))
+    datasz = odr_sizeof(odr_)::Int * numel(dataspace)::Int
+    psz = payload_size_without_storage_message(dataspace, datatype)::Int
+    psz += sum(message_size.(attributes), init=0)
+    # minimum extra space for continuation message
+    psz += jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length)
+
+    # Layout class: Use contiguous for now
+    layout_class = LcContiguous
+    psz += jlsizeof(Val(HmDataLayout); layout_class)
+    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
+
+    header_offset = f.end_of_data
+    io = f.io
+    seek(io, header_offset)
+    f.end_of_data = header_offset + fullsz
+
+    cio = begin_checksum_write(io, fullsz - 4)
+    write_object_header_and_dataspace_message(cio, f, psz, dataspace)
+    write_datatype_message(cio, datatype)
+    for a in attributes
+        write_header_message(cio, f, a, wsession)
+    end
+    # Align contiguous chunk to 8 bytes in the file
+    address = f.end_of_data + 8 - mod1(f.end_of_data, 8)
+    data_address = h5offset(f, address)
+    write_header_message(cio, Val(HmDataLayout); 
+        layout_class, data_address, data_size=datasz)
+
+    dset.header_chunk_info = (header_offset, position(cio)+20, position(cio))
+    # Add NIL message replacable by continuation message
+    write_continuation_placeholder(cio)
+    jlwrite(io, end_checksum(cio))
+
+    f.end_of_data = address + datasz
+    seek(io, f.end_of_data)
+
+    offset = h5offset(f, header_offset)
+    !isempty(dset.name) && (dset.parent[dset.name] = offset)
+    #dset.offset = offset
+
+    # load current dataset as new dataset
+    ddset = get_dataset(f, offset, dset.parent, dset.name)
+    for field in fieldnames(Dataset)
+        setproperty!(dset, field, getfield(ddset, field))
+    end
+    return offset
+end
 end

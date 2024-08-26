@@ -106,6 +106,15 @@ function get_compressor(::Bool)
     false, COMPRESSOR_TO_ID[:ZlibCompressor], m.ZlibCompressor()
 end
 
+function get_compressor(filter_id::UInt16)
+    modname, compressorname, decompressorname, = ID_TO_DECOMPRESSOR[filter_id]
+    invoke_again, m = checked_import(modname)
+    if invoke_again || !applicable(getproperty(m,compressorname))
+        _, compressor = Base.invokelatest(get_compressor, filter_id)
+        return true, compressor
+    end
+    return invoke_again, getproperty(m,compressorname)()
+end
 function get_decompressor(filter_id::UInt16)
     modname, compressorname, decompressorname, = ID_TO_DECOMPRESSOR[filter_id]
     invoke_again, m = checked_import(modname)
@@ -180,35 +189,15 @@ function write_chunked_storage_message( io::IO,
                                         elsize::Int,
                                         dims::NTuple{N,Int},
                                         filtered_size::Int,
-                                        offset::RelOffset) where N
-    jlwrite(io, HeaderMessage(HmDataLayout, chunked_storage_message_size(N) - jlsizeof(HeaderMessage), 0))
-    jlwrite(io, UInt8(4))                     # Version
-    jlwrite(io, UInt8(LcChunked))    # Layout Class
-    jlwrite(io, UInt8(2))                     # Flags (= SINGLE_INDEX_WITH_FILTER)
-    jlwrite(io, UInt8(N+1))                   # Dimensionality
-    jlwrite(io, UInt8(jlsizeof(Length)))        # Dimensionality Size
-    for i = N:-1:1
-        jlwrite(io, Length(dims[i]))          # Dimensions 1...N
-    end
-    jlwrite(io, Length(elsize))               # Element size (last dimension)
-    jlwrite(io, UInt8(1))                     # Chunk Indexing Type (= Single Chunk)
-    jlwrite(io, Length(filtered_size))        # Size of filtered chunk
-    jlwrite(io, UInt32(0))                    # Filters for chunk
-    jlwrite(io, offset)                       # Address
-end
-
-
-function write_compressed_data(cio, f, data, odr, wsession, filter_id, compressor)
-    write_filter_pipeline_message(cio, filter_id)
-
-    # deflate first
-    deflated = deflate_data(f, data, odr, wsession, compressor)
-
-    write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
-    jlwrite(f.io, end_checksum(cio))
-
-    f.end_of_data += length(deflated)
-    jlwrite(f.io, deflated)
+                                        data_address::RelOffset) where N
+    write_header_message(io, Val(HmDataLayout);
+        layout_class = LcChunked,
+        flags = 2,  # (= SINGLE_INDEX_WITH_FILTER)
+        dimensions = UInt64.((reverse(dims)..., elsize)), # Reversed dimensions with element size as last dim
+        chunk_indexing_type = 1,  # (= Single Chunk)
+        data_size = filtered_size,
+        filters = 0, # Filters for chunk
+        data_address)  
 end
 
 function decompress!(inptr::Ptr, data_length, element_size, n, decompressor::TranscodingStreams.Codec)

@@ -1,3 +1,11 @@
+## 0.4.52
+ - fix attribute loading
+ - new features: `readmmap` `ismmappable`  and `allocate_early` (api experimental)
+ - adds Downgrade testing
+ - new feature: disable committing datatypes. (restrict to h5 numbers, strings, and arrays)
+ - internal cleanup
+ - new experimental feature: reconstruct all committed types as `NamedTuple`s
+
 ## 0.4.51
  - remove Unicode normalization support due to excessive performance loss
  - rework of header message internals

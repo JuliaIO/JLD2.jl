@@ -117,13 +117,6 @@ jldopen(fn, "r+") do f
     @test f["x2"] == x2
 end
 
-# Issue #19
-save(fn, Dict("a"=>[1,2,3]))
-io = open(fn)
-@info("The next error message (involving \"loading nothing\") is a sign of normal operation")
-@test_throws FileIO.CapturedException load(io)
-close(io)
-
 # Issue #33
 d = Dict("params/p1" => 1,
          "params/p2" => 2.,
@@ -751,3 +744,16 @@ end
     end
 end
 
+@testset "Disable committing datatypes" begin
+    cd(mktempdir()) do
+        jldopen("test.jld2", "w") do f
+            f.disable_commit = true
+
+            @test_throws ArgumentError f["1"] = Dict(1=>2)
+            @test_throws ArgumentError f["2"] = Vector{Float64}
+            @test_throws ArgumentError f["3"] = (1,2,3)
+            # this could eventually be allowed
+            @test_throws ArgumentError f["4"] = (; a=1, b=2)
+        end
+    end
+end

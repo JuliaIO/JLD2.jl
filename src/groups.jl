@@ -254,13 +254,6 @@ function load_group(f::JLDFile, offset::RelOffset)
 end
 
 """
-    link_size(name::String)
-
-Returns the size of a link message, excluding message header.
-"""
-link_size(link_name::String) = sizefun(Val(HmLinkMessage), 0,0,(;link_name, target=UNDEFINED_ADDRESS))
-
-"""
     links_size(pairs)
 
 Returns the size of several link messages. `pairs` is an iterator of
@@ -269,7 +262,7 @@ Returns the size of several link messages. `pairs` is an iterator of
 function links_size(pairs)
     sz = 0
     for (name::String,) in pairs
-        sz += link_size(name) + jlsizeof(HeaderMessage)
+        sz += jlsizeof(Val(HmLinkMessage); link_name=name)
     end
     sz
 end
@@ -305,30 +298,25 @@ function save_group(g::Group)
     # If the group has not been saved yet
     if g.last_chunk_start_offset == -1
 
-        link_info = Hmessage(HmLinkInfo)
-        group_info = Hmessage(HmGroupInfo; g.est_num_entries, g.est_link_name_len)
-
-        totalsize = jlsizeof(link_info) + jlsizeof(group_info)
-        # Object header continuation placeholder
-        totalsize += (jlsizeof(HeaderMessage) + jlsizeof(RelOffset) + jlsizeof(Length))
-        # Link messages
+        totalsize = jlsizeof(Val(HmLinkInfo))
+        totalsize += jlsizeof(Val(HmGroupInfo); g.est_num_entries, g.est_link_name_len)
+        totalsize += CONTINUATION_MSG_SIZE
         totalsize += links_size(g.unwritten_links)
-        
         # add to size to make space for additional links
         totalsize += group_extra_space(g)
+
         sz = jlsizeof(ObjectStart) + size_size(totalsize) + totalsize
 
         g.last_chunk_start_offset = f.end_of_data
         g.last_chunk_checksum_offset = f.end_of_data + sz
         f.end_of_data += sz + 4
-
         seek(io, g.last_chunk_start_offset)
         
         # Object header
         jlwrite(io, ObjectStart(size_flag(totalsize)))
         write_size(io, totalsize)
-        jlwrite(io, link_info)
-        jlwrite(io, group_info)
+        write_header_message(io, Val(HmLinkInfo))
+        write_header_message(io, Val(HmGroupInfo); g.est_num_entries, g.est_link_name_len)
 
         g.next_link_offset = position(io)
     end

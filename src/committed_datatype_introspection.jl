@@ -56,7 +56,6 @@ function stringify_object(f, offset)
     dataspace = ReadDataspace()
     attrs = EMPTY_READ_ATTRIBUTES
     datatype::H5Datatype = PlaceholderH5Datatype()
-    chunked_storage::Bool = false
     layout::DataLayout = DataLayout(0,LcCompact,0,-1)
     filter_pipeline::FilterPipeline = FilterPipeline(Filter[])
     for msg in HeaderMessageIterator(f, offset)

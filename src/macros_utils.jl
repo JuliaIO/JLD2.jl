@@ -50,15 +50,13 @@ macro pseudostruct(name, blck)
     constructor_body, size_body, messageshow_body = 
         build_fun_body((Any[], Any[], Any[]), blck)
 
-    exprs = generate_getprop(blck.args)
+    get_prop_exprs = generate_getprop(blck.args)
     quote
-        function $(esc(:construct_hm_payload))(::Val{$name}, $(esc(:hflags)), $(esc(:hsize)), $(esc(:kw)))
-            io = IOBuffer()
+        function $(esc(:jlwrite))(io, ::Val{$name}, $(esc(:hflags)), $(esc(:hsize)), $(esc(:kw)))
             $(constructor_body...)
-            io
         end
 
-        function $(esc(:sizefun))(::Val{$name}, $(esc(:hflags)), $(esc(:hsize)), $(esc(:kw)))
+        function $(esc(:compute_size))(::Val{$name}, $(esc(:hflags)), $(esc(:hsize)), $(esc(:kw)))
             $(esc(:offset)) = 0
             $(size_body...)
             return $(esc(:offset))
@@ -73,19 +71,21 @@ macro pseudostruct(name, blck)
             return keyvalue
         end
 
-        function $(esc(:ioexpr))(::Val{$name})
-            return $(QuoteNode(exprs))
+        function $(esc(:(Base.getproperty)))(tw::HmWrap{$name}, s::Symbol)
+            s in (:size, :hflags, :m) && return getfield(tw, s)
+            m = getfield(tw, :m)
+            hflags = getfield(tw, :hflags)
+            hsize = getfield(tw, :size)
+            io = getfield(m, :io)
+            $(get_prop_exprs)
+            throw(ArgumentError("property $s not found"))
         end
         nothing
     end
 end
 
-function getprop end
-function construct_hm_payload end
-function sizefun end
+function compute_size end
 function messageshow end
-function ioexpr end
-
 
 function build_fun_body(accs, blk)
     for ex in blk.args
@@ -152,8 +152,8 @@ function linefun(ex)
             haskey_ = nothing
         elseif @capture(T, @read(type_, rsize_)) || @capture(T, @read(type_))
             read_io = :(jlread($io, $(esc(type))))
-            write_statement = :(jlwrite(_io, $(esc(s))))
-            increment = isnothing(rsize) ? :(sizeof(typeof($(esc(s))))) : rsize
+            write_statement = :(jlwrite(io, $(esc(s))))
+            increment = isnothing(rsize) ? :(jlsizeof($(esc(s)))) : rsize
         else
             T = esc(T)
             read_io = :(jlread($io, $T))
