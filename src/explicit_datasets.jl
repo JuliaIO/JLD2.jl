@@ -144,12 +144,17 @@ function write_dataset(dataset::Dataset, data, wsession::JLDWriteSession=JLDWrit
     end
     offset = write_dataset(f, dataspace, datatype, odr, data, wsession, compressor)
     !isempty(dataset.name) && (dataset.parent[dataset.name] = offset)
-
     # Attributes
-    # TODO: this can be optimized by writing all attributes at once
-    for (name, attr) in pairs(dataset.attributes)
-        add_attribute(dataset, name, value, wsession)
+    attrs = map(collect(keys(pairs(dataset.attributes)))) do name
+       WrittenAttribute(f, name, dataset.attributes[name]) 
     end
+    dataset = get_dataset(f, offset, dataset.parent, dataset.name)
+    dataset.header_chunk_info = 
+        attach_message(f, dataset.offset, attrs, wsession;
+            chunk_start=dataset.header_chunk_info[1],
+            chunk_end=dataset.header_chunk_info[2],
+            next_msg_offset=dataset.header_chunk_info[3],
+            )
 
     return offset
 end
@@ -341,9 +346,9 @@ function add_attribute(dset::Dataset, name::String, data, wsession=JLDWriteSessi
     f = dset.parent.f
     prewrite(f) # assert writability
 
-    for attr in dset.attributes
-        if (attr isa ReadAttribute && attr.name == name) || (attr isa Pair && attr.first == name)
-            throw(ArgumentError("Attribute $name already exists. Attribute names must be unique."))
+    for attrname in keys(dset.attributes)
+        if name == attrname
+            throw(ArgumentError("Attribute \"$name\" already exists. Attribute names must be unique."))
         end
     end
     dset.attributes[name] = data
@@ -484,7 +489,7 @@ function allocate_early(dset::Dataset, T::DataType)
     for attr in dataspace.attributes
         write_header_message(cio, f, attr)
     end
-    write_header_message(cio, Val(HmDatatype), 1 | (2*isa(dt, CommittedDatatype)); dt)
+    write_header_message(cio, Val(HmDatatype), 1 | (2*isa(datatype, CommittedDatatype)); dt=datatype)
     for a in attributes
         write_header_message(cio, f, a, wsession)
     end

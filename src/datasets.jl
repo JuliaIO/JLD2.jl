@@ -367,7 +367,7 @@ end
     seek(io, header_offset)
     f.end_of_data = header_offset + fullsz
 
-    track!(wsession, data, header_offset)
+    track!(wsession, data, h5offset(f, header_offset))
 
     cio = begin_checksum_write(io, fullsz - 4)
     jlwrite(cio, ObjectStart(size_flag(psz)))
@@ -377,7 +377,7 @@ end
     for attr in dataspace.attributes
         write_header_message(cio, f, attr)
     end
-    write_header_message(cio, Val(HmDatatype), 1 | (2*isa(dt, CommittedDatatype)); dt)
+    write_header_message(cio, Val(HmDatatype), 1 | (2*isa(datatype, CommittedDatatype)); dt=datatype)
 
     # Data storage layout
     if layout_class == LcCompact
