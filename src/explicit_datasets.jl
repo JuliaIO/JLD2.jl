@@ -526,7 +526,7 @@ function ArrayDataset(dset::Dataset)
     dt = dset.datatype
     return ArrayDataset(
         f, dset, 
-        reverse(dset.dataspace.dimensions), 
+        Int.(reverse(dset.dataspace.dimensions)), 
         fileoffset(f, dset.layout.data_address), 
         jltype(f, !(f.plain) && dt isa SharedDatatype ? get(f.datatype_locations, dt.header_offset, dt) : dt)
         )
