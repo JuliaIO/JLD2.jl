@@ -172,7 +172,7 @@ function read_dataset(dset::Dataset)
         DataLayout(f, dset.layout),
         isnothing(dset.filters) ? FilterPipeline() : dset.filters, 
         dset.offset, 
-        collect(values(dset.attributes)))
+        collect(ReadAttribute, values(dset.attributes)))
 end
 
 """
@@ -392,11 +392,7 @@ function ismmappable(dset::Dataset)
     iswritten(dset) || return false
     f = dset.parent.f
     dt = dset.datatype
-    if dt isa SharedDatatype
-        rr = jltype(f, get(f.datatype_locations, dt.header_offset, dt))
-    else
-        rr = jltype(f, dt)
-    end
+    rr = jltype(f, dt)
     T = typeof(rr).parameters[1]
     !(samelayout(T)) && return false
     !isempty(dset.filters.filters) && return false
@@ -424,11 +420,7 @@ function readmmap(dset::Dataset)
 
     # figure out the element type
     dt = dset.datatype
-    if dt isa SharedDatatype
-        rr = jltype(f, get(f.datatype_locations, dt.header_offset, dt))
-    else
-        rr = jltype(f, dt)
-    end
+    rr = jltype(f, dt)
     T = typeof(rr).parameters[1]
     ndims, offset = get_ndims_offset(f, ReadDataspace(f, dset.dataspace), collect(values(dset.attributes)))
     
@@ -518,4 +510,53 @@ function allocate_early(dset::Dataset, T::DataType)
     end
     return offset
 end
+end
+
+struct ArrayDataset{T, N, ODR, io} <: AbstractArray{T, N}
+    f::JLDFile{io}
+    dset::Dataset
+    dims::NTuple{N, Int}
+    data_address::Int64
+    rr::ReadRepresentation{T, ODR}
+end
+function ArrayDataset(dset::Dataset)
+    isarraydataset(dset) || throw(ArgumentError("Dataset is not an array"))
+    iscompressed(dset.filters) && throw(UnsupportedFeatureException("Compressed datasets are not supported."))
+    f = dset.parent.f
+    dt = dset.datatype
+    return ArrayDataset(
+        f, dset, 
+        reverse(dset.dataspace.dimensions), 
+        fileoffset(f, dset.layout.data_address), 
+        jltype(f, !(f.plain) && dt isa SharedDatatype ? get(f.datatype_locations, dt.header_offset, dt) : dt)
+        )
+end
+
+function isarraydataset(dset::Dataset)
+    isnothing(dset.dataspace) && return false
+    ds = dset.dataspace
+    if ds isa HmWrap{HmDataspace}
+        return ds.dataspace_type == DS_SIMPLE || ds.dataspace_type == DS_V1
+    end
+    return false
+end
+
+Base.IndexStyle(::Type{<:ArrayDataset}) = IndexLinear()
+Base.size(A::ArrayDataset) = A.dims
+Base.getindex(dset::Dataset, I...) = ArrayDataset(dset)[I...]
+Base.getindex(dset::Dataset) = read_dataset(dset)
+Base.setindex!(dset::Dataset, v, i, I...) = Base.setindex!(ArrayDataset(dset), v, i, I...)
+
+function Base.getindex(A::ArrayDataset, i::Int)
+    @boundscheck checkbounds(A, i)
+    seek(A.f.io, A.data_address + (i-1)*odr_sizeof(A.rr))
+    return read_scalar(A.f, A.rr, UNDEFINED_ADDRESS)
+end
+
+function Base.setindex!(A::ArrayDataset{T,N,ODR}, v, i::Int) where {T,N,ODR}
+    @boundscheck checkbounds(A, i)
+    A.f.writable || throw(ArgumentError("Cannot edit in read-only mode"))
+    seek(A.f.io, A.data_address + (i-1)*odr_sizeof(A.rr))
+    write_data(A.f.io, A.f, v, T, datamode(ODR), JLDWriteSession())
+    return v
 end

@@ -62,8 +62,10 @@ end
 
 # jltype is the inverse of h5type, providing a ReadRepresentation for an
 # H5Datatype. We handle committed datatypes here, and other datatypes below.
-function jltype(f::JLDFile, cdt::CommittedDatatype)
+function jltype(f::JLDFile, sdt::Union{SharedDatatype,CommittedDatatype})
+    cdt = get(f.datatype_locations, sdt.header_offset, sdt)
     haskey(f.h5jltype, cdt) && return f.h5jltype[cdt]::ReadRepresentation
+    
     dt, attrs = read_shared_datatype(f, cdt)
 
     julia_type_attr = nothing
@@ -75,66 +77,45 @@ function jltype(f::JLDFile, cdt::CommittedDatatype)
             written_type_attr = attr
         end
     end
+    isnothing(julia_type_attr) && return f.h5jltype[cdt] = jltype(f, dt)
 
-    if isa(julia_type_attr, Nothing)
-        throw(InvalidDataException())
-    end
-    julia_type_attr = julia_type_attr::ReadAttribute
-
-    # If type of datatype is this datatype, then this is the committed
-    # datatype that describes a datatype
-    if julia_type_attr.datatype isa SharedDatatype && 
-       julia_type_attr.datatype.header_offset == cdt.header_offset
-        # Verify that the datatype matches our expectations
+    # Bootstrap: the datatype of datatype is a datatype
+    if julia_type_attr.datatype == SharedDatatype(cdt.header_offset)
         if dt != H5TYPE_DATATYPE
-            error("""The HDF5 datatype representing a Julia datatype does not match
-                     the expectations of this version of JLD.
-
-                     You may need to update JLD to read this file.""")
+            throw(InternalError("""The HDF5 datatype representing a Julia datatype does not match
+                     the expectations of this version of JLD2.
+                     You may need to update JLD2 to read this file."""))
         end
         f.jlh5type[DataType] = cdt
         f.datatypes[cdt.index] = dt
         return (f.h5jltype[cdt] = ReadRepresentation{DataType, DataTypeODR()}())
     end
 
-    datatype = read_attr_data(f, julia_type_attr)
-    if f.plain && !(datatype isa Upgrade) && !(datatype <: Tuple) 
-        rr = jltype(f, dt)
-        return f.h5jltype[cdt] = rr
-    end
+    f.plain && return f.h5jltype[cdt] = jltype(f, dt)
 
-    if written_type_attr !== nothing
+    datatype = read_attr_data(f, julia_type_attr)
+
+    if !isnothing(written_type_attr)
         # Custom serialization
         custom_datatype = read_attr_data(f, written_type_attr)
         read_as = _readas(custom_datatype, datatype)
         if read_as <: UnknownType
             @warn("custom serialization of $(typestring(read_as))" *
                   " encountered, but the type does not exist in the workspace; the data will be read unconverted")
-            rr = (constructrr(f, custom_datatype, dt, attrs)::Tuple{ReadRepresentation,Bool})[1]
+            rr, _ = constructrr(f, custom_datatype, dt, attrs)
             canonical = false
         else
-            rr, canonical = constructrr(f, custom_datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
-            rrty = typeof(rr)
-            rr = ReadRepresentation{read_as, CustomSerialization{rrty.parameters[1], rrty.parameters[2]}}()
-            canonical = canonical && writeas(read_as) === custom_datatype
+            rr, canonical = constructrr(f, custom_datatype, dt, attrs)
+            rr = ReadRepresentation{read_as, CustomSerialization{typeof(rr).parameters...}}()
+            canonical &= writeas(read_as) === custom_datatype
         end
     else
-        rr, canonical = constructrr(f, datatype, dt, attrs)::Tuple{ReadRepresentation,Bool}
+        rr, canonical = constructrr(f, datatype, dt, attrs)
     end
 
     canonical && (f.jlh5type[datatype] = cdt)
     f.datatypes[cdt.index] = dt
     f.h5jltype[cdt] = rr
-end
-
-
-# jltype is the inverse of h5type, providing a ReadRepresentation for an
-# H5Datatype. We handle shared datatypes here: ones that were not "committed" by JLD2.
-function jltype(f::JLDFile, sdt::SharedDatatype)
-    haskey(f.h5jltype, sdt) && return f.h5jltype[sdt]::ReadRepresentation
-    dt, attrs = read_shared_datatype(f, sdt)
-    rr = jltype(f, dt)
-    f.h5jltype[sdt] = rr
 end
 
 
@@ -381,7 +362,7 @@ function types_from_refs(f::JLDFile, ptr::Ptr)
             # If the reference is to a committed datatype, read the datatype
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
-            res = cdt !== nulldt ? (typeof(jltype(f, cdt)::ReadRepresentation)::DataType).parameters[1] : load_dataset(f, ref)
+            res = cdt !== nulldt ? eltype(jltype(f, cdt)) : load_dataset(f, ref)
             unknown_params = unknown_params || isunknowntype(res) || isreconstructed(res)
             res
         end for ref in refs]

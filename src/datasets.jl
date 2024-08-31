@@ -66,26 +66,13 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
                    filters::FilterPipeline=FilterPipeline(),
                    header_offset::RelOffset=NULL_REFERENCE,
                    attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
-    # See if there is a julia type attribute
-    io = f.io
-    if dt isa SharedDatatype
-        # this means that it is "committed" to `_types` if the file was written by JLD2  
-        rr = jltype(f, get(f.datatype_locations, dt.header_offset, dt))
-
-        if layout.data_offset == -1
-            # There was no layout message.
-            # That means, this dataset is just a datatype
-            # return the Datatype
-            return typeof(rr).parameters[1]
-        end
-
-        seek(io, layout.data_offset)
-        read_dataspace = (dataspace, header_offset, layout, filters)
-        read_data(f, rr, read_dataspace, attributes)
-        
+    rr = jltype(f, dt)
+    if layout.data_offset == -1
+        # There was no layout message.
+        # That means, this dataset is just a datatype
+        return typeof(rr).parameters[1]
     elseif layout.data_offset == typemax(Int64)
-        rr = jltype(f, dt)
-        T,S = typeof(rr).parameters
+        T,_ = typeof(rr).parameters
         if layout.data_length > -1
             # TODO: this could use the fill value message to populate the array
             @warn "This array should be populated by a fill value. This is not (yet) implemented."
@@ -93,21 +80,10 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
         v = Array{T, 1}()
         track_weakref!(f, header_offset, v)
         return v
-    else
-        dtt = dt
-        rr = jltype(f, dtt)
-
-        if layout.data_offset == -1
-            # There was no layout message.
-            # That means, this dataset is just a datatype
-            # return the Datatype
-            return typeof(rr).parameters[1]
-        end
-
-        seek(io, layout.data_offset)
-        read_dataspace = (dataspace, header_offset, layout, filters)
-        read_data(f, rr, read_dataspace, attributes)
     end
+    seek(f.io, layout.data_offset)
+    read_dataspace = (dataspace, header_offset, layout, filters)
+    read_data(f, rr, read_dataspace, attributes)
 end
 
 # Most types can only be scalars or arrays
