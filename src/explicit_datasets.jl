@@ -547,13 +547,13 @@ Base.getindex(dset::Dataset, I...) = ArrayDataset(dset)[I...]
 Base.getindex(dset::Dataset) = read_dataset(dset)
 Base.setindex!(dset::Dataset, v, i, I...) = Base.setindex!(ArrayDataset(dset), v, i, I...)
 
-function Base.getindex(A::ArrayDataset, i::Int)
+function Base.getindex(A::ArrayDataset, i::Integer)
     @boundscheck checkbounds(A, i)
     seek(A.f.io, A.data_address + (i-1)*odr_sizeof(A.rr))
     return read_scalar(A.f, A.rr, UNDEFINED_ADDRESS)
 end
 
-function Base.setindex!(A::ArrayDataset{T,N,ODR}, v, i::Int) where {T,N,ODR}
+function Base.setindex!(A::ArrayDataset{T,N,ODR}, v, i::Integer) where {T,N,ODR}
     @boundscheck checkbounds(A, i)
     A.f.writable || throw(ArgumentError("Cannot edit in read-only mode"))
     seek(A.f.io, A.data_address + (i-1)*odr_sizeof(A.rr))
