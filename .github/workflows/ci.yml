@@ -1,14 +1,13 @@
 name: CI
 on:
   pull_request:
-    branches:
-      - master
-      - dev
+    branches: [main, master, dev]
   push:
-    branches:
-      - master
-      - dev
+    branches: [main, master, dev]
     tags: '*'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     name: Tests, Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
@@ -16,25 +15,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version:
-          - '1.6'
-          - '1'
-          - 'nightly'
-        os:  [ubuntu-latest, windows-latest, macos-latest] # adjust according to need, e.g. os: [ubuntu-latest] if testing only on linux
-        arch:
-          - x64
+        version: ['min', '1', 'nightly']
+        os:  [ubuntu-latest, windows-latest, macos-latest]
+        arch: x64
         include:
           - os: ubuntu-latest
             version: '1'
             arch: x86
     steps:
-      # Cancel ongoing CI test runs if pushing to branch again before the previous tests
-      # have finished
-      - name: Cancel ongoing test runs for previous commits
-        uses: styfle/cancel-workflow-action@0.12.1
-        with:
-          access_token: ${{ github.token }}
-
       # Do tests
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
@@ -49,31 +37,3 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: lcov.info
-  docs:
-    name: Documentation
-    runs-on: ubuntu-latest
-    steps:
-      # Cancel ongoing documentation build if pushing to branch again before the previous
-      # build is finished.
-      - name: Cancel ongoing documentation builds for previous commits
-        uses: styfle/cancel-workflow-action@0.12.1
-        with:
-          access_token: ${{ github.token }}
-
-      # Build docs
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
-        with:
-          version: '1'
-      - name: Instantiate and install dependencies
-        run: |
-          julia --project=docs -e '
-              using Pkg
-              Pkg.develop(PackageSpec(path=pwd()))
-              Pkg.instantiate()'
-      - name: Generate documentation and deploy
-        env: # needed for pushing to gh-pages branch
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }} # For authentication with SSH deploy key
-        run:
-          julia --project=docs docs/make.jl

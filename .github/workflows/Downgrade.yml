@@ -1,15 +1,16 @@
 name: Downgrade
 on:
   pull_request:
-    branches:
-      - master
+    branches: [main, master, dev]
     paths-ignore:
       - 'docs/**'
   push:
-    branches:
-      - master
+    branches: [main, master, dev]
     paths-ignore:
       - 'docs/**'
+  concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -18,11 +19,11 @@ jobs:
         version: ['1']
     steps:
       - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v1
+      - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
-      - uses: cjdoris/julia-downgrade-compat-action@v1
+      - uses: julia-actions/julia-downgrade-compat@v1
         with:
-          skip: Pkg,TOML,Mmap
+          skip: Pkg, TOML, Mmap
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
