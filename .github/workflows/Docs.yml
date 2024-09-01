@@ -1,0 +1,21 @@
+name: Documenter
+on:
+  push:
+    branches: [main, master, dev]
+    tags: [v*]
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  Documenter:
+    permissions:
+      contents: write
+      statuses: write
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: julia-actions/julia-docdeploy@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

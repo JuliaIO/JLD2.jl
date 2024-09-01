@@ -35,10 +35,8 @@ end
 
 @nospecializeinfer function write_dataset(f::JLDFile, @nospecialize(x::Array), wsession::JLDWriteSession, @nospecialize(compress=f.compress))
     T = eltype(x)
-    if !isa(wsession, JLDWriteSession{Union{}})
-        offset = get(wsession.h5offset, objectid(x), UNDEFINED_ADDRESS)
-        offset != UNDEFINED_ADDRESS && return offset
-    end
+    offset = get_tracked(wsession, x)
+    offset != UNDEFINED_ADDRESS && return offset
     if T isa Union && writeasbits(T)
         # Conversion has to be done earlier here because
         # vectors are special cased in dispatch
@@ -60,7 +58,7 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     io = f.io
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
     seek(io, offset)
-    v = construct_array(io, InlineUnionEl{T1,T2}, Val(Int(ndims)))
+    v = construct_array(io, InlineUnionEl{T1,T2}, Int(ndims))
     n = length(v)
     seek(io, layout.data_offset)
     if iscompressed(filters)

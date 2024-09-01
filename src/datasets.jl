@@ -66,26 +66,13 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
                    filters::FilterPipeline=FilterPipeline(),
                    header_offset::RelOffset=NULL_REFERENCE,
                    attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
-    # See if there is a julia type attribute
-    io = f.io
-    if dt isa SharedDatatype
-        # this means that it is "committed" to `_types` if the file was written by JLD2  
-        rr = jltype(f, get(f.datatype_locations, dt.header_offset, dt))
-
-        if layout.data_offset == -1
-            # There was no layout message.
-            # That means, this dataset is just a datatype
-            # return the Datatype
-            return typeof(rr).parameters[1]
-        end
-
-        seek(io, layout.data_offset)
-        read_dataspace = (dataspace, header_offset, layout, filters)
-        read_data(f, rr, read_dataspace, attributes)
-        
+    rr = jltype(f, dt)
+    if layout.data_offset == -1
+        # There was no layout message.
+        # That means, this dataset is just a datatype
+        return typeof(rr).parameters[1]
     elseif layout.data_offset == typemax(Int64)
-        rr = jltype(f, dt)
-        T,S = typeof(rr).parameters
+        T,_ = typeof(rr).parameters
         if layout.data_length > -1
             # TODO: this could use the fill value message to populate the array
             @warn "This array should be populated by a fill value. This is not (yet) implemented."
@@ -93,21 +80,10 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
         v = Array{T, 1}()
         track_weakref!(f, header_offset, v)
         return v
-    else
-        dtt = dt
-        rr = jltype(f, dtt)
-
-        if layout.data_offset == -1
-            # There was no layout message.
-            # That means, this dataset is just a datatype
-            # return the Datatype
-            return typeof(rr).parameters[1]
-        end
-
-        seek(io, layout.data_offset)
-        read_dataspace = (dataspace, header_offset, layout, filters)
-        read_data(f, rr, read_dataspace, attributes)
     end
+    seek(f.io, layout.data_offset)
+    read_dataspace = (dataspace, header_offset, layout, filters)
+    read_data(f, rr, read_dataspace, attributes)
 end
 
 # Most types can only be scalars or arrays
@@ -213,7 +189,7 @@ function read_empty(rr::ReadRepresentation{T}, f::JLDFile,
     dimensions_attr.datatype == h5fieldtype(f, Int64, Int64, Val{true}) || throw(UnsupportedFeatureException())
 
     seek(io, dimensions_attr.data_offset)
-    v = construct_array(io, T, Val(ndims))
+    v = construct_array(io, T, ndims)
     if isconcretetype(T)
         for i = 1:length(v)
             @inbounds v[i] = jlconvert(rr, f, Ptr{Cvoid}(0), header_offset)
@@ -244,30 +220,12 @@ function get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Abst
 end
 
 """
-    construct_array{T}(io::IO, ::Type{T}, ::Val{ndims})
+    construct_array(io::IO, eltype, ndims::Int)
 
 Construct array by reading `ndims` dimensions from `io`. Assumes `io` has already been
 seeked to the correct position.
 """
-function construct_array(io::IO, ::Type{T}, ::Val{1}) where {T}
-    n = jlread(io, Int64)
-    Vector{T}(undef, n)
-end
-
-function construct_array(io::IO, ::Type{T}, ::Val{2}) where {T}
-    d2 = jlread(io, Int64)
-    d1 = jlread(io, Int64)
-    Matrix{T}(undef, d1, d2)
-end
-
-function construct_array(io::IO, ::Type{T}, ::Val{3}) where {T}
-    d3 = jlread(io, Int64)
-    d2 = jlread(io, Int64)
-    d1 = jlread(io, Int64)
-    Array{T,3}(undef, d1, d2, d3)
-end        
-
-function construct_array(io::IO, ::Type{T}, ::Val{N})::Array{T,N} where {T,N}
+function construct_array(io::IO, ::Type{T}, N::Int) where {T}
     ds = reverse(ntuple(i->jlread(io, Int64), Val(N)))
     Array{T,N}(undef, ds...)
 end
@@ -283,7 +241,7 @@ end
         ndims, offset = get_ndims_offset(f, dataspace, attributes)
 
         seek(io, offset)
-        v = construct_array(io, T, Val(Int(ndims)))
+        v = construct_array(io, T, Int(ndims))
         n = length(v)
         seek(io, data_offset)
         if iscompressed(filters)
@@ -296,7 +254,7 @@ end
     else
         ndims, offset = get_ndims_offset(f, dataspace, attributes)
         seek(io, offset)
-        v = construct_array(io, T, Val(Int(ndims)))
+        v = construct_array(io, T, Int(ndims))
         if layout.version == 3 
             # version 1 B-tree
             # This version appears to be padding incomplete chunks
@@ -385,14 +343,17 @@ end
     seek(io, header_offset)
     f.end_of_data = header_offset + fullsz
 
-    if ismutabletype(typeof(data)) && !isa(wsession, JLDWriteSession{Union{}})
-        wsession.h5offset[objectid(data)] = h5offset(f, header_offset)
-        push!(wsession.objects, data)
-    end
+    track!(wsession, data, h5offset(f, header_offset))
 
     cio = begin_checksum_write(io, fullsz - 4)
-    write_object_header_and_dataspace_message(cio, f, psz, dataspace)
-    write_datatype_message(cio, datatype)
+    jlwrite(cio, ObjectStart(size_flag(psz)))
+    write_size(cio, psz)
+    write_header_message(cio, Val(HmFillValue); flags=0x09)
+    write_header_message(cio, Val(HmDataspace); dataspace.dataspace_type, dimensions=dataspace.size)
+    for attr in dataspace.attributes
+        write_header_message(cio, f, attr)
+    end
+    write_header_message(cio, Val(HmDatatype), 1 | (2*isa(datatype, CommittedDatatype)); dt=datatype)
 
     # Data storage layout
     if layout_class == LcCompact
@@ -429,25 +390,10 @@ end
     h5offset(f, header_offset)
 end
 
-function write_object_header_and_dataspace_message(cio::IO, f::JLDFile, psz::Int, dataspace::WriteDataspace)
-    jlwrite(cio, ObjectStart(size_flag(psz)))
-    write_size(cio, psz)
-    write_header_message(cio, Val(HmFillValue); flags=0x09)
-    write_header_message(cio, Val(HmDataspace); dataspace.dataspace_type, dimensions=dataspace.size)
-    for attr in dataspace.attributes
-        write_header_message(cio, f, attr)
-    end
-end
-
-write_datatype_message(cio::IO, dt::H5Datatype) = 
-    write_header_message(cio, Val(HmDatatype), 1 | (2*isa(dt, CommittedDatatype)); dt)
-
 
 @nospecializeinfer function write_dataset(f::JLDFile, @nospecialize(x), wsession::JLDWriteSession)::RelOffset
-    if ismutabletype(typeof(x)) && !isa(wsession, JLDWriteSession{Union{}})
-        offset = get(wsession.h5offset, objectid(x), UNDEFINED_ADDRESS)
-        offset != UNDEFINED_ADDRESS && return offset
-    end
+    offset = get_tracked(wsession, x)
+    offset != UNDEFINED_ADDRESS && return offset
     odr = objodr(x)
     write_dataset(f, WriteDataspace(f, x, odr), h5type(f, x), odr, x, wsession)::RelOffset
 end

@@ -67,18 +67,18 @@ h5fieldtype(::JLDFile, ::Type{Bool}, ::Type{Bool}, ::Initialized) =BitFieldDatat
 jltype(::JLDFile, ::BitFieldDatatype) = ReadRepresentation{Bool, Bool}()
 
 h5fieldtype(::JLDFile, ::Type{Float16}, ::Type{Float16}, ::Initialized) =
-    FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x0f, 0x00, 2, 0, 16, 10, 5, 0, 10, 0x0000000f)
+    FloatingPointDatatype(UInt8(DT_FLOATING_POINT) + 0x3<<4, 0x20, 0x0f, 0x00, 2, 0, 16, 10, 5, 0, 10, 0x0000000f)
 h5fieldtype(::JLDFile, ::Type{Float32}, ::Type{Float32}, ::Initialized) =
-    FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x1f, 0x00, 4, 0, 32, 23, 8, 0, 23, 0x0000007f)
+    FloatingPointDatatype(UInt8(DT_FLOATING_POINT) + 0x3<<4, 0x20, 0x1f, 0x00, 4, 0, 32, 23, 8, 0, 23, 0x0000007f)
 h5fieldtype(::JLDFile, ::Type{Float64}, ::Type{Float64}, ::Initialized) =
-    FloatingPointDatatype(DT_FLOATING_POINT, 0x20, 0x3f, 0x00, 8, 0, 64, 52, 11, 0, 52, 0x000003ff)
+    FloatingPointDatatype(UInt8(DT_FLOATING_POINT) + 0x3<<4, 0x20, 0x3f, 0x00, 8, 0, 64, 52, 11, 0, 52, 0x000003ff)
 
 h5fieldtype(::JLDFile, ::Type{BENumber{Float16}}, ::Type{Float16}, ::Initialized) =
-    FloatingPointDatatype(DT_FLOATING_POINT, 0x21, 0x0f, 0x00, 2, 0, 16, 10, 5, 0, 10, 0x0000000f)
+    FloatingPointDatatype(UInt8(DT_FLOATING_POINT) + 0x3<<4, 0x21, 0x0f, 0x00, 2, 0, 16, 10, 5, 0, 10, 0x0000000f)
 h5fieldtype(::JLDFile, ::Type{BENumber{Float32}}, ::Type{Float32}, ::Initialized) =
-    FloatingPointDatatype(DT_FLOATING_POINT, 0x21, 0x1f, 0x00, 4, 0, 32, 23, 8, 0, 23, 0x0000007f)
+    FloatingPointDatatype(UInt8(DT_FLOATING_POINT) + 0x3<<4, 0x21, 0x1f, 0x00, 4, 0, 32, 23, 8, 0, 23, 0x0000007f)
 h5fieldtype(::JLDFile, ::Type{BENumber{Float64}}, ::Type{Float64}, ::Initialized) =
-    FloatingPointDatatype(DT_FLOATING_POINT, 0x21, 0x3f, 0x00, 8, 0, 64, 52, 11, 0, 52, 0x000003ff)
+    FloatingPointDatatype(UInt8(DT_FLOATING_POINT) + 0x3<<4, 0x21, 0x3f, 0x00, 8, 0, 64, 52, 11, 0, 52, 0x000003ff)
 
 function jltype(f::JLDFile, dt::FloatingPointDatatype)
     if dt == h5fieldtype(f, Float64, Float64, Val{true})

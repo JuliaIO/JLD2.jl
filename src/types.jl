@@ -114,14 +114,24 @@ referenced multiple times are written multiple times.
 """
 struct JLDWriteSession{T<:Union{Dict{UInt,RelOffset},Union{}}}
     h5offset::T
-    objects::Vector{Any}
-
     JLDWriteSession{T}() where T = new()
-    JLDWriteSession{T}(h5offset, objects) where T = new(h5offset, objects)
+    JLDWriteSession{T}(h5offset, objects) where T = new(h5offset)
 end
 JLDWriteSession() = JLDWriteSession{Dict{UInt,RelOffset}}(Dict{UInt,RelOffset}(), Any[])
-
-
+track!(::JLDWriteSession{Union{}}, args...) = nothing
+function track!(s::JLDWriteSession, data, offset::RelOffset)
+    if ismutabletype(typeof(data))
+        s.h5offset[objectid(data)] = offset
+    end
+    nothing
+end
+get_tracked(wsession::JLDWriteSession{Union{}}, data) = UNDEFINED_ADDRESS
+function get_tracked(wsession::JLDWriteSession, data)
+    if ismutabletype(typeof(data))
+        return get(wsession.h5offset, objectid(data), UNDEFINED_ADDRESS)
+    end
+    return UNDEFINED_ADDRESS
+end
 """
     GlobalHeap
 
