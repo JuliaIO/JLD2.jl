@@ -1,3 +1,9 @@
+## 0.4.53
+ - Experimental: Slicing and inplace updating of array datasets
+ - updated CI workflows
+ - improve pretty printing of attribute header message
+ - fix storing of datatype info for h5 compat
+
 ## 0.4.52
  - fix attribute loading
  - new features: `readmmap` `ismmappable`  and `allocate_early` (api experimental)
