@@ -114,7 +114,7 @@ function linefun(ex)
         increment = esc(n)
         off_inc = :($offset += $increment)
         write_inc = :(write_zerobytes(io, $increment))
-        return [write_inc, off_inc, off_inc]
+        return [write_inc, off_inc, :(skip($io, $increment))]
     elseif @capture(ex, s_Symbol::T_) || @capture(ex, s_Symbol::T_ = v_)
         getprop_ = :($(esc(s)) = $kw.$(s))
         default = Symbol(s,"_default")

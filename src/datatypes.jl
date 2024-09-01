@@ -34,11 +34,11 @@ struct BasicDatatype <: H5Datatype
 end
 define_packed(BasicDatatype)
 StringDatatype(::Type{String}, size::Integer) =
-    BasicDatatype(DT_STRING, 0x11, 0x00, 0x00, size)
+    BasicDatatype(UInt8(DT_STRING) | 0x3<<4, 0x11, 0x00, 0x00, size)
 OpaqueDatatype(size::Integer) =
-    BasicDatatype(DT_OPAQUE, 0x00, 0x00, 0x00, size) # XXX make sure ignoring the tag is OK
+    BasicDatatype(UInt8(DT_OPAQUE) | 0x3<<4, 0x00, 0x00, 0x00, size) # XXX make sure ignoring the tag is OK
 ReferenceDatatype() =
-    BasicDatatype(DT_REFERENCE, 0x00, 0x00, 0x00, jlsizeof(RelOffset))
+    BasicDatatype(UInt8(DT_REFERENCE) | 0x3<<4, 0x00, 0x00, 0x00, jlsizeof(RelOffset))
 
 function Base.:(==)(dt1::BasicDatatype, dt2::BasicDatatype)
     ret = true
@@ -124,7 +124,7 @@ struct BitFieldDatatype <: H5Datatype
 end
 define_packed(BitFieldDatatype)
 BitFieldDatatype(size) =
-    BitFieldDatatype(DT_BITFIELD, 0x00, 0x00, 0x00, size, 0, 8*size)
+    BitFieldDatatype(UInt8(DT_BITFIELD) | 0x3<<4, 0x00, 0x00, 0x00, size, 0, 8*size)
 
 
 struct FloatingPointDatatype <: H5Datatype
@@ -198,7 +198,7 @@ end
 
 function jlwrite(io::IO, dt::CompoundDatatype)
     n = length(dt.names)
-    jlwrite(io, BasicDatatype(DT_COMPOUND, n % UInt8, (n >> 8) % UInt8, 0x00, dt.size))
+    jlwrite(io, BasicDatatype(UInt8(DT_COMPOUND) | 0x3<<4, n % UInt8, (n >> 8) % UInt8, 0x00, dt.size))
     for i = 1:length(dt.names)
         # Name
         name = dt.names[i]
@@ -273,7 +273,7 @@ struct VariableLengthDatatype{T<:H5Datatype} <: H5Datatype
     basetype::T
 end
 VariableLengthDatatype(basetype::H5Datatype) =
-    VariableLengthDatatype{typeof(basetype)}(DT_VARIABLE_LENGTH, 0x00, 0x00, 0x00, 8+jlsizeof(RelOffset), basetype)
+    VariableLengthDatatype{typeof(basetype)}(UInt8(DT_VARIABLE_LENGTH) | 0x3<<4, 0x00, 0x00, 0x00, 8+jlsizeof(RelOffset), basetype)
 VariableLengthDatatype(class, bitfield1, bitfield2, bitfield3, size, basetype::H5Datatype) =
     VariableLengthDatatype{typeof(basetype)}(class, bitfield1, bitfield2, bitfield3, size, basetype)
 
@@ -288,7 +288,7 @@ jlsizeof(dt::VariableLengthDatatype) =
     jlsizeof(BasicDatatype) + jlsizeof(dt.basetype)
 
 function jlwrite(io::IO, dt::VariableLengthDatatype)
-    jlwrite(io, BasicDatatype(DT_VARIABLE_LENGTH, dt.bitfield1, dt.bitfield2, dt.bitfield3, dt.size))
+    jlwrite(io, BasicDatatype(UInt8(DT_VARIABLE_LENGTH) | 0x3<<4, dt.bitfield1, dt.bitfield2, dt.bitfield3, dt.size))
     jlwrite(io, dt.basetype)
 end
 
