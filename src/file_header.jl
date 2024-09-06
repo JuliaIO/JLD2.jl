@@ -1,11 +1,11 @@
 # Currently we specify a 512 byte header
 const FILE_HEADER_LENGTH = 512
 
-const FORMAT_VERSION = v"0.1.1"
+const FORMAT_VERSION = v"0.2.0"
 # Range of file format versions that can be read
 # Publish patch release relaxing upper version bound
 # if the imminent major release is not breaking
-const COMPATIBLE_VERSIONS = (lower=v"0.1", upper=v"0.2")
+const COMPATIBLE_VERSIONS = (lower=v"0.1", upper=v"0.3")
 const REQUIRED_FILE_HEADER = "HDF5-based Julia Data Format, version "
 const FILE_HEADER = "$(REQUIRED_FILE_HEADER)$(FORMAT_VERSION)\x00 (Julia $(VERSION) $(sizeof(Int)*8)-bit $(htol(1) == 1 ? "LE" : "BE"))\x00"
 @assert length(FILE_HEADER) <= FILE_HEADER_LENGTH
