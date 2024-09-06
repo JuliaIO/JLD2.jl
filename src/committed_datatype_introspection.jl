@@ -31,11 +31,11 @@ function stringify_committed_datatype(f, cdt; showfields=false)
         return julia_type_str, written_type_str, String[]
     end
 
-    field_datatypes = read_field_datatypes(f, attrs)
+    field_datatypes = read_field_datatypes(f, dt, attrs)
     field_strs = String[]
     do_report = false
     for i = 1:length(dt.names)
-        if !isempty(field_datatypes) && (ref = field_datatypes[i]) != NULL_REFERENCE
+        if !isempty(field_datatypes) && (ref = field_datatypes[string(fn[i])]) != NULL_REFERENCE
             fieldtype = stringify_committed_datatype(f, f.datatype_locations[ref])[1]
             do_report = true
         else

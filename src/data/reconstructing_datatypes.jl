@@ -1,11 +1,24 @@
-function read_field_datatypes(f::JLDFile, attrs::Vector{ReadAttribute})
+function read_field_datatypes(f::JLDFile, dt::CompoundDatatype, attrs::Vector{ReadAttribute})
+    offsets = nothing
+    namevec = nothing
     for attr in attrs
-        if attr.name == :field_datatypes
-            return read_attr_data(f, attr, ReferenceDatatype(),
-                                  ReadRepresentation{RelOffset,RelOffset}())
+        if attr.name == :field_types
+            offsets = read_attr_data(f, attr, ReferenceDatatype(),
+                            ReadRepresentation{RelOffset,RelOffset}())
+        elseif attr.name == :field_names
+            namevec = read_attr_data(f, attr, H5TYPE_VLEN_UTF8,
+                            ReadRepresentation{String,Vlen{String}}())
+        elseif attr.name == :field_datatypes
+            # Legacy: Files written before JLD2 v0.4.54
+            roffsetvec = read_attr_data(f, attr, ReferenceDatatype(),
+                            ReadRepresentation{RelOffset,RelOffset}())
+            return OrderedDict(dt.names .=> roffsetvec)        
         end
     end
-    RelOffset[]
+    if isnothing(offsets) || isnothing(namevec)
+        return OrderedDict{String, RelOffset}()
+    end
+    OrderedDict{String, RelOffset}(namevec .=> offsets)
 end
 
 function check_empty(attrs::Vector{ReadAttribute})
@@ -161,8 +174,7 @@ will have a matching memory layout without first inspecting the memory layout.
 function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
-    field_datatypes = read_field_datatypes(f, attrs)
-
+    field_datatypes = read_field_datatypes(f, dt, attrs)
     # If read type is not a leaf type, reconstruct
     if !isconcretetype(T)
         @warn("read type $T is not a leaf type in workspace; reconstructing")
@@ -197,7 +209,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
             end
 
             dtindex = dtnames[fn[i]]
-            if !isempty(field_datatypes) && (ref = field_datatypes[dtindex]) != NULL_REFERENCE
+            if !isempty(field_datatypes) && (ref = field_datatypes[string(fn[i])]) != NULL_REFERENCE
                 dtrr = jltype(f, f.datatype_locations[ref])
             else
                 dtrr = jltype(f, dt.members[dtindex])
@@ -277,7 +289,7 @@ end
 function constructrr(f::JLDFile, u::Upgrade, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
-    field_datatypes = read_field_datatypes(f, attrs)
+    field_datatypes = read_field_datatypes(f, dt, attrs)
 
 
     rodr = reconstruct_odr(f, dt, field_datatypes)
@@ -298,7 +310,7 @@ function constructrr(f::JLDFile, T::UnionAll, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
     @warn("read type $T is not a leaf type in workspace; reconstructing")
-    return reconstruct_compound(f, string(T), dt, read_field_datatypes(f, attrs))
+    return reconstruct_compound(f, string(T), dt, read_field_datatypes(f, dt, attrs))
 end
 
 # Find types in modules
@@ -572,7 +584,7 @@ behead(@nospecialize T) = T
 
 function constructrr(f::JLDFile, unk::Type{UnknownType{T,P}}, dt::CompoundDatatype,
     attrs::Vector{ReadAttribute}) where {T,P}
-    field_datatypes = read_field_datatypes(f, attrs)
+    field_datatypes = read_field_datatypes(f, dt, attrs)
     if T isa DataType
         if T === Tuple
             # For a tuple with unknown fields, we should reconstruct the fields
@@ -631,26 +643,36 @@ end
 # Reconstruct the ODR of a type from the CompoundDatatype and field_datatypes
 # attribute
 function reconstruct_odr(f::JLDFile, dt::CompoundDatatype,
-                         field_datatypes::Vector{RelOffset})
+                         field_datatypes::OrderedDict{String,RelOffset})
     # Get the type and ODR information for each field
-    types = Vector{Any}(undef, length(dt.names))
-    h5types = Vector{Any}(undef, length(dt.names))
-    for i = 1:length(dt.names)
-        if !isempty(field_datatypes) && (ref = field_datatypes[i]) != NULL_REFERENCE
-            dtrr = jltype(f, f.datatype_locations[ref])
-        else
+    types = []
+    h5types = []
+    offsets = Int[]
+    offset = 0
+    for (k,typeref) in field_datatypes
+        i = findfirst(==(Symbol(k)), dt.names)
+        if typeref != NULL_REFERENCE
+            dtrr = jltype(f, f.datatype_locations[typeref])
+            odr_sizeof(dtrr) != 0 && @warn "Field $k has non-zero size in file, this should not happen"
+        elseif !isnothing(i)
+            offset = dt.offsets[i]
             dtrr = jltype(f, dt.members[i])
+        else
+            throw(InternalError("Field $k not found in datatype"))
         end
-        types[i], h5types[i] = typeof(dtrr).parameters
+        push!(types, typeof(dtrr).parameters[1])
+        push!(h5types, typeof(dtrr).parameters[2])
+        push!(offsets, offset)
+        offset += odr_sizeof(dtrr)
     end
-    return OnDiskRepresentation{(dt.offsets...,), Tuple{types...}, Tuple{h5types...},dt.size}()
+    OnDiskRepresentation{(offsets...,), Tuple{types...}, Tuple{h5types...},dt.size}()
 end
 
 # Reconstruct type that is a "lost cause": either we were not able to resolve
 # the name, or the workspace type has additional fields, or cannot convert
 # fields to workspace types
 function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
-                              field_datatypes::Union{Vector{RelOffset},Nothing})
+                              field_datatypes::OrderedDict{String,RelOffset})
     rodr = reconstruct_odr(f, dt, field_datatypes)
     types = typeof(rodr).parameters[2].parameters
     odrs = typeof(rodr).parameters[3].parameters
@@ -767,13 +789,13 @@ end
 
         if odr === nothing
             # Type is not stored or single instance
-            if T.types[i] == Union{}
+            if rtype == Union{}
                 # This cannot be defined
                 @assert !ismutabletype(T)
                 push!(args, Expr(:return, Expr(:new, T, fsyms[1:i-1]...)))
                 return blk
             else
-                newi = Expr(:new, T.types[i])
+                newi = Expr(:new, rtype)
                 push!(args, :($fsym = $newi))
             end
         else

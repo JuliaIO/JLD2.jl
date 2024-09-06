@@ -102,6 +102,8 @@ end
         read_scalar(f, rr, header_offset)
     elseif dataspace.dataspace_type == DS_V1
         read_array(f, dataspace, rr, layout, filters, header_offset, attributes)
+    elseif dataspace.dataspace_type == DS_NULL
+        read_empty(rr, f, get(attributes, find_dimensions_attr(attributes),), header_offset)
     else
         throw(UnsupportedFeatureException())
     end
