@@ -34,8 +34,8 @@ function stringify_committed_datatype(f, cdt; showfields=false)
     field_datatypes = read_field_datatypes(f, dt, attrs)
     field_strs = String[]
     do_report = false
-    for i = 1:length(dt.names)
-        if !isempty(field_datatypes) && (ref = field_datatypes[string(fn[i])]) != NULL_REFERENCE
+    for (i, key) in enumerate(keys(field_datatypes))
+        if (ref = field_datatypes[string(key)]) != NULL_REFERENCE
             fieldtype = stringify_committed_datatype(f, f.datatype_locations[ref])[1]
             do_report = true
         else

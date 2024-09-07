@@ -45,7 +45,6 @@ end
 
 # Gets the size of an on-disk representation
 function odr_sizeof(::OnDiskRepresentation{Offsets,JLTypes,H5Types,Size}) where {Offsets,JLTypes,H5Types,Size}
-    #Offsets[end]+odr_sizeof(H5Types.parameters[end])
     Size
 end
 

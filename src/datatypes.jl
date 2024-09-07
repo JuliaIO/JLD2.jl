@@ -50,53 +50,29 @@ function Base.:(==)(dt1::BasicDatatype, dt2::BasicDatatype)
     ret
 end
 
-# Replace a symbol or expression in an AST with a new one
-function replace_expr(x, from, to)
-    ex = copy(x)
-    for i = 1:length(ex.args)
-        x = ex.args[i]
-        if x == from
-            ex.args[i] = to
-        elseif isa(x, Expr)
-            ex.args[i] = replace_expr(x, from, to)
-        end
-    end
-    ex
-end
-
-# Macro to read an entire datatype from a file, avoiding dynamic
-# dispatch for all but variable length types
-macro read_datatype(io, datatype_class, datatype, then)
-    esc(quote
-        if $datatype_class%16== DT_FIXED_POINT
-            $(replace_expr(then, datatype, :(jlread($io, FixedPointDatatype))))
-        elseif $datatype_class%16 == DT_FLOATING_POINT
-            $(replace_expr(then, datatype, :(jlread($io, FloatingPointDatatype))))
-        elseif $datatype_class%16 in (DT_STRING, DT_OPAQUE, DT_REFERENCE)
-            $(replace_expr(then, datatype, :(jlread($io, BasicDatatype))))
-        elseif $datatype_class%16 == DT_COMPOUND
-            $(replace_expr(then, datatype, :(jlread($io, CompoundDatatype))))
-        elseif $datatype_class%16 == DT_VARIABLE_LENGTH
-            $(replace_expr(then, datatype, :(jlread($io, VariableLengthDatatype))))
-        elseif $datatype_class%16 == DT_BITFIELD
-            $(replace_expr(then, datatype, :(jlread($io, BitFieldDatatype))))
-        elseif $datatype_class%16 == DT_TIME
-            throw(UnsupportedFeatureException("Time datatype (rarely used) not supported"))
-        elseif $datatype_class%16 == DT_ARRAY
-            $(replace_expr(then, datatype, :(jlread($io, ArrayDatatype))))
-        elseif $datatype_class%16 == DT_ENUMERATED
-            $(replace_expr(then, datatype, :(jlread($io, EnumerationDatatype))))
-        else
-            throw(UnsupportedFeatureException("invalid datatype class $datatype_class"))
-        end
-    end)
-end
-
 function jlread(io::IO, ::Type{H5Datatype})
-    datatype_class = jlread(io, UInt8)
+    dtclass = jlread(io, UInt8) % 16
     seek(io, position(io)-1)
-    @read_datatype io datatype_class dt begin
-        dt
+    if dtclass == DT_FIXED_POINT
+        jlread(io, FixedPointDatatype)
+    elseif dtclass == DT_FLOATING_POINT
+        jlread(io, FloatingPointDatatype)
+    elseif dtclass in (DT_STRING, DT_OPAQUE, DT_REFERENCE)
+        jlread(io, BasicDatatype)
+    elseif dtclass == DT_COMPOUND
+        jlread(io, CompoundDatatype)
+    elseif dtclass == DT_VARIABLE_LENGTH
+        jlread(io, VariableLengthDatatype)
+    elseif dtclass == DT_BITFIELD
+        jlread(io, BitFieldDatatype)
+    elseif dtclass == DT_TIME
+        throw(UnsupportedFeatureException("Time datatype (rarely used) not supported"))
+    elseif dtclass == DT_ARRAY
+        jlread(io, ArrayDatatype)
+    elseif dtclass == DT_ENUMERATED
+        jlread(io, EnumerationDatatype)
+    else
+        throw(UnsupportedFeatureException("invalid datatype class $dtclass"))
     end
 end
 
@@ -176,7 +152,8 @@ struct CompoundDatatype <: H5Datatype
 end
 
 function jltype(f::JLDFile, dt::CompoundDatatype)
-    odr = reconstruct_odr(f, dt, RelOffset[])
+    field_datatypes = OrderedDict{String, RelOffset}(string.(dt.names) .=> fill(NULL_REFERENCE, length(dt.names)))
+    odr = reconstruct_odr(f, dt, field_datatypes)
     T = NamedTuple{tuple(dt.names...), typeof(odr).parameters[2]}
     return ReadRepresentation{T, odr}()    
 end
@@ -254,11 +231,7 @@ function jlread(io::IO, ::Type{CompoundDatatype})
         end
 
         # Member type message
-        datatype_class = jlread(io, UInt8)
-        skip(io, -1)
-        @read_datatype io datatype_class member begin
-            members[i] = member
-        end
+        members[i] = jlread(io, H5Datatype)
     end
 
     CompoundDatatype(dt.size, names, offsets, members)
@@ -294,14 +267,11 @@ end
 
 function jlread(io::IO, ::Type{VariableLengthDatatype})
     dtype = jlread(io, BasicDatatype)
-    datatype_class = jlread(io, UInt8)
-    skip(io, -1)
-    @read_datatype io datatype_class dt begin
-        VariableLengthDatatype(dtype.class, dtype.bitfield1, dtype.bitfield2, dtype.bitfield3, dtype.size, dt)
-    end
+    dt = jlread(io, H5Datatype)
+    VariableLengthDatatype(dtype.class, dtype.bitfield1, dtype.bitfield2, dtype.bitfield3, dtype.size, dt)
 end
 
-jlsizeof(dt::CommittedDatatype) = 2 + jlsizeof(RelOffset)
+jlsizeof(::CommittedDatatype) = 2 + jlsizeof(RelOffset)
 
 function jlwrite(io::IO, dt::CommittedDatatype)
     jlwrite(io, UInt8(3))
@@ -379,12 +349,8 @@ function jlread(io::IO, ::Type{ArrayDatatype})
         # unsupported permutation index
         skip(io, 4*dimensionality)
     end
-    
-    datatype_class = jlread(io, UInt8)
-    skip(io, -1)
-    @read_datatype io datatype_class base_type begin
-        ArrayDatatype(dt.class, 0x0, 0x0, 0x0, dimensionality, dims, base_type)
-    end
+    base_type = jlread(io, H5Datatype)
+    ArrayDatatype(dt.class, 0x0, 0x0, 0x0, dimensionality, dims, base_type)
 end
 
 struct ArrayPlaceHolder{T, D} end
