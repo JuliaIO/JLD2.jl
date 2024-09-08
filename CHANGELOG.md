@@ -1,3 +1,6 @@
+## 0.5.1
+ - Bugfix and added test for bug introduced in v0.5.0
+ 
 ## 0.5.0
  - Improved encoding of committed datatypes.
  This fixes longstanding issues but new files will not be loaded correctly with JLD2 versions prior to `v0.5.0`.

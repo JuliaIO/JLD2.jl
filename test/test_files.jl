@@ -24,7 +24,7 @@ update Artifacts.toml:
         lazy=true)
 update artifact string below to reflect new version number
 =#
-testfiles = artifact"testfiles/JLD2TestFiles-0.1.5/artifacts"
+testfiles = artifact"testfiles/JLD2TestFiles-0.1.6/artifacts"
 
 @testset "HDF5 compat test files" begin
     # These are test files copied from the HDF5.jl test suite
@@ -269,4 +269,27 @@ end
     @test getproperty(data["tms"], Symbol(1)) == 1
     @test data["s"]   == (a = 1,)
     @test data["ds"].kvvec[1]  == (; first = "a", second = (a = 1,))
+end
+
+@testset "Reconstruct struct with singleton fields" begin
+    fn = joinpath(testfiles,"singleton_struct_fields.jld2")
+    if VERSION ≥ v"1.7"
+        @test_warn "type Main.MissingStruct does not exist in workspace; reconstructing" ms = load(fn, "ms")
+    else # @test_warn works differently on 1.6
+        ms = load(fn, "ms")
+    end
+    @test ms.a == 1
+    @test ms.b === nothing
+    @test ms.c === missing
+    @test ms.d == 2.0
+    @test typeof(ms).parameters[1] == :MissingStruct
+
+    @test_nowarn ms = load(fn, "ms"; typemap=Dict("Main.MissingStruct" => JLD2.Upgrade(NamedTuple)))
+    @test ms.a == 1
+    @test ms.b === nothing
+    @test ms.c === missing
+    @test ms.d == 2.0
+
+    ms = load(fn, "ms"; plain=true)
+    @test ms == (; a=1, d=2.0)
 end
