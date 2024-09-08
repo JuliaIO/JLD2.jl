@@ -131,9 +131,9 @@ function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{Re
     empty = any(a->a.name==:empty, attrs)
     if empty
         !hasdata(T) && return (ReadRepresentation{T,nothing}(), true)
-        @warn("$T has $(T.size*8) bytes, but written type was empty; reconstructing")
+        @warn("$T has $(sizeof(T)*8) bytes, but written type was empty; reconstructing")
     elseif isempty(T.types)
-        @warn("primitive type $T has $(T.size*8) bits, but written type has $(dt.size*8) bits; reconstructing")
+        @warn("primitive type $T has $(sizeof(T)*8) bits, but written type has $(dt.size*8) bits; reconstructing")
     else
         @warn("$T is a non-primitive type, but written type is a primitive type with $(dt.size*8) bits; reconstructing")
     end

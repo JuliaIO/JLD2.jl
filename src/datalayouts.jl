@@ -65,12 +65,8 @@ function FilterPipeline(msg_::Hmessage)
         name_length = (version == 2 && id < 255) ? zero(UInt16) : jlread(io, UInt16)
         flags = jlread(io, UInt16)
         nclient_vals = jlread(io, UInt16)
-        if iszero(name_length) 
-            name = ""
-        else
-            name = read_bytestring(io)
-            skip(io, 8-mod1(sizeof(name), 8)-1)
-        end
+        name = iszero(name_length) ? "" : read_bytestring(io)
+        skip(io, max(0, 8-mod1(name_length, 8)-1))
         client_data = jlread(io, UInt32, nclient_vals)
         (version == 1 && isodd(nclient_vals)) && skip(io, 4)
         Filter(id, flags, name, client_data)

@@ -152,7 +152,7 @@ h5type(f::JLDFile, @nospecialize(x)) = h5type(f, writeas(typeof(x)), x)
     members = H5Datatype[]
     field_names = String[]
     field_types = RelOffset[]
-
+    anynondefault = false
     offset = 0
     for i = 1:length(types)
         fieldty = types[i]
@@ -172,6 +172,7 @@ h5type(f::JLDFile, @nospecialize(x)) = h5type(f, writeas(typeof(x)), x)
             end
             push!(field_names, string(names[i]))
             push!(field_types, dtype.header_offset)
+            anynondefault = true
             continue
         end
         
@@ -180,6 +181,7 @@ h5type(f::JLDFile, @nospecialize(x)) = h5type(f, writeas(typeof(x)), x)
             # datatypes. We store these separately in an attribute.
             type_offset = dtype.header_offset
             dtype = f.datatypes[dtype.index]
+            anynondefault = true
         else
             type_offset = NULL_REFERENCE
         end
@@ -193,15 +195,19 @@ h5type(f::JLDFile, @nospecialize(x)) = h5type(f, writeas(typeof(x)), x)
 
     @assert offset != 0
     compound = CompoundDatatype(offset, h5names, offsets, members)
-    attr1 = WrittenAttribute(:field_names,
-        WriteDataspace(f, field_names, Vlen{String}),
-        h5type(f, field_names),
-        field_names)
-    attr2 = WrittenAttribute(:field_types,
-        WriteDataspace(f, field_types, DataType),
-        ReferenceDatatype(),
-        field_types)
-    commit(f, compound, writtenas, readas, attr1, attr2)::CommittedDatatype
+    if anynondefault
+        commit(f, compound, writtenas, readas,
+            WrittenAttribute(:field_names,
+                WriteDataspace(f, field_names, Vlen{String}),
+                h5type(f, field_names),
+                field_names),
+            WrittenAttribute(:field_types,
+                WriteDataspace(f, field_types, DataType),
+                ReferenceDatatype(),
+                field_types))
+    else
+        commit(f, compound, writtenas, readas)::CommittedDatatype
+    end
 end
 
 # Write an HDF5 datatype to the file
