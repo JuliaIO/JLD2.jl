@@ -102,6 +102,8 @@ end
         read_scalar(f, rr, header_offset)
     elseif dataspace.dataspace_type == DS_V1
         read_array(f, dataspace, rr, layout, filters, header_offset, attributes)
+    elseif dataspace.dataspace_type == DS_NULL
+        read_empty(f, rr, dataspace, attributes, header_offset)
     else
         throw(UnsupportedFeatureException())
     end
@@ -138,9 +140,7 @@ function read_data(f::JLDFile,
             end
         end
     elseif dataspace.dataspace_type == DS_NULL
-        return read_empty(ReadRepresentation{Union{},nothing}(), f,
-                          attributes[find_dimensions_attr(attributes)],
-                          header_offset)
+        return read_empty(f, ReadRepresentation{Union{},nothing}(), dataspace, attributes, header_offset)
     elseif dataspace.dataspace_type == DS_V1
         return read_array(f, dataspace, ReadRepresentation{Any,RelOffset}(),
                                   layout, FilterPipeline(), header_offset, attributes)
@@ -157,13 +157,11 @@ function read_data(f::JLDFile,
     dataspace, header_offset, layout, filters = read_dataspace
     iscompressed(filters) && throw(UnsupportedFeatureException())
     dataspace.dataspace_type == DS_NULL || throw(UnsupportedFeatureException())
-
-    dimensions_attr_index = find_dimensions_attr(attributes)
-    if dimensions_attr_index == 0
+    if !any(a->a.name==:dimensions, attributes)
         jlconvert(rr, f, Ptr{Cvoid}(0), header_offset)
     else
         # dimensions attribute => array of empty type
-        read_empty(rr, f, attributes[dimensions_attr_index], header_offset)
+        read_empty(f, rr, dataspace, attributes, header_offset)
     end
 end
 
@@ -178,18 +176,10 @@ function find_dimensions_attr(attributes::Vector{ReadAttribute})
     dimensions_attr_index
 end
 
-function read_empty(rr::ReadRepresentation{T}, f::JLDFile,
-                 dimensions_attr::ReadAttribute, header_offset::RelOffset) where T
-    dimensions_attr.datatype.class == DT_FIXED_POINT || throw(UnsupportedFeatureException())
-
-    io = f.io
-    seek(io, dimensions_attr.dataspace.dimensions_offset)
-    ndims = Int(jlread(io, Length))
-
-    dimensions_attr.datatype == h5fieldtype(f, Int64, Int64, Val{true}) || throw(UnsupportedFeatureException())
-
-    seek(io, dimensions_attr.data_offset)
-    v = construct_array(io, T, ndims)
+function read_empty(f::JLDFile, rr::ReadRepresentation{T}, dataspace, attributes, header_offset::RelOffset) where T
+    ndims, offset = get_ndims_offset(f, dataspace, attributes)
+    seek(f.io, offset)
+    v = construct_array(f.io, T, Int(ndims))
     if isconcretetype(T)
         for i = 1:length(v)
             @inbounds v[i] = jlconvert(rr, f, Ptr{Cvoid}(0), header_offset)
@@ -210,6 +200,7 @@ function get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Abst
             if x.name == :dimensions
                 (x.dataspace.dataspace_type == DS_SIMPLE &&
                  x.dataspace.dimensionality == 1) || throw(InvalidDataException())
+                x.datatype == h5fieldtype(f, Int64, Int64, Val{true}) || throw(UnsupportedFeatureException())             
                 seek(f.io, x.dataspace.dimensions_offset)
                 ndims = UInt8(jlread(f.io, Length))
                 offset = x.data_offset

@@ -518,17 +518,20 @@ struct ArrayDataset{T, N, ODR, io} <: AbstractArray{T, N}
     dims::NTuple{N, Int}
     data_address::Int64
     rr::ReadRepresentation{T, ODR}
+    writable::Bool
 end
 function ArrayDataset(dset::Dataset)
     isarraydataset(dset) || throw(ArgumentError("Dataset is not an array"))
     iscompressed(dset.filters) && throw(UnsupportedFeatureException("Compressed datasets are not supported."))
     f = dset.parent.f
     dt = dset.datatype
+    writable = f.writable && (dset.layout.layout_class == LcContiguous)
     return ArrayDataset(
         f, dset, 
         Int.(reverse(dset.dataspace.dimensions)), 
         fileoffset(f, dset.layout.data_address), 
-        jltype(f, !(f.plain) && dt isa SharedDatatype ? get(f.datatype_locations, dt.header_offset, dt) : dt)
+        jltype(f, !(f.plain) && dt isa SharedDatatype ? get(f.datatype_locations, dt.header_offset, dt) : dt),
+        writable
         )
 end
 
@@ -556,6 +559,7 @@ end
 function Base.setindex!(A::ArrayDataset{T,N,ODR}, v, i::Integer) where {T,N,ODR}
     @boundscheck checkbounds(A, i)
     A.f.writable || throw(ArgumentError("Cannot edit in read-only mode"))
+    A.writable || throw(ArgumentError("Dataset cannot be edited"))
     seek(A.f.io, A.data_address + (i-1)*odr_sizeof(A.rr))
     write_data(A.f.io, A.f, v, T, datamode(ODR), JLDWriteSession())
     return v

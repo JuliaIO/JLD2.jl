@@ -2,7 +2,7 @@ name: Doc Preview Cleanup
 
 on:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 0 1 * *"
 
 jobs:
   doc-preview-cleanup:
@@ -17,8 +17,8 @@ jobs:
         shell: julia {0}
         run: |
           using Pkg
-          pkg"activate --temp"
-          pkg"add HTTP JSON3"
+          Pkg.activate(; temp=true)
+          Pkg.add(["HTTP", "JSON3"])
 
           using HTTP
           using JSON3
@@ -43,8 +43,7 @@ jobs:
               end
               return prs
           end
-          prs = all_prs()
-          open_within_threshold = map(x -> x.number, filter(prs) do pr
+          open_within_threshold = map(x -> x.number, filter(all_prs()) do pr
               time = DateTime(pr.updated_at[1:19], ISODateTimeFormat)
               return pr.state == "open" && Dates.days(now() - time) <= retention_days
           end)
@@ -54,7 +53,7 @@ jobs:
 
           if isempty(stale_previews)
               @info "No stale previews"
-              exit(1)
+              exit(0)
           end
 
           for pr in stale_previews

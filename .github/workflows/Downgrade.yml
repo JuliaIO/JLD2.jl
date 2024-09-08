@@ -5,7 +5,7 @@ on:
     paths-ignore:
       - 'docs/**'
   push:
-    branches: [main, master, dev]
+    branches: [main, master]
     paths-ignore:
       - 'docs/**'
 concurrency:

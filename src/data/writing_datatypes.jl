@@ -45,7 +45,6 @@ end
 
 # Gets the size of an on-disk representation
 function odr_sizeof(::OnDiskRepresentation{Offsets,JLTypes,H5Types,Size}) where {Offsets,JLTypes,H5Types,Size}
-    #Offsets[end]+odr_sizeof(H5Types.parameters[end])
     Size
 end
 
@@ -151,26 +150,44 @@ h5type(f::JLDFile, @nospecialize(x)) = h5type(f, writeas(typeof(x)), x)
     offsets = Int[]
     h5names = Symbol[]
     members = H5Datatype[]
-    fieldtypes = RelOffset[]
-    hasfieldtype = false
-
+    field_names = String[]
+    field_types = RelOffset[]
+    anynondefault = false
     offset = 0
     for i = 1:length(types)
         fieldty = types[i]
         fieldwrittenas = writeas(fieldty)
-        !hasfielddata(fieldwrittenas) && continue
         dtype = h5fieldtype(f, fieldwrittenas, fieldty, Val{i <= ninitialized(writtenas)})
-        dtype === nothing && continue
-        push!(h5names, names[i])
+        if isnothing(dtype)
+            # this is the function body of h5type(f, fieldwrittenas, x) but x is an instance of fieldty unknownavailable here
+            cdt = get(f.jlh5type, fieldty, nothing)
+            dtype = if !isnothing(cdt)
+                cdt
+            elseif !hasdata(fieldwrittenas)
+                commit(f, OpaqueDatatype(1), fieldwrittenas, fieldty, WrittenAttribute(f, :empty, UInt8(1)))
+            elseif isempty(fieldwrittenas.types) # bitstype
+                commit(f, OpaqueDatatype(sizeof(fieldwrittenas)), fieldwrittenas, fieldty)
+            else
+                commit_compound(f, fieldnames(fieldwrittenas), fieldwrittenas, fieldty)
+            end
+            push!(field_names, string(names[i]))
+            push!(field_types, dtype.header_offset)
+            anynondefault = true
+            continue
+        end
+        
         if isa(dtype, CommittedDatatype)
             # HDF5 cannot store relationships among committed
             # datatypes. We store these separately in an attribute.
-            push!(fieldtypes, dtype.header_offset)
+            type_offset = dtype.header_offset
             dtype = f.datatypes[dtype.index]
-            hasfieldtype = true
+            anynondefault = true
         else
-            push!(fieldtypes, NULL_REFERENCE)
+            type_offset = NULL_REFERENCE
         end
+        push!(field_names, string(names[i]))
+        push!(field_types, type_offset)
+        push!(h5names, names[i])
         push!(members, dtype)
         push!(offsets, offset)
         offset += dtype.size::UInt32
@@ -178,12 +195,16 @@ h5type(f::JLDFile, @nospecialize(x)) = h5type(f, writeas(typeof(x)), x)
 
     @assert offset != 0
     compound = CompoundDatatype(offset, h5names, offsets, members)
-    if hasfieldtype
-        fieldtypeattr = WrittenAttribute(:field_datatypes,
-                                         WriteDataspace(f, fieldtypes, DataType),
-                                         ReferenceDatatype(),
-                                         fieldtypes)
-        commit(f, compound, writtenas, readas, fieldtypeattr)::CommittedDatatype
+    if anynondefault
+        commit(f, compound, writtenas, readas,
+            WrittenAttribute(:field_names,
+                WriteDataspace(f, field_names, Vlen{String}),
+                h5type(f, field_names),
+                field_names),
+            WrittenAttribute(:field_types,
+                WriteDataspace(f, field_types, DataType),
+                ReferenceDatatype(),
+                field_types))
     else
         commit(f, compound, writtenas, readas)::CommittedDatatype
     end
@@ -606,6 +627,9 @@ end
 # fieldodr, but actually encoding the data for things that odr stores
 # as references
 @nospecializeinfer function odr(@nospecialize(T::Type))
+    if T <: Function
+        @warn LazyString("Attempting to store ", T, ".\n Function types cannot be propertly stored in JLD2 files.\n Loading may yield unexpected results.")
+    end
     if !hasdata(T)
         # A pointer singleton or ghost. We need to write something, but we'll
         # just write a single byte.

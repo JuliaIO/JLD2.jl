@@ -757,3 +757,32 @@ end
         end
     end
 end
+
+
+@testset "Missing Types in Tuples" begin
+    cd(mktempdir()) do
+        eval(:(module ModuleWithFunction
+            fun(x) = x+1
+        end))
+        if VERSION ≥ v"1.7"
+            @test_warn(
+                contains("Function types cannot"),
+                eval(:(save_object("test.jld2", (1, ModuleWithFunction.fun, 2))))
+            )
+        else
+            eval(:(save_object("test.jld2", (1, ModuleWithFunction.fun, 2))))
+        end
+        obj = load_object("test.jld2")
+        @test length(obj) == 3
+        @test obj[1] == 1
+        @test obj[2] == eval(:(ModuleWithFunction.fun))
+        @test obj[3] == 2
+
+        eval(:(module ModuleWithFunction end))
+        obj = load_object("test.jld2")
+        @test length(obj) == 3
+        @test obj[1] == 1
+        @test JLD2.isreconstructed(obj[2])
+        @test obj[3] == 2
+    end
+end

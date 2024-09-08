@@ -1,20 +1,22 @@
-function read_field_datatypes(f::JLDFile, attrs::Vector{ReadAttribute})
+function read_field_datatypes(f::JLDFile, dt::CompoundDatatype, attrs::Vector{ReadAttribute})
+    offsets = nothing
+    namevec = nothing
     for attr in attrs
-        if attr.name == :field_datatypes
-            return read_attr_data(f, attr, ReferenceDatatype(),
-                                  ReadRepresentation{RelOffset,RelOffset}())
+        if attr.name == :field_types
+            offsets = read_attr_data(f, attr, ReferenceDatatype(),
+                            ReadRepresentation{RelOffset,RelOffset}())
+        elseif attr.name == :field_names
+            namevec = read_attr_data(f, attr, H5TYPE_VLEN_UTF8,
+                            ReadRepresentation{String,Vlen{String}}())
+        elseif attr.name == :field_datatypes
+            # Legacy: Files written before JLD2 v0.4.54
+            offsets = read_attr_data(f, attr, ReferenceDatatype(),
+                            ReadRepresentation{RelOffset,RelOffset}())
         end
     end
-    RelOffset[]
-end
-
-function check_empty(attrs::Vector{ReadAttribute})
-    for attr in attrs
-        if attr.name == :empty
-            return true
-        end
-    end
-    false
+    isnothing(namevec) && (namevec = string.(dt.names))
+    isnothing(offsets) && (offsets = fill(NULL_REFERENCE, length(namevec)))
+    OrderedDict{String, RelOffset}(namevec .=> offsets)
 end
 
 """
@@ -124,28 +126,27 @@ end
 function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{ReadAttribute})
     dt.class == DT_OPAQUE || throw(UnsupportedFeatureException())
     if sizeof(T) == dt.size && isempty(T.types)
-        (ReadRepresentation{T,T}(), true)
-    else
-        empty = check_empty(attrs)
-        if empty
-            if !hasdata(T)
-                (ReadRepresentation{T,nothing}(), true)
-            else
-                @warn("$T has $(T.size*8) bytes, but written type was empty; reconstructing")
-                reconstruct_bitstype(T.name.name, dt.size, empty)
-            end
-        else
-            if isempty(T.types)
-                @warn("primitive type $T has $(T.size*8) bits, but written type has $(dt.size*8) bits; reconstructing")
-            else
-                @warn("$T is a non-primitive type, but written type is a primitive type with $(dt.size*8) bits; reconstructing")
-            end
-            reconstruct_bitstype(T.name.name, dt.size, empty)
-        end
+        return (ReadRepresentation{T,T}(), true)
     end
+    empty = any(a->a.name==:empty, attrs)
+    if empty
+        !hasdata(T) && return (ReadRepresentation{T,nothing}(), true)
+        @warn("$T has $(sizeof(T)*8) bytes, but written type was empty; reconstructing")
+    elseif isempty(T.types)
+        @warn("primitive type $T has $(sizeof(T)*8) bits, but written type has $(dt.size*8) bits; reconstructing")
+    else
+        @warn("$T is a non-primitive type, but written type is a primitive type with $(dt.size*8) bits; reconstructing")
+    end
+    reconstruct_bitstype(T.name.name, dt.size, empty)
 end
 
 struct TypeMappingException <: Exception end
+
+
+unpack_odr(::OnDiskRepresentation{Offsets,JLTypes,H5Types}) where {Offsets,JLTypes,H5Types} =
+    (Offsets, JLTypes.parameters, H5Types.parameters)
+
+
 
 """
     constructrr(f::JLDFile, T::DataType, dt::CompoundType, attrs::Vector{ReadAttribute},
@@ -161,19 +162,13 @@ will have a matching memory layout without first inspecting the memory layout.
 function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
-    field_datatypes = read_field_datatypes(f, attrs)
-
+    field_datatypes = read_field_datatypes(f, dt, attrs)
     # If read type is not a leaf type, reconstruct
     if !isconcretetype(T)
         @warn("read type $T is not a leaf type in workspace; reconstructing")
         return reconstruct_compound(f, string(T), dt, field_datatypes)
     end
-
-    # Map names in dt to their indices
-    dtnames = Dict{Symbol,Int}()
-    for i = 1:length(dt.names)
-        dtnames[dt.names[i]] = i
-    end
+    dtnames = Dict{Symbol,Int}(sym => n for (n,sym) in enumerate(dt.names))
     mapped = falses(length(dt.names))
 
     offsets = Vector{Int}(undef, length(T.types))
@@ -197,7 +192,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
             end
 
             dtindex = dtnames[fn[i]]
-            if !isempty(field_datatypes) && (ref = field_datatypes[dtindex]) != NULL_REFERENCE
+            if (ref = field_datatypes[string(fn[i])]) != NULL_REFERENCE
                 dtrr = jltype(f, f.datatype_locations[ref])
             else
                 dtrr = jltype(f, dt.members[dtindex])
@@ -230,7 +225,6 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
                 # for this field
                 !(odrs[i] isa OnDiskRepresentation) && 
                 !(odrs[i] <: CustomSerialization)
-
             mapped[dtindex] = true
         end
     end
@@ -242,49 +236,27 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
               "\n\nData in these fields will not be accessible")
     end
 
-    if samelayout
-        (ReadRepresentation{T,T}(), true)
-    else
-        wodr = odr(T)
-        # This should theoretically be moved inside the if statement, but then it returns
-        # the wrong result due to a bug in type inference on 0.6
-        typeof_wodr = typeof(wodr)
-        offsets = (offsets...,)
-        if wodr isa OnDiskRepresentation
-            odr_offsets = typeof_wodr.parameters[1]
-            odr_types = typeof_wodr.parameters[2].parameters
-            odr_h5types = typeof_wodr.parameters[3].parameters
-            tequal = length(odr_types) == length(types)
-            if tequal
-                for i = 1:length(types)
-                    if !(odr_types[i] <: types[i]) || odr_h5types[i] != odrs[i]
-                        tequal = false
-                        break
-                    end
-                end
-                if tequal && odr_offsets == offsets
-                    # This should not be necessary, but type inference mistakenly changes
-                    # the value of wodr here
-                    wodr = typeof_wodr()
-                    return (ReadRepresentation{T,wodr}(), true)
-                end
-            end
+    samelayout && return (ReadRepresentation{T,T}(), true)
+    offsets = (offsets...,)
+    if (wodr = odr(T)) isa OnDiskRepresentation
+        odr_offsets, odr_types, odr_h5types = unpack_odr(wodr)
+        tequal = length(odr_types) == length(types)
+        for i = 1:length(types)
+            tequal || break
+            tequal &= odr_types[i] <: types[i]
+            tequal &= odr_h5types[i] == odrs[i]
         end
-        return (ReadRepresentation{T,OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}, offsets[end]+odr_sizeof(odrs[end])}()}(), false)
+        tequal &= odr_offsets == offsets
+        tequal && return (ReadRepresentation{T,wodr}(), true)
     end
+    return (ReadRepresentation{T,OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}, offsets[end]+odr_sizeof(odrs[end])}()}(), false)
 end
 
 function constructrr(f::JLDFile, u::Upgrade, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
-    field_datatypes = read_field_datatypes(f, attrs)
-
-
-    rodr = reconstruct_odr(f, dt, field_datatypes)
-    types = typeof(rodr).parameters[2].parameters
-
+    rodr = reconstruct_odr(f, dt, read_field_datatypes(f, dt, attrs))
     T2 = NamedTuple{tuple(dt.names...), typeof(rodr).parameters[2]}
-
     return (ReadRepresentation{u.target, CustomSerialization{T2, rodr}}(), false)    
 end
 
@@ -298,7 +270,7 @@ function constructrr(f::JLDFile, T::UnionAll, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
     @warn("read type $T is not a leaf type in workspace; reconstructing")
-    return reconstruct_compound(f, string(T), dt, read_field_datatypes(f, attrs))
+    return reconstruct_compound(f, string(T), dt, read_field_datatypes(f, dt, attrs))
 end
 
 # Find types in modules
@@ -311,14 +283,10 @@ function _resolve_type_singlemodule(::ReadRepresentation{T,DataTypeODR()},
                                     params) where T
     for part in parts
         sym = Symbol(part)
-        if !isa(m, Module) || !isdefined(m, sym)
-            return nothing
-        end
+        (!isa(m, Module) || !isdefined(m, sym)) && return nothing
         m = getfield(m, sym)
     end
-    if !isa(m, DataType) && !isa(m, UnionAll)
-        return nothing
-    end
+    (!isa(m, DataType) && !isa(m, UnionAll)) && return nothing
     return m
 end
 
@@ -343,11 +311,9 @@ function _resolve_type(rr::ReadRepresentation{T,DataTypeODR()},
                                                         mypath,
                                                         hasparams,
                                                         params)
-        if !isnothing(resolution_attempt)
-            return resolution_attempt
-        end
+        !isnothing(resolution_attempt) && return resolution_attempt
     end
-    return hasparams ? UnknownType{Symbol(mypath), Tuple{params...}} : UnknownType{Symbol(mypath), Tuple{}}
+    return UnknownType{Symbol(mypath), Tuple{ifelse(hasparams,params,())...}}
 end
 
 
@@ -363,7 +329,7 @@ function types_from_refs(f::JLDFile, ptr::Ptr)
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
             res = cdt !== nulldt ? eltype(jltype(f, cdt)) : load_dataset(f, ref)
-            unknown_params = unknown_params || isunknowntype(res) || isreconstructed(res)
+            unknown_params |= isunknowntype(res) || isreconstructed(res)
             res
         end for ref in refs]
         return params, unknown_params
@@ -487,7 +453,7 @@ end
 function constructrr(f::JLDFile, unk::Type{<:UnknownType}, dt::BasicDatatype,
                      attrs::Vector{ReadAttribute})
     @warn("type $(typestring(unk)) does not exist in workspace; reconstructing")
-    reconstruct_bitstype(shorttypestring(unk), dt.size, check_empty(attrs))
+    reconstruct_bitstype(shorttypestring(unk), dt.size, any(a->a.name==:empty, attrs))
 end
 
 """
@@ -511,15 +477,7 @@ function typestring(UT)# ::Type{<:UnknownType}
     print(tn, T)
     if !isempty(params)
         write(tn, '{')
-        for i = 1:length(params)
-            x = params[i]
-            i != 1 && write(tn, ',')
-            if isunknowntype(x)
-                write(tn, typestring(x))
-            else
-                print(tn, x)
-            end
-        end
+        join(tn, (isunknowntype(x) ? typestring(x) : x for x in params), ',')
         write(tn, '}')
     end
     String(take!(tn))
@@ -547,15 +505,7 @@ function shorttypestring(UT) #::Type{<:UnknownType}
     print(tn, T isa Symbol ? split(string(T),'.')[end] : T)
     if !isempty(params)
         write(tn, '{')
-        for i = 1:length(params)
-            x = params[i]
-            i != 1 && write(tn, ',')
-            if isunknowntype(x)
-                write(tn, shorttypestring(x))
-            else
-                print(tn, x)
-            end
-        end
+        join(tn, (isunknowntype(x) ? shorttypestring(x) : x for x in params), ',')
         write(tn, '}')
     end
     String(take!(tn))
@@ -572,7 +522,7 @@ behead(@nospecialize T) = T
 
 function constructrr(f::JLDFile, unk::Type{UnknownType{T,P}}, dt::CompoundDatatype,
     attrs::Vector{ReadAttribute}) where {T,P}
-    field_datatypes = read_field_datatypes(f, attrs)
+    field_datatypes = read_field_datatypes(f, dt, attrs)
     if T isa DataType
         if T === Tuple
             # For a tuple with unknown fields, we should reconstruct the fields
@@ -583,7 +533,6 @@ function constructrr(f::JLDFile, unk::Type{UnknownType{T,P}}, dt::CompoundDataty
         else
             @warn("read type $(typestring(unk)) was parametrized, but type " *
             "$(T) in workspace is not; reconstructing")
-
         end
     elseif T isa UnionAll
         body = behead(T)
@@ -631,46 +580,45 @@ end
 # Reconstruct the ODR of a type from the CompoundDatatype and field_datatypes
 # attribute
 function reconstruct_odr(f::JLDFile, dt::CompoundDatatype,
-                         field_datatypes::Vector{RelOffset})
+                         field_datatypes::OrderedDict{String,RelOffset})
     # Get the type and ODR information for each field
-    types = Vector{Any}(undef, length(dt.names))
-    h5types = Vector{Any}(undef, length(dt.names))
-    for i = 1:length(dt.names)
-        if !isempty(field_datatypes) && (ref = field_datatypes[i]) != NULL_REFERENCE
-            dtrr = jltype(f, f.datatype_locations[ref])
-        else
+    types = []
+    h5types = []
+    offsets = Int[]
+    offset = 0
+    for (k,typeref) in field_datatypes
+        i = findfirst(==(Symbol(k)), dt.names)
+        if typeref != NULL_REFERENCE
+            dtrr = jltype(f, f.datatype_locations[typeref])
+            odr_sizeof(dtrr) != 0 && @warn "Field $k has non-zero size in file, this should not happen"
+        elseif !isnothing(i)
+            offset = dt.offsets[i]
             dtrr = jltype(f, dt.members[i])
+        else
+            throw(InternalError("Field $k not found in datatype"))
         end
-        types[i], h5types[i] = typeof(dtrr).parameters
+        push!(types, typeof(dtrr).parameters[1])
+        push!(h5types, typeof(dtrr).parameters[2])
+        push!(offsets, offset)
+        offset += odr_sizeof(dtrr)
     end
-    return OnDiskRepresentation{(dt.offsets...,), Tuple{types...}, Tuple{h5types...},dt.size}()
+    OnDiskRepresentation{(offsets...,), Tuple{types...}, Tuple{h5types...},dt.size}()
 end
 
 # Reconstruct type that is a "lost cause": either we were not able to resolve
 # the name, or the workspace type has additional fields, or cannot convert
 # fields to workspace types
 function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
-                              field_datatypes::Union{Vector{RelOffset},Nothing})
+                              field_datatypes::OrderedDict{String,RelOffset})
     rodr = reconstruct_odr(f, dt, field_datatypes)
-    types = typeof(rodr).parameters[2].parameters
-    odrs = typeof(rodr).parameters[3].parameters
-
-    fullyinit = true
-    for i = 1:length(types)
-        if jlconvert_canbeuninitialized(ReadRepresentation{types[i], odrs[i]}())
-            fullyinit = false
-            break
-        end
+    _, types, odrs = unpack_odr(rodr)
+    if !any(jlconvert_canbeuninitialized(ReadRepresentation{types[i], odrs[i]}()) for i = 1:length(types))
+        rt = ReconstructedStatic{Symbol(T), tuple(dt.names...), Tuple{types...}}
+        odr = OnDiskRepresentation{(0,), Tuple{NamedTuple{tuple(dt.names...),Tuple{types...}}}, Tuple{rodr}, dt.size}()
+        return (ReadRepresentation{rt, odr}(), false)
     end
-    if fullyinit
-        return (ReadRepresentation{ReconstructedStatic{Symbol(T),tuple(dt.names...),Tuple{types...}}, OnDiskRepresentation{(0,), Tuple{NamedTuple{tuple(dt.names...),Tuple{types...}}}, Tuple{rodr}, dt.size}()}(), false)
-    end
-
-    # Now reconstruct the type
     T = ReconstructedMutable{Symbol(T), tuple(dt.names...), Tuple{types...}}
-
-    rr = ReadRepresentation{T, rodr}()
-    return rr, false
+    return ReadRepresentation{T, rodr}(), false
 end
 
 # At present, we write Union{} as an object of Core.TypeofBottom. The method above
@@ -680,19 +628,12 @@ jlconvert(::ReadRepresentation{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
           header_offset::RelOffset) = Union{}
 
 function jlconvert(::ReadRepresentation{T, S}, f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T<:ReconstructedMutable, S}
-    offsets = typeof(S).parameters[1]
-    types = typeof(S).parameters[2].parameters
-    odrs = typeof(S).parameters[3].parameters
-
+    offsets, types, odrs = unpack_odr(S)
     res = Vector{Any}(undef, length(types))
     for i = 1:length(types)
-        offset = offsets[i]
-        rtype = types[i]
-        odr = odrs[i]
-    
-        rr = ReadRepresentation{rtype,odr}()
-        if !(jlconvert_canbeuninitialized(rr)) || jlconvert_isinitialized(rr, ptr+offset) 
-            res[i] = jlconvert(rr, f, ptr+offset, NULL_REFERENCE)
+        rr = ReadRepresentation{types[i],odrs[i]}()
+        if !(jlconvert_canbeuninitialized(rr)) || jlconvert_isinitialized(rr, ptr+offsets[i]) 
+            res[i] = jlconvert(rr, f, ptr+offsets[i], NULL_REFERENCE)
         end
     end
     return T(res)
@@ -703,104 +644,68 @@ end
                               header_offset::RelOffset) where {T,S}
     isa(S, DataType) && return :(convert(T, jlunsafe_load(pconvert(Ptr{S}, ptr))))
     @assert isa(S, OnDiskRepresentation)
+    offsets, types, odrs = unpack_odr(S)
+    fn = T === Tuple ? [Symbol(i) for i = 1:length(types)] : fieldnames(T)
 
-    offsets = typeof(S).parameters[1]
-    types = typeof(S).parameters[2].parameters
-    odrs = typeof(S).parameters[3].parameters
-
-    blk = Expr(:block)
-    args = blk.args
-    # Separate treatment for mutable structs for better readability
     if ismutabletype(T)
-        push!(args, quote
+        blk = quote
             obj = $(Expr(:new, T))
             track_weakref_if_untracked!(f, header_offset, obj)
-        end)
-        fn = fieldnames(T)
-        for i = 1:length(types)
-            offset = offsets[i]
-            rtype = types[i]
-            odr = odrs[i]
-    
-            rr = ReadRepresentation{rtype,odr}()
-    
-            fni = QuoteNode(fn[i])
-            ttype = T.types[i]
-            if odr === nothing
-                # Type is not stored or single instance
-                newi = Expr(:new, ttype)
-                # use jl_set_nth_field instead of setfield! since the former also works for const fields
-                # in mutable structs.
-                push!(args, :(ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), obj, ($i)-1, $newi)))
-            else
-                loadfield = quote
-                    fieldval = rconvert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype
-                    ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), obj, ($i)-1, fieldval)
-                end
-                if jlconvert_canbeuninitialized(rr)
-                    push!(args, :(jlconvert_isinitialized($rr, ptr+$offset) && $(loadfield)))
-                else
-                    push!(args, loadfield)
-                end
-            end
         end
-
-        push!(args, (:obj))    
+        for i = 1:length(types)
+            rtype = types[i]
+            rr = ReadRepresentation{rtype,odrs[i]}()
+            ttype = T.types[i]
+            if isnothing(odrs[i])
+                # Type is not stored or single instance
+                fieldval = Expr(:new, ttype)               
+            else
+                fieldval = :(rconvert($ttype, jlconvert($rr, f, ptr+$(offsets[i]), NULL_REFERENCE)::$rtype)::$ttype)
+            end
+            # use jl_set_nth_field instead of setfield! since the former also works for const fields
+            # in mutable structs.
+            setfield = :(ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), obj, ($i)-1, $fieldval))
+            if jlconvert_canbeuninitialized(rr)
+                setfield = :(jlconvert_isinitialized($rr, ptr+$(offsets[i])) && $(setfield))
+            end
+            push!(blk.args, setfield)
+        end
+        push!(blk.args, (:obj))    
         return blk
     end
-    if isbitstype(T)
-        # For bits types, we should always inline, because otherwise we'll just
-        # pass a lot of crap around in registers
-        push!(args, Expr(:meta, :inline))
-    end
-    fsyms = []
-    fn = T === Tuple ? [Symbol(i) for i = 1:length(types)] : fieldnames(T)
+    blk = Expr(:block)
+    fsyms = Symbol[]
     for i = 1:length(types)
-        offset = offsets[i]
+        ptr = :(ptr + $(offsets[i]))
         rtype = types[i]
-        odr = odrs[i]
-
         fsym = Symbol("field_", fn[i])
         push!(fsyms, fsym)
+        rr = ReadRepresentation{rtype,odrs[i]}()
 
-        rr = ReadRepresentation{rtype,odr}()
-
-        if odr === nothing
-            # Type is not stored or single instance
-            if T.types[i] == Union{}
-                # This cannot be defined
-                @assert !ismutabletype(T)
-                push!(args, Expr(:return, Expr(:new, T, fsyms[1:i-1]...)))
-                return blk
-            else
-                newi = Expr(:new, T.types[i])
-                push!(args, :($fsym = $newi))
-            end
-        else
-            if jlconvert_canbeuninitialized(rr)
-                push!(args, quote
-                    if !jlconvert_isinitialized($rr, ptr+$offset)
-                        $(if T <: Tuple || i <= ninitialized(T)
-                            # Reference must always be initialized
-                            :(throw(UndefinedFieldException(T,$(QuoteNode(fn[i])))))
-                        else
-                            Expr(:return, Expr(:new, T, fsyms[1:i-1]...))
-                        end)
-                    end
-                end)
-            end
-            if T === Tuple
-                # Special case for reconstructed tuples, where we don't know the
-                # field types in advance
-                push!(args, :($fsym = jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype))
-            else
-                ttype = T.types[i]
-                push!(args, :($fsym = rconvert($ttype, jlconvert($rr, f, ptr+$offset, NULL_REFERENCE)::$rtype)::$ttype))
-            end
+        if isnothing(odrs[i])
+            push!(blk.args, :($fsym = $(Expr(:new, rtype))))
+            continue
         end
+        if jlconvert_canbeuninitialized(rr)
+            push!(blk.args, quote
+                if !jlconvert_isinitialized($rr, $ptr)
+                    $(if T <: Tuple || i <= ninitialized(T)
+                        # Reference must always be initialized
+                        :(throw(UndefinedFieldException(T,$(QuoteNode(fn[i])))))
+                    else
+                        Expr(:return, Expr(:new, T, fsyms[1:i-1]...))
+                    end)
+                end
+            end)
+        end
+        fieldval = :(jlconvert($rr, f, $ptr, NULL_REFERENCE)::$rtype)
+        if T !== Tuple
+            # Special case for reconstructed tuples, where we don't know the
+            # field types in advance
+            fieldval = :(rconvert($(T.types[i]), $fieldval)::$(T.types[i]))
+        end
+        push!(blk.args, :($fsym = $fieldval))
     end
-
-    push!(args, T <: Tuple ? Expr(:tuple, fsyms...) : Expr(:new, T, fsyms...))
-
+    push!(blk.args, T <: Tuple ? Expr(:tuple, fsyms...) : Expr(:new, T, fsyms...))
     blk
 end
