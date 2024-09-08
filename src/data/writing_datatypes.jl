@@ -627,6 +627,9 @@ end
 # fieldodr, but actually encoding the data for things that odr stores
 # as references
 @nospecializeinfer function odr(@nospecialize(T::Type))
+    if T <: Function
+        @warn LazyString("Attempting to store ", T, ".\n Function types cannot be propertly stored in JLD2 files.\n Loading may yield unexpected results.")
+    end
     if !hasdata(T)
         # A pointer singleton or ghost. We need to write something, but we'll
         # just write a single byte.

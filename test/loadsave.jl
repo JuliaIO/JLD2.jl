@@ -764,7 +764,14 @@ end
         eval(:(module ModuleWithFunction
             fun(x) = x+1
         end))
-        eval(:(save_object("test.jld2", (1, ModuleWithFunction.fun, 2))))
+        if VERSION ≥ v"1.7"
+            @test_warn(
+                contains("Function types cannot"),
+                eval(:(save_object("test.jld2", (1, ModuleWithFunction.fun, 2))))
+            )
+        else
+            eval(:(save_object("test.jld2", (1, ModuleWithFunction.fun, 2))))
+        end
         obj = load_object("test.jld2")
         @test length(obj) == 3
         @test obj[1] == 1
