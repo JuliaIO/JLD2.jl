@@ -1,3 +1,9 @@
+## 0.5.0
+ - Improved encoding of committed datatypes.
+ This fixes longstanding issues but new files will not be loaded correctly with JLD2 versions prior to `v0.5.0`.
+ Existing files remain readable.
+ - JLD2 now warns when storing structures containing `<: Function` objects.
+
 ## 0.4.53
  - Experimental: Slicing and inplace updating of array datasets
  - updated CI workflows
