@@ -255,8 +255,10 @@ end
 function constructrr(f::JLDFile, u::Upgrade, dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
-    rodr = reconstruct_odr(f, dt, read_field_datatypes(f, dt, attrs))
-    T2 = NamedTuple{tuple(dt.names...), typeof(rodr).parameters[2]}
+    field_datatypes = read_field_datatypes(f, dt, attrs)
+    rodr = reconstruct_odr(f, dt, field_datatypes)
+    fnames = tuple((Symbol(k) for k in keys(field_datatypes))...)
+    T2 = NamedTuple{fnames, typeof(rodr).parameters[2]}
     return (ReadRepresentation{u.target, CustomSerialization{T2, rodr}}(), false)    
 end
 
@@ -612,12 +614,13 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
                               field_datatypes::OrderedDict{String,RelOffset})
     rodr = reconstruct_odr(f, dt, field_datatypes)
     _, types, odrs = unpack_odr(rodr)
+    fnames = tuple((Symbol(k) for k in keys(field_datatypes))...,)
     if !any(jlconvert_canbeuninitialized(ReadRepresentation{types[i], odrs[i]}()) for i = 1:length(types))
-        rt = ReconstructedStatic{Symbol(T), tuple(dt.names...), Tuple{types...}}
-        odr = OnDiskRepresentation{(0,), Tuple{NamedTuple{tuple(dt.names...),Tuple{types...}}}, Tuple{rodr}, dt.size}()
+        rt = ReconstructedStatic{Symbol(T), fnames, Tuple{types...}}
+        odr = OnDiskRepresentation{(0,), Tuple{NamedTuple{fnames,Tuple{types...}}}, Tuple{rodr}, dt.size}()
         return (ReadRepresentation{rt, odr}(), false)
     end
-    T = ReconstructedMutable{Symbol(T), tuple(dt.names...), Tuple{types...}}
+    T = ReconstructedMutable{Symbol(T), fnames, Tuple{types...}}
     return ReadRepresentation{T, rodr}(), false
 end
 
