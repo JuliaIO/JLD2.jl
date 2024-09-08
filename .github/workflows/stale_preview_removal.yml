@@ -2,7 +2,7 @@ name: Doc Preview Cleanup
 
 on:
   schedule:
-    - cron: "0 0 0 * *"
+    - cron: "0 0 1 * *"
 
 jobs:
   doc-preview-cleanup:
