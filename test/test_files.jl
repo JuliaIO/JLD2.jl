@@ -273,7 +273,11 @@ end
 
 @testset "Reconstruct struct with singleton fields" begin
     fn = joinpath(testfiles,"singleton_struct_fields.jld2")
-    @test_warn "type Main.MissingStruct does not exist in workspace; reconstructing" ms = load(fn, "ms")
+    if VERSION ≥ v"1.7"
+        @test_warn "type Main.MissingStruct does not exist in workspace; reconstructing" ms = load(fn, "ms")
+    else # @test_warn works differently on 1.6
+        ms = load(fn, "ms")
+    end
     @test ms.a == 1
     @test ms.b === nothing
     @test ms.c === missing
