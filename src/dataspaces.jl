@@ -34,7 +34,7 @@ struct DataspaceStart
 end
 define_packed(DataspaceStart)
 
-const EMPTY_DIMENSIONS = Int[]
+const EMPTY_DIMENSIONS = Int64[]
 
 # Pass-through for custom serializations
 # Need a bunch of methods to avoid ambiguity
