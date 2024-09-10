@@ -592,9 +592,8 @@ function reconstruct_odr(f::JLDFile, dt::CompoundDatatype,
         i = findfirst(==(Symbol(k)), dt.names)
         if typeref != NULL_REFERENCE
             dtrr = jltype(f, f.datatype_locations[typeref])
-            odr_sizeof(dtrr) != 0 && @warn "Field $k has non-zero size in file, this should not happen"
         elseif !isnothing(i)
-            offset = dt.offsets[i]
+            offset == dt.offsets[i] || throw(InternalError("Field offsets were incorrectly mapped."))
             dtrr = jltype(f, dt.members[i])
         else
             throw(InternalError("Field $k not found in datatype"))
