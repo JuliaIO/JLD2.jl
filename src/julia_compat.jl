@@ -29,3 +29,9 @@ end
 else
     using Base: @nospecializeinfer
 end
+
+@static if VERSION < v"1.7.0"
+    isgensym(s::Symbol) = '#' in string(s)
+else
+    using Base: isgensym
+end

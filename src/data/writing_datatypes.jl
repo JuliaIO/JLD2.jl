@@ -446,7 +446,7 @@ end
 
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     t = typename(T)
-    if T <: Function && Base.isgensym(nameof(T.instance))
+    if T <: Function && isgensym(nameof(T.instance))
         @warn LazyString("Attempting to store ", T, ".\n",
                          "JLD2 only stores functions by name.\n",
                          " This may not be useful for anonymous functions.")
