@@ -1,3 +1,7 @@
+## 0.5.2
+ - Remove left-over warning
+ - Restrict warning for storing `Function` objects to `anonymous` functions.
+
 ## 0.5.1
  - Bugfix and added test for bug introduced in v0.5.0
  

@@ -219,7 +219,6 @@ end
     if f.disable_commit
         throw(ArgumentError("Attempted to commit DataType $readas but committing is disabled."))
     end
-    io = f.io
 
     # This needs to be written this way or type inference gets unhappy...
     # Also needs to happen here so that we write the DataType type
@@ -229,7 +228,7 @@ end
 
     offset = f.end_of_data
 
-    seek(io, offset)
+    seek(f.io, offset)
     id = length(f.datatypes)+1
     h5o = h5offset(f, offset)
     cdt = CommittedDatatype(h5o, id)
@@ -383,15 +382,15 @@ const H5TYPE_DATATYPE = CompoundDatatype(
 )
 
 function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T<:DataType
+    if f.disable_commit
+        throw(ArgumentError("Attempted to commit DataType $readas but committing is disabled."))
+    end
     if !(readas <: DataType) || (T isa Type{Type{T}} where T)
         @lookup_committed f readas
         return commit(f, H5TYPE_DATATYPE, DataType, readas)
     end
     
     @lookup_committed f DataType
-    if f.disable_commit
-        throw(ArgumentError("Attempted to commit DataType $readas but committing is disabled."))
-    end
     io = f.io
     offset = f.end_of_data
 
@@ -446,6 +445,11 @@ end
 
 function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     t = typename(T)
+    if T <: Function && isgensym(nameof(T.instance))
+        @warn LazyString("Attempting to store ", T, ".\n",
+                         "JLD2 only stores functions by name.\n",
+                         " This may not be useful for anonymous functions.")
+    end
     store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, t), f.datatype_wsession)
     if isempty(T.parameters)
         h5convert_uninitialized!(out+odr_sizeof(Vlen{UInt8}), Vlen{UInt8})
@@ -627,9 +631,6 @@ end
 # fieldodr, but actually encoding the data for things that odr stores
 # as references
 @nospecializeinfer function odr(@nospecialize(T::Type))
-    if T <: Function
-        @warn LazyString("Attempting to store ", T, ".\n Function types cannot be propertly stored in JLD2 files.\n Loading may yield unexpected results.")
-    end
     if !hasdata(T)
         # A pointer singleton or ghost. We need to write something, but we'll
         # just write a single byte.
