@@ -745,37 +745,47 @@ end
 end
 
 @testset "Disable committing datatypes" begin
-    cd(mktempdir()) do
-        jldopen("test.jld2", "w") do f
-            f.disable_commit = true
+    fn = joinpath(mktempdir(), "disable_committing_datatypes.jld2")
+    jldopen(fn, "w") do f
+        f.disable_commit = true
 
-            @test_throws ArgumentError f["1"] = Dict(1=>2)
-            @test_throws ArgumentError f["2"] = Vector{Float64}
-            @test_throws ArgumentError f["3"] = (1,2,3)
-            # this could eventually be allowed
-            @test_throws ArgumentError f["4"] = (; a=1, b=2)
-        end
+        @test_throws ArgumentError f["1"] = Dict(1=>2)
+        @test_throws ArgumentError f["2"] = Vector{Float64}
+        @test_throws ArgumentError f["3"] = (1,2,3)
+        @test_throws ArgumentError f["4"] = :asymbol
+        # No throw
+        f["5"] = "a string"
+        # this could eventually be allowed
+        @test_throws ArgumentError f["4"] = (; a=1, b=2)
     end
 end
 
 
 @testset "Missing Types in Tuples" begin
-    cd(mktempdir()) do
-        eval(:(module ModuleWithFunction
-            fun(x) = x+1
-        end))
-        eval(:(save_object("test.jld2", (1, ModuleWithFunction.fun, 2))))
-        obj = load_object("test.jld2")
-        @test length(obj) == 3
-        @test obj[1] == 1
-        @test obj[2] == eval(:(ModuleWithFunction.fun))
-        @test obj[3] == 2
+    fn = joinpath(mktempdir(), "missing_types_in_tuple.jld2")
+    eval(:(module ModuleWithFunction
+        fun(x) = x+1
+    end))
+    eval(:(save_object($fn, (1, ModuleWithFunction.fun, 2))))
+    obj = load_object(fn)
+    @test length(obj) == 3
+    @test obj[1] == 1
+    @test obj[2] == eval(:(ModuleWithFunction.fun))
+    @test obj[3] == 2
 
-        eval(:(module ModuleWithFunction end))
-        obj = load_object("test.jld2")
-        @test length(obj) == 3
-        @test obj[1] == 1
-        @test JLD2.isreconstructed(obj[2])
-        @test obj[3] == 2
+    eval(:(module ModuleWithFunction end))
+    obj = load_object(fn)
+    @test length(obj) == 3
+    @test obj[1] == 1
+    @test JLD2.isreconstructed(obj[2])
+    @test obj[3] == 2
+    
+end
+
+if VERSION ≥ v"1.7"
+    @testset "Storing an anonymous function" begin
+        fn = joinpath(mktempdir(), "storing_anon_function.jld2")
+        f = x -> x+1
+        @test_warn contains("Attempting to store") save_object(fn, f)
     end
 end

@@ -219,7 +219,6 @@ end
     if f.disable_commit
         throw(ArgumentError("Attempted to commit DataType $readas but committing is disabled."))
     end
-    io = f.io
 
     # This needs to be written this way or type inference gets unhappy...
     # Also needs to happen here so that we write the DataType type
@@ -229,7 +228,7 @@ end
 
     offset = f.end_of_data
 
-    seek(io, offset)
+    seek(f.io, offset)
     id = length(f.datatypes)+1
     h5o = h5offset(f, offset)
     cdt = CommittedDatatype(h5o, id)
@@ -383,15 +382,15 @@ const H5TYPE_DATATYPE = CompoundDatatype(
 )
 
 function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T<:DataType
+    if f.disable_commit
+        throw(ArgumentError("Attempted to commit DataType $readas but committing is disabled."))
+    end
     if !(readas <: DataType) || (T isa Type{Type{T}} where T)
         @lookup_committed f readas
         return commit(f, H5TYPE_DATATYPE, DataType, readas)
     end
     
     @lookup_committed f DataType
-    if f.disable_commit
-        throw(ArgumentError("Attempted to commit DataType $readas but committing is disabled."))
-    end
     io = f.io
     offset = f.end_of_data
 
