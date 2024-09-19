@@ -2,7 +2,7 @@ using JLD2, Test
 
 function writeloop(f, sz)
     for i = 1:sz
-        write(f, UInt8(6))
+        JLD2.jlwrite(f, UInt8(6))
     end
 end
 
@@ -21,7 +21,7 @@ rd = read!(f, Array{UInt8}(undef, sz))
 close(f)
 
 f = JLD2.MmapIO(name, true, true, true)
-write(f, rd)
+JLD2.jlwrite(f, rd)
 JLD2.truncate_and_close(f, position(f))
 
 @test filesize(name) == sz

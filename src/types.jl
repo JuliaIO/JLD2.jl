@@ -14,6 +14,7 @@ const OBJECT_HEADER_CONTINUATION_SIGNATURE = htol(0x4b48434f) # "OCHK"
     LcVirtual = 0x03
 end
 LayoutClass(lc::LayoutClass) = lc
+jlwrite(io, lc::LayoutClass) = jlwrite(io, UInt8(lc))
 
 @enum(CharacterSet::UInt8,
       CSET_ASCII,

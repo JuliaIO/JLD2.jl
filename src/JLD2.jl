@@ -35,10 +35,27 @@ jlsizeof(x) = Base.sizeof(x)
 jlunsafe_store!(p, x) = Base.unsafe_store!(p, x)
 jlunsafe_load(p) = Base.unsafe_load(p)
 
-include("mmapio.jl")
-include("bufferedio.jl")
+"""
+    MemoryBackedIO <: IO
+
+Abstract type for IO objects that are backed by memory in such a way that
+one can use pointer based `unsafe_load` and `unsafe_store!` operations
+after ensuring that there is enough memory allocated.
+
+This is used for dispatch to [`MmapIO`](@ref) and [`BufferedWriter`](@ref).
+
+It needs to provide:
+ - `getproperty(io, :curptr)` to get the current pointer
+ - `ensureroom(io, nb)` to ensure that there are at least nb bytes available
+ - `position(io)` to get the current (zero-based) position 
+ - `seek(io, pos)` to set the current position (zero-based)
+"""
+abstract type MemoryBackedIO <: IO end
+
 include("macros_utils.jl")
 include("types.jl")
+include("mmapio.jl")
+include("bufferedio.jl")
 include("julia_compat.jl")
 include("file_header.jl")
 include("Lookup3.jl")

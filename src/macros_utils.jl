@@ -21,8 +21,8 @@ function define_packed(ty::DataType)
     end
 
     @eval begin
-        @inline jlwrite(io::Union{MmapIO,BufferedWriter}, x::$ty) = _write(io, x)
-        @inline jlread(io::Union{MmapIO,BufferedReader}, x::Type{$ty}) = _read(io, x)
+        @inline jlwrite(io::MemoryBackedIO, x::$ty) = _write(io, x)
+        @inline jlread(io::MemoryBackedIO, x::Type{$ty}) = _read(io, x)
         function jlread(io::IO, ::Type{$ty})
             $(Expr(:new, ty, [:(jlread(io, $(ty.types[i]))) for i = 1:length(packed_offsets)]...))
         end
