@@ -789,3 +789,15 @@ if VERSION ≥ v"1.7"
         @test_warn contains("Attempting to store") save_object(fn, f)
     end
 end
+
+struct Foo601 <: Function
+    x::Int
+end
+
+@testset "Issue #601: Storing <: Function objects" begin
+    foo = Foo601(2)
+    tempfile = tempname()
+    jldsave(tempfile; foo)
+    loaded_foo = load(tempfile, "foo")
+    @test loaded_foo isa Foo601
+end
