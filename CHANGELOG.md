@@ -1,3 +1,6 @@
+## 0.5.3
+ - Bugfix for `<: Function` structs
+
 ## 0.5.2
  - Remove left-over warning
  - Restrict warning for storing `Function` objects to `anonymous` functions.
