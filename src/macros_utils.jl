@@ -72,7 +72,7 @@ macro pseudostruct(name, blck)
         end
 
         function $(esc(:(Base.getproperty)))(tw::HmWrap{$name}, s::Symbol)
-            s in (:size, :hflags, :m) && return getfield(tw, s)
+            (s == :size || s==:hflags ||s==:m) && return getfield(tw, s)
             m = getfield(tw, :m)
             hflags = getfield(tw, :hflags)
             hsize = getfield(tw, :size)

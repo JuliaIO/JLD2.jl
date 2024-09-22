@@ -355,7 +355,7 @@ end
 
 struct ArrayPlaceHolder{T, D} end
 
-odr_sizeof(::Type{ArrayPlaceHolder{T,D}}) where {T,D} = odr_sizeof(T)*prod(D)
+odr_sizeof(::Type{ArrayPlaceHolder{T,D}}) where {T,D} = Int(odr_sizeof(T)*prod(D))
 
 function jltype(f::JLDFile, dt::ArrayDatatype)
     rr = jltype(f, dt.base_type)

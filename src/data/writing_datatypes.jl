@@ -21,7 +21,7 @@ end
 
 # Carries the type and on-disk representation of data to be read from
 # the disk
-odr_sizeof(::ReadRepresentation{T,S}) where {T,S} = odr_sizeof(S)
+odr_sizeof(::ReadRepresentation{T,S}) where {T,S} = odr_sizeof(S)::Int
 
 # Determines whether a specific field type should be saved in the file
 function hasfielddata(@nospecialize(T), encounteredtypes=DataType[])::Bool
@@ -45,7 +45,7 @@ end
 
 # Gets the size of an on-disk representation
 function odr_sizeof(::OnDiskRepresentation{Offsets,JLTypes,H5Types,Size}) where {Offsets,JLTypes,H5Types,Size}
-    Size
+    Size::Int
 end
 
 # Determines whether a type will have the same layout on disk as in memory
@@ -656,7 +656,7 @@ end
         offset += odr_sizeof(fodr)
     end
 
-    OnDiskRepresentation{(offsets...,), Tuple{T.types...}, Tuple{odrs...}, offset}()
+    OnDiskRepresentation{(offsets...,), Tuple{T.types...}, Tuple{odrs...}, Int(offset)}()
 end
 
 abstract type DataMode end
@@ -669,7 +669,7 @@ datamode(::DataType) = ReferenceFree()
 datamode(::FixedLengthString) = ReferenceFree()
 datamode(::AsciiString) = ReferenceFree()
 datamode(::Nothing) = ReferenceFree()
-function datamode(odr::OnDiskRepresentation{Offsets,JLTypes,H5Types,Size} where {Offsets,JLTypes,Size}) where H5Types
+function datamode(::OnDiskRepresentation{Offsets,JLTypes,H5Types,Size} where {Offsets,JLTypes,Size}) where H5Types
     for ty in H5Types.parameters
         datamode(ty) == HasReferences() && return HasReferences()
     end

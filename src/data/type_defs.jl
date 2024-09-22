@@ -12,9 +12,9 @@ odr_sizeof(::Nothing) = 0
         size = unsafe_load(pconvert(Ptr{Base.DataTypeLayout}, dt.layout)).size
         return Int(size)
     end
-    @Base.pure odr_sizeof(x::DataType) = datatype_size(x)
+    odr_sizeof(x::DataType) = datatype_size(x)
 else
-    @Base.pure odr_sizeof(x::DataType) = Int(x.size)
+    odr_sizeof(x::DataType) = Int(x.size)
 end
 
 struct UnknownType{T, P} end

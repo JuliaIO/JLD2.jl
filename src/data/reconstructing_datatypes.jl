@@ -249,7 +249,7 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
         tequal &= odr_offsets == offsets
         tequal && return (ReadRepresentation{T,wodr}(), true)
     end
-    return (ReadRepresentation{T,OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}, offsets[end]+odr_sizeof(odrs[end])}()}(), false)
+    return (ReadRepresentation{T,OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}, Int(offsets[end]+odr_sizeof(odrs[end]))}()}(), false)
 end
 
 function constructrr(f::JLDFile, u::Upgrade, dt::CompoundDatatype,
@@ -603,7 +603,7 @@ function reconstruct_odr(f::JLDFile, dt::CompoundDatatype,
         push!(offsets, offset)
         offset += odr_sizeof(dtrr)
     end
-    OnDiskRepresentation{(offsets...,), Tuple{types...}, Tuple{h5types...},dt.size}()
+    OnDiskRepresentation{(offsets...,), Tuple{types...}, Tuple{h5types...},Int(dt.size)}()
 end
 
 # Reconstruct type that is a "lost cause": either we were not able to resolve
@@ -616,7 +616,7 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
     fnames = tuple((Symbol(k) for k in keys(field_datatypes))...,)
     if !any(jlconvert_canbeuninitialized(ReadRepresentation{types[i], odrs[i]}()) for i = 1:length(types))
         rt = ReconstructedStatic{Symbol(T), fnames, Tuple{types...}}
-        odr = OnDiskRepresentation{(0,), Tuple{NamedTuple{fnames,Tuple{types...}}}, Tuple{rodr}, dt.size}()
+        odr = OnDiskRepresentation{(0,), Tuple{NamedTuple{fnames,Tuple{types...}}}, Tuple{rodr}, Int(dt.size)}()
         return (ReadRepresentation{rt, odr}(), false)
     end
     T = ReconstructedMutable{Symbol(T), fnames, Tuple{types...}}
