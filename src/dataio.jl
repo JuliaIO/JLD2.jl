@@ -31,24 +31,23 @@ function read_compressed_array! end
 # Cutoff for using ordinary IO instead of copying into mmapped region
 const MMAP_CUTOFF = 1048576
 
-function read_scalar(f::JLDFile{<:MemoryBackedIO}, @nospecialize(rr), header_offset::RelOffset)
+@nospecializeinfer function read_scalar(f::JLDFile{<:MemoryBackedIO}, @nospecialize(rr), header_offset::RelOffset)
     io = f.io
     inptr = io.curptr
     obj = jlconvert(rr, f, inptr, header_offset)
-    io.curptr = inptr + odr_sizeof(rr)
+    io.curptr = inptr + odr_sizeof(rr)::Int
     obj
 end
 
-function read_array!(v::Array{T}, f::JLDFile{<:MemoryBackedIO}, rr::ReadRepresentation{T,T}) where T
-    io = f.io
-    inptr = io.curptr
+function read_array!(v::Array{T}, f::JLDFile{<:MemoryBackedIO}, ::ReadRepresentation{T,T}) where T
+    inptr = f.io.curptr
     n = length(v)
     unsafe_copyto!(pointer(v), pconvert(Ptr{T}, inptr), n)
-    io.curptr = inptr + odr_sizeof(T) * n
+    f.io.curptr = inptr + odr_sizeof(T) * n
     v
 end
 
-function read_array!(v::Array{T}, f::JLDFile{MmapIO}, rr::ReadRepresentation{T,T}) where T
+function read_array!(v::Array{T}, f::JLDFile{MmapIO}, ::ReadRepresentation{T,T}) where T
     io = f.io
     inptr = io.curptr
     n = length(v)
@@ -64,22 +63,19 @@ function read_array!(v::Array{T}, f::JLDFile{MmapIO}, rr::ReadRepresentation{T,T
     else
         unsafe_copyto!(pointer(v), pconvert(Ptr{T}, inptr), n)
     end
-    io.curptr = inptr + odr_sizeof(T) * n
+    io.curptr = inptr + nb
     v
 end
 
-function read_array!(v::Array{T}, f::JLDFile{IO},
-                             rr::ReadRepresentation{T,RR}) where {T,RR, IO<:MemoryBackedIO}
-    io = f.io
-    inptr = io.curptr
-    n = length(v)
-    @simd for i = 1:n
-        if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, inptr)
-            @inbounds v[i] = jlconvert(rr, f, inptr, NULL_REFERENCE)
+function read_array!(v::Array{T}, f::JLDFile{<:MemoryBackedIO}, rr::ReadRepresentation{T,RR}) where {T,RR}
+    cp0 = f.io.curptr
+    @simd for i in eachindex(v)
+        cp = cp0 + (i-1)*odr_sizeof(RR)
+        if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, cp)
+            v[i] = jlconvert(rr, f, cp, NULL_REFERENCE)
         end
-        inptr += odr_sizeof(RR)
     end
-    io.curptr = inptr + odr_sizeof(RR) * n
+    f.io.curptr = cp0 + odr_sizeof(RR) * length(v)
     v
 end
 
@@ -120,11 +116,11 @@ function write_data(io::MemoryBackedIO, f::JLDFile, data::Array{T}, odr::S, ::Ha
     ensureroom(io, odr_sizeof(odr) * length(data))
     cp = IndirectPointer(io)
     
-    for i = 1:length(data)
+    for i = eachindex(data)
         if isassigned(data, i)
-            @inbounds h5convert!(cp, odr, f, data[i], wsession)
+            h5convert!(cp, odr, f, data[i], wsession)
         else
-            @inbounds h5convert_uninitialized!(cp, odr)
+            h5convert_uninitialized!(cp, odr)
         end
         cp += odr_sizeof(odr)
     end
@@ -153,13 +149,13 @@ end
 function read_array!(v::Array{T}, f::JLDFile, rr::ReadRepresentation{T,RR}) where {T,RR}
     n = length(v)
     nb = odr_sizeof(RR)*n
-    io = f.io
-    data = read!(io, Vector{UInt8}(undef, nb))
+    data = read!(f.io, Vector{UInt8}(undef, nb))
     @GC.preserve data begin
-        @simd for i = 1:n
-            dataptr = Ptr{Cvoid}(pointer(data, odr_sizeof(RR)*(i-1)+1))
+        p0 = Ptr{Cvoid}(pointer(data))
+        @simd for i = eachindex(v)
+            dataptr = p0 + odr_sizeof(RR)*(i-1)
             if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
-                @inbounds v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
+                v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
             end
         end
     end
@@ -191,12 +187,12 @@ function write_data(io::IO, f::JLDFile, data::Array{T}, odr::S, wm::DataMode,
     buf = Vector{UInt8}(undef, nb)
     pos = position(io)
     cp0 = Ptr{Cvoid}(pointer(buf))
-    for i = 1:length(data)
+    for i = eachindex(data)
         cp = cp0 + (i-1)*odr_sizeof(odr)
         if isassigned(data, i)
-            @inbounds h5convert!(cp, odr, f, data[i], wsession)
+            h5convert!(cp, odr, f, data[i], wsession)
         else
-            @inbounds h5convert_uninitialized!(cp, odr)
+            h5convert_uninitialized!(cp, odr)
         end
     end
     # We might seek around in the file as a consequence of writing stuff, so seek back. We

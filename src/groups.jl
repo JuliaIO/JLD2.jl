@@ -96,7 +96,7 @@ function Base.getindex(g::Group, name::AbstractString)
         throw(KeyError(name))
     end
 
-    load_dataset(f, roffset)
+    Base.inferencebarrier(load_dataset(f, roffset))
 end
 
 function Base.setindex!(g::Group, obj, name::AbstractString)
@@ -231,14 +231,14 @@ function load_group(f::JLDFile, offset::RelOffset)
     end
 
     if fractal_heap_address != UNDEFINED_ADDRESS
-        records = read_btree(f, fractal_heap_address, name_index_btree)
+        records = read_btree(f, fractal_heap_address, name_index_btree)::Vector{Tuple{String, RelOffset}}
         for r in records
             links[r[1]] = r[2]
         end
     end
 
     if v1btree_address != UNDEFINED_ADDRESS
-        records = read_oldstyle_group(f, v1btree_address, name_index_heap)
+        records = read_oldstyle_group(f, v1btree_address, name_index_heap)::Vector{Tuple{String, RelOffset}}
         for r in records
             links[r[1]] = r[2]
         end

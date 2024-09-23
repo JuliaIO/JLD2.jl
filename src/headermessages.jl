@@ -90,7 +90,7 @@ end
 
 @pseudostruct HmDataLayout begin
     version::UInt8 = 4
-    if version in (1,2)
+    if version == 1 || version == 2
         dimensionality::UInt8
         layout_class::LayoutClass
         @skip(5)
@@ -98,7 +98,7 @@ end
         dimensions::NTuple{Int(dimensionality), Int32}
         (layout_class == LcChunked) && element_size::UInt32
         if (layout_class == LcCompact) 
-            data_size::UInt32
+            data_size::@Int(4)
             data_address::@Offset
             data::@Blob(data_size)
         end
@@ -106,19 +106,19 @@ end
     if version == 3 || version == 4
         layout_class::LayoutClass
         if layout_class == LcCompact
-            data_size::UInt16
+            data_size::@Int(2)
             data_address::@Offset
             data::@Blob(data_size) = UInt8[] # don't write anything if nothing is passed
         end
         if layout_class == LcContiguous
             data_address::RelOffset = UNDEFINED_ADDRESS
-            data_size::Int64 = 0# Lengths
+            data_size::@Int(8) = 0# Lengths
         end
         if version == 3 && layout_class == LcChunked
             dimensionality::UInt8
             data_address::RelOffset
             dimensions::NTuple{Int(dimensionality), Int32}
-            data_size::UInt32#element_size::UInt32
+            data_size::@Int(4)#UInt32#element_size::UInt32
         end
         if version == 4 && layout_class == LcChunked
             flags::UInt8
@@ -127,7 +127,7 @@ end
             dimensions::NTuple{Int(dimensionality), uintofsize(dim_size)}
             chunk_indexing_type::UInt8
             if chunk_indexing_type == 1 # Single Chunk
-                data_size::Int64 # Lengths
+                data_size::@Int(8)#Int64 # Lengths
                 filters::UInt32
             end
             if chunk_indexing_type == 3

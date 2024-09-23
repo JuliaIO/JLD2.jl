@@ -71,12 +71,14 @@ macro pseudostruct(name, blck)
             return keyvalue
         end
 
-        function $(esc(:(Base.getproperty)))(tw::HmWrap{$name}, s::Symbol)
-            (s == :size || s==:hflags ||s==:m) && return getfield(tw, s)
-            m = getfield(tw, :m)
+        function $(esc(:(Base.getproperty)))(tw::HmWrap{$name, iot}, s::Symbol) where iot
+            s == :size && return getfield(tw, s)
+            s ==:hflags && return getfield(tw, s)
+            s==:m && return getfield(tw, s)
+            m = getfield(tw, :m)::Message{iot}
             hflags = getfield(tw, :hflags)
             hsize = getfield(tw, :size)
-            io = getfield(m, :io)
+            io = getfield(m, :io)::iot
             $(get_prop_exprs)
             throw(ArgumentError("property $s not found"))
         end
@@ -134,7 +136,7 @@ function linefun(ex)
             write_statement = :(jlwrite(io, $(esc(s))))
         elseif @capture(T, @Int(len_))
             len = esc(len)
-            read_io = :(read_nb_uint($io, $(len)))
+            read_io = :(read_nb_uint($io, $(len))::UInt64)
             increment = :($len)
             write_statement = :(write_nb_int(io, $(esc(s)), $len))
         elseif @capture(T, @Offset)
@@ -211,10 +213,10 @@ function generate_getprop(exprs, fields=[], precond=true)
                 read_io = :(String(jlread($io, UInt8, $(len))))
                 increment = :($len)
             elseif @capture(T, @Blob(len_))
-                read_io = :(jlread($io, UInt8, $(len)))
+                read_io = :(jlread($io, UInt8, $(len))::Vector{UInt8})
                 increment = :($len)
             elseif @capture(T, @Int(len_))
-                read_io = :(read_nb_uint($io, $len))
+                read_io = :(read_nb_uint($io, $len)::UInt64)
                 increment = :($len)
             elseif @capture(T, @Offset)
                 read_io = :(RelOffset(getfield(m,:offset) + position($io) - getfield(m,:address)))
@@ -226,7 +228,7 @@ function generate_getprop(exprs, fields=[], precond=true)
                 read_io = :(jlread($io, $(type)))
                 increment = !isnothing(rsize) ? rsize :  :(sizeof(typeof(s)))
             else
-                read_io = :(jlread($io, $T))
+                read_io = :(jlread($io, $T)::$(T))
                 increment = :(sizeof($(T)))
             end
 

@@ -279,7 +279,7 @@ function jlwrite(io::IO, dt::CommittedDatatype)
     jlwrite(io, dt.header_offset)
 end
 
-function commit(f::JLDFile,
+@nospecializeinfer function commit(f::JLDFile,
         @nospecialize(dt::H5Datatype), 
         attrs::Tuple{Vararg{WrittenAttribute}}=())
     psz = jlsizeof(Val(HmDatatype), 64; dt)

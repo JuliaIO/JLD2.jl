@@ -16,7 +16,10 @@ function read_field_datatypes(f::JLDFile, dt::CompoundDatatype, attrs::Vector{Re
     end
     isnothing(namevec) && (namevec = string.(dt.names))
     isnothing(offsets) && (offsets = fill(NULL_REFERENCE, length(namevec)))
-    OrderedDict{String, RelOffset}(namevec .=> offsets)
+    namevec::Vector{String}
+    offsets::Vector{RelOffset}
+    v = [n=>v for (n,v) in zip(namevec,offsets)]
+    OrderedDict{String, RelOffset}(v)
 end
 
 """
@@ -159,7 +162,7 @@ If `hard_failure` is true, then throw a `TypeMappingException` instead of attemp
 reconstruction. This helps in cases where we can't know if reconstructed parametric types
 will have a matching memory layout without first inspecting the memory layout.
 """
-function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
+@nospecializeinfer function constructrr(f::JLDFile, @nospecialize(T::DataType), dt::CompoundDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
     field_datatypes = read_field_datatypes(f, dt, attrs)

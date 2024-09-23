@@ -72,7 +72,7 @@ end
     write(f.root_group, name, obj, wsession; compress=compress)
 
 # groups.jl 112
-function Base.write(g::Group, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession(); compress=nothing)
+@nospecializeinfer function Base.write(g::Group, name::AbstractString, @nospecialize(obj), wsession::JLDWriteSession=JLDWriteSession(); compress=nothing)
     f = g.f
     prewrite(f)
     (g, name) = pathize(g, name, true)

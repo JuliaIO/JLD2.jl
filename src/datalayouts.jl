@@ -25,10 +25,10 @@ function DataLayout(f::JLD2.JLDFile, msg::HmWrap{HmDataLayout})
     data_offset::Int64 = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
     if version == 4 || version == 3
         if storage_type == LcCompact
-            data_length = Int64(msg.data_size::UInt16)
+            data_length = Int64(msg.data_size)
             return DataLayout(version, storage_type, data_length, data_offset) 
         elseif storage_type == LcContiguous
-            data_length = Int64(msg.data_size::Int64)
+            data_length = Int64(msg.data_size)
             return DataLayout(version, storage_type, data_length, data_offset) 
         elseif version == 4 && storage_type == LcChunked
             chunk_dimensions = Int[msg.dimensions...]

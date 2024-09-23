@@ -45,9 +45,7 @@ function load_dataset(f::JLDFile{IO}, offset::RelOffset) where IO
         throw(InvalidDataException("No datatype message found"))
     end
     iscompressed(filter_pipeline) && !ischunked(layout) && throw(InvalidDataException("Compressed data must be chunked"))
-
-    # TODO verify that data length matches
-    read_data(f, dataspace, dt, layout, filter_pipeline, offset, attrs)
+    Base.inferencebarrier(read_data(f, dataspace, dt, layout, filter_pipeline, offset, attrs))
 end
 
 

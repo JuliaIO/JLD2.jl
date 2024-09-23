@@ -138,7 +138,7 @@ _odr(writtenas::DataType, readas::DataType, odr) =
 end
 check_writtenas_type(::DataType) = nothing
 check_writtenas_type(::Any) = throw(ArgumentError("writeas(leaftype) must return a leaf type"))
-h5type(f::JLDFile, @nospecialize(x)) = h5type(f, writeas(typeof(x)), x)
+@nospecializeinfer h5type(f::JLDFile, @nospecialize(x)) = h5type(f, writeas(typeof(x)), x)
 
 # Make a compound datatype from a set of names and types
 @nospecializeinfer  function commit_compound(f::JLDFile, names::AbstractVector{Symbol},

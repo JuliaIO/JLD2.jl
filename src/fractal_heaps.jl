@@ -371,7 +371,7 @@ function read_btree(f, offset_hh, offset_bh)
             m.link_name, m.target
         end
     end
-    links
+    links::Vector{Tuple{String, RelOffset}}
 end
 
 ###########################################################################################
@@ -383,8 +383,8 @@ function read_oldstyle_group(f, v1btree_address, name_index_heap)
     links = read_v1btree(f, v1btree_address)
     map(links) do link
         link_name = read_in_local_heap(f, local_heap, link.link_name_offset)
-        (link_name, link.obj_header_address)
-    end
+        (link_name, link.obj_header_address::RelOffset)
+    end::Vector{Tuple{String, RelOffset}}
 end
 
 const LOCAL_HEAP_SIGNATURE = htol(0x50414548) # UInt8['H', 'E', 'A', 'P']

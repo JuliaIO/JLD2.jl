@@ -387,11 +387,8 @@ function prewrite(f::JLDFile)
     f.written = true
 end
 
-Base.read(f::JLDFile, name::AbstractString) = f.root_group[name]
-#Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession()) =
-#    write(f.root_group, name, obj, wsession)
-
-Base.getindex(f::JLDFile, name::AbstractString) = f.root_group[name]
+Base.read(f::JLDFile, name::AbstractString) = Base.inferencebarrier(f.root_group[name])
+Base.getindex(f::JLDFile, name::AbstractString) = Base.inferencebarrier(f.root_group[name])
 Base.setindex!(f::JLDFile, obj, name::AbstractString) = (f.root_group[name] = obj; f)
 Base.haskey(f::JLDFile, name::AbstractString) = haskey(f.root_group, name)
 Base.isempty(f::JLDFile) = isempty(f.root_group)

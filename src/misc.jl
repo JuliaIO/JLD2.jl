@@ -208,7 +208,7 @@ function write_nb_int(io::IO, sz::Integer, nb::Integer)
 end
 
 function read_nb_uint(io::IO, nb)
-    val = zero(UInt)
+    val = zero(UInt64)
     for i = 1:nb
         val += jlread(io, UInt8) * 2^(8*(i-1))
     end
