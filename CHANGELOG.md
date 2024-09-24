@@ -1,3 +1,7 @@
+## 0.5.4
+ - Important correctness fix when storing very many equally sized objects
+that may get GC'ed while storing is in progress! (#603)
+
 ## 0.5.3
  - Bugfix for `<: Function` structs
 
