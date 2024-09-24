@@ -801,3 +801,40 @@ end
     loaded_foo = load(tempfile, "foo")
     @test loaded_foo isa Foo601
 end
+
+
+@testset "Issue #603 - reused objectids" begin
+    fn = joinpath(mktempdir(), "issue603_reused_objectids.jld2")
+
+    function create_large_dict(levels::Int, items_per_level::Int, item_size::Int)
+        # Create a nested dictionary with the specified number of levels
+        function create_nested_dict(current_level, max_level)
+            if current_level > max_level
+                return Dict("x" => rand(Int, item_size))
+            else
+                return Dict(
+                    string(i) => create_nested_dict(current_level + 1, max_level)
+                    for i in 1:items_per_level
+                )
+            end
+        end
+        # Create the top-level dictionary
+        return create_nested_dict(1, levels)
+    end
+
+    obj = create_large_dict(3, 30, 1);
+    jldsave(fn; obj)
+    res = load(fn, "obj")
+    function recursive_test(obj, res)
+        @test length(keys(obj)) == length(keys(res))
+        for (k, v) in obj
+            @test haskey(res, k)
+            if isa(v, Dict)
+                recursive_test(v, res[k])
+            else
+                @test v == res[k]
+            end
+        end
+    end
+    recursive_test(obj, res)
+end

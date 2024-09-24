@@ -112,25 +112,25 @@ A `JLDWriteSession` keeps track of references to serialized objects. If `T` is a
 written dataset. If it is `Union{}`, then references are not tracked, and objects
 referenced multiple times are written multiple times.
 """
-struct JLDWriteSession{T<:Union{Dict{UInt,RelOffset},Union{}}}
+struct JLDWriteSession{T<:Union{Dict{UInt,Tuple{RelOffset,WeakRef}},Union{}}}
     h5offset::T
-    JLDWriteSession{T}() where T = new()
-    JLDWriteSession{T}(h5offset, objects) where T = new(h5offset)
+    JLDWriteSession{T}() where T = new{T}()
+    JLDWriteSession(h5offset::T) where T = new{T}(h5offset)
 end
-JLDWriteSession() = JLDWriteSession{Dict{UInt,RelOffset}}(Dict{UInt,RelOffset}(), Any[])
+JLDWriteSession() = JLDWriteSession(Dict{UInt,Tuple{RelOffset,WeakRef}}())
 track!(::JLDWriteSession{Union{}}, args...) = nothing
 function track!(s::JLDWriteSession, data, offset::RelOffset)
     if ismutabletype(typeof(data))
-        s.h5offset[objectid(data)] = offset
+        s.h5offset[objectid(data)] = (offset, WeakRef(data))
     end
     nothing
 end
-get_tracked(wsession::JLDWriteSession{Union{}}, data) = UNDEFINED_ADDRESS
+get_tracked(::JLDWriteSession{Union{}}, data) = UNDEFINED_ADDRESS
 function get_tracked(wsession::JLDWriteSession, data)
-    if ismutabletype(typeof(data))
-        return get(wsession.h5offset, objectid(data), UNDEFINED_ADDRESS)
-    end
-    return UNDEFINED_ADDRESS
+    !ismutabletype(typeof(data)) && return UNDEFINED_ADDRESS
+    offset, wref = get(wsession.h5offset, objectid(data), (UNDEFINED_ADDRESS, WeakRef(nothing)))
+    isnothing(wref.value) && return UNDEFINED_ADDRESS
+    return offset
 end
 """
     GlobalHeap

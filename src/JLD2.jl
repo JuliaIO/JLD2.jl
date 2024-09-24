@@ -113,7 +113,7 @@ mutable struct JLDFile{T<:IO}
     disable_commit::Bool
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
-    datatype_wsession::JLDWriteSession{Dict{UInt,RelOffset}}
+    datatype_wsession::JLDWriteSession{Dict{UInt,Tuple{RelOffset,WeakRef}}}
     typemap::Dict{String, Any}
     jlh5type::IdDict{Any,Any}
     h5jltype::IdDict{Any,Any}
