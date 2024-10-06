@@ -36,19 +36,16 @@ function Base.seek(io::BufferedWriter, offset::Integer)
     buffer_offset = offset - io.file_position
     buffer_offset < 0 && throw(ArgumentError("cannot seek before start of buffer"))
     ensureroom(io, buffer_offset - bufferpos(io))
-    io.curptr += buffer_offset - bufferpos(io)
+    io.curptr = pointer(io.buffer) + buffer_offset
 end
 
 function finish!(io::BufferedWriter)
-    f = io.f
     bufferpos(io) == length(io.buffer) ||
         throw(InternalError("BufferedWriter: buffer not written to end; position is $(bufferpos(io)) but length is $(length(io.buffer))"))
-    seek(f, io.file_position)
-    jlwrite(f, io.buffer)
+    seek(io.f, io.file_position)
+    jlwrite(io.f, io.buffer)
     nothing
 end
-
-jlwrite(io::BufferedWriter, x::Union{UInt8,Int8}) = _write(io, x)
 
 mutable struct BufferedReader{io} <: MemoryBackedIO
     f::io
@@ -61,6 +58,7 @@ function BufferedReader(io)
     buf = Vector{UInt8}()
     BufferedReader(io, buf, Int64(position(io)), Ptr{Nothing}(pointer(buf)))
 end
+
 Base.show(io::IO, ::BufferedReader) = print(io, "BufferedReader")
 
 function readmore!(io::BufferedReader, n::Integer)
@@ -77,27 +75,6 @@ end
 ensureroom(io::BufferedReader, n::Integer) = 
     (bufferpos(io) + n >= length(io.buffer)) && readmore!(io, n)
 
-function _read(io::BufferedReader, T::DataType)
-    n = jlsizeof(T)
-    ensureroom(io, n)
-    v = jlunsafe_load(Ptr{T}(io.curptr))
-    io.curptr += n
-    v
-end
-jlread(io::BufferedReader, T::Type{UInt8}) = _read(io, T)
-jlread(io::BufferedReader, T::Type{Int8}) = _read(io, T)
-jlread(io::BufferedReader, T::PlainType) = _read(io, T)
-
-function jlread(io::BufferedReader, ::Type{T}, n::Int) where T
-    m = jlsizeof(T) * n
-    ensureroom(io, m)
-    arr = Vector{T}(undef, n)
-    unsafe_copyto!(pointer(arr), Ptr{T}(io.curptr), n)
-    io.curptr += m
-    arr
-end
-jlread(io::BufferedReader, ::Type{T}, n::Integer) where {T} =
-    jlread(io, T, Int(n))
 
 Base.position(io::BufferedReader) = io.file_position + bufferpos(io)
 
@@ -108,18 +85,13 @@ Get the current position in the buffer.
 """
 bufferpos(io::Union{BufferedReader, BufferedWriter}) = Int(io.curptr - pointer(io.buffer))
 
-function adjust_position!(io::BufferedReader, position::Integer)
-    position < 0 && throw(ArgumentError("cannot seek before start of buffer"))
-    if position > length(io.buffer)
-        readmore!(io, position - length(io.buffer))
-    end
-    io.curptr = pointer(io.buffer, position+1)
-    position
+function Base.seek(io::BufferedReader, offset::Integer)
+    pos =  offset - io.file_position
+    pos < 0 && throw(ArgumentError("cannot seek before start of buffer"))
+    ensureroom(io, offset - position(io))
+    io.curptr = pointer(io.buffer) + pos
+    nothing
 end
-
-Base.seek(io::BufferedReader, offset::Integer) = adjust_position!(io, offset - io.file_position)
-Base.skip(io::BufferedReader, offset::Integer) = adjust_position!(io, bufferpos(io) + offset)
-
 finish!(io::BufferedReader) = seek(io.f, io.file_position + bufferpos(io))
 
 function truncate_and_close(io::IOStream, endpos::Integer)
@@ -129,15 +101,9 @@ end
 
 Base.close(::BufferedReader) = nothing
 
-
-# We sometimes need to compute checksums. We do this by first calling begin_checksum when
-# starting to handle whatever needs checksumming, and calling end_checksum afterwards. Note
-# that we never compute nested checksums, but we may compute multiple checksums
-# simultaneously.
-
 begin_checksum_read(io::IO) = BufferedReader(io)
 
-function begin_checksum_write(io::IOStream, sz::Integer)
+function begin_checksum_write(io::IO, sz::Integer)
     BufferedWriter(io, sz)
 end
 function end_checksum(io::Union{BufferedReader,BufferedWriter})

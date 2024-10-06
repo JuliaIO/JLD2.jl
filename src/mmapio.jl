@@ -10,12 +10,6 @@ else
     const FILE_GROW_SIZE = 2^18
 end
 
-const Plain = Union{Int16,Int32,Int64,Int128,UInt16,UInt32,UInt64,UInt128,Float16,Float32,
-                    Float64}
-const PlainType = Union{Type{Int16},Type{Int32},Type{Int64},Type{Int128},Type{UInt16},
-                        Type{UInt32},Type{UInt64},Type{UInt128},Type{Float16},
-                        Type{Float32},Type{Float64}}
-
 mutable struct MmapIO <: MemoryBackedIO
     f::IOStream
     write::Bool
@@ -126,18 +120,15 @@ end
 
 Base.show(io::IO, ::MmapIO) = print(io, "MmapIO")
 
-if Sys.islinux()
-    # This is used to be "pwrite" but that is actually not defined behaviour
-    # and fails on NFS systems. "ftruncate" is recommended instead
-    # TODO: Benchmark on Windows
-    grow(io::IOStream, sz::Integer) =
+function grow(io::IOStream, sz::Integer)
+    @static if Sys.islinux()
         systemerror("ftruncate",
-            ccall(:ftruncate, Cint, (Cint, Int64),
-            fd(io), sz) != 0)
-
-else
-    grow(io::IOStream, sz::Integer) = truncate(io, sz)
+            ccall(:ftruncate, Cint, (Cint, Int64), fd(io), sz) != 0)
+    else
+        truncate(io, sz)
+    end
 end
+
 
 function Base.resize!(io::MmapIO, newend::Ptr{Cvoid})
     io.write || throw(EOFError())
@@ -162,10 +153,7 @@ end
 
 function ensureroom(io::MmapIO, n::Integer)
     ep = io.curptr + n
-    if ep > io.endptr
-        resize!(io, ep)
-    end
-    nothing
+    ep > io.endptr && resize!(io, ep)
 end
 
 function truncate_and_close(io::MmapIO, endpos::Integer)
@@ -179,23 +167,6 @@ function Base.close(io::MmapIO)
     io.write && msync(io)
     munmap(io)
     close(io.f)
-end
-
-function _write(io::MemoryBackedIO, x)
-    n = jlsizeof(x)
-    ensureroom(io, n)
-    jlunsafe_store!(Ptr{typeof(x)}(io.curptr), x)
-    io.curptr += n
-    return jlsizeof(x)
-end
-jlwrite(io::MmapIO, x::Union{UInt8, Int8}) = _write(io, x)
-jlwrite(io::MmapIO, x::Plain)  = _write(io, x)
-
-function Base.unsafe_write(io::MemoryBackedIO, ptr::Ptr{UInt8}, n::UInt)
-    ensureroom(io, n)
-    unsafe_copyto!(Ptr{UInt8}(io.curptr), ptr, n)
-    io.curptr += n
-    n
 end
 
 @static if Sys.isunix()
@@ -228,50 +199,12 @@ end
     end
 end
 
-function _read(io::MemoryBackedIO, T::DataType)
-    cp = io.curptr
-    ep = cp + jlsizeof(T)
-    ep > io.endptr && resize!(io, ep)
-    v = jlunsafe_load(Ptr{T}(cp))
-    io.curptr = ep
-    v
-end
-Base.read(io::MemoryBackedIO, T::Type{UInt8}) = _read(io, T)
-jlread(io::MemoryBackedIO, T::Type{UInt8}) = _read(io, T)
-jlread(io::MemoryBackedIO, T::Type{Int8}) = _read(io, T)
-jlread(io::MemoryBackedIO, T::PlainType) = _read(io, T)
-
-function Base.read(io::MemoryBackedIO, ::Type{T}, n::Int) where T
-    m = jlsizeof(T) * n
-    ensureroom(io, m)
-    arr = Vector{T}(undef, n)
-    unsafe_copyto!(pointer(arr), Ptr{T}(io.curptr), n)
-    io.curptr += m
-    arr
-end
-Base.read(io::MemoryBackedIO, ::Type{T}, n::Integer) where {T} = read(io, T, Int(n))
-jlread(io::MemoryBackedIO, ::Type{T}, n::Integer) where {T} = read(io, T, Int(n))
-
 # Read a null-terminated string
 function read_bytestring(io::MmapIO)
     # TODO do not try to read outside the buffer
-    cp = io.curptr
-    str = unsafe_string(pconvert(Ptr{UInt8}, cp))
-    io.curptr = cp + jlsizeof(str) + 1
+    str = unsafe_string(pconvert(Ptr{UInt8}, io.curptr))
+    io.curptr += jlsizeof(str) + 1
     str
-end
-
-function Base.seek(io::MemoryBackedIO, offset::Integer)
-    offset < 0 && throw(ArgumentError("cannot seek before start of file"))
-    ensureroom(io, offset-bufferpos(io))
-    io.curptr = io.startptr + offset
-    nothing
-end
-
-function Base.skip(io::MemoryBackedIO, offset::Integer)
-    ensureroom(io, offset)
-    io.curptr += offset
-    nothing
 end
 
 Base.position(io::MmapIO) = Int64(io.curptr - io.startptr)
@@ -291,10 +224,12 @@ function begin_checksum_read(io::MmapIO)
     end
     io
 end
+
 function begin_checksum_write(io::MmapIO, sz::Integer)
     ensureroom(io, sz)
     begin_checksum_read(io)
 end
+
 function end_checksum(io::MmapIO)
     @inbounds v = io.checksum_pos[io.nchecksum]
     io.nchecksum -= 1

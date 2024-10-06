@@ -333,7 +333,6 @@ end
     f.end_of_data = header_offset + fullsz
 
     track!(wsession, data, h5offset(f, header_offset))
-
     cio = begin_checksum_write(io, fullsz - 4)
     jlwrite(cio, ObjectStart(size_flag(psz)))
     write_size(cio, psz)

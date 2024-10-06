@@ -1,3 +1,73 @@
+const Plain = Union{Int8, Int16,Int32,Int64,Int128,UInt8, UInt16,UInt32,UInt64,UInt128,Float16,Float32,
+                    Float64}
+const PlainType = Union{Type{Int8}, Type{Int16},Type{Int32}, Type{Int64}, Type{Int128},
+                        Type{UInt8}, Type{UInt16}, Type{UInt32}, Type{UInt64}, Type{UInt128}, Type{Float16},
+                        Type{Float32}, Type{Float64}}
+# JLD2 requires two levels of read / write customization
+# These need to use separate function names to avoid ambiguities
+# Non-trivial structs get a custom jlread/jlwrite method for generic ::IO
+# Different IO types should implement `_read` and `_write` for plain types.
+jlwrite(io, x) = Base.write(io, x)
+jlwrite(io, x::Plain) = _write(io, x)
+_write(io, x) = Base.write(io, x)
+
+jlread(io, T) = Base.read(io, T)
+jlread(io, x::PlainType) = _read(io, x)
+_read(io, T) = Base.read(io, T)
+
+jlread(io::IO, ::Type{T}, n::Integer) where {T} = T[jlread(io, T) for _=1:n]
+
+Base.read(io::MemoryBackedIO, T::Type{UInt8}) = _read(io, T)
+
+function _read(io::MemoryBackedIO, T::DataType)
+    n = jlsizeof(T)
+    ensureroom(io, n)
+    v = jlunsafe_load(Ptr{T}(io.curptr))
+    io.curptr += n
+    v
+end
+
+function Base.read(io::MemoryBackedIO, ::Type{T}, n::Int) where T
+    m = jlsizeof(T) * n
+    ensureroom(io, m)
+    arr = Vector{T}(undef, n)
+    unsafe_copyto!(pointer(arr), Ptr{T}(io.curptr), n)
+    io.curptr += m
+    arr
+end
+
+Base.read(io::MemoryBackedIO, ::Type{T}, n::Integer) where {T} = read(io, T, Int(n))
+jlread(io::MemoryBackedIO, ::Type{T}, n::Integer) where {T} = read(io, T, Int(n))
+
+
+function _write(io::MemoryBackedIO, x)
+    n = jlsizeof(x)
+    ensureroom(io, n)
+    jlunsafe_store!(Ptr{typeof(x)}(io.curptr), x)
+    io.curptr += n
+    return n
+end
+
+function Base.unsafe_write(io::MemoryBackedIO, ptr::Ptr{UInt8}, n::UInt)
+    ensureroom(io, n)
+    unsafe_copyto!(Ptr{UInt8}(io.curptr), ptr, n)
+    io.curptr += n
+    n
+end
+
+function Base.seek(io::MemoryBackedIO, offset::Integer)
+    offset < 0 && throw(ArgumentError("cannot seek before start of file"))
+    ensureroom(io, offset-position(io))
+    io.curptr = io.startptr + offset
+    nothing
+end
+
+function Base.skip(io::MemoryBackedIO, offset::Integer)
+    ensureroom(io, offset)
+    io.curptr += offset
+    nothing
+end
+
 """
     read_scalar(f::JLDFile, rr, header_offset::RelOffset)
 
@@ -47,26 +117,6 @@ function read_array!(v::Array{T}, f::JLDFile{<:MemoryBackedIO}, ::ReadRepresenta
     v
 end
 
-function read_array!(v::Array{T}, f::JLDFile{MmapIO}, ::ReadRepresentation{T,T}) where T
-    io = f.io
-    inptr = io.curptr
-    n = length(v)
-    nb = odr_sizeof(T)*n
-    if nb > MMAP_CUTOFF && (!Sys.iswindows() || !f.written)
-        # It turns out that regular IO is faster here (at least on OS X), but on Windows,
-        # we shouldn't use ordinary IO to read, since coherency with the memory map is not
-        # guaranteed
-        mmapio = f.io
-        regulario = mmapio.f
-        seek(regulario, inptr - io.startptr)
-        unsafe_read(regulario, pointer(v), nb)
-    else
-        unsafe_copyto!(pointer(v), pconvert(Ptr{T}, inptr), n)
-    end
-    io.curptr = inptr + nb
-    v
-end
-
 function read_array!(v::Array{T}, f::JLDFile{<:MemoryBackedIO}, rr::ReadRepresentation{T,RR}) where {T,RR}
     cp0 = f.io.curptr
     @simd for i in eachindex(v)
@@ -101,13 +151,13 @@ end
 function write_data(io::MemoryBackedIO, f::JLDFile, data::Array{T}, odr::S, ::ReferenceFree,
                     wsession::JLDWriteSession) where {T,S}
     ensureroom(io, odr_sizeof(odr) * length(data))
-    cp = cporig = io.curptr
+    cp0 = io.curptr
     @simd for i = 1:length(data)
+        cp = cp0 + (i-1)*odr_sizeof(odr)
         @inbounds h5convert!(cp, odr, f, data[i], wsession)
-        cp += odr_sizeof(odr)
     end
-    io.curptr == cporig || throw(InternalError())
-    io.curptr = cp
+    io.curptr == cp0 || throw(InternalError())
+    io.curptr = cp0 + length(data)*odr_sizeof(odr)
     nothing
 end
 
@@ -128,8 +178,12 @@ function write_data(io::MemoryBackedIO, f::JLDFile, data::Array{T}, odr::S, ::Ha
     nothing
 end
 
+write_data(io::MemoryBackedIO, ::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree, ::JLDWriteSession) where {T} =
+    unsafe_write(io, Ptr{UInt8}(pointer(data)), odr_sizeof(odr) * length(data))
+
+
 #
-# IOStream/BufferedWriter
+# Fallback for non-memory-backed IO
 #
 
 function read_scalar(f::JLDFile, rr, header_offset::RelOffset)
@@ -162,8 +216,6 @@ function read_array!(v::Array{T}, f::JLDFile, rr::ReadRepresentation{T,RR}) wher
     v
 end
 
-write_data(io::MemoryBackedIO, ::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree, ::JLDWriteSession) where {T} =
-    unsafe_write(io, Ptr{UInt8}(pointer(data)), odr_sizeof(odr) * length(data))
 
 function write_data(io::IO, f::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree,
                     wsession::JLDWriteSession) where T
@@ -201,4 +253,29 @@ function write_data(io::IO, f::JLDFile, data::Array{T}, odr::S, wm::DataMode,
     !isa(wm, ReferenceFree) && seek(io, pos)
     jlwrite(io, buf)
     nothing
+end
+
+
+# The delimiter is excluded by default
+read_bytestring(io::Union{IOStream, IOBuffer}) = String(readuntil(io, 0x00))
+
+# Late addition for MmapIO that can't be defined in mmapio.jl due to include ordering
+function read_array!(v::Array{T}, f::JLDFile{MmapIO}, ::ReadRepresentation{T,T}) where T
+    io = f.io
+    inptr = io.curptr
+    n = length(v)
+    nb = odr_sizeof(T)*n
+    if nb > MMAP_CUTOFF && (!Sys.iswindows() || !f.written)
+        # It turns out that regular IO is faster here (at least on OS X), but on Windows,
+        # we shouldn't use ordinary IO to read, since coherency with the memory map is not
+        # guaranteed
+        mmapio = f.io
+        regulario = mmapio.f
+        seek(regulario, inptr - io.startptr)
+        unsafe_read(regulario, pointer(v), nb)
+    else
+        unsafe_copyto!(pointer(v), pconvert(Ptr{T}, inptr), n)
+    end
+    io.curptr = inptr + nb
+    v
 end
