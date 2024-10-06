@@ -279,7 +279,7 @@ function jlwrite(io::IO, dt::CommittedDatatype)
     jlwrite(io, dt.header_offset)
 end
 
-function commit(f::JLDFile,
+@nospecializeinfer function commit(f::JLDFile,
         @nospecialize(dt::H5Datatype), 
         attrs::Tuple{Vararg{WrittenAttribute}}=())
     psz = jlsizeof(Val(HmDatatype), 64; dt)
@@ -355,7 +355,7 @@ end
 
 struct ArrayPlaceHolder{T, D} end
 
-odr_sizeof(::Type{ArrayPlaceHolder{T,D}}) where {T,D} = odr_sizeof(T)*prod(D)
+odr_sizeof(::Type{ArrayPlaceHolder{T,D}}) where {T,D} = Int(odr_sizeof(T)*prod(D))
 
 function jltype(f::JLDFile, dt::ArrayDatatype)
     rr = jltype(f, dt.base_type)

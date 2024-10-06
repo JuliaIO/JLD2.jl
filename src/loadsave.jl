@@ -1,4 +1,4 @@
-function jldopen(@nospecialize(f::Function), args...; kws...)
+@nospecializeinfer function jldopen(@nospecialize(f::Function), args...; kws...)
     jld = jldopen(args...; kws...)
     try
         return f(jld)

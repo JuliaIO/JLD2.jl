@@ -45,9 +45,7 @@ function load_dataset(f::JLDFile{IO}, offset::RelOffset) where IO
         throw(InvalidDataException("No datatype message found"))
     end
     iscompressed(filter_pipeline) && !ischunked(layout) && throw(InvalidDataException("Compressed data must be chunked"))
-
-    # TODO verify that data length matches
-    read_data(f, dataspace, dt, layout, filter_pipeline, offset, attrs)
+    Base.inferencebarrier(read_data(f, dataspace, dt, layout, filter_pipeline, offset, attrs))
 end
 
 
@@ -335,7 +333,6 @@ end
     f.end_of_data = header_offset + fullsz
 
     track!(wsession, data, h5offset(f, header_offset))
-
     cio = begin_checksum_write(io, fullsz - 4)
     jlwrite(cio, ObjectStart(size_flag(psz)))
     write_size(cio, psz)

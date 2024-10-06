@@ -16,11 +16,11 @@ isatend(f::JLDFile, gh::GlobalHeap) =
 heap_object_length(data::AbstractArray) = length(data)
 heap_object_length(::Any) = 1
 
-function write_heap_object(f::JLDFile, odr, data, wsession::JLDWriteSession)
-    psz = odr_sizeof(odr)*heap_object_length(data)
+function write_heap_object(f::JLDFile, odr::ODR, data, wsession::JLDWriteSession) where ODR
+    # The type parameter ODR is needed to convince the compiler to specialize on ODR.
+    psz = odr_sizeof(odr) * heap_object_length(data)
     objsz = 8 + jlsizeof(Length) + psz
     objsz += 8 - mod1(objsz, 8)
-
     io = f.io
 
     # This is basically a memory allocation problem. Right now we do it

@@ -10,13 +10,7 @@ else
     const FILE_GROW_SIZE = 2^18
 end
 
-const Plain = Union{Int16,Int32,Int64,Int128,UInt16,UInt32,UInt64,UInt128,Float16,Float32,
-                    Float64}
-const PlainType = Union{Type{Int16},Type{Int32},Type{Int64},Type{Int128},Type{UInt16},
-                        Type{UInt32},Type{UInt64},Type{UInt128},Type{Float16},
-                        Type{Float32},Type{Float64}}
-
-mutable struct MmapIO <: IO
+mutable struct MmapIO <: MemoryBackedIO
     f::IOStream
     write::Bool
     n::Int
@@ -54,6 +48,8 @@ if Sys.isunix()
         offset_page::Int64 = div(offset, Mmap.PAGESIZE) * Mmap.PAGESIZE
         # add (offset - offset_page) to `len` to get total length of memory-mapped region
         mmaplen::Int64 = (offset - offset_page) + len
+        # Edge case: calling msync with 0 mmaplen fails on mac
+        mmaplen == 0 && return nothing
         systemerror("msync",
                     ccall(:msync, Cint, (Ptr{Cvoid}, Csize_t, Cint),
                           io.startptr + offset_page, mmaplen,
@@ -124,18 +120,15 @@ end
 
 Base.show(io::IO, ::MmapIO) = print(io, "MmapIO")
 
-if Sys.islinux()
-    # This is used to be "pwrite" but that is actually not defined behaviour
-    # and fails on NFS systems. "ftruncate" is recommended instead
-    # TODO: Benchmark on Windows
-    grow(io::IOStream, sz::Integer) =
+function grow(io::IOStream, sz::Integer)
+    @static if Sys.islinux()
         systemerror("ftruncate",
-            ccall(:ftruncate, Cint, (Cint, Int64),
-            fd(io), sz) != 0)
-
-else
-    grow(io::IOStream, sz::Integer) = truncate(io, sz)
+            ccall(:ftruncate, Cint, (Cint, Int64), fd(io), sz) != 0)
+    else
+        truncate(io, sz)
+    end
 end
+
 
 function Base.resize!(io::MmapIO, newend::Ptr{Cvoid})
     io.write || throw(EOFError())
@@ -158,12 +151,9 @@ function Base.resize!(io::MmapIO, newend::Ptr{Cvoid})
     io
 end
 
-@inline function ensureroom(io::MmapIO, n::Int)
+function ensureroom(io::MmapIO, n::Integer)
     ep = io.curptr + n
-    if ep > io.endptr
-        resize!(io, ep)
-    end
-    nothing
+    ep > io.endptr && resize!(io, ep)
 end
 
 function truncate_and_close(io::MmapIO, endpos::Integer)
@@ -179,105 +169,46 @@ function Base.close(io::MmapIO)
     close(io.f)
 end
 
-@inline function _write(io::MmapIO, x)
-    cp = io.curptr
-    ep = cp + jlsizeof(x)
-    if ep > io.endptr
-        resize!(io, ep)
-        cp = io.curptr
-        ep = cp + jlsizeof(x)
+@static if Sys.isunix()
+    function Base.unsafe_write(io::MmapIO, ptr::Ptr{UInt8}, nb::UInt)
+        if nb > MMAP_CUTOFF
+            pos = position(io)
+
+            # Ensure that the current page has been flushed to disk
+            msync(io, pos, min(io.endptr - io.curptr, nb))
+
+            # Write to the underlying IOStream
+            regulario = io.f
+            seek(regulario, pos)
+            unsafe_write(regulario, ptr, nb)
+
+            # Invalidate cache of any pages that were just written to
+            msync(io, pos, min(io.n - pos, nb), true)
+
+            # Make sure the mapping encompasses the written data
+            ensureroom(io, nb + 1)
+
+            # Seek to the place we just wrote
+            seek(io, pos + nb)
+        else
+            ensureroom(io, nb)
+            unsafe_copyto!(Ptr{UInt8}(io.curptr), ptr, nb)
+            io.curptr += nb
+        end
+        nb
     end
-    jlunsafe_store!(Ptr{typeof(x)}(cp), x)
-    io.curptr = ep
-    return jlsizeof(x)
 end
-@inline Base.write(io::MmapIO, x::UInt8) = _write(io, x)
-@inline Base.write(io::MmapIO, x::Int8) = _write(io, x)
-@inline Base.write(io::MmapIO, x::Plain)  = _write(io, x)
-
-function Base.unsafe_write(io::MmapIO, x::Ptr{UInt8}, n::UInt)
-    cp = io.curptr
-    ep = cp + n
-    if ep > io.endptr
-        resize!(io, ep)
-        cp = io.curptr
-        ep = cp + n
-    end
-    unsafe_copyto!(Ptr{UInt8}(cp), x, n)
-    io.curptr = ep
-    return n
-end
-
-@inline function _read(io::MmapIO, T::DataType)
-    cp = io.curptr
-    ep = cp + jlsizeof(T)
-    ep > io.endptr && throw(EOFError())
-    v = jlunsafe_load(Ptr{T}(cp))
-    io.curptr = ep
-    v
-end
-@inline Base.read(io::MmapIO, T::Type{UInt8}) = _read(io, T)
-@inline Base.read(io::MmapIO, T::Type{Int8}) = _read(io, T)
-@inline Base.read(io::MmapIO, T::PlainType) = _read(io, T)
-
-function Base.read(io::MmapIO, ::Type{T}, n::Int) where T
-    cp = io.curptr
-    ep = cp + jlsizeof(T)*n
-    ep > io.endptr && throw(EOFError())
-    arr = Vector{T}(undef, n)
-    unsafe_copyto!(pointer(arr), Ptr{T}(cp), n)
-    io.curptr = ep
-    arr
-end
-Base.read(io::MmapIO, ::Type{T}, n::Integer) where {T} = read(io, T, Int(n))
-jlread(io::MmapIO, ::Type{T}, n::Integer) where {T} = read(io, T, Int(n))
 
 # Read a null-terminated string
 function read_bytestring(io::MmapIO)
     # TODO do not try to read outside the buffer
-    cp = io.curptr
-    str = unsafe_string(pconvert(Ptr{UInt8}, cp))
-    io.curptr = cp + jlsizeof(str) + 1
+    str = unsafe_string(pconvert(Ptr{UInt8}, io.curptr))
+    io.curptr += jlsizeof(str) + 1
     str
 end
 
-@inline function Base.seek(io::MmapIO, offset::Integer)
-    if io.startptr + offset > io.endptr
-        resize!(io, io.startptr + offset)
-    end
-    io.curptr = io.startptr + offset
-    nothing
-end
-
-@inline function Base.skip(io::MmapIO, offset::Integer)
-    if io.curptr + offset > io.endptr
-        resize!(io, io.curptr + offset)
-    end
-    io.curptr += offset
-    nothing
-end
-
 Base.position(io::MmapIO) = Int64(io.curptr - io.startptr)
-
-"""
-    IndirectPointer
-
-When writing data, we may need to enlarge the memory mapping, which would invalidate any
-memory addresses arising from the old `mmap` pointer. `IndirectPointer` holds a pointer to
-the `startptr` field of an `MmapIO`, and the offset relative to that pointer. It defers
-computing a memory address until converted to a `Ptr{T}`, so the memory mapping can be
-enlarged and addresses will remain valid.
-"""
-struct IndirectPointer
-    ptr::Ptr{Ptr{Cvoid}}
-    offset::Int
-end
-
-function IndirectPointer(io::MmapIO, offset::Integer=position(io))
-    IndirectPointer(pointer_from_objref(io) + fieldoffset(MmapIO, 4), offset)
-end
-Base.:+(x::IndirectPointer, y::Integer) = IndirectPointer(x.ptr, x.offset+y)
-pconvert(::Type{Ptr{T}}, x::IndirectPointer) where {T} = Ptr{T}(jlunsafe_load(x.ptr) + x.offset)
+bufferpos(io::MmapIO) = Int64(io.curptr - io.startptr)
 
 # We sometimes need to compute checksums. We do this by first calling begin_checksum when
 # starting to handle whatever needs checksumming, and calling end_checksum afterwards. Note
@@ -293,10 +224,12 @@ function begin_checksum_read(io::MmapIO)
     end
     io
 end
+
 function begin_checksum_write(io::MmapIO, sz::Integer)
     ensureroom(io, sz)
     begin_checksum_read(io)
 end
+
 function end_checksum(io::MmapIO)
     @inbounds v = io.checksum_pos[io.nchecksum]
     io.nchecksum -= 1

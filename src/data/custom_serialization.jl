@@ -24,7 +24,7 @@ CustomSerialization(::Type{WrittenAs}, ::Type{WrittenAs}, odr) where {WrittenAs}
 CustomSerialization(::Type{WrittenAs}, ::Type{ReadAs}, odr) where {WrittenAs,ReadAs} =
     CustomSerialization{WrittenAs,odr}
 
-odr_sizeof(::Type{CustomSerialization{T,ODR}}) where {T,ODR} = odr_sizeof(ODR)
+odr_sizeof(::Type{CustomSerialization{T,ODR}}) where {T,ODR} = odr_sizeof(ODR)::Int
 
 # Usually we want to convert the object and then write it.
 h5convert!(out::Pointers, ::Type{CustomSerialization{T,ODR}}, f::JLDFile,

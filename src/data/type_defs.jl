@@ -4,36 +4,9 @@ const Pointers = Union{Ptr{Cvoid}, IndirectPointer}
 
 struct OnDiskRepresentation{Offsets,JLTypes,H5Types, Size} end
 odr_sizeof(::Nothing) = 0
-@static if VERSION ≥ v"1.9.0-DEV"
-    # Modelled after Base.datatype_alignment
-    function datatype_size(dt::DataType)
-        Base.@_foldable_meta
-        dt.layout == C_NULL && throw(UndefRefError())
-        size = unsafe_load(pconvert(Ptr{Base.DataTypeLayout}, dt.layout)).size
-        return Int(size)
-    end
-    @Base.pure odr_sizeof(x::DataType) = datatype_size(x)
-else
-    @Base.pure odr_sizeof(x::DataType) = Int(x.size)
-end
+odr_sizeof(x::DataType) = Core.sizeof(x)
 
 struct UnknownType{T, P} end
-
-# Horrible Invalidations
-# function Base.show(io::IO, x::Type{UnknownType{T, P}}) where {T, P}
-#     print(io, "UnknownType:\"", T,"\"")
-#     if !isempty(P.parameters)
-#         print(io, "{")
-#         for p in P.parameters
-#             print(io, p)
-#             if p !== P.parameters[end]
-#                 print(io, ", ")
-#             end
-#         end
-#         print(io, "}")
-#     end
-# end
-
 struct Vlen{T}
     size::UInt32
     id::GlobalHeapID

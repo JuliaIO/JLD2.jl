@@ -7,38 +7,16 @@ using FileIO: load, save
 export load, save
 using Requires: @require
 using PrecompileTools: @setup_workload, @compile_workload
+export jldopen, @load, @save, save_object, load_object, jldsave
 
-export jldopen, @load, @save, save_object, load_object, printtoc
-export jldsave
-
-
-# Due to custom overrides we do not use Base functions directly
-# but define our own to avoid type piracy
-"""
-    jlwrite(io, x)
-
-Wrapper around `Base.write(io, x)`. Defined separately to avoid type piracy.
-"""
-jlwrite(io, x) = Base.write(io, x)
-"""
-    jlread(io, x)
-
-Wrapper around `Base.read(io, x)`. Defined separately to avoid type piracy.
-"""
-jlread(io, x) = Base.read(io, x)
-jlread(io::IO, ::Type{T}, n::Integer) where {T} = T[jlread(io, T) for _=1:n]
-
-# Use internal convert function (for pointer conversion) to avoid invalidations
-pconvert(T, x) = Base.convert(T, x)
-
-jlsizeof(x) = Base.sizeof(x)
-jlunsafe_store!(p, x) = Base.unsafe_store!(p, x)
-jlunsafe_load(p) = Base.unsafe_load(p)
-
-include("mmapio.jl")
-include("bufferedio.jl")
-include("macros_utils.jl")
 include("types.jl")
+
+
+
+
+include("macros_utils.jl")
+include("io/mmapio.jl")
+include("io/bufferedio.jl")
 include("julia_compat.jl")
 include("file_header.jl")
 include("Lookup3.jl")
@@ -181,9 +159,6 @@ end
 FallbackType(::Type{MmapIO}) = IOStream
 FallbackType(::Type{IOStream}) = nothing
 
-# The delimiter is excluded by default
-read_bytestring(io::Union{IOStream, IOBuffer}) = String(readuntil(io, 0x00))
-
 const OPEN_FILES = Dict{String,WeakRef}()
 const OPEN_FILES_LOCK = ReentrantLock()
 function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=DEFAULT_IOTYPE;
@@ -196,7 +171,6 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                  ) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
     verify_compressor(compress)
-    exists = ispath(fname)
 
     # Can only open multiple in parallel if mode is "r"
     if parallel_read && (wr, create, truncate)  != (false, false, false)
@@ -206,37 +180,34 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
     lock(OPEN_FILES_LOCK)
 
     f = try
+        exists = ispath(fname)
         if exists
             rname = realpath(fname)
             # catch existing file system entities that are not regular files
             !isfile(rname) && throw(ArgumentError("not a regular file: $fname"))
 
+            f = get(OPEN_FILES, rname, (;value=nothing)).value
             # If in serial, return existing handle. In parallel always generate a new handle
-            if haskey(OPEN_FILES, rname)
-                ref = OPEN_FILES[rname]
-                f = ref.value
-                if !isnothing(f)
-                    if parallel_read 
-                        f.writable && throw(ArgumentError("Tried to open file in a parallel context but it is open in write-mode elsewhere in a serial context."))
-                    else
-                        if truncate
-                            throw(ArgumentError("attempted to truncate a file that was already open"))
-                        elseif !isa(f, JLDFile{iotype})
-                            throw(ArgumentError("attempted to open file with $iotype backend, but already open with a different backend"))
-                        elseif f.writable != wr
-                            current = wr ? "read/write" : "read-only"
-                            previous = f.writable ? "read/write" : "read-only"
-                            throw(ArgumentError("attempted to open file $(current), but file was already open $(previous)"))
-                        elseif f.compress != compress
-                            throw(ArgumentError("attempted to open file with compress=$(compress), but file was already open with compress=$(f.compress)"))
-                        elseif f.mmaparrays != mmaparrays
-                            throw(ArgumentError("attempted to open file with mmaparrays=$(mmaparrays), but file was already open with mmaparrays=$(f.mmaparrays)"))
-                        end
-
-                        f = f::JLDFile{iotype}
-                        f.n_times_opened += 1
-                        return f
+            if !isnothing(f)
+                if parallel_read 
+                    f.writable && throw(ArgumentError("Tried to open file in a parallel context but it is open in write-mode elsewhere in a serial context."))
+                else
+                    if truncate
+                        throw(ArgumentError("attempted to truncate a file that was already open"))
+                    elseif !isa(f, JLDFile{iotype})
+                        throw(ArgumentError("attempted to open file with $iotype backend, but already open with a different backend"))
+                    elseif f.writable != wr
+                        current = wr ? "read/write" : "read-only"
+                        previous = f.writable ? "read/write" : "read-only"
+                        throw(ArgumentError("attempted to open file $(current), but file was already open $(previous)"))
+                    elseif f.compress != compress
+                        throw(ArgumentError("attempted to open file with compress=$(compress), but file was already open with compress=$(f.compress)"))
+                    elseif f.mmaparrays != mmaparrays
+                        throw(ArgumentError("attempted to open file with mmaparrays=$(mmaparrays), but file was already open with mmaparrays=$(f.mmaparrays)"))
                     end
+                    f = f::JLDFile{iotype}
+                    f.n_times_opened += 1
+                    return f
                 end
             end
         end
@@ -246,78 +217,57 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         rname = realpath(fname)
         f = JLDFile(io, rname, wr, created, plain, compress, mmaparrays)
 
-        if !parallel_read
-            OPEN_FILES[rname] = WeakRef(f)
-        end
+        !parallel_read && (OPEN_FILES[rname] = WeakRef(f))
 
         f
-    catch e
-        rethrow(e)
     finally
         unlock(OPEN_FILES_LOCK)
     end
-    if f.written
-        f.base_address = 512
-        if f isa JLDFile{MmapIO}
-            f.root_group = Group{JLDFile{MmapIO}}(f)
-            f.types_group =  Group{JLDFile{MmapIO}}(f)
-        elseif f isa JLDFile{IOStream}
-            f.root_group =  Group{JLDFile{IOStream}}(f)
-            f.types_group = Group{JLDFile{IOStream}}(f)
-        end
-    else
-        try
-            load_file_metadata!(f)
-        catch e
-            close(f)
-            throw(e)
-        end
+    try
+        initialize_fileobject!(f)
+    catch e
+        close(f)
+        throw(e)
     end
     merge!(f.typemap, typemap)
     return f
 end
 
-function load_file_metadata!(f)
+function initialize_fileobject!(f::JLDFile)
+    if f.written
+        f.base_address = 512
+        f.root_group = Group{typeof(f)}(f)
+        f.types_group =  Group{typeof(f)}(f)
+        return
+    end
     superblock = find_superblock(f)
     f.end_of_data = superblock.end_of_file_address
     f.base_address = superblock.base_address
     f.root_group_offset = superblock.root_group_object_header_address
     if superblock.version >= 2
         verify_file_header(f)
-    else
-        @warn "This file was not written with JLD2. Some things may not work."
-        if f.writable
-            close(f)
-            throw(UnsupportedVersionException("This file can not be edited by JLD2. Please open in read-only mode."))
-        end
+    elseif f.writable
+        close(f)
+        throw(UnsupportedVersionException("This file can not be edited by JLD2. Please open in read-only mode."))
     end
-    #try
-        f.root_group = load_group(f, f.root_group_offset)
+    f.root_group = load_group(f, f.root_group_offset)
 
-        if haskey(f.root_group.written_links, "_types")
-            types_group_offset = f.root_group.written_links["_types"]::RelOffset
-            f.types_group = f.loaded_groups[types_group_offset] = load_group(f, types_group_offset)
-            i = 0
-            for (offset::RelOffset) in values(f.types_group.written_links)
-                f.datatype_locations[offset] = CommittedDatatype(offset, i += 1)
-            end
-            resize!(f.datatypes, length(f.datatype_locations))
-        else
-            f.types_group = Group{typeof(f)}(f)
+    types_offset = get(f.root_group.written_links, "_types", UNDEFINED_ADDRESS)
+    if types_offset != UNDEFINED_ADDRESS
+        f.types_group = f.loaded_groups[types_offset] = load_group(f, types_offset)
+        for (i, offset::RelOffset) in enumerate(values(f.types_group.written_links))
+            f.datatype_locations[offset] = CommittedDatatype(offset, i)
         end
-    # catch e
-    #     show(e)
-    #     f.types_group = Group{typeof(f)}(f)
-
-    # end
-    nothing
+        resize!(f.datatypes, length(f.datatype_locations))
+    else
+        f.types_group = Group{typeof(f)}(f)
+    end
 end
 
 """
-    jldopen(fname::AbstractString, mode::AbstractString;
-            iotype=MmapIO, compress=false, typemap=Dict())
+    jldopen(file, mode::AbstractString; iotype=MmapIO, compress=false, typemap=Dict())
 
-Opens a JLD2 file at path `fname`.
+Opens a JLD2 file at path `file`. Alternatively `file` may be a suitable IO object.
 
 Options for `mode`:
 - `"r"`: Open for reading only, failing if no file exists
@@ -326,13 +276,43 @@ Options for `mode`:
 - `"a"`/`"a+"`: Open for reading and writing, creating a new file if none exists, but
                 preserving the existing file if one is present
 """
-function jldopen(fname::AbstractString, mode::AbstractString="r"; iotype=DEFAULT_IOTYPE, kwargs...)
+function jldopen(fname::Union{AbstractString, IO}, mode::AbstractString="r"; iotype=DEFAULT_IOTYPE, kwargs...)
     (wr, create, truncate) = mode == "r"  ? (false, false, false) :
                              mode == "r+" ? (true, false, false) :
                              mode == "a" || mode == "a+" ? (true, true, false) :
                              mode == "w" || mode == "w+" ? (true, true, true) :
                              throw(ArgumentError("invalid open mode: $mode"))
-    jldopen(fname, wr, create, truncate, iotype; kwargs...)
+    if fname isa AbstractString
+        jldopen(fname, wr, create, truncate, iotype; kwargs...)
+    else
+        jldopen(fname, wr, create, truncate; kwargs...)
+    end
+end
+
+
+function jldopen(io::IO, writable::Bool, create::Bool, truncate::Bool;
+                plain::Bool=false,
+                compress=false,
+                typemap::Dict{String}=Dict{String,Any}(),
+                )
+    verify_compressor(compress)
+    # figure out what kind of io object this is 
+    # for now assume it is
+    !io.readable && throw("IO object is not readable")
+    if io.seekable && writable && iswritable(io)
+        # Here could have a more lightweight wrapper
+        # that just ensures API is defined
+        created = truncate
+        io = RWBuffer(io)
+        f = JLDFile(io, "RWBuffer", writable, created, plain, compress, false)
+    elseif (false == writable == create == truncate)
+        # Were trying to read, so let's hope `io` implements `read` and bytesavailable
+        io = ReadOnlyBuffer(io)
+        f = JLDFile(io, "ReadOnlyBuffer", false, false, plain, compress, false)
+    end
+    initialize_fileobject!(f)
+    merge!(f.typemap, typemap)
+    return f
 end
 
 """
@@ -365,11 +345,8 @@ function prewrite(f::JLDFile)
     f.written = true
 end
 
-Base.read(f::JLDFile, name::AbstractString) = f.root_group[name]
-#Base.write(f::JLDFile, name::AbstractString, obj, wsession::JLDWriteSession=JLDWriteSession()) =
-#    write(f.root_group, name, obj, wsession)
-
-Base.getindex(f::JLDFile, name::AbstractString) = f.root_group[name]
+Base.read(f::JLDFile, name::AbstractString) = Base.inferencebarrier(f.root_group[name])
+Base.getindex(f::JLDFile, name::AbstractString) = Base.inferencebarrier(f.root_group[name])
 Base.setindex!(f::JLDFile, obj, name::AbstractString) = (f.root_group[name] = obj; f)
 Base.haskey(f::JLDFile, name::AbstractString) = haskey(f.root_group, name)
 Base.isempty(f::JLDFile) = isempty(f.root_group)
@@ -451,6 +428,10 @@ function jld_finalizer(f::JLDFile{IOStream})
     close(f)
 end
 
+function jld_finalizer(f::JLDFile)
+    f.n_times_opened == 0 && return
+    close(f)
+end
 # Display functions
 
 # simple one-line display (without trailing line break)
@@ -504,7 +485,8 @@ include("data/custom_serialization.jl")
 include("data/writing_datatypes.jl")
 include("data/reconstructing_datatypes.jl")
 
-include("dataio.jl")
+include("io/dataio.jl")
+include("io/io_wrappers.jl")
 include("loadsave.jl")
 include("backwards_compatibility.jl")
 include("inlineunion.jl")

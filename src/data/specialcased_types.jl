@@ -137,8 +137,8 @@ function jlconvert(rr::ReadRepresentation{String, FixedLengthAsciiString{SpacePa
     unsafe_copyto!(pointer(data), pconvert(Ptr{UInt8}, ptr), N)
     rstrip(String(data))
 end
-odr_sizeof(x::AsciiString) = x.length
-odr_sizeof(x::Type{FixedLengthAsciiString{TERM, N}}) where {TERM, N} = UInt32(N)#::Int
+odr_sizeof(x::AsciiString) = Int(x.length)
+odr_sizeof(x::Type{FixedLengthAsciiString{TERM, N}}) where {TERM, N} = Int(N)::Int
 
 
 

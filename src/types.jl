@@ -1,3 +1,61 @@
+"""
+    MemoryBackedIO <: IO
+
+Abstract type for IO objects that are backed by memory in such a way that
+one can use pointer based `unsafe_load` and `unsafe_store!` operations
+after ensuring that there is enough memory allocated.
+
+It needs to provide:
+ - `getproperty(io, :curptr)` to get the current pointer
+ - `ensureroom(io, nb)` to ensure that there are at least nb bytes available
+ - `position(io)` to get the current (zero-based) position 
+ - `seek(io, pos)` to set the current position (zero-based)
+"""
+abstract type MemoryBackedIO <: IO end
+
+
+
+# Define custom `jlread`, `jlwrite`, `jlunsafe_load`, `jlunsafe_store!` functions for a struct
+# this needs to be called immediately after the struct definition (since it itself calls `jlsizeof`)
+function define_packed(ty::DataType)
+    @assert isbitstype(ty)
+    packed_offsets = cumsum([jlsizeof(x) for x in ty.types])
+    sz = pop!(packed_offsets)
+    pushfirst!(packed_offsets, 0)
+
+    if sz != jlsizeof(ty)
+        @eval begin
+            function jlunsafe_store!(p::Ptr{$ty}, x::$ty)
+                $([:(jlunsafe_store!(pconvert(Ptr{$(ty.types[i])}, p+$(packed_offsets[i])), getfield(x, $i)))
+                   for i = 1:length(packed_offsets)]...)
+            end
+            function jlunsafe_load(p::Ptr{$ty})
+                $(Expr(:new, ty, [:(jlunsafe_load(pconvert(Ptr{$(ty.types[i])}, p+$(packed_offsets[i]))))
+                                   for i = 1:length(packed_offsets)]...))
+            end
+            jlsizeof(::Union{$ty,Type{$ty}}) = $(Int(sz))::Int
+        end
+    end
+
+    @eval begin
+        @inline jlwrite(io::MemoryBackedIO, x::$ty) = _write(io, x)
+        @inline jlread(io::MemoryBackedIO, x::Type{$ty}) = _read(io, x)
+        function jlread(io::IO, ::Type{$ty})
+            $(Expr(:new, ty, [:(jlread(io, $(ty.types[i]))) for i = 1:length(packed_offsets)]...))
+        end
+        function jlwrite(io::IO, x::$ty)
+            $([:(jlwrite(io, getfield(x, $i))) for i = 1:length(packed_offsets)]...)
+            nothing
+        end
+    end
+    nothing
+end
+
+jlsizeof(x) = Base.sizeof(x)
+jlunsafe_store!(p, x) = Base.unsafe_store!(p, x)
+jlunsafe_load(p) = Base.unsafe_load(p)
+
+
 ## Signatures
 const OBJECT_HEADER_SIGNATURE = htol(0x5244484f) # "OHDR"
 const OH_ATTRIBUTE_CREATION_ORDER_TRACKED = 2^2
@@ -14,6 +72,7 @@ const OBJECT_HEADER_CONTINUATION_SIGNATURE = htol(0x4b48434f) # "OCHK"
     LcVirtual = 0x03
 end
 LayoutClass(lc::LayoutClass) = lc
+jlwrite(io, lc::LayoutClass) = jlwrite(io, UInt8(lc))
 
 @enum(CharacterSet::UInt8,
       CSET_ASCII,
@@ -258,3 +317,24 @@ Message(type::HeaderMessageType, f, offset::RelOffset) =
 Message(type::HeaderMessageType, io::IO) = Message(type, position(io), UNDEFINED_ADDRESS, io)
 Message(type::HeaderMessageType, data::Vector{UInt8}) = Message(type, 0, UNDEFINED_ADDRESS, IOBuffer(data))
 
+
+"""
+    IndirectPointer
+
+When writing data, we may need to enlarge the memory mapping, which would invalidate any
+memory addresses arising from the old `mmap` pointer. `IndirectPointer` holds an offset relative to the 
+MemoryBackedIO. It defers computing a memory address until converted to a `Ptr{T}`, 
+so the memory mapping can be enlarged and addresses will remain valid.
+"""
+struct IndirectPointer{P<:MemoryBackedIO}
+    io::P
+    offset::Int
+end
+
+IndirectPointer(io::MemoryBackedIO) = IndirectPointer(io, Int(bufferpos(io)))
+
+Base.:+(x::IndirectPointer, y::Integer) = IndirectPointer(x.io, x.offset+y)
+pconvert(::Type{Ptr{T}}, x::IndirectPointer) where {T} = Ptr{T}(x.io.curptr - bufferpos(x.io) + x.offset)
+
+# Use internal convert function (for pointer conversion) to avoid invalidations
+pconvert(T, x) = Base.convert(T, x)
