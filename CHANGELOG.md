@@ -1,3 +1,6 @@
+## 0.5.5
+ - Experimental support for writing to and reading from `IO` objects e.g. `jldopen(io, "r")`
+
 ## 0.5.4
  - Important correctness fix when storing very many equally sized objects
 that may get GC'ed while storing is in progress! (#603)
