@@ -277,24 +277,6 @@ end
 Base.position(io::MmapIO) = Int64(io.curptr - io.startptr)
 bufferpos(io::MmapIO) = Int64(io.curptr - io.startptr)
 
-"""
-    IndirectPointer
-
-When writing data, we may need to enlarge the memory mapping, which would invalidate any
-memory addresses arising from the old `mmap` pointer. `IndirectPointer` holds an offset relative to the 
-MemoryBackedIO. It defers computing a memory address until converted to a `Ptr{T}`, 
-so the memory mapping can be enlarged and addresses will remain valid.
-"""
-struct IndirectPointer{P<:MemoryBackedIO}
-    io::P
-    offset::Int
-end
-
-IndirectPointer(io::MemoryBackedIO) = IndirectPointer(io, Int(bufferpos(io)))
-
-Base.:+(x::IndirectPointer, y::Integer) = IndirectPointer(x.io, x.offset+y)
-pconvert(::Type{Ptr{T}}, x::IndirectPointer) where {T} = Ptr{T}(x.io.curptr - bufferpos(x.io) + x.offset)
-
 # We sometimes need to compute checksums. We do this by first calling begin_checksum when
 # starting to handle whatever needs checksumming, and calling end_checksum afterwards. Note
 # that we never compute nested checksums, but we may compute multiple checksums

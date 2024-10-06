@@ -11,49 +11,12 @@ using PrecompileTools: @setup_workload, @compile_workload
 export jldopen, @load, @save, save_object, load_object, printtoc
 export jldsave
 
+# abstract types and other definitions that need to be defined early on
+include("types.jl")
 
-# Due to custom overrides we do not use Base functions directly
-# but define our own to avoid type piracy
-"""
-    jlwrite(io, x)
 
-Wrapper around `Base.write(io, x)`. Defined separately to avoid type piracy.
-"""
-jlwrite(io, x) = Base.write(io, x)
-"""
-    jlread(io, x)
-
-Wrapper around `Base.read(io, x)`. Defined separately to avoid type piracy.
-"""
-jlread(io, x) = Base.read(io, x)
-jlread(io::IO, ::Type{T}, n::Integer) where {T} = T[jlread(io, T) for _=1:n]
-
-# Use internal convert function (for pointer conversion) to avoid invalidations
-pconvert(T, x) = Base.convert(T, x)
-
-jlsizeof(x) = Base.sizeof(x)
-jlunsafe_store!(p, x) = Base.unsafe_store!(p, x)
-jlunsafe_load(p) = Base.unsafe_load(p)
-
-"""
-    MemoryBackedIO <: IO
-
-Abstract type for IO objects that are backed by memory in such a way that
-one can use pointer based `unsafe_load` and `unsafe_store!` operations
-after ensuring that there is enough memory allocated.
-
-This is used for dispatch to [`MmapIO`](@ref) and [`BufferedWriter`](@ref).
-
-It needs to provide:
- - `getproperty(io, :curptr)` to get the current pointer
- - `ensureroom(io, nb)` to ensure that there are at least nb bytes available
- - `position(io)` to get the current (zero-based) position 
- - `seek(io, pos)` to set the current position (zero-based)
-"""
-abstract type MemoryBackedIO <: IO end
 
 include("macros_utils.jl")
-include("types.jl")
 include("mmapio.jl")
 include("bufferedio.jl")
 include("julia_compat.jl")
