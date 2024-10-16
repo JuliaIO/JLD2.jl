@@ -13,7 +13,7 @@ TranscodingStreams = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
 
 [compat]
 FileIO = "1.5"
-MacroTools = "0.5"
+MacroTools = "0.5.10"
 OrderedCollections = "1"
 PrecompileTools = "1"
 Requires = "1.3"
