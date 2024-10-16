@@ -95,8 +95,8 @@ function jltype(f::JLDFile, dt::VariableLengthDatatype)
         return ReadRepresentation{String,Vlen{String}}()
     else#if dt.bitfield1 & 0x1 == 0x0 # it's a sequence
         rr = jltype(f, dt.basetype)
-        T = typeof(rr).parameters[1]
-        odr = typeof(rr).parameters[2]
+        T = eltype(rr)
+        odr = readodr(rr)
         return ReadRepresentation{Vector{T}, Vlen{odr}}()
     end
 end

@@ -21,7 +21,7 @@ end
 
 # Carries the type and on-disk representation of data to be read from
 # the disk
-odr_sizeof(::ReadRepresentation{T,S}) where {T,S} = odr_sizeof(S)::Int
+odr_sizeof(::AbstractReadRepr{T,S}) where {T,S} = odr_sizeof(S)::Int
 
 # Determines whether a specific field type should be saved in the file
 function hasfielddata(@nospecialize(T), encounteredtypes=DataType[])::Bool
@@ -44,7 +44,7 @@ end
 end
 
 # Gets the size of an on-disk representation
-function odr_sizeof(::OnDiskRepresentation{Offsets,JLTypes,H5Types,Size}) where {Offsets,JLTypes,H5Types,Size}
+function odr_sizeof(::Type{OnDiskRepresentation{Offsets,JLTypes,H5Types,Size}}) where {Offsets,JLTypes,H5Types,Size}
     Size::Int
 end
 
@@ -244,7 +244,7 @@ end
         f.h5jltype[cdt] = ReadRepresentation{readas,CustomSerialization{writeas, odr(writeas)}}()
         commit(f, dtype, tuple(typeattr, wrtypeattr, attributes...))
     else
-        f.h5jltype[cdt] = ReadRepresentation{writeas,odr(writeas)}()
+        f.h5jltype[cdt] = readrepr(writeas,odr(writeas))()
         commit(f, dtype, tuple(typeattr, attributes...))
     end
 
@@ -261,7 +261,7 @@ h5convert!(out::Pointers, ::Type{T}, ::JLDFile, x, ::JLDWriteSession) where {T} 
 
 # We pack types that have padding using a staged h5convert! method
 @generated function h5convert!(out::Pointers,
-       ::OnDiskRepresentation{Offsets,Types,H5Types,Size},
+       ::Type{OnDiskRepresentation{Offsets,Types,H5Types,Size}},
        file::JLDFile, x, wsession::JLDWriteSession) where {Offsets,Types,H5Types,Size}
     T = x
     types = Types.parameters
@@ -299,8 +299,7 @@ jlconvert_canbeuninitialized(::Any) = false
 
 # jlconvert converts data from a pointer into a Julia object. This method
 # handles types where this is just a simple load
-jlconvert(::ReadRepresentation{T,T}, ::JLDFile, ptr::Ptr,
-                  ::RelOffset) where {T} =
+jlconvert(::SameLayoutRepr{T}, ::JLDFile, ptr::Ptr, ::RelOffset) where {T} =
     jlunsafe_load(pconvert(Ptr{T}, ptr))
 
 # When fields are undefined in the file but can't be in the workspace, we need
@@ -400,7 +399,7 @@ function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T
     cdt = CommittedDatatype(h5o, id)
     f.datatype_locations[h5o] = cdt
     f.jlh5type[DataType] = cdt
-    f.h5jltype[cdt] = ReadRepresentation{DataType,DataTypeODR()}()
+    f.h5jltype[cdt] = ReadRepresentation{DataType,DataTypeODR}()
     push!(f.datatypes, H5TYPE_DATATYPE)
     f.types_group[string(id, pad=8)] = h5o
 
@@ -409,11 +408,11 @@ function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T
 
     cdt
 end
-fieldodr(::Type{T}, ::Bool) where {T<:DataType} = DataTypeODR()
+fieldodr(::Type{T}, ::Bool) where {T<:DataType} = DataTypeODR
 
 h5type(f::JLDFile, ::Type{T}, x) where {T<:DataType} =
     h5fieldtype(f, DataType, typeof(x), Val{true})
-odr(::Type{T}) where {T<:DataType} = DataTypeODR()
+odr(::Type{T}) where {T<:DataType} = DataTypeODR
 
 function typename(T::DataType)
     s = IOBuffer()
@@ -443,7 +442,7 @@ function refs_from_types(f::JLDFile, types, wsession::JLDWriteSession)
     for x in types]
 end
 
-function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::DataType, wsession::JLDWriteSession)
+function h5convert!(out::Pointers, ::Type{DataTypeODR}, f::JLDFile, T::DataType, wsession::JLDWriteSession)
     t = typename(T)
     if T <: Function && isgensym(Symbol(T))
         @warn LazyString("Attempting to store ", T, ".\n",
@@ -463,7 +462,7 @@ end
 
 # This is a trick to compactly write long NTuple
 # This uses that NTuple{N,T} === Tuple{T,T,T,T,...,T}
-function h5convert!(out::Pointers, ::DataTypeODR, f::JLDFile, T::Type{<: NTuple}, wsession::JLDWriteSession)
+function h5convert!(out::Pointers, ::Type{DataTypeODR}, f::JLDFile, T::Type{<: NTuple}, wsession::JLDWriteSession)
     params = T.parameters
     N = length(params)
     if N ≤ 1 || !(reduce(==, params))
@@ -509,7 +508,7 @@ function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T
     commit(f, H5TYPE_UNION, Union, readas)
 end
 
-fieldodr(::Type{T}, ::Bool) where {T<:Union} = UnionTypeODR()
+fieldodr(::Type{T}, ::Bool) where {T<:Union} = UnionTypeODR
 h5fieldtype(f::JLDFile, ::Type{Union{}}, ::Initialized) = nothing
 fieldodr(::Type{Union{}}, initialized::Bool) = nothing
 
@@ -517,7 +516,7 @@ h5type(f::JLDFile, ::Type{T}, x::Any) where {T<:Union} =
     h5fieldtype(f, Union, typeof(x), Val{true})
 odr(::Type{Union}) = fieldodr(Union, true)
 
-function h5convert!(out::Pointers, ::UnionTypeODR, f::JLDFile, x::Union, wsession::JLDWriteSession)
+function h5convert!(out::Pointers, ::Type{UnionTypeODR}, f::JLDFile, x::Union, wsession::JLDWriteSession)
     # Write a description of the union type
     # This is not needed for loading the file but makes h5dump output clearer
     t = string(x)
@@ -539,7 +538,7 @@ function h5convert!(out::Pointers, ::UnionTypeODR, f::JLDFile, x::Union, wsessio
     end
 end
 
-function jlconvert(::ReadRepresentation{Union, UnionTypeODR()}, f::JLDFile,
+function jlconvert(::ReadRepresentation{Union, UnionTypeODR}, f::JLDFile,
                    ptr::Ptr, header_offset::RelOffset)
     # Skip union type description in the beginning
     ptr += odr_sizeof(Vlen{String})
@@ -555,7 +554,7 @@ end
 
 
 function constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute}) where {T<:Union}
-    dt == H5TYPE_UNION ? (ReadRepresentation{Union,UnionTypeODR()}(), true) :
+    dt == H5TYPE_UNION ? (ReadRepresentation{Union,UnionTypeODR}(), true) :
                          throw(UnsupportedFeatureException())
 end
 
@@ -567,7 +566,7 @@ const UnionAllODR = OnDiskRepresentation{(0, 8),Tuple{TypeVar,Any},Tuple{RelOffs
 # generic h5convert! method for the specific UnionAll type rather than for UnionAll
 # more generally.
 function h5convert!(out::Pointers,
-                    odr::UnionAllODR,
+                    odr::Type{UnionAllODR},
                     f::JLDFile, x::UnionAll, wsession::JLDWriteSession)
     h5convert!(out, RelOffset, f, x.var, f.datatype_wsession)
     h5convert!(out+odr_sizeof(RelOffset), RelOffset, f, x.body, f.datatype_wsession)
@@ -656,7 +655,7 @@ end
         offset += odr_sizeof(fodr)
     end
 
-    OnDiskRepresentation{(offsets...,), Tuple{T.types...}, Tuple{odrs...}, Int(offset)}()
+    OnDiskRepresentation{(offsets...,), Tuple{T.types...}, Tuple{odrs...}, Int(offset)}
 end
 
 abstract type DataMode end
@@ -669,7 +668,7 @@ datamode(::DataType) = ReferenceFree()
 datamode(::FixedLengthString) = ReferenceFree()
 datamode(::AsciiString) = ReferenceFree()
 datamode(::Nothing) = ReferenceFree()
-function datamode(::OnDiskRepresentation{Offsets,JLTypes,H5Types,Size} where {Offsets,JLTypes,Size}) where H5Types
+function datamode(::Type{OnDiskRepresentation{Offsets,JLTypes,H5Types,Size}}) where {Offsets,JLTypes,H5Types,Size}
     for ty in H5Types.parameters
         datamode(ty) == HasReferences() && return HasReferences()
     end

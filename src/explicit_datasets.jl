@@ -62,7 +62,7 @@ function Base.show(io::IO, ::MIME"text/plain", dset::Dataset)
         print(io, prefix*"datatype: $(typeof(dt))", iscommitted ? " (committed)\n" : "\n")
         iscommitted && println(io, prefix*"\tcommitted at: $(dt.header_offset)")
         rr = jltype(dset.parent.f, dt)
-        jt = typeof(rr).parameters[1]
+        jt = eltype(rr)
         println(io, prefix*"\twritten structure: $jt")
         if iscommitted
             juliatype, writtentype, fields = stringify_committed_datatype(f, f.datatype_locations[dt.header_offset], showfields=true)
@@ -393,7 +393,7 @@ function ismmappable(dset::Dataset)
     f = dset.parent.f
     dt = dset.datatype
     rr = jltype(f, dt)
-    T = typeof(rr).parameters[1]
+    T = eltype(rr)
     !(samelayout(T)) && return false
     !isempty(dset.filters.filters) && return false
     ret = false
@@ -421,7 +421,7 @@ function readmmap(dset::Dataset)
     # figure out the element type
     dt = dset.datatype
     rr = jltype(f, dt)
-    T = typeof(rr).parameters[1]
+    T = eltype(rr)
     ndims, offset = get_ndims_offset(f, ReadDataspace(f, dset.dataspace), collect(values(dset.attributes)))
     
     io = f.io
@@ -512,12 +512,12 @@ function allocate_early(dset::Dataset, T::DataType)
 end
 end
 
-struct ArrayDataset{T, N, ODR, io} <: AbstractArray{T, N}
+struct ArrayDataset{T, N, RR<:AbstractReadRepr{T}, io} <: AbstractArray{T, N}
     f::JLDFile{io}
     dset::Dataset
     dims::NTuple{N, Int}
     data_address::Int64
-    rr::ReadRepresentation{T, ODR}
+    rr::RR
     writable::Bool
 end
 function ArrayDataset(dset::Dataset)
@@ -526,11 +526,12 @@ function ArrayDataset(dset::Dataset)
     f = dset.parent.f
     dt = dset.datatype
     writable = f.writable && (dset.layout.layout_class == LcContiguous)
+    rr = jltype(f, !(f.plain) && dt isa SharedDatatype ? get(f.datatype_locations, dt.header_offset, dt) : dt)
     return ArrayDataset(
         f, dset, 
         Int.(reverse(dset.dataspace.dimensions)), 
         fileoffset(f, dset.layout.data_address), 
-        jltype(f, !(f.plain) && dt isa SharedDatatype ? get(f.datatype_locations, dt.header_offset, dt) : dt),
+        rr,
         writable
         )
 end

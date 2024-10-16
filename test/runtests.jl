@@ -42,10 +42,6 @@ using TestItemRunner
 @testitem "Aqua Testing" begin
     using Aqua
     Aqua.test_all(JLD2;
-        ambiguities = (;
-            # Some jlconvert methods are ambiguous for pathological type combinations
-            broken=true,
-        ),
         deps_compat = (;
             ignore = [:Mmap,],
         ),

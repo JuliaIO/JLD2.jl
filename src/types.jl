@@ -236,14 +236,21 @@ end
 # Allow dropping the index field
 SharedDatatype(dt::CommittedDatatype) = SharedDatatype(dt.header_offset)
 
+abstract type AbstractReadRepr{T, ODR} end
+Base.eltype(::Type{<:AbstractReadRepr{T}}) where T = T
+readodr(::AbstractReadRepr{T,ODR}) where {T,ODR} = ODR
 
 """
     ReadRepresentation{T,ODR}
 
 A type encoding both the Julia type `T` and the on-disk (HDF5) representation `ODR`.
 """
-struct ReadRepresentation{T,ODR} end
-Base.eltype(::Type{<:ReadRepresentation{T}}) where T = T
+struct ReadRepresentation{T,ODR} <: AbstractReadRepr{T,ODR} end
+
+struct SameLayoutRepr{T} <: AbstractReadRepr{T,T} end
+
+readrepr(::Type{T}, ::Type{T}) where T = SameLayoutRepr{T}
+readrepr(T, ODR) = ReadRepresentation{T,ODR}
 
 """
     CustomSerialization{T,S}

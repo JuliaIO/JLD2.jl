@@ -33,15 +33,15 @@ function jltype(f::JLDFile, dt::FixedPointDatatype)
         throw(UnsupportedFeatureException())
     if endianness == 0
         if dt.size == 8
-            return signed ? ReadRepresentation{Int64,Int64}() : ReadRepresentation{UInt64,UInt64}()
+            return signed ? SameLayoutRepr{Int64}() : SameLayoutRepr{UInt64}()
         elseif dt.size == 1
-            return signed ? ReadRepresentation{Int8,Int8}() : ReadRepresentation{UInt8,UInt8}()
+            return signed ? SameLayoutRepr{Int8}() : SameLayoutRepr{UInt8}()
         elseif dt.size == 4
-            return signed ? ReadRepresentation{Int32,Int32}() : ReadRepresentation{UInt32,UInt32}()
+            return signed ? SameLayoutRepr{Int32}() : SameLayoutRepr{Int32}()
         elseif dt.size == 2
-            return signed ? ReadRepresentation{Int16,Int16}() : ReadRepresentation{UInt16,UInt16}()
+            return signed ? SameLayoutRepr{Int16}() : SameLayoutRepr{UInt16}()
         elseif dt.size == 16
-            return signed ? ReadRepresentation{Int128,Int128}() : ReadRepresentation{UInt128,UInt128}()
+            return signed ? SameLayoutRepr{Int128}() : SameLayoutRepr{UInt128}()
         else
             throw(UnsupportedFeatureException())
         end
@@ -64,7 +64,7 @@ end
 
 # Special handling for booleans as they are not considered <: Integer in HDF5
 h5fieldtype(::JLDFile, ::Type{Bool}, ::Type{Bool}, ::Initialized) =BitFieldDatatype(1)
-jltype(::JLDFile, ::BitFieldDatatype) = ReadRepresentation{Bool, Bool}()
+jltype(::JLDFile, ::BitFieldDatatype) = readrepr(Bool, Bool)()
 
 h5fieldtype(::JLDFile, ::Type{Float16}, ::Type{Float16}, ::Initialized) =
     FloatingPointDatatype(UInt8(DT_FLOATING_POINT) + 0x3<<4, 0x20, 0x0f, 0x00, 2, 0, 16, 10, 5, 0, 10, 0x0000000f)
@@ -82,11 +82,11 @@ h5fieldtype(::JLDFile, ::Type{BENumber{Float64}}, ::Type{Float64}, ::Initialized
 
 function jltype(f::JLDFile, dt::FloatingPointDatatype)
     if dt == h5fieldtype(f, Float64, Float64, Val{true})
-        return ReadRepresentation{Float64,Float64}()
+        return SameLayoutRepr{Float64}()
     elseif dt == h5fieldtype(f, Float32, Float32, Val{true})
-        return ReadRepresentation{Float32,Float32}()
+        return SameLayoutRepr{Float32}()
     elseif dt == h5fieldtype(f, Float16, Float16, Val{true})
-        return ReadRepresentation{Float16,Float16}()
+        return SameLayoutRepr{Float16}()
     elseif dt == h5fieldtype(f, BENumber{Float64}, Float64, Val{true})
         return ReadRepresentation{Float32,BENumber{Float32}}()
     elseif dt == h5fieldtype(f, BENumber{Float32}, Float32, Val{true})
@@ -108,5 +108,5 @@ h5type(f::JLDFile, writeas::PrimitiveTypeTypes, x) =
 # Used only for custom serialization
 constructrr(f::JLDFile, T::PrimitiveTypeTypes, dt::Union{FixedPointDatatype,FloatingPointDatatype},
             ::Vector{ReadAttribute}) =
-    dt == h5fieldtype(f, T, T, Val{true}) ? (ReadRepresentation{T,T}(), true) :
+    dt == h5fieldtype(f, T, T, Val{true}) ? (SameLayoutRepr{T}(), true) :
                                             throw(UnsupportedFeatureException())

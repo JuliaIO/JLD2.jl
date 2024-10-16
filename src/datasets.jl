@@ -68,9 +68,9 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
     if layout.data_offset == -1
         # There was no layout message.
         # That means, this dataset is just a datatype
-        return typeof(rr).parameters[1]
+        return eltype(rr)
     elseif layout.data_offset == typemax(Int64)
-        T,_ = typeof(rr).parameters
+        T = eltype(rr)
         if layout.data_length > -1
             # TODO: this could use the fill value message to populate the array
             @warn "This array should be populated by a fill value. This is not (yet) implemented."
@@ -220,7 +220,7 @@ function construct_array(io::IO, ::Type{T}, N::Int) where {T}
 end
 
 @nospecializeinfer function read_array(f::JLDFile, dataspace::ReadDataspace,
-                    @nospecialize(rr::ReadRepresentation), layout::DataLayout,
+                    @nospecialize(rr::AbstractReadRepr), layout::DataLayout,
                     filters::FilterPipeline, header_offset::RelOffset,
                     attributes::Union{Vector{ReadAttribute},Nothing})
     T = eltype(rr)

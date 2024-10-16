@@ -231,7 +231,7 @@ function decompress!(io::IO, data_length, element_size, n, decompressor)
 end
 
 function read_compressed_array!(v::Array{T}, f::JLDFile,
-                                rr::ReadRepresentation{T,RR},
+                                rr::AbstractReadRepr{T,RR},
                                 data_length::Integer,
                                 filters,
                                 ) where {T,RR}

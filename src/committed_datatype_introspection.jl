@@ -41,7 +41,7 @@ function stringify_committed_datatype(f, cdt; showfields=false)
         else
             # These are normal julia types
             dtrr = jltype(f, dt.members[i])
-            fieldtype = string(typeof(dtrr).parameters[1])
+            fieldtype = string(eltype(dtrr))
         end
         push!(field_strs, "$(dt.names[i])::$(fieldtype)")
     end
@@ -127,7 +127,7 @@ function jlconvert_string_wrap(rr, f, offset)
     end
 end
 
-function jlconvert_string(rr::ReadRepresentation{T,DataTypeODR()},
+function jlconvert_string(::ReadRepresentation{T,DataTypeODR},
                         f::JLDFile,
                         ptr::Ptr) where T
     mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
@@ -143,7 +143,7 @@ function jlconvert_string(rr::ReadRepresentation{T,DataTypeODR()},
     end
 end
 
-function jlconvert_string(::ReadRepresentation{Union, UnionTypeODR()}, f::JLDFile,
+function jlconvert_string(::ReadRepresentation{Union, UnionTypeODR}, f::JLDFile,
     ptr::Ptr)#, header_offset::RelOffset)
     # Skip union type description in the beginning
     ptr += odr_sizeof(Vlen{String})
@@ -154,7 +154,7 @@ function jlconvert_string(::ReadRepresentation{Union, UnionTypeODR()}, f::JLDFil
     "Union{"*join(vcat(datatypes, unionalls), ",")*"}"
 end
 
-function jlconvert_string(rr::ReadRepresentation,
+function jlconvert_string(rr::AbstractReadRepr,
                         f::JLDFile,
                         ptr::Ptr)
     # so apparently this is a custom struct with plain fields that wants to be loaded
