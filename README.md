@@ -1,8 +1,11 @@
 # JLD2
 
-| **Documentation**   |  **Tests**     | **CodeCov**  | **Downloads** |
-|:--------:|:---------------:|:-------:|:---:|
-|[![](https://img.shields.io/badge/docs-online-blue.svg)](https://JuliaIO.github.io/JLD2.jl/dev)| [![CI](https://github.com/JuliaIO/JLD2.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/JuliaIO/JLD2.jl/actions/workflows/ci.yml) | [![codecov.io](https://codecov.io/github/JuliaIO/JLD2.jl/coverage.svg?branch=master)](https://codecov.io/github/JuliaIO/JLD2.jl?branch=master) | [![JLD2 Downloads](https://img.shields.io/badge/dynamic/json?url=http%3A%2F%2Fjuliapkgstats.com%2Fapi%2Fv1%2Fmonthly_downloads%2FJLD2&query=total_requests&suffix=%2Fmonth&label=Downloads)](http://juliapkgstats.com/pkg/JLD2) |
+[![](https://img.shields.io/badge/docs-online-blue.svg)](https://JuliaIO.github.io/JLD2.jl/dev)
+[![CI](https://github.com/JuliaIO/JLD2.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/JuliaIO/JLD2.jl/actions/workflows/ci.yml)
+[![codecov.io](https://codecov.io/github/JuliaIO/JLD2.jl/coverage.svg?branch=master)](https://codecov.io/github/JuliaIO/JLD2.jl?branch=master)
+[![JLD2 Downloads](https://img.shields.io/badge/dynamic/json?url=http%3A%2F%2Fjuliapkgstats.com%2Fapi%2Fv1%2Fmonthly_downloads%2FJLD2&query=total_requests&suffix=%2Fmonth&label=Downloads)](http://juliapkgstats.com/pkg/JLD2)
+[![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
+
 
 JLD2 saves and loads Julia data structures in a format comprising a subset of HDF5, without any dependency on the HDF5 C library. 
 JLD2 is able to read most HDF5 files created by other HDF5 implementations supporting HDF5 File Format Specification Version 3.0 (i.e. libhdf5 1.10 or later) and similarly those should be able to read the files that JLD2 produces. JLD2 provides read-only support for files created with the JLD package.

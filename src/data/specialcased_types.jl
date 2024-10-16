@@ -286,8 +286,8 @@ end
 # convert to an array instead.
 const NTUPLE_INLINE_THRESHOLD = 10
 
-function writeas(NT::Type{NTuple{N,T}}) where {N,T}
-    if N > NTUPLE_INLINE_THRESHOLD
+function writeas(NT::Type{Tuple{T, Vararg{T,N}}}) where {N,T}
+    if (N+1) > NTUPLE_INLINE_THRESHOLD
         return Vector{T}
     else
         return NT

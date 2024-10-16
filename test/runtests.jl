@@ -34,3 +34,20 @@ include("unpack_test.jl")
 include("dataset_api.jl")
 include("mmap_test.jl")
 include("wrapped_io.jl")
+
+using TestItemRunner
+
+@run_package_tests
+
+@testitem "Aqua Testing" begin
+    using Aqua
+    Aqua.test_all(JLD2;
+        ambiguities = (;
+            # Some jlconvert methods are ambiguous for pathological type combinations
+            broken=true,
+        ),
+        deps_compat = (;
+            ignore = [:Mmap,],
+        ),
+    )
+end
