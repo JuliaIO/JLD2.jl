@@ -198,7 +198,7 @@ function flag2uint(flag::UInt8)
 end
 
 
-jlread(io::IO, ::Type{NTuple{N,T}}) where {N,T} = ntuple(_->jlread(io, T), Val{N}())
+jlread(io::IO, ::Type{Tuple{T, Vararg{T,N}}}) where {N,T} = ntuple(_->jlread(io, T), Val{N+1}())
 jlread(io::IO, ::Type{Tuple{}}) = ()
 
 function write_nb_int(io::IO, sz::Integer, nb::Integer)

@@ -142,7 +142,7 @@ function _read(io::RWBuffer, T::DataType)
 end
 # needed explicitly for avoiding ambiguities
 Base.read(io::RWBuffer, T::Type{UInt8}) = _read(io, T)
-Base.read(io::RWBuffer, T::PlainType) = _read(io, T)
+#Base.read(io::RWBuffer, T::PlainType) = _read(io, T)
 Base.write(io::RWBuffer, x::UInt8) = _write(io, x)
 jlwrite(io::RWBuffer, x::String) = _write(io, x)
 

@@ -22,7 +22,7 @@ struct Hmessage{IO}
     m::Message{IO}
 end
 
-function write_header_message(io, vtype::Val{HMT}, hflags=0x00, size=0; kwargs...) where HMT
+function write_header_message(io, vtype::Val{HMT}, hflags::Integer=0x00, size=0; kwargs...) where HMT
     kw = (; kwargs...)
     size = compute_size(vtype, hflags, size, kw)
     jlwrite(io, UInt8(HMT))

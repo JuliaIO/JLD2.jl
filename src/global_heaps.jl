@@ -125,7 +125,7 @@ function jlread(io::IO, ::Type{GlobalHeap})
     GlobalHeap(offset, heapsz, free, objects)
 end
 
-function read_heap_object(f::JLDFile, hid::GlobalHeapID, rr::ReadRepresentation{T,RR}) where {T,RR}
+function read_heap_object(f::JLDFile, hid::GlobalHeapID, rr::ReadRepresentation)
     io = f.io
     if haskey(f.global_heaps, hid.heap_offset)
         gh = f.global_heaps[hid.heap_offset]
@@ -135,8 +135,8 @@ function read_heap_object(f::JLDFile, hid::GlobalHeapID, rr::ReadRepresentation{
     end
     seek(io, gh.objects[hid.index]+8)
     len = Int(jlread(io, Length))
-    n = div(len, odr_sizeof(RR))
-    len == n * odr_sizeof(RR) || throw(InvalidDataException())
+    n = div(len, odr_sizeof(rr))
+    len == n * odr_sizeof(rr) || throw(InvalidDataException())
 
-    read_array!(Vector{T}(undef, n), f, rr)
+    read_array!(Vector{julia_type(rr)}(undef, n), f, rr)
 end
