@@ -21,7 +21,7 @@ end
 
 # Carries the type and on-disk representation of data to be read from
 # the disk
-odr_sizeof(::AbstractReadRepr{T,S}) where {T,S} = odr_sizeof(S)::Int
+odr_sizeof(::ReadRepresentation{T,S}) where {T,S} = odr_sizeof(S)::Int
 
 # Determines whether a specific field type should be saved in the file
 function hasfielddata(@nospecialize(T), encounteredtypes=DataType[])::Bool
@@ -241,10 +241,10 @@ end
         wrtypeattr = WrittenAttribute(:written_type,
                                       WriteDataspace(f, DataType, odr(DataType)),
                                       h5type(f, DataType, DataType), writeas)
-        f.h5jltype[cdt] = ReadRepresentation{readas,CustomSerialization{writeas, odr(writeas)}}()
+        f.h5jltype[cdt] = ChangedLayout{readas,CustomSerialization{writeas, odr(writeas)}}()
         commit(f, dtype, tuple(typeattr, wrtypeattr, attributes...))
     else
-        f.h5jltype[cdt] = readrepr(writeas,odr(writeas))()
+        f.h5jltype[cdt] = ReadRepresentation(writeas,odr(writeas))
         commit(f, dtype, tuple(typeattr, attributes...))
     end
 
@@ -299,7 +299,7 @@ jlconvert_canbeuninitialized(::Any) = false
 
 # jlconvert converts data from a pointer into a Julia object. This method
 # handles types where this is just a simple load
-jlconvert(::SameLayoutRepr{T}, ::JLDFile, ptr::Ptr, ::RelOffset) where {T} =
+jlconvert(::SameLayout{T}, ::JLDFile, ptr::Ptr, ::RelOffset) where {T} =
     jlunsafe_load(pconvert(Ptr{T}, ptr))
 
 # When fields are undefined in the file but can't be in the workspace, we need
@@ -328,20 +328,19 @@ h5convert_uninitialized!(out::Pointers, odr::Type{RelOffset}) =
     (jlunsafe_store!(pconvert(Ptr{RelOffset}, out), NULL_REFERENCE); nothing)
 
 # Reading references as references
-jlconvert(::ReadRepresentation{RelOffset,RelOffset}, f::JLDFile, ptr::Ptr,
-          ::RelOffset) =
+jlconvert(::SameLayout{RelOffset}, f::JLDFile, ptr::Ptr, ::RelOffset) =
     jlunsafe_load(pconvert(Ptr{RelOffset}, ptr))
-jlconvert_canbeuninitialized(::ReadRepresentation{RelOffset,RelOffset}) = false
+jlconvert_canbeuninitialized(::SameLayout{RelOffset}) = false
 
 # Reading references as other types
-function jlconvert(::ReadRepresentation{T,RelOffset}, f::JLDFile, ptr::Ptr,
+function jlconvert(::ChangedLayout{T,RelOffset}, f::JLDFile, ptr::Ptr,
                            ::RelOffset) where T
     x = load_dataset(f, jlunsafe_load(pconvert(Ptr{RelOffset}, ptr)))
     (isa(x, T) ? x : rconvert(T, x))::T
 end
 
-jlconvert_canbeuninitialized(::ReadRepresentation{T,RelOffset}) where {T} = true
-jlconvert_isinitialized(::ReadRepresentation{T,RelOffset}, ptr::Ptr) where {T} =
+jlconvert_canbeuninitialized(::ChangedLayout{T,RelOffset}) where {T} = true
+jlconvert_isinitialized(::ChangedLayout{T,RelOffset}, ptr::Ptr) where {T} =
     jlunsafe_load(pconvert(Ptr{RelOffset}, ptr)) != NULL_REFERENCE
 
 ## Routines for variable-length datatypes
@@ -363,10 +362,10 @@ h5convert_uninitialized!(out::Pointers, odr::Type{T}) where {T<:Vlen} =
     (jlunsafe_store!(pconvert(Ptr{Int128}, out), 0); nothing)
 
 # Read variable-length data given offset and length in ptr
-jlconvert(::ReadRepresentation{T,Vlen{S}}, f::JLDFile, ptr::Ptr, ::RelOffset) where {T,S} =
-    read_heap_object(f, jlunsafe_load(pconvert(Ptr{GlobalHeapID}, ptr+4)), ReadRepresentation{T, S}())
-jlconvert_canbeuninitialized(::ReadRepresentation{T,Vlen{S}}) where {T,S} = true
-jlconvert_isinitialized(::ReadRepresentation{T,Vlen{S}}, ptr::Ptr) where {T,S} =
+jlconvert(::ChangedLayout{T,Vlen{S}}, f::JLDFile, ptr::Ptr, ::RelOffset) where {T,S} =
+    read_heap_object(f, jlunsafe_load(pconvert(Ptr{GlobalHeapID}, ptr+4)), ReadRepresentation(T, S))
+jlconvert_canbeuninitialized(::ChangedLayout{<: Type, <: Vlen}) = true
+jlconvert_isinitialized(::ChangedLayout{T,Vlen{S}}, ptr::Ptr) where {T,S} =
     jlunsafe_load(pconvert(Ptr{GlobalHeapID}, ptr+4)) != GlobalHeapID(RelOffset(0), 0)
 
 
@@ -399,7 +398,7 @@ function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T
     cdt = CommittedDatatype(h5o, id)
     f.datatype_locations[h5o] = cdt
     f.jlh5type[DataType] = cdt
-    f.h5jltype[cdt] = ReadRepresentation{DataType,DataTypeODR}()
+    f.h5jltype[cdt] = ChangedLayout{DataType,DataTypeODR}()
     push!(f.datatypes, H5TYPE_DATATYPE)
     f.types_group[string(id, pad=8)] = h5o
 
@@ -538,7 +537,7 @@ function h5convert!(out::Pointers, ::Type{UnionTypeODR}, f::JLDFile, x::Union, w
     end
 end
 
-function jlconvert(::ReadRepresentation{Union, UnionTypeODR}, f::JLDFile,
+function jlconvert(::ChangedLayout{Union, UnionTypeODR}, f::JLDFile,
                    ptr::Ptr, header_offset::RelOffset)
     # Skip union type description in the beginning
     ptr += odr_sizeof(Vlen{String})
@@ -554,7 +553,7 @@ end
 
 
 function constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute}) where {T<:Union}
-    dt == H5TYPE_UNION ? (ReadRepresentation{Union,UnionTypeODR}(), true) :
+    dt == H5TYPE_UNION ? (ChangedLayout{Union,UnionTypeODR}(), true) :
                          throw(UnsupportedFeatureException())
 end
 
@@ -598,9 +597,9 @@ end
 
 
 # jlconvert for empty objects
-function jlconvert(@nospecialize(rr::ReadRepresentation{T,nothing} where T), f::JLDFile, ptr::Ptr,
-                              header_offset::RelOffset)::eltype(rr)
-    T = eltype(rr)
+function jlconvert(@nospecialize(rr::ChangedLayout{T,nothing} where T), f::JLDFile, ptr::Ptr,
+                              header_offset::RelOffset)::julia_type(rr)
+    T = julia_type(rr)
     sizeof(T) == 0 && return newstruct(T)::T
 
     # In this case, T is a non-empty object, but the written data was empty
@@ -612,10 +611,10 @@ function jlconvert(@nospecialize(rr::ReadRepresentation{T,nothing} where T), f::
         if writtenas === ty
             # This will usually equal `ty()` unless ty does not have a
             # constructor without arguments
-            jlconvert(ReadRepresentation{ty,nothing}(), f, ptr, header_offset)
+            jlconvert(ChangedLayout{ty,nothing}(), f, ptr, header_offset)
         else
             rconvert(ty,
-                jlconvert(ReadRepresentation{writtenas,nothing}(), f, ptr, header_offset)
+                jlconvert(ChangedLayout{writtenas,nothing}(), f, ptr, header_offset)
             )
         end
     end

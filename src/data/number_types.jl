@@ -22,7 +22,7 @@ struct BENumber{T}
     x::T
 end
 
-jlconvert(::ReadRepresentation{T,BENumber{T}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {T} =
+jlconvert(::ChangedLayout{T,BENumber{T}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {T} =
     bswap(jlunsafe_load(pconvert(Ptr{T}, ptr)))
 
 function jltype(f::JLDFile, dt::FixedPointDatatype)
@@ -33,29 +33,29 @@ function jltype(f::JLDFile, dt::FixedPointDatatype)
         throw(UnsupportedFeatureException())
     if endianness == 0
         if dt.size == 8
-            return signed ? SameLayoutRepr{Int64}() : SameLayoutRepr{UInt64}()
+            return signed ? SameLayout{Int64}() : SameLayout{UInt64}()
         elseif dt.size == 1
-            return signed ? SameLayoutRepr{Int8}() : SameLayoutRepr{UInt8}()
+            return signed ? SameLayout{Int8}() : SameLayout{UInt8}()
         elseif dt.size == 4
-            return signed ? SameLayoutRepr{Int32}() : SameLayoutRepr{Int32}()
+            return signed ? SameLayout{Int32}() : SameLayout{Int32}()
         elseif dt.size == 2
-            return signed ? SameLayoutRepr{Int16}() : SameLayoutRepr{UInt16}()
+            return signed ? SameLayout{Int16}() : SameLayout{UInt16}()
         elseif dt.size == 16
-            return signed ? SameLayoutRepr{Int128}() : SameLayoutRepr{UInt128}()
+            return signed ? SameLayout{Int128}() : SameLayout{UInt128}()
         else
             throw(UnsupportedFeatureException())
         end
     else
         if dt.size == 8
-            return signed ? ReadRepresentation{Int64,BENumber{Int64}}() : ReadRepresentation{UInt64,BENumber{UInt64}}()
+            return signed ? ChangedLayout{Int64,BENumber{Int64}}() : ChangedLayout{UInt64,BENumber{UInt64}}()
         elseif dt.size == 1
-            return signed ? ReadRepresentation{Int8,BENumber{Int8}}() : ReadRepresentation{UInt8,BENumber{UInt8}}()
+            return signed ? ChangedLayout{Int8,BENumber{Int8}}() : ChangedLayout{UInt8,BENumber{UInt8}}()
         elseif dt.size == 4
-            return signed ? ReadRepresentation{Int32,BENumber{Int32}}() : ReadRepresentation{UInt32,BENumber{UInt32}}()
+            return signed ? ChangedLayout{Int32,BENumber{Int32}}() : ChangedLayout{UInt32,BENumber{UInt32}}()
         elseif dt.size == 2
-            return signed ? ReadRepresentation{Int16,BENumber{Int16}}() : ReadRepresentation{UInt16,BENumber{UInt16}}()
+            return signed ? ChangedLayout{Int16,BENumber{Int16}}() : ChangedLayout{UInt16,BENumber{UInt16}}()
         elseif dt.size == 16
-            return signed ? ReadRepresentation{Int128,BENumber{Int128}}() : ReadRepresentation{UInt128,BENumber{UInt128}}()
+            return signed ? ChangedLayout{Int128,BENumber{Int128}}() : ChangedLayout{UInt128,BENumber{UInt128}}()
         else
             throw(UnsupportedFeatureException())
         end
@@ -64,7 +64,7 @@ end
 
 # Special handling for booleans as they are not considered <: Integer in HDF5
 h5fieldtype(::JLDFile, ::Type{Bool}, ::Type{Bool}, ::Initialized) =BitFieldDatatype(1)
-jltype(::JLDFile, ::BitFieldDatatype) = readrepr(Bool, Bool)()
+jltype(::JLDFile, ::BitFieldDatatype) = SameLayout{Bool}()
 
 h5fieldtype(::JLDFile, ::Type{Float16}, ::Type{Float16}, ::Initialized) =
     FloatingPointDatatype(UInt8(DT_FLOATING_POINT) + 0x3<<4, 0x20, 0x0f, 0x00, 2, 0, 16, 10, 5, 0, 10, 0x0000000f)
@@ -82,17 +82,17 @@ h5fieldtype(::JLDFile, ::Type{BENumber{Float64}}, ::Type{Float64}, ::Initialized
 
 function jltype(f::JLDFile, dt::FloatingPointDatatype)
     if dt == h5fieldtype(f, Float64, Float64, Val{true})
-        return SameLayoutRepr{Float64}()
+        return SameLayout{Float64}()
     elseif dt == h5fieldtype(f, Float32, Float32, Val{true})
-        return SameLayoutRepr{Float32}()
+        return SameLayout{Float32}()
     elseif dt == h5fieldtype(f, Float16, Float16, Val{true})
-        return SameLayoutRepr{Float16}()
+        return SameLayout{Float16}()
     elseif dt == h5fieldtype(f, BENumber{Float64}, Float64, Val{true})
-        return ReadRepresentation{Float32,BENumber{Float32}}()
+        return ChangedLayout{Float32,BENumber{Float32}}()
     elseif dt == h5fieldtype(f, BENumber{Float32}, Float32, Val{true})
-        return ReadRepresentation{Float32,BENumber{Float32}}()
+        return ChangedLayout{Float32,BENumber{Float32}}()
     elseif dt == h5fieldtype(f, BENumber{Float16}, Float16, Val{true})
-        return ReadRepresentation{Float32,BENumber{Float32}}()
+        return ChangedLayout{Float32,BENumber{Float32}}()
     else
         throw(UnsupportedFeatureException())
     end
@@ -108,5 +108,5 @@ h5type(f::JLDFile, writeas::PrimitiveTypeTypes, x) =
 # Used only for custom serialization
 constructrr(f::JLDFile, T::PrimitiveTypeTypes, dt::Union{FixedPointDatatype,FloatingPointDatatype},
             ::Vector{ReadAttribute}) =
-    dt == h5fieldtype(f, T, T, Val{true}) ? (SameLayoutRepr{T}(), true) :
+    dt == h5fieldtype(f, T, T, Val{true}) ? (SameLayout{T}(), true) :
                                             throw(UnsupportedFeatureException())

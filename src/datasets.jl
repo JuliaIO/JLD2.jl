@@ -68,9 +68,9 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
     if layout.data_offset == -1
         # There was no layout message.
         # That means, this dataset is just a datatype
-        return eltype(rr)
+        return julia_type(rr)
     elseif layout.data_offset == typemax(Int64)
-        T = eltype(rr)
+        T = julia_type(rr)
         if layout.data_length > -1
             # TODO: this could use the fill value message to populate the array
             @warn "This array should be populated by a fill value. This is not (yet) implemented."
@@ -109,7 +109,7 @@ end
 
 # Reference arrays can only be arrays or null dataspace (for Union{} case)
 function read_data(f::JLDFile,
-    rr::ReadRepresentation{Any,RelOffset},
+    ::ChangedLayout{Any,RelOffset},
     read_dataspace::Tuple{ReadDataspace,RelOffset,DataLayout,FilterPipeline},
     attributes::Vector{ReadAttribute})
 
@@ -126,11 +126,11 @@ function read_data(f::JLDFile,
                 if isunknowntype(T)
                     str = typestring(T)
                     @warn "type $(str) does not exist in workspace; interpreting Array{$str} as Array{Any}" maxlog=1
-                    rr = ReadRepresentation{Any,RelOffset}()
+                    rr = ChangedLayout{Any,RelOffset}()
                 elseif T isa Upgrade
-                    rr = ReadRepresentation{T.target, RelOffset}()
+                    rr = ChangedLayout{T.target, RelOffset}()
                 else
-                    rr = ReadRepresentation{T, RelOffset}()
+                    rr = ReadRepresentation(T, RelOffset)
                 end
                 seek(io, startpos)
                 return read_array(f, dataspace, rr,
@@ -138,9 +138,9 @@ function read_data(f::JLDFile,
             end
         end
     elseif dataspace.dataspace_type == DS_NULL
-        return read_empty(f, ReadRepresentation{Union{},nothing}(), dataspace, attributes, header_offset)
+        return read_empty(f, ChangedLayout{Union{},nothing}(), dataspace, attributes, header_offset)
     elseif dataspace.dataspace_type == DS_V1
-        return read_array(f, dataspace, ReadRepresentation{Any,RelOffset}(),
+        return read_array(f, dataspace, ChangedLayout{Any,RelOffset}(),
                                   layout, FilterPipeline(), header_offset, attributes)
     end
     throw(UnsupportedFeatureException("Dataspace type $(dataspace.dataspace_type) not implemented"))
@@ -220,10 +220,10 @@ function construct_array(io::IO, ::Type{T}, N::Int) where {T}
 end
 
 @nospecializeinfer function read_array(f::JLDFile, dataspace::ReadDataspace,
-                    @nospecialize(rr::AbstractReadRepr), layout::DataLayout,
+                    @nospecialize(rr::ReadRepresentation), layout::DataLayout,
                     filters::FilterPipeline, header_offset::RelOffset,
                     attributes::Union{Vector{ReadAttribute},Nothing})
-    T = eltype(rr)
+    T = julia_type(rr)
     io = f.io
     data_offset = layout.data_offset
     if !ischunked(layout) || (layout.chunk_indexing_type == 1)

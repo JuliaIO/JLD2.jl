@@ -155,7 +155,7 @@ function jltype(f::JLDFile, dt::CompoundDatatype)
     field_datatypes = OrderedDict{String, RelOffset}(string.(dt.names) .=> fill(NULL_REFERENCE, length(dt.names)))
     odr = reconstruct_odr(f, dt, field_datatypes)
     T = NamedTuple{tuple(dt.names...), odr.parameters[2]}
-    return ReadRepresentation{T, odr}()    
+    return ChangedLayout{T, odr}()    
 end
 
 Base.:(==)(x::CompoundDatatype, y::CompoundDatatype) =
@@ -359,17 +359,17 @@ odr_sizeof(::Type{ArrayPlaceHolder{T,D}}) where {T,D} = Int(odr_sizeof(T)*prod(D
 
 function jltype(f::JLDFile, dt::ArrayDatatype)
     rr = jltype(f, dt.base_type)
-    T = eltype(rr)
-    ReadRepresentation{Array{T, Int(dt.dimensionality)}, ArrayPlaceHolder{rr, tuple(dt.dims...)}}()
+    T = julia_type(rr)
+    ChangedLayout{Array{T, Int(dt.dimensionality)}, ArrayPlaceHolder{rr, tuple(dt.dims...)}}()
 end
 
 
-function jlconvert(::ReadRepresentation{Array{T,D}, ArrayPlaceHolder{RR, DIMS}}, f::JLDFile, ptr::Ptr, 
+function jlconvert(::ChangedLayout{Array{T,D}, ArrayPlaceHolder{RR, DIMS}}, f::JLDFile, ptr::Ptr, 
                     header_offset::RelOffset) where {T, D, RR, DIMS}
     v = Array{T, D}(undef, reverse(DIMS)...)
     for i=1:prod(DIMS)
         v[i] = jlconvert(RR, f, ptr, header_offset)
-        ptr += jlsizeof(readodr(RR))
+        ptr += jlsizeof(file_repr(RR))
     end
     return v
 end
@@ -404,7 +404,7 @@ function jlread(io::IO, ::Type{EnumerationDatatype})
 end
 
 function jltype(f::JLDFile, dt::EnumerationDatatype)
-    readrepr(dt.base_type, dt.base_type)()
+    SameLayout{dt.base_type}()
 end
 
 # Can't read big endian ints 

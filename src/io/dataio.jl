@@ -109,7 +109,7 @@ const MMAP_CUTOFF = 1048576
     obj
 end
 
-function read_array!(v::Array{T}, f::JLDFile{<:MemoryBackedIO}, ::SameLayoutRepr{T}) where T
+function read_array!(v::Array{T}, f::JLDFile{<:MemoryBackedIO}, ::SameLayout{T}) where T
     inptr = f.io.curptr
     n = length(v)
     unsafe_copyto!(pointer(v), pconvert(Ptr{T}, inptr), n)
@@ -117,15 +117,15 @@ function read_array!(v::Array{T}, f::JLDFile{<:MemoryBackedIO}, ::SameLayoutRepr
     v
 end
 
-function read_array!(v::Array{T}, f::JLDFile{<:MemoryBackedIO}, rr::ReadRepresentation{T,RR}) where {T,RR}
+function read_array!(v::Array{T}, f::JLDFile{<:MemoryBackedIO}, rr::ReadRepresentation{T}) where T
     cp0 = f.io.curptr
     @simd for i in eachindex(v)
-        cp = cp0 + (i-1)*odr_sizeof(RR)
+        cp = cp0 + (i-1)*odr_sizeof(rr)
         if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, cp)
             v[i] = jlconvert(rr, f, cp, NULL_REFERENCE)
         end
     end
-    f.io.curptr = cp0 + odr_sizeof(RR) * length(v)
+    f.io.curptr = cp0 + odr_sizeof(rr) * length(v)
     v
 end
 
@@ -191,19 +191,19 @@ function read_scalar(f::JLDFile, rr, header_offset::RelOffset)
 end
 
 
-function read_array!(v::Array{T}, f::JLDFile, ::SameLayoutRepr{T}) where {T}
+function read_array!(v::Array{T}, f::JLDFile, ::SameLayout{T}) where {T}
     unsafe_read(f.io, pointer(v), odr_sizeof(T)*length(v))
     v
 end
 
-function read_array!(v::Array{T}, f::JLDFile, rr::ReadRepresentation{T,RR}) where {T,RR}
+function read_array!(v::Array{T}, f::JLDFile, rr::ReadRepresentation{T}) where {T}
     n = length(v)
-    nb = odr_sizeof(RR)*n
+    nb = odr_sizeof(rr)*n
     data = read!(f.io, Vector{UInt8}(undef, nb))
     @GC.preserve data begin
         p0 = Ptr{Cvoid}(pointer(data))
         @simd for i = eachindex(v)
-            dataptr = p0 + odr_sizeof(RR)*(i-1)
+            dataptr = p0 + odr_sizeof(rr)*(i-1)
             if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
                 v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
             end
@@ -255,7 +255,7 @@ end
 read_bytestring(io::Union{IOStream, IOBuffer}) = String(readuntil(io, 0x00))
 
 # Late addition for MmapIO that can't be defined in mmapio.jl due to include ordering
-function read_array!(v::Array{T}, f::JLDFile{MmapIO}, ::SameLayoutRepr{T}) where T
+function read_array!(v::Array{T}, f::JLDFile{MmapIO}, ::SameLayout{T}) where T
     io = f.io
     inptr = io.curptr
     n = length(v)
