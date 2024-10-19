@@ -4,14 +4,14 @@ function read_field_datatypes(f::JLDFile, dt::CompoundDatatype, attrs::Vector{Re
     for attr in attrs
         if attr.name == :field_types
             offsets = read_attr_data(f, attr, ReferenceDatatype(),
-                            SameLayout{RelOffset}())
+                            SameRepr{RelOffset}())
         elseif attr.name == :field_names
             namevec = read_attr_data(f, attr, H5TYPE_VLEN_UTF8,
-                            ChangedLayout{String,Vlen{String}}())
+                            MappedRepr{String,Vlen{String}}())
         elseif attr.name == :field_datatypes
             # Legacy: Files written before JLD2 v0.4.54
             offsets = read_attr_data(f, attr, ReferenceDatatype(),
-                            SameLayout{RelOffset}())
+                            SameRepr{RelOffset}())
         end
     end
     isnothing(namevec) && (namevec = string.(dt.names))
@@ -93,7 +93,7 @@ function jltype(f::JLDFile, sdt::Union{SharedDatatype,CommittedDatatype})
         end
         f.jlh5type[DataType] = cdt
         f.datatypes[cdt.index] = dt
-        return (f.h5jltype[cdt] = ChangedLayout{DataType, DataTypeODR}())
+        return (f.h5jltype[cdt] = MappedRepr{DataType, DataTypeODR}())
     end
 
     f.plain && return f.h5jltype[cdt] = jltype(f, dt)
@@ -111,7 +111,7 @@ function jltype(f::JLDFile, sdt::Union{SharedDatatype,CommittedDatatype})
             canonical = false
         else
             rr, canonical = constructrr(f, custom_datatype, dt, attrs)
-            rr = ChangedLayout{read_as, CustomSerialization{julia_type(rr), file_repr(rr)}}()
+            rr = MappedRepr{read_as, CustomSerialization{julia_repr(rr), file_repr(rr)}}()
             canonical &= writeas(read_as) === custom_datatype
         end
     else
@@ -129,11 +129,11 @@ end
 function constructrr(::JLDFile, T::DataType, dt::BasicDatatype, attrs::Vector{ReadAttribute})
     dt.class == DT_OPAQUE || throw(UnsupportedFeatureException())
     if sizeof(T) == dt.size && isempty(T.types)
-        return (SameLayout{T}(), true)
+        return (SameRepr{T}(), true)
     end
     empty = any(a->a.name==:empty, attrs)
     if empty
-        !hasdata(T) && return (ChangedLayout{T,nothing}(), true)
+        !hasdata(T) && return (MappedRepr{T,nothing}(), true)
         @warn("$T has $(sizeof(T)*8) bytes, but written type was empty; reconstructing")
     elseif isempty(T.types)
         @warn("primitive type $T has $(sizeof(T)*8) bits, but written type has $(dt.size*8) bits; reconstructing")
@@ -201,7 +201,7 @@ will have a matching memory layout without first inspecting the memory layout.
                 dtrr = jltype(f, dt.members[dtindex])
             end
 
-            readtype = julia_type(dtrr)
+            readtype = julia_repr(dtrr)
             odrtype = file_repr(dtrr)
 
             if typeintersect(readtype, wstype) === Union{} &&
@@ -240,7 +240,7 @@ will have a matching memory layout without first inspecting the memory layout.
               "\n\nData in these fields will not be accessible")
     end
 
-    samelayout && return (SameLayout{T}(), true)
+    samelayout && return (SameRepr{T}(), true)
     offsets = (offsets...,)
     if (wodr = odr(T)) <: OnDiskRepresentation
         odr_offsets, odr_types, odr_h5types = unpack_odr(wodr)
@@ -251,9 +251,9 @@ will have a matching memory layout without first inspecting the memory layout.
             tequal &= odr_h5types[i] == odrs[i]
         end
         tequal &= odr_offsets == offsets
-        tequal && return (ChangedLayout{T,wodr}(), true)
+        tequal && return (MappedRepr{T,wodr}(), true)
     end
-    return (ChangedLayout{T,OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}, Int(offsets[end]+odr_sizeof(odrs[end]))}}(), false)
+    return (MappedRepr{T,OnDiskRepresentation{offsets, Tuple{types...}, Tuple{odrs...}, Int(offsets[end]+odr_sizeof(odrs[end]))}}(), false)
 end
 
 function constructrr(f::JLDFile, u::Upgrade, dt::CompoundDatatype,
@@ -263,13 +263,13 @@ function constructrr(f::JLDFile, u::Upgrade, dt::CompoundDatatype,
     rodr = reconstruct_odr(f, dt, field_datatypes)
     fnames = tuple((Symbol(k) for k in keys(field_datatypes))...)
     T2 = NamedTuple{fnames, rodr.parameters[2]}
-    return (ChangedLayout{u.target, CustomSerialization{T2, rodr}}(), false)    
+    return (MappedRepr{u.target, CustomSerialization{T2, rodr}}(), false)    
 end
 
 function constructrr(f::JLDFile, u::Upgrade, dt::BasicDatatype, 
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
-    return (ChangedLayout{u.target, CustomSerialization{NamedTuple{(), Tuple{}},nothing}}(), false)    
+    return (MappedRepr{u.target, CustomSerialization{NamedTuple{(), Tuple{}},nothing}}(), false)    
 end
 
 function constructrr(f::JLDFile, T::UnionAll, dt::CompoundDatatype,
@@ -281,7 +281,7 @@ end
 
 # Find types in modules
 # returns the result of searching for the type in the specified module m
-function _resolve_type_singlemodule(::ChangedLayout{T,DataTypeODR},
+function _resolve_type_singlemodule(::MappedRepr{T,DataTypeODR},
                                     m,
                                     parts,
                                     mypath,
@@ -300,7 +300,7 @@ isunknowntype(x) = false
 isunknowntype(::Type{Union{}}) = false
 isunknowntype(x::Type) = x <: UnknownType ? true : false
 
-function _resolve_type(rr::ChangedLayout{T,DataTypeODR},
+function _resolve_type(rr::MappedRepr{T,DataTypeODR},
                        f::JLDFile,
                        ptr::Ptr,
                        header_offset::RelOffset,
@@ -329,12 +329,12 @@ function types_from_refs(f::JLDFile, ptr::Ptr)
     isinit = jlunsafe_load(pconvert(Ptr{UInt32}, ptr)) != 0
     unknown_params = false
     if isinit
-        refs = jlconvert(ChangedLayout{RelOffset, Vlen{RelOffset}}(), f, ptr, NULL_REFERENCE)
+        refs = jlconvert(MappedRepr{RelOffset, Vlen{RelOffset}}(), f, ptr, NULL_REFERENCE)
         params =  Any[let
             # If the reference is to a committed datatype, read the datatype
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
-            res = cdt !== nulldt ? julia_type(jltype(f, cdt)) : load_dataset(f, ref)
+            res = cdt !== nulldt ? julia_repr(jltype(f, cdt)) : load_dataset(f, ref)
             unknown_params |= isunknowntype(res) || isreconstructed(res)
             res
         end for ref in refs]
@@ -345,7 +345,7 @@ end
 
 # Read a type. Returns an instance of UnknownType if the type or parameters
 # could not be resolved.
-function jlconvert(rr::ChangedLayout{<:Type,DataTypeODR},
+function jlconvert(rr::MappedRepr{<:Type,DataTypeODR},
                    f::JLDFile,
                    ptr::Ptr,
                    header_offset::RelOffset)
@@ -362,7 +362,7 @@ function jlconvert(rr::ChangedLayout{<:Type,DataTypeODR},
         end
     end
     hasparams = !isempty(params)
-    mypath = String(jlconvert(ChangedLayout{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
+    mypath = String(jlconvert(MappedRepr{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
 
     if mypath in keys(f.typemap)
         m = f.typemap[mypath]
@@ -391,7 +391,7 @@ function jlconvert(rr::ChangedLayout{<:Type,DataTypeODR},
 end
 
 constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute}) where {T<:DataType} =
-    dt == H5TYPE_DATATYPE ? (ChangedLayout{DataType,DataTypeODR}(), true) :
+    dt == H5TYPE_DATATYPE ? (MappedRepr{DataType,DataTypeODR}(), true) :
                             throw(UnsupportedFeatureException())
 
 
@@ -449,10 +449,10 @@ isreconstructed(x::Type{Union{}}) = false
 
 function reconstruct_bitstype(name::Union{Symbol,String}, size::Integer, empty::Bool)
     if empty
-        return (ChangedLayout{ReconstructedSingleton{Symbol(name)}, nothing}(), false)
+        return (MappedRepr{ReconstructedSingleton{Symbol(name)}, nothing}(), false)
     else
         T = ReconstructedPrimitive{Symbol(name), uintofsize(size)}
-        return (SameLayout{T}(), false)
+        return (SameRepr{T}(), false)
     end
 end
 
@@ -535,7 +535,7 @@ function constructrr(f::JLDFile, unk::Type{UnknownType{T,P}}, dt::CompoundDataty
             rodr = reconstruct_odr(f, dt, field_datatypes)
             # This is a "pseudo-RR" since the tuple is not fully parametrized, but
             # the parameters must depend on the types actually encoded in the file
-            return (ChangedLayout{Tuple,rodr}(), false)
+            return (MappedRepr{Tuple,rodr}(), false)
         else
             @warn("read type $(typestring(unk)) was parametrized, but type " *
             "$(T) in workspace is not; reconstructing")
@@ -602,7 +602,7 @@ function reconstruct_odr(f::JLDFile, dt::CompoundDatatype,
         else
             throw(InternalError("Field $k not found in datatype"))
         end
-        push!(types, julia_type(dtrr))
+        push!(types, julia_repr(dtrr))
         push!(h5types, file_repr(dtrr))
         push!(offsets, offset)
         offset += odr_sizeof(dtrr)
@@ -621,19 +621,19 @@ function reconstruct_compound(f::JLDFile, T::String, dt::H5Datatype,
     if !any(jlconvert_canbeuninitialized(ReadRepresentation(types[i], odrs[i])) for i = 1:length(types))
         rt = ReconstructedStatic{Symbol(T), fnames, Tuple{types...}}
         odr = OnDiskRepresentation{(0,), Tuple{NamedTuple{fnames,Tuple{types...}}}, Tuple{rodr}, Int(dt.size)}
-        return (ChangedLayout{rt, odr}(), false)
+        return (MappedRepr{rt, odr}(), false)
     end
     T = ReconstructedMutable{Symbol(T), fnames, Tuple{types...}}
-    return ChangedLayout{T, rodr}(), false
+    return MappedRepr{T, rodr}(), false
 end
 
 # At present, we write Union{} as an object of Core.TypeofBottom. The method above
 # basically works, but `Expr(:new, Type{Union{}})` is a bit weird and causes problems for
 # inference. Better to define a separate method.
-jlconvert(::ChangedLayout{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
+jlconvert(::MappedRepr{Core.TypeofBottom,nothing}, f::JLDFile, ptr::Ptr,
           header_offset::RelOffset) = Union{}
 
-function jlconvert(::ChangedLayout{T,S}, f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T<:ReconstructedMutable, S<:OnDiskRepresentation}
+function jlconvert(::MappedRepr{T,S}, f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T<:ReconstructedMutable, S<:OnDiskRepresentation}
     offsets, types, odrs = unpack_odr(S)
     res = Vector{Any}(undef, length(types))
     for i = 1:length(types)
@@ -649,7 +649,7 @@ jlconvert(::ReadRepresentation{T, S}, f::JLDFile, ptr::Ptr, header_offset::RelOf
     rconvert(T, jlunsafe_load(pconvert(Ptr{S}, ptr)))
 
 # This jlconvert method handles compound types with padding or references
-@generated function jlconvert(::ChangedLayout{T,S}, f::JLDFile, ptr::Ptr,
+@generated function jlconvert(::MappedRepr{T,S}, f::JLDFile, ptr::Ptr,
                               header_offset::RelOffset) where {T,S<:OnDiskRepresentation}
     offsets, types, odrs = unpack_odr(S)
     fn = T === Tuple ? [Symbol(i) for i = 1:length(types)] : fieldnames(T)

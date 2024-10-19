@@ -62,7 +62,7 @@ function Base.show(io::IO, ::MIME"text/plain", dset::Dataset)
         print(io, prefix*"datatype: $(typeof(dt))", iscommitted ? " (committed)\n" : "\n")
         iscommitted && println(io, prefix*"\tcommitted at: $(dt.header_offset)")
         rr = jltype(dset.parent.f, dt)
-        jt = julia_type(rr)
+        jt = julia_repr(rr)
         println(io, prefix*"\twritten structure: $jt")
         if iscommitted
             juliatype, writtentype, fields = stringify_committed_datatype(f, f.datatype_locations[dt.header_offset], showfields=true)
@@ -393,7 +393,7 @@ function ismmappable(dset::Dataset)
     f = dset.parent.f
     dt = dset.datatype
     rr = jltype(f, dt)
-    T = julia_type(rr)
+    T = julia_repr(rr)
     !(samelayout(T)) && return false
     !isempty(dset.filters.filters) && return false
     ret = false
@@ -421,7 +421,7 @@ function readmmap(dset::Dataset)
     # figure out the element type
     dt = dset.datatype
     rr = jltype(f, dt)
-    T = julia_type(rr)
+    T = julia_repr(rr)
     ndims, offset = get_ndims_offset(f, ReadDataspace(f, dset.dataspace), collect(values(dset.attributes)))
     
     io = f.io

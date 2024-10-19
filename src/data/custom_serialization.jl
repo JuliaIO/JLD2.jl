@@ -47,12 +47,12 @@ h5convert!(out::Pointers, odr::Type{CustomSerialization{T,RelOffset}},
 h5convert_uninitialized!(out::Pointers, odr::Type{CustomSerialization{T,ODR}}) where {T,ODR} =
     h5convert_uninitialized!(out, ODR)
 
-jlconvert_canbeuninitialized(::ChangedLayout{T,CustomSerialization{S,ODR}}) where {T,S,ODR} =
-    jlconvert_canbeuninitialized(ChangedLayout{S,ODR}())
-jlconvert_isinitialized(::ChangedLayout{T,CustomSerialization{S,ODR}}, ptr::Ptr) where {T,S,ODR} =
-    jlconvert_isinitialized(ChangedLayout{S,ODR}(), ptr)
+jlconvert_canbeuninitialized(::MappedRepr{T,CustomSerialization{S,ODR}}) where {T,S,ODR} =
+    jlconvert_canbeuninitialized(MappedRepr{S,ODR}())
+jlconvert_isinitialized(::MappedRepr{T,CustomSerialization{S,ODR}}, ptr::Ptr) where {T,S,ODR} =
+    jlconvert_isinitialized(MappedRepr{S,ODR}(), ptr)
 
-function jlconvert(::ChangedLayout{T,CustomSerialization{S,RelOffset}},
+function jlconvert(::MappedRepr{T,CustomSerialization{S,RelOffset}},
         f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T,S}
     # Concerns objects whose custom serialization is itself only referenced by a RelOffset
     # This be important when the original object is mutable
@@ -60,7 +60,7 @@ function jlconvert(::ChangedLayout{T,CustomSerialization{S,RelOffset}},
     return rconvert(T, load_dataset(f, offset))
 end
 
-function jlconvert(::ChangedLayout{T,CustomSerialization{S,ODR}},
+function jlconvert(::MappedRepr{T,CustomSerialization{S,ODR}},
           f::JLDFile, ptr::Ptr, header_offset::RelOffset) where {T,S,ODR}
 
     if ismutabletype(T) && !(T <: Core.SimpleVector)
