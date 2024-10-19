@@ -4,7 +4,7 @@ struct OpaqueData{N}
     OpaqueData(data) = new{length(data)}(data)
 end
 
-function jlconvert(rr::ReadRepresentation{OpaqueData{N}, NTuple{N,UInt8}}, ::JLDFile, ptr::Ptr, ::RelOffset) where N
+function jlconvert(::MappedRepr{OpaqueData{N}, NTuple{N,UInt8}}, ::JLDFile, ptr::Ptr, ::RelOffset) where N
     data = Vector{UInt8}(undef, N)
     unsafe_copyto!(pointer(data), pconvert(Ptr{UInt8}, ptr), N)
     OpaqueData(data)
@@ -50,20 +50,20 @@ function jltype(f::JLDFile, dt::BasicDatatype)
     class = dt.class
     if class >> 4 == 1
         if class%16 == DT_REFERENCE
-            return ReadRepresentation{Any,RelOffset}()
+            return MappedRepr{Any,RelOffset}()
         elseif class%16 == DT_STRING
             if dt.bitfield1 == 0x00 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
                 #return AsciiString{NullTerminated}(dt.size)
-                return ReadRepresentation{String, FixedLengthAsciiString{NullTerminated, dt.size}}()
+                return MappedRepr{String, FixedLengthAsciiString{NullTerminated, dt.size}}()
             elseif dt.bitfield1 == 0x10 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
                 return FixedLengthString{String}(dt.size)
             elseif dt.bitfield1 == 0x02 && dt.bitfield2 == 0x00 && dt.bitfield3 == 0x00
-                return ReadRepresentation{String, FixedLengthAsciiString{SpacePadded, dt.size}}()
+                return MappedRepr{String, FixedLengthAsciiString{SpacePadded, dt.size}}()
             else
                 throw(UnsupportedFeatureException("Encountered an unsupported string type. $dt"))
             end
         elseif class%16 == DT_OPAQUE
-            return ReadRepresentation{OpaqueData{Int(dt.size)},NTuple{Int(dt.size),UInt8}}()
+            return MappedRepr{OpaqueData{Int(dt.size)},NTuple{Int(dt.size),UInt8}}()
 
         else
             throw(UnsupportedFeatureException("Encountered an unsupported type."))
@@ -78,9 +78,9 @@ function jltype(f::JLDFile, dt::BasicDatatype)
             throw(UnsupportedFeatureException("Encountered an unsupported string type."))
         end
     elseif class%16 == DT_OPAQUE
-        return ReadRepresentation{OpaqueData{Int(dt.size)},NTuple{Int(dt.size),UInt8}}()
+        return MappedRepr{OpaqueData{Int(dt.size)},NTuple{Int(dt.size),UInt8}}()
     elseif class%16 == DT_REFERENCE
-        return ReadRepresentation{Any,RelOffset}()
+        return MappedRepr{Any,RelOffset}()
     else
         throw(UnsupportedFeatureException())
     end
@@ -89,20 +89,20 @@ end
 function jltype(f::JLDFile, dt::VariableLengthDatatype)
     if dt == H5TYPE_VLEN_UTF8
         # this is the fully supported JLD2 string
-        return ReadRepresentation{String,Vlen{String}}()
+        return MappedRepr{String,Vlen{String}}()
     elseif dt.bitfield1 & 0x1 == 0x1
         # it's some kind of string. Let's try
-        return ReadRepresentation{String,Vlen{String}}()
+        return MappedRepr{String,Vlen{String}}()
     else#if dt.bitfield1 & 0x1 == 0x0 # it's a sequence
         rr = jltype(f, dt.basetype)
-        T = typeof(rr).parameters[1]
-        odr = typeof(rr).parameters[2]
-        return ReadRepresentation{Vector{T}, Vlen{odr}}()
+        T = julia_repr(rr)
+        odr = file_repr(rr)
+        return MappedRepr{Vector{T}, Vlen{odr}}()
     end
 end
 
-jlconvert(::ReadRepresentation{Vector{T},Vlen{ODR}}, f::JLDFile, ptr::Ptr, ::RelOffset) where {T, ODR} =
-    jlconvert(ReadRepresentation{T,Vlen{ODR}}(), f, ptr, UNDEFINED_ADDRESS)
+jlconvert(::MappedRepr{Vector{T},Vlen{ODR}}, f::JLDFile, ptr::Ptr, ::RelOffset) where {T, ODR} =
+    jlconvert(MappedRepr{T,Vlen{ODR}}(), f, ptr, UNDEFINED_ADDRESS)
 
 
 function h5convert!(out::Pointers, fls::FixedLengthString, f::JLDFile, x, ::JLDWriteSession)
@@ -112,8 +112,8 @@ end
 h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x, wsession::JLDWriteSession) =
     store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, x), wsession)
 
-jlconvert(::ReadRepresentation{String,Vlen{String}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
-    String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
+jlconvert(::MappedRepr{String,Vlen{String}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
+    String(jlconvert(MappedRepr{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
 function jlconvert(rr::FixedLengthString{String}, ::JLDFile, ptr::Ptr, ::RelOffset)
     data = Vector{UInt8}(undef, rr.length)
     unsafe_copyto!(pointer(data), pconvert(Ptr{UInt8}, ptr), rr.length)
@@ -126,19 +126,19 @@ function jlconvert(rr::AsciiString{NullTerminated}, ::JLDFile, ptr::Ptr, ::RelOf
     unsafe_copyto!(pointer(data), pconvert(Ptr{UInt8}, ptr), rr.length)
     String(data[1:end-1])
 end
-function jlconvert(rr::ReadRepresentation{String, FixedLengthAsciiString{NullTerminated,N}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {N}
+function jlconvert(::MappedRepr{String, FixedLengthAsciiString{NullTerminated,N}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {N}
     data = Vector{UInt8}(undef, N)
     unsafe_copyto!(pointer(data), pconvert(Ptr{UInt8}, ptr), N)
     String(data)
 end
 
-function jlconvert(rr::ReadRepresentation{String, FixedLengthAsciiString{SpacePadded,N}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {N}
+function jlconvert(::MappedRepr{String, FixedLengthAsciiString{SpacePadded,N}}, ::JLDFile, ptr::Ptr, ::RelOffset) where {N}
     data = Vector{UInt8}(undef, N)
     unsafe_copyto!(pointer(data), pconvert(Ptr{UInt8}, ptr), N)
     rstrip(String(data))
 end
 odr_sizeof(x::AsciiString) = Int(x.length)
-odr_sizeof(x::Type{FixedLengthAsciiString{TERM, N}}) where {TERM, N} = Int(N)::Int
+odr_sizeof(::Type{FixedLengthAsciiString{TERM, N}}) where {TERM, N} = Int(N)::Int
 
 
 
@@ -147,7 +147,7 @@ odr_sizeof(x::Type{FixedLengthAsciiString{TERM, N}}) where {TERM, N} = Int(N)::I
 # Used only for custom serialization
 constructrr(::JLDFile, ::Type{String}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
     dt == H5TYPE_VLEN_UTF8 ?
-        (ReadRepresentation{String,Vlen{String}}(), true) :
+        (MappedRepr{String,Vlen{String}}(), true) :
         throw(UnsupportedFeatureException())
 
 ## Symbols
@@ -167,11 +167,11 @@ function h5convert!(out::Pointers, ::Type{Vlen{String}}, f::JLDFile, x::Symbol, 
 end
 
 constructrr(::JLDFile, ::Type{Symbol}, dt::VariableLengthDatatype{FixedPointDatatype}, ::Vector{ReadAttribute}) =
-    dt == H5TYPE_VLEN_UTF8 ? (ReadRepresentation{Symbol,Vlen{String}}(), true) :
+    dt == H5TYPE_VLEN_UTF8 ? (MappedRepr{Symbol,Vlen{String}}(), true) :
                              throw(UnsupportedFeatureException())
 
-jlconvert(::ReadRepresentation{Symbol,Vlen{String}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
-    Symbol(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
+jlconvert(::MappedRepr{Symbol,Vlen{String}}, f::JLDFile, ptr::Ptr, ::RelOffset) =
+    Symbol(jlconvert(MappedRepr{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
 
 ## BigInts and BigFloats
 
@@ -183,9 +183,9 @@ rconvert(::Type{BigFloat}, x::String) = parse(BigFloat, x)
 
 # BigInts and BigFloats are defined as mutable structs but should be reconstructed like an
 # immutable one. This overrides the default behavior.
-function jlconvert(::ReadRepresentation{BN,CustomSerialization{String,Vlen{String}}},
+function jlconvert(::MappedRepr{BN,CustomSerialization{String,Vlen{String}}},
         f::JLDFile, ptr::Ptr, header_offset::RelOffset) where BN <: Union{BigInt, BigFloat}
-    rconvert(BN, jlconvert(ReadRepresentation{String, Vlen{String}}(), f, ptr, header_offset))
+    rconvert(BN, jlconvert(MappedRepr{String, Vlen{String}}(), f, ptr, header_offset))
 end
 
 ## Pointers
@@ -244,7 +244,7 @@ _odr(writtenas::Type{T}, readas::DataType, odr) where {T<:Array} =
 function constructrr(::JLDFile, ::Type{T}, dt::BasicDatatype,
                      attrs::Vector{ReadAttribute}) where T<:Array
     dt.class == DT_REFERENCE || throw(UnsupportedFeatureException())
-    (ReadRepresentation{Array, RelOffset}(), true)
+    (MappedRepr{Array, RelOffset}(), true)
 end
 
 ## SimpleVectors
@@ -286,8 +286,8 @@ end
 # convert to an array instead.
 const NTUPLE_INLINE_THRESHOLD = 10
 
-function writeas(NT::Type{NTuple{N,T}}) where {N,T}
-    if N > NTUPLE_INLINE_THRESHOLD
+function writeas(NT::Type{Tuple{T, Vararg{T,N}}}) where {N,T}
+    if (N+1) > NTUPLE_INLINE_THRESHOLD
         return Vector{T}
     else
         return NT
@@ -317,7 +317,7 @@ function rconvert(::Type{Module}, x::String)
     end
 end
 
-function jlconvert(::ReadRepresentation{Module,CustomSerialization{String,Vlen{String}}},
+function jlconvert(::MappedRepr{Module,CustomSerialization{String,Vlen{String}}},
     f::JLDFile, ptr::Ptr, header_offset::RelOffset)
-rconvert(Module, jlconvert(ReadRepresentation{String, Vlen{String}}(), f, ptr, header_offset))
+rconvert(Module, jlconvert(MappedRepr{String, Vlen{String}}(), f, ptr, header_offset))
 end

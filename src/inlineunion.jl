@@ -52,7 +52,7 @@ end
 # except for the ReadRepresentation and the very last line where the data is
 # converted back into a Union Array
 function read_array(f::JLDFile, dataspace::ReadDataspace,
-                    rr::ReadRepresentation{InlineUnionEl{T1,T2},RR}, layout::DataLayout,
+                    rr::MappedRepr{InlineUnionEl{T1,T2},RR}, layout::DataLayout,
                     filters::FilterPipeline, header_offset::RelOffset,
                     attributes::Union{Vector{ReadAttribute},Nothing}) where {T1, T2,RR}
     io = f.io

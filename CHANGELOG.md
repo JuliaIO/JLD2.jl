@@ -1,3 +1,6 @@
+## 0.5.6
+ - Add Aqua tests and eliminate method ambiguities
+ 
 ## 0.5.5
  - Experimental support for writing to and reading from `IO` objects e.g. `jldopen(io, "r")`
 
