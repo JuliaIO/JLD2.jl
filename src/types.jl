@@ -242,8 +242,15 @@ SharedDatatype(dt::CommittedDatatype) = SharedDatatype(dt.header_offset)
 
 A type encoding both the Julia type `T` and the on-disk (HDF5) representation `ODR`.
 """
-struct ReadRepresentation{T,ODR} end
-Base.eltype(::Type{<:ReadRepresentation{T}}) where T = T
+abstract type ReadRepresentation{T, ODR} end
+julia_repr(::ReadRepresentation{T}) where T = T
+file_repr(::ReadRepresentation{T,ODR}) where {T,ODR} = ODR
+
+struct SameRepr{T} <: ReadRepresentation{T,T} end
+struct MappedRepr{T,ODR} <: ReadRepresentation{T,ODR} end
+
+ReadRepresentation(::Type{T}, ::Type{T}) where T = SameRepr{T}()
+ReadRepresentation(T, ODR) = MappedRepr{T,ODR}()
 
 """
     CustomSerialization{T,S}

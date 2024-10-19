@@ -41,7 +41,7 @@ function stringify_committed_datatype(f, cdt; showfields=false)
         else
             # These are normal julia types
             dtrr = jltype(f, dt.members[i])
-            fieldtype = string(typeof(dtrr).parameters[1])
+            fieldtype = string(julia_type(dtrr))
         end
         push!(field_strs, "$(dt.names[i])::$(fieldtype)")
     end
@@ -97,7 +97,7 @@ function typestring_from_refs(f::JLDFile, ptr::Ptr)
     # Test for a potential null pointer indicating an empty array
     isinit = jlunsafe_load(convert(Ptr{UInt32}, ptr)) != 0
     if isinit
-        refs = jlconvert(ReadRepresentation{RelOffset, Vlen{RelOffset}}(), f, ptr, NULL_REFERENCE)
+        refs = jlconvert(MappedRepr{RelOffset, Vlen{RelOffset}}(), f, ptr, NULL_REFERENCE)
         #println("datatypes at refs $(Int.(getproperty.(refs,:offset)))")
         params =  Any[let
             # If the reference is to a committed datatype, read the datatype
@@ -127,10 +127,10 @@ function jlconvert_string_wrap(rr, f, offset)
     end
 end
 
-function jlconvert_string(rr::ReadRepresentation{T,DataTypeODR()},
+function jlconvert_string(::MappedRepr{T,DataTypeODR},
                         f::JLDFile,
                         ptr::Ptr) where T
-    mypath = String(jlconvert(ReadRepresentation{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
+    mypath = String(jlconvert(MappedRepr{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
     params = typestring_from_refs(f, ptr+odr_sizeof(Vlen{UInt8}))
     if startswith(mypath, r"Core|Main")
         mypath = last(split(mypath, "."; limit=2))
@@ -143,7 +143,7 @@ function jlconvert_string(rr::ReadRepresentation{T,DataTypeODR()},
     end
 end
 
-function jlconvert_string(::ReadRepresentation{Union, UnionTypeODR()}, f::JLDFile,
+function jlconvert_string(::MappedRepr{Union, UnionTypeODR}, f::JLDFile,
     ptr::Ptr)#, header_offset::RelOffset)
     # Skip union type description in the beginning
     ptr += odr_sizeof(Vlen{String})
