@@ -838,3 +838,13 @@ end
     end
     recursive_test(obj, res)
 end
+
+@testset "Issue #611 - non-initialized Symbol field" begin
+    fn = joinpath(mktempdir(), "non-init-symbolfield.jld2")
+    data = Vector{Symbol}(undef, 2)
+    data[1] = :a
+    jldsave(fn; data)
+    loaded_data = load(fn, "data")
+    @test !isassigned(loaded_data, 2)
+    @test loaded_data[1] == :a
+end
