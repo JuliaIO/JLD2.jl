@@ -364,7 +364,7 @@ h5convert_uninitialized!(out::Pointers, odr::Type{T}) where {T<:Vlen} =
 # Read variable-length data given offset and length in ptr
 jlconvert(::MappedRepr{T,Vlen{S}}, f::JLDFile, ptr::Ptr, ::RelOffset) where {T,S} =
     read_heap_object(f, jlunsafe_load(pconvert(Ptr{GlobalHeapID}, ptr+4)), ReadRepresentation(T, S))
-jlconvert_canbeuninitialized(::MappedRepr{<: Type, <: Vlen}) = true
+jlconvert_canbeuninitialized(::MappedRepr{<: Any, <: Vlen}) = true
 jlconvert_isinitialized(::MappedRepr{T,Vlen{S}}, ptr::Ptr) where {T,S} =
     jlunsafe_load(pconvert(Ptr{GlobalHeapID}, ptr+4)) != GlobalHeapID(RelOffset(0), 0)
 

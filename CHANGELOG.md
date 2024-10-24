@@ -1,3 +1,6 @@
+## 0.5.7
+ - Fix edge case for uninitialized Vlens
+ 
 ## 0.5.6
  - Add Aqua tests and eliminate method ambiguities
  
