@@ -10,6 +10,8 @@
 JLD2 saves and loads Julia data structures in a format comprising a subset of HDF5, without any dependency on the HDF5 C library. 
 JLD2 is able to read most HDF5 files created by other HDF5 implementations supporting HDF5 File Format Specification Version 3.0 (i.e. libhdf5 1.10 or later) and similarly those should be able to read the files that JLD2 produces. JLD2 provides read-only support for files created with the JLD package.
 
+⚠️ **Warning**: Loading JLD2 files is not safe from malicious or erroneously constructed data. Loading JLD2 files can cause arbitrary code to execute on your machine. Do not load files from unknown or untrusted sources. See more at the [Security](https://juliaio.github.io/JLD2.jl/stable/#Security) section of the manual.
+
 ## Reading and writing data
 ### `save` and `load` functions
 
