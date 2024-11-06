@@ -158,10 +158,10 @@ function write_data(io::MemoryBackedIO, f::JLDFile, data::Array, odr, ::Referenc
     nothing
 end
 
-function write_data(io::MemoryBackedIO, f::JLDFile, data::Array, odr, ::HasReferences, wsession::JLDWriteSession)
+function write_data(io::MemoryBackedIO, f::JLDFile, data::Array, odr::ODR, ::HasReferences, wsession::JLDWriteSession) where ODR
     ensureroom(io, odr_sizeof(odr) * length(data))
     cp = IndirectPointer(io)
-    
+
     for i = eachindex(data)
         if isassigned(data, i)
             h5convert!(cp, odr, f, data[i], wsession)
