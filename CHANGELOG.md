@@ -1,3 +1,6 @@
+## 0.5.8
+ - Stop using `Base.module_keys` as it is removed on nightly
+
 ## 0.5.7
  - Fix edge case for uninitialized Vlens
  
