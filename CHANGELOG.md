@@ -1,3 +1,7 @@
+## 0.5.9
+ - fix regression for `Union{Bool,Nothing}` array elements (#617)
+ - fix printing issue in `printtoc` 
+
 ## 0.5.8
  - Stop using `Base.module_keys` as it is removed on nightly
 

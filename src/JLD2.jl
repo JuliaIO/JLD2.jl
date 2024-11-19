@@ -462,8 +462,10 @@ Prints an overview of the contents of `f` to the `IO`.
 Use the optional `numlines` parameter to restrict the amount of items listed.
 """
 printtoc(f::JLDFile; kwargs...) = printtoc(Base.stdout, f; kwargs...)
-printtoc(io::IO, f::JLDFile; numlines = typemax(Int64)) =
+function printtoc(io::IO, f::JLDFile; numlines = typemax(Int64))
     show_group(io, f.root_group, numlines, " ", true)
+    return nothing
+end
 
 
 
