@@ -40,4 +40,8 @@ struct Bparam{T}; x::T; end
     u = Union{Float32, Missing}[rand(5,5);]
     save(fn, "u", u)
     @test u == load(fn, "u")
+
+    u = Union{Bool, Nothing}[true, nothing, false]
+    save(fn, "u", u)
+    @test u == load(fn, "u")
 end
