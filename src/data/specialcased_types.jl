@@ -304,13 +304,15 @@ wconvert(::Type{String}, x::Module) = string(x)
 function rconvert(::Type{Module}, x::String)
     pkg = Symbol(x)
     # Try to find the module
-    # Start with the method used to find compression libraries
-    m =_findmod(pkg)
-    isnothing(m) || return Base.loaded_modules[m]
-    @info "Encountered reference to module $x, but it is not currently loaded."
+    for m in Base.loaded_modules_array()
+        (Symbol(m) == pkg) && return m
+    end
+    @warn "Encountered reference to module $x, but it is not currently loaded."
     return try
-        topimport(pkg)
-        Base.loaded_modules[_findmod(pkg)]
+        @eval Base.__toplevel__  import $pkg
+        for m in Base.loaded_modules_array()
+            (Symbol(m) == pkg) && return m
+        end
     catch
        @warn "Could not load module $x. Returning a dummy module"
        Module(Symbol(x*"_dummy"))

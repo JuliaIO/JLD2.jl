@@ -20,12 +20,12 @@ end
 """
     readas(::Type)::Type
 
-**Experimental feature**: 
+**Experimental feature**:
 `JLD2.readas` can be overloaded to override which type a saved type is read as,
 and is used together with custom serialization using [`JLD2.writeas`](@ref).
 
 The typical case is custom serialization of parametric types,
-where not all type parameters are available during reading. 
+where not all type parameters are available during reading.
 Consider the following example for an anonymous function `fun` inside a `Foo`
 ```julia
 struct Foo{F<:Function}
@@ -53,7 +53,7 @@ restart julia, include the definitions again, and call
 `foo::Foo{UndefinedFunction}` and `foo::FooSerialization`
 with and without defining the `JLD2.readas` above, respectively.
 """
-readas(::Any) = nothing # default to nothing to do nothing if no overload is specified. 
+readas(::Any) = nothing # default to nothing to do nothing if no overload is specified.
 
 function _readas(T_custom, T_in)
     T_out = readas(T_custom)::Union{Type,Nothing}
@@ -65,7 +65,7 @@ end
 function jltype(f::JLDFile, sdt::Union{SharedDatatype,CommittedDatatype})
     cdt = get(f.datatype_locations, sdt.header_offset, sdt)
     haskey(f.h5jltype, cdt) && return f.h5jltype[cdt]::ReadRepresentation
-    
+
     dt, attrs = read_shared_datatype(f, cdt)
 
     julia_type_attr = nothing
@@ -223,12 +223,12 @@ function constructrr(f::JLDFile, T::DataType, dt::CompoundDatatype,
             # The on disk representation of T can only be the same as in memory
             # if the offsets are the same, field type on disk (readtype) and in memory (wstype)
             # are the same and if no CustomSerialization is involved
-            samelayout = samelayout && 
-                offsets[i] == fieldoffset(T, i) && 
-                types[i] === wstype && 
+            samelayout = samelayout &&
+                offsets[i] == fieldoffset(T, i) &&
+                types[i] === wstype &&
                 # An OnDiskRepresentation as odr means that something "fixable" went wrong
                 # for this field
-                !(odrs[i] isa OnDiskRepresentation) && 
+                !(odrs[i] isa OnDiskRepresentation) &&
                 !(odrs[i] <: CustomSerialization)
 
             mapped[dtindex] = true
@@ -285,13 +285,13 @@ function constructrr(f::JLDFile, u::Upgrade, dt::CompoundDatatype,
 
     T2 = NamedTuple{tuple(dt.names...), typeof(rodr).parameters[2]}
 
-    return (ReadRepresentation{u.target, CustomSerialization{T2, rodr}}(), false)    
+    return (ReadRepresentation{u.target, CustomSerialization{T2, rodr}}(), false)
 end
 
-function constructrr(f::JLDFile, u::Upgrade, dt::BasicDatatype, 
+function constructrr(f::JLDFile, u::Upgrade, dt::BasicDatatype,
                      attrs::Vector{ReadAttribute},
                      hard_failure::Bool=false)
-    return (ReadRepresentation{u.target, CustomSerialization{NamedTuple{(), Tuple{}},nothing}}(), false)    
+    return (ReadRepresentation{u.target, CustomSerialization{NamedTuple{(), Tuple{}},nothing}}(), false)
 end
 
 function constructrr(f::JLDFile, T::UnionAll, dt::CompoundDatatype,
@@ -334,9 +334,7 @@ function _resolve_type(rr::ReadRepresentation{T,DataTypeODR()},
                        hasparams::Bool,
                        params) where T
     parts = split(mypath, '.')
-    modules = vcat([Main], collect(keys(Base.module_keys)))
-    unique!(modules)
-    for mod in modules
+    for mod in Base.loaded_modules_array()
         resolution_attempt = _resolve_type_singlemodule(rr,
                                                         mod,
                                                         parts,
@@ -689,9 +687,9 @@ function jlconvert(::ReadRepresentation{T, S}, f::JLDFile, ptr::Ptr, header_offs
         offset = offsets[i]
         rtype = types[i]
         odr = odrs[i]
-    
+
         rr = ReadRepresentation{rtype,odr}()
-        if !(jlconvert_canbeuninitialized(rr)) || jlconvert_isinitialized(rr, ptr+offset) 
+        if !(jlconvert_canbeuninitialized(rr)) || jlconvert_isinitialized(rr, ptr+offset)
             res[i] = jlconvert(rr, f, ptr+offset, NULL_REFERENCE)
         end
     end
@@ -721,9 +719,9 @@ end
             offset = offsets[i]
             rtype = types[i]
             odr = odrs[i]
-    
+
             rr = ReadRepresentation{rtype,odr}()
-    
+
             fni = QuoteNode(fn[i])
             ttype = T.types[i]
             if odr === nothing
@@ -745,7 +743,7 @@ end
             end
         end
 
-        push!(args, (:obj))    
+        push!(args, (:obj))
         return blk
     end
     if isbitstype(T)
