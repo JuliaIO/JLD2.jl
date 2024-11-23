@@ -1,12 +1,4 @@
 module JLD2
-
-# Use the README as the module docs
-@doc let
-    path = joinpath("README.md")
-    include_dependency(path)
-    read(path, String)
-end JLD2
-
 using OrderedCollections: OrderedDict
 using MacroTools: MacroTools, @capture
 using Mmap: Mmap
