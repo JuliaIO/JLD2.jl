@@ -33,35 +33,18 @@ end
 # Dynamic Package Loading Logic copied from FileIO
 const load_locker = Base.ReentrantLock()
 
-function _findmod(f::Symbol)
-    for (u,v) in Base.loaded_modules
-        (Symbol(v) == f) && return u
-    end
-    nothing
-end
-
-function topimport(modname)
-    @info "Attempting to dynamically load $modname"
-    @eval Base.__toplevel__  import $modname
-    u = _findmod(modname)
-    @eval $modname = Base.loaded_modules[$u]
-end
 
 function checked_import(pkg::Symbol)
     lock(load_locker) do
-        # kludge for test suite
-        if isdefined(Main, pkg)
-            m1 = getfield(Main, pkg)
-            isa(m1, Module) && return false, m1
+        for m in Base.loaded_modules_array()
+            (Symbol(m) == pkg) && return false, m
         end
-        if isdefined(JLD2, pkg)
-            m1 = getfield(JLD2, pkg)
-            isa(m1, Module) && return false, m1
+        @info "Attempting to dynamically load $pkg"
+        @eval Base.__toplevel__  import $pkg
+        for m in Base.loaded_modules_array()
+            (Symbol(m) == pkg) && return true, m
         end
-        m = _findmod(pkg)
-        (m === nothing) || return false, Base.loaded_modules[m]
-        topimport(pkg)
-        return true, Base.loaded_modules[_findmod(pkg)]
+        throw(InternalError("Module $pkg could not be loaded."))
     end
 end
 

@@ -308,7 +308,7 @@ function _resolve_type(rr::MappedRepr{T,DataTypeODR},
                        hasparams::Bool,
                        params) where T
     parts = split(mypath, '.')
-    for mod in values(Base.loaded_modules)
+    for mod in Base.loaded_modules_array()
         resolution_attempt = _resolve_type_singlemodule(rr,
                                                         mod,
                                                         parts,
