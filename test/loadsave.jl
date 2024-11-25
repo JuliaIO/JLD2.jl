@@ -848,3 +848,20 @@ end
     @test !isassigned(loaded_data, 2)
     @test loaded_data[1] == :a
 end
+
+@testset "Issue #619 - Number type turnaround" begin
+    fn = joinpath(mktempdir(), "number_type_turnaround.jld2")
+    types = [UInt8, Int8, UInt16, Int16, UInt32, Int32, UInt64, Int64, UInt128, Int128, Float16, Float32, Float64]
+    jldopen(fn, "w") do f
+        for t in types
+            f[string(t)] = typemax(t)
+        end
+    end
+    jldopen(fn) do f
+        for t in types
+            v = f[string(t)]
+            @test v isa t
+            @test v == typemax(t)
+        end
+    end
+end

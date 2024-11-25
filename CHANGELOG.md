@@ -1,16 +1,20 @@
+## 0.5.10
+ - fix regression for `UInt32`
+ - **Deprecation**: Do not rely on JLD2 to load a compression library. This feature will be removed in a future release. Instead explicitly add `using` statements into your scripts.
+
 ## 0.5.9
  - fix regression for `Union{Bool,Nothing}` array elements (#617)
- - fix printing issue in `printtoc` 
+ - fix printing issue in `printtoc`
 
 ## 0.5.8
  - Stop using `Base.module_keys` as it is removed on nightly
 
 ## 0.5.7
  - Fix edge case for uninitialized Vlens
- 
+
 ## 0.5.6
  - Add Aqua tests and eliminate method ambiguities
- 
+
 ## 0.5.5
  - Experimental support for writing to and reading from `IO` objects e.g. `jldopen(io, "r")`
 
@@ -27,7 +31,7 @@ that may get GC'ed while storing is in progress! (#603)
 
 ## 0.5.1
  - Bugfix and added test for bug introduced in v0.5.0
- 
+
 ## 0.5.0
  - Improved encoding of committed datatypes.
  This fixes longstanding issues but new files will not be loaded correctly with JLD2 versions prior to `v0.5.0`.
@@ -58,7 +62,7 @@ that may get GC'ed while storing is in progress! (#603)
  - fix `Upgrade` for Singleton types
 
 ## 0.4.50
- - Don't hide exception data during loading and saving (#569) 
+ - Don't hide exception data during loading and saving (#569)
 
 ## 0.4.49
  - update compat bounds
@@ -68,7 +72,7 @@ that may get GC'ed while storing is in progress! (#603)
  - fix behaviour for unnormalized strings
  - add missing method for load_attributes
  - clean up `using` statements
- 
+
 ## 0.4.47
  - fix loading structs with more than 256 fields (#558)
 
@@ -107,7 +111,7 @@ that may get GC'ed while storing is in progress! (#603)
  - restrict default Dict encoding to Base implementations
 
 ## 0.4.37
- - Update Dict encoding for latest julia 
+ - Update Dict encoding for latest julia
 
 ## 0.4.36
  - compat bound for TranscodingStreams.jl
@@ -129,22 +133,22 @@ that may get GC'ed while storing is in progress! (#603)
 ## 0.4.31
  - fix UInt32 truncation error for absurdly large array sizes
  - move test-files to a separate repo
- 
+
 ## 0.4.30
  -  allow loading compressed files during precompilation #446 (@marius311)
- 
+
 ## 0.4.29
  - added `Upgrade` feature
- 
+
 ## 0.4.28
  - compatibility to julia v1.9-dev (@eschnett)
- 
+
 ## 0.4.26
  - fix identity relations with custom serialization
 
 ## 0.4.25
  - remove leftover debug statement
- 
+
 ## 0.4.24
  - read-only support for `JLD.jl` files
  - read-only support for many HDF5 files. Most test files of HDF5.jl are covered
@@ -155,14 +159,14 @@ that may get GC'ed while storing is in progress! (#603)
 
 ## 0.4.23
  - Support for `const` fields in mutable structs
- 
+
 ## 0.4.22
  - Fix reconstruction of partially initialized structs
 
 ## 0.4.21
- - Add explicit type mapping 
+ - Add explicit type mapping
 
-## 0.4.20 
+## 0.4.20
  - TTFX improvements
  - Add a comment on jldsave (@BoundaryValueProblems)
 ## 0.4.19
