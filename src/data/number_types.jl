@@ -37,7 +37,7 @@ function jltype(f::JLDFile, dt::FixedPointDatatype)
         elseif dt.size == 1
             return signed ? SameRepr{Int8}() : SameRepr{UInt8}()
         elseif dt.size == 4
-            return signed ? SameRepr{Int32}() : SameRepr{Int32}()
+            return signed ? SameRepr{Int32}() : SameRepr{UInt32}()
         elseif dt.size == 2
             return signed ? SameRepr{Int16}() : SameRepr{UInt16}()
         elseif dt.size == 16
