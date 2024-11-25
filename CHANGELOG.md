@@ -1,3 +1,7 @@
+## 0.4.54
+
+ - **Deprecation**: Do not rely on JLD2 to load a compression library. This feature will be removed in a future release. Instead explicitly add `using` statements into your scripts.
+
 ## 0.4.53
  - Experimental: Slicing and inplace updating of array datasets
  - updated CI workflows
@@ -22,7 +26,7 @@
  - fix `Upgrade` for Singleton types
 
 ## 0.4.50
- - Don't hide exception data during loading and saving (#569) 
+ - Don't hide exception data during loading and saving (#569)
 
 ## 0.4.49
  - update compat bounds
@@ -32,7 +36,7 @@
  - fix behaviour for unnormalized strings
  - add missing method for load_attributes
  - clean up `using` statements
- 
+
 ## 0.4.47
  - fix loading structs with more than 256 fields (#558)
 
@@ -71,7 +75,7 @@
  - restrict default Dict encoding to Base implementations
 
 ## 0.4.37
- - Update Dict encoding for latest julia 
+ - Update Dict encoding for latest julia
 
 ## 0.4.36
  - compat bound for TranscodingStreams.jl
@@ -93,22 +97,22 @@
 ## 0.4.31
  - fix UInt32 truncation error for absurdly large array sizes
  - move test-files to a separate repo
- 
+
 ## 0.4.30
  -  allow loading compressed files during precompilation #446 (@marius311)
- 
+
 ## 0.4.29
  - added `Upgrade` feature
- 
+
 ## 0.4.28
  - compatibility to julia v1.9-dev (@eschnett)
- 
+
 ## 0.4.26
  - fix identity relations with custom serialization
 
 ## 0.4.25
  - remove leftover debug statement
- 
+
 ## 0.4.24
  - read-only support for `JLD.jl` files
  - read-only support for many HDF5 files. Most test files of HDF5.jl are covered
@@ -119,14 +123,14 @@
 
 ## 0.4.23
  - Support for `const` fields in mutable structs
- 
+
 ## 0.4.22
  - Fix reconstruction of partially initialized structs
 
 ## 0.4.21
- - Add explicit type mapping 
+ - Add explicit type mapping
 
-## 0.4.20 
+## 0.4.20
  - TTFX improvements
  - Add a comment on jldsave (@BoundaryValueProblems)
 ## 0.4.19
