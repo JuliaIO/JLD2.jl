@@ -29,18 +29,31 @@ is_win7() = Sys.iswindows() && Sys.windows_version().major <= 6 && Sys.windows_v
 const DEFAULT_IOTYPE = is_win7() ? IOStream : MmapIO
 
 """
-    Group{T}
-    Group(file::T)
+    Group(file::JLDFile, name::String)
+    Group(file::Group, name::String)
 
-JLD2 group object.
+Construct a `Group` in `file` with name `name`.
+`Group`s are JLD2s equivalent of folders and may be nested, so `file` itself may alread be a `Group` or a `JLDFile` file handle.
 
-## Advanced Usage
-Takes two optional keyword arguments:
+## Example usage
+```
+jldopen("example.jld2", "w") do f
+    g = Group(f, "subgroup")
+    g["data"] = 42
+end
+
+jldopen("example.jld2") do f
+    g = f["subgroup"]
+    f["subgroup/data"] == g["data"]
+end
+```
+
+## Keyword arguments:
 
 - `est_num_entries::Int` = 4
 - `est_link_name_len::Int` = 8
 
-These determine how much (additional) empty space should be allocated for the group description. (list of entries)
+Determine how much (additional) empty space should be allocated for the group description. (list of entries)
 This can be useful for performance when one expects to append many additional datasets after first writing the file.
 """
 mutable struct Group{T}
