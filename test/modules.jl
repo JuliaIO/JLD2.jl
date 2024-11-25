@@ -21,7 +21,7 @@ S = BType(x)
 end
 
 @testset "name collisions" begin
-    mods = collect(values(Base.loaded_modules))
+    mods = Base.loaded_modules_array()
     # use whichever module would not be found first in a linear search
     M = findfirst(==(A), mods) < findfirst(==(B), mods) ? B : A
     x = M.SameNameType(42)
