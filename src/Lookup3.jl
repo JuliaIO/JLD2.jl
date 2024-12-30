@@ -3,8 +3,6 @@ import JLD2: jlunsafe_load, pconvert
 
 # Original source at http://www.burtleburtle.net/bob/c/lookup3.c
 
-rot(x::UInt32, k) = xor(((x)<<(k)), ((x)>>(32-(k))))
-
 # -------------------------------------------------------------------------------
 # mix -- mix 3 32-bit values reversibly.
 
@@ -48,13 +46,13 @@ rot(x::UInt32, k) = xor(((x)<<(k)), ((x)>>(32-(k))))
 # rotates.
 # -------------------------------------------------------------------------------
 @inline function mix(a, b, c)
-  a -= c;  a = xor(a, rot(c, 4));  c += b
-  b -= a;  b = xor(b, rot(a, 6));  a += c
-  c -= b;  c = xor(c, rot(b, 8));  b += a
-  a -= c;  a = xor(a, rot(c,16));  c += b
-  b -= a;  b = xor(b, rot(a,19));  a += c
-  c -= b;  c = xor(c, rot(b, 4));  b += a
-  (a, b, c)
+    a -= c;  a ⊻= bitrotate(c, 4);  c += b
+    b -= a;  b ⊻= bitrotate(a, 6);  a += c
+    c -= b;  c ⊻= bitrotate(b, 8);  b += a
+    a -= c;  a ⊻= bitrotate(c,16);  c += b
+    b -= a;  b ⊻= bitrotate(a,19);  a += c
+    c -= b;  c ⊻= bitrotate(b, 4);  b += a
+    (a, b, c)
 end
 
 # # -------------------------------------------------------------------------------
@@ -81,14 +79,14 @@ end
 #  11  8 15 26 3 22 24
 # -------------------------------------------------------------------------------
 @inline function final(a, b, c)
-  c = xor(c, b); c -= rot(b,14)
-  a = xor(a, c); a -= rot(c,11)
-  b = xor(b, a); b -= rot(a,25)
-  c = xor(c, b); c -= rot(b,16)
-  a = xor(a, c); a -= rot(c,4)
-  b = xor(b, a); b -= rot(a,14)
-  c = xor(c, b); c -= rot(b,24)
-  c
+    c ⊻= b; c -= bitrotate(b,14)
+    a ⊻= c; a -= bitrotate(c,11)
+    b ⊻= a; b -= bitrotate(a,25)
+    c ⊻= b; c -= bitrotate(b,16)
+    a ⊻= c; a -= bitrotate(c, 4)
+    b ⊻= a; b -= bitrotate(a,14)
+    c ⊻= b; c -= bitrotate(b,24)
+    c
 end
 
 # -------------------------------------------------------------------------------
@@ -117,12 +115,12 @@ end
 # -------------------------------------------------------------------------------
 function hash(k::AbstractVector{UInt8}, istart::Integer=1, n::Integer=length(k), initval::UInt32=UInt32(0))
     n <= length(k) || throw(BoundsError())
-    hash(pointer(k, istart), n, initval)
+    GC.@preserve k hash(pointer(k, istart), n, initval)
 end
 
 function hash(k::Ptr{UInt8}, n::Integer=length(k), initval::UInt32=UInt32(0))
     # Set up the internal state
-    a = b = c = 0xdeadbeef + convert(UInt32, n) + initval
+    a = b = c = 0xdeadbeef + n%UInt32 + initval
 
     # --------------- all but the last block: affect some 32 bits of (a,b,c)
     ptr = k
