@@ -354,8 +354,6 @@ function jlconvert(rr::MappedRepr{<:Type,DataTypeODR},
     params = map(params) do p
         if p isa Union{Int64,Int32}
             Int(p)
-        elseif p isa Upgrade
-            p.target
         else
             p
         end
