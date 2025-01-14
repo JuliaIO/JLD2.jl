@@ -15,3 +15,14 @@ for i = 1:length(large_buf)
 end
 @test JLD2.Lookup3.hash(large_buf) == 0x1bd2ee7b
 @test JLD2.Lookup3.hash(fill!(large_buf, 0)) == 0x930c7afc
+
+lookup3_test_hashes = [
+    0x276a0407, 0xc4f3b847, 0x3253e887, 0xf0dbeea6, 0xa496ca89, 0xa2773e81,
+    0xa88b6e6c, 0x2ca474f0, 0xe38ce8aa, 0xdb610bd1, 0x17f84daf, 0xccda323b,
+    0x114345a2, 0xc01e7c57, 0x636342ab, 0x17bd0180, 0xbed86ff9, 0xae721167,
+    0x9bc026d8, 0xaf53f65a, 0xbad83ad7, 0xcf6e279e, 0x8806c437, 0x4eaa9b13,
+    0x2b885021, 0x769e8a62, 0x7e5372be, 0xa70fa8be, 0x8b7a3c59, 0x17770551,
+]
+for (i, h) in enumerate(lookup3_test_hashes)
+    @test JLD2.Lookup3.hash(b"Four score and seven years ago"[begin:i]) == h
+end
