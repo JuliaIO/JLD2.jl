@@ -726,6 +726,8 @@ module DummyModule
     end
     JLD2.rconvert(::Type{CC}, nt::NamedTuple) = CC()
     JLD2.rconvert(::Type{BB}, nt::NamedTuple) = BB()
+    mutable struct DD end
+    JLD2.rconvert(::Type{DD}, nt::NamedTuple) = DD()
 end
 @testset "Upgrading a struct that was formerly singleton" begin
     cd(mktempdir()) do     
@@ -733,6 +735,27 @@ end
         @test DummyModule.BB() == load("testing.jld2", "a"; typemap = Dict("Main.DummyModule.AA" => JLD2.Upgrade(DummyModule.BB)))
         @test DummyModule.BB() == load("testing.jld2", "a"; typemap = Dict("Main.DummyModule.AA" => DummyModule.BB))
         @test DummyModule.CC() == load("testing.jld2", "a"; typemap = Dict("Main.DummyModule.AA" => JLD2.Upgrade(DummyModule.CC)))
+    end
+end
+
+@testset "Issue #628 Upgrading structs that contains unions" begin
+    cd(mktempdir()) do
+        @testset "immutable" begin
+            a1 = Dict("a" => [nothing DummyModule.AA()])
+            save("a.jld2", a1)
+            a2 = load("a.jld2"; typemap = Dict("Main.DummyModule.AA" => JLD2.Upgrade(DummyModule.AA)))
+            @test only(keys(a1)) == "a"
+            @test keys(a1) == keys(a2)
+            @test a1["a"] == a2["a"]
+        end
+        @testset "mutable" begin
+            a1 = Dict("a" => [nothing DummyModule.DD()])
+            save("a.jld2", a1)
+            a2 = load("a.jld2"; typemap = Dict("Main.DummyModule.DD" => JLD2.Upgrade(DummyModule.DD)))
+            @test only(keys(a1)) == "a"
+            @test keys(a1) == keys(a2)
+            @test typeof(a1["a"]) == typeof(a2["a"])
+        end
     end
 end
 

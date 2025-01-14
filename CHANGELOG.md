@@ -1,3 +1,6 @@
+## 0.5.11
+ - Make `Upgrade` work for types that sit inside `Union{..}`
+
 ## 0.5.10
  - fix regression for `UInt32`
  - **Deprecation**: Do not rely on JLD2 to load a compression library. This feature will be removed in a future release. Instead explicitly add `using` statements into your scripts.

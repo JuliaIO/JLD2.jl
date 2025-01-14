@@ -333,6 +333,7 @@ function types_from_refs(f::JLDFile, ptr::Ptr)
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
             res = cdt !== nulldt ? julia_repr(jltype(f, cdt)) : load_dataset(f, ref)
+            res isa Upgrade && (res = res.target)
             unknown_params |= isunknowntype(res) || isreconstructed(res)
             res
         end for ref in refs]
@@ -353,8 +354,6 @@ function jlconvert(rr::MappedRepr{<:Type,DataTypeODR},
     params = map(params) do p
         if p isa Union{Int64,Int32}
             Int(p)
-        elseif p isa Upgrade
-            p.target
         else
             p
         end
