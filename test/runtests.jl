@@ -1,5 +1,6 @@
 using JLD2, FileIO
 using Test
+using CodecZlib, CodecBzip2, CodecZstd, CodecLz4
 
 function better_success(cmd)
     fn1, _ = mktemp()
