@@ -48,7 +48,7 @@ include("misc.jl")
 
 is_win7() = Sys.iswindows() && Sys.windows_version().major <= 6 && Sys.windows_version().minor <= 1
 # Windows 7 doesn't support mmap, falls back to IOStream
-const DEFAULT_IOTYPE = is_win7() ? IOStream : MmapIO
+const DEFAULT_IOTYPE[] = is_win7() ? Ref(IOStream) : Ref(MmapIO)
 
 """
     Group{T}
@@ -186,7 +186,7 @@ read_bytestring(io::Union{IOStream, IOBuffer}) = String(readuntil(io, 0x00))
 
 const OPEN_FILES = Dict{String,WeakRef}()
 const OPEN_FILES_LOCK = ReentrantLock()
-function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=DEFAULT_IOTYPE;
+function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=DEFAULT_IOTYPE[];
                  fallback::Union{Type, Nothing} = FallbackType(iotype),
                  compress=false,
                  mmaparrays::Bool=false,
@@ -326,7 +326,7 @@ Options for `mode`:
 - `"a"`/`"a+"`: Open for reading and writing, creating a new file if none exists, but
                 preserving the existing file if one is present
 """
-function jldopen(fname::AbstractString, mode::AbstractString="r"; iotype=DEFAULT_IOTYPE, kwargs...)
+function jldopen(fname::AbstractString, mode::AbstractString="r"; iotype=DEFAULT_IOTYPE[], kwargs...)
     (wr, create, truncate) = mode == "r"  ? (false, false, false) :
                              mode == "r+" ? (true, false, false) :
                              mode == "a" || mode == "a+" ? (true, true, false) :
@@ -523,6 +523,8 @@ function __init__()
     @require UnPack="3a884ed6-31ef-47d7-9d2a-63182c4928ed" begin
         include("../ext/UnPackExt.jl")
     end
+
+    DEFAULT_IOTYPE[] = is_win7() ? IOStream : MmapIO
 end
 
 end

@@ -280,7 +280,7 @@ end
 To choose the io type `IOStream` instead of the default `MmapIO` use 
 `jldsave(fn, IOStream; kwargs...)`.
 """
-@nospecializeinfer function jldsave(filename::AbstractString, compress=false, iotype::Union{Type{IOStream},Type{MmapIO}}=DEFAULT_IOTYPE; 
+@nospecializeinfer function jldsave(filename::AbstractString, compress=false, iotype::Union{Type{IOStream},Type{MmapIO}}=DEFAULT_IOTYPE[]; 
                     @nospecialize(kwargs...)
                     )
     f = jldopen(filename, "w"; compress, iotype)
