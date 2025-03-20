@@ -1,18 +1,15 @@
 module JLD2
+
 using OrderedCollections: OrderedDict
 using MacroTools: MacroTools, @capture
 using Mmap: Mmap
 using TranscodingStreams: TranscodingStreams
-using FileIO: load, save
-export load, save
-using Requires: @require
 using PrecompileTools: @setup_workload, @compile_workload
+
+VERSION >= v"1.11" && include_string(JLD2, "public load, save")
 export jldopen, @load, @save, save_object, load_object, jldsave
 
 include("types.jl")
-
-
-
 
 include("macros_utils.jl")
 include("io/mmapio.jl")
@@ -497,16 +494,12 @@ include("compression.jl")
 include("explicit_datasets.jl")
 include("committed_datatype_introspection.jl")
 
+# these will get defined when (and if) FileIO is used
+function fileio_load end
+function fileio_save end
 
 if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
     include("precompile.jl")
-end
-
-function __init__()
-    # If UnPack.jl package is loaded, extend @unpack, @pack! for file-like interface
-    @require UnPack="3a884ed6-31ef-47d7-9d2a-63182c4928ed" begin
-        include("../ext/UnPackExt.jl")
-    end
 end
 
 end

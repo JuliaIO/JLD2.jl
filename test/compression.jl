@@ -74,7 +74,7 @@ end
 
     N = 100
     a = (rand(N, N), rand(N, N))
-    save("test.jld2", "a", a; compress = true)
+    JLD2.save("test.jld2", "a", a; compress = true)
     """
 
     cd(mktempdir()) do

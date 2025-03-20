@@ -1,5 +1,4 @@
 
-
 @setup_workload begin
     a=1
     b=2.0
