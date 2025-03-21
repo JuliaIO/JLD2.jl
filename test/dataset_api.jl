@@ -1,4 +1,4 @@
-using JLD2, Test
+using JLD2, FileIO, Test
 
 @testset "Dataset API" begin
     cd(mktempdir()) do 
