@@ -28,7 +28,7 @@
                 JLD2.loadnesteddict(file)
                 JLD2.loadtodict!(Dict{String,Any}(), file)
             finally
-                close(f)
+                close(file)
             end
             nothing
         end
