@@ -23,9 +23,13 @@
                 end
             end
 
-            load(path)
-            load(path; nested=true)
-
+            file = jldopen(path, "r")
+            try 
+                JLD2.loadnesteddict(file)
+                JLD2.loadtodict!(Dict{String,Any}(), file)
+            finally
+                close(file)
+            end
             nothing
         end
     end
