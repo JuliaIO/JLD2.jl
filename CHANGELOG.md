@@ -1,3 +1,6 @@
+## 0.5.12
+ - Fix precompile workload for loading on latest julia
+
 ## 0.5.11
  - Make `Upgrade` work for types that sit inside `Union{..}`
 
