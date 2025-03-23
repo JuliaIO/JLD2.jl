@@ -1,4 +1,4 @@
-using Test, JLD2
+using Test, JLD2, FileIO
 
 @testset "Write to IOBuffer" begin
     iobuf = IOBuffer()

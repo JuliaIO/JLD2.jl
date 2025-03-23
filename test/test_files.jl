@@ -1,4 +1,4 @@
-using Test, JLD2
+using Test, JLD2, FileIO
 using LazyArtifacts
 #=
 When adding test files to the JLD2Testfiles repo tag a new
@@ -176,7 +176,7 @@ end
 end
 
 module RecoverableChangesInStructs
-    using JLD2, Test
+    using JLD2, FileIO, Test
     fn = joinpath(Main.testfiles, "recoverable_changes_in structs.jld2")
     # for saving:
     # struct A; x::Int; end

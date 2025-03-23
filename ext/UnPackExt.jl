@@ -1,7 +1,11 @@
 # —————————————————————————————————————————————————————————————————————————————————————— #
 #             Extension of @unpack and @pack! function from UnPack.jl package            #
 # —————————————————————————————————————————————————————————————————————————————————————— #
-using .UnPack
+#
+module UnPackExt
+using JLD2
+using JLD2: JLDFile, MmapIO, Group
+using UnPack
 
 """
 Unpack fields from JLD2-structs created with e.g. `file = jldopen(path)`. Also works for JLD2-
@@ -31,4 +35,5 @@ close(file)
 """
 @inline function UnPack.pack!(file::Union{T, Group{T}}, ::Val{f}, val) where {f, T<:JLDFile{MmapIO}}
     file[string(f)] = val
+end
 end
