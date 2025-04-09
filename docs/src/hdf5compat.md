@@ -14,6 +14,8 @@ such as `h5dump` and `h5debug` provided by the HDF5 group.
 
     - Numbers `FloatXX`, `IntXX` and `UIntXX`
 
+    - Bools
+
     - Strings
 
     - Arrays of those types
