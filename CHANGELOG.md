@@ -1,3 +1,7 @@
+## 0.5.13
+ - Make UnPack.jl compat into an extension
+ - bumps lower compat for julia to v1.9
+
 ## 0.5.12
  - Fix precompile workload for loading on latest julia
 

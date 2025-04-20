@@ -1,11 +1,13 @@
 # —————————————————————————————————————————————————————————————————————————————————————— #
 #             Extension of @unpack and @pack! function from UnPack.jl package            #
 # —————————————————————————————————————————————————————————————————————————————————————— #
-using .UnPack
+module UnPackExt
+using JLD2
+using JLD2: JLDFile, MmapIO, Group
+using UnPack
 
 """
-Unpack fields from JLD2-structs created with e.g. `file = jldopen(path)`. Also works for JLD2-
-groups. Useful for quick exrtraction.
+Unpack fields from JLD2-files created with e.g. `file = jldopen(path)`. Also works for JLD2 groups. Useful for quick extraction.
 
 # Example
 ```julia
@@ -18,7 +20,7 @@ file = jldopen(path) # contains fields :x, :y
 end
 
 """
-Pack variables into JLD2-structs. Also works for JLD2- groups. Useful for quick saving.
+Pack variables into JLD2-files. Also works for JLD2 groups. Useful for quick saving.
 
 # Example
 ```julia
@@ -31,4 +33,6 @@ close(file)
 """
 @inline function UnPack.pack!(file::Union{T, Group{T}}, ::Val{f}, val) where {f, T<:JLDFile{MmapIO}}
     file[string(f)] = val
+end
+
 end
