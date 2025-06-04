@@ -132,7 +132,7 @@ end
 
 """
     mutable struct HeaderMessageIterator{IO}
-        HeaderMessageIterator(f::JLDFile, offset::RelOffset)
+    HeaderMessageIterator(f::JLDFile, offset::RelOffset)
 
 Implements an iterator over header messages.
 """
