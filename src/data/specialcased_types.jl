@@ -342,5 +342,5 @@ end
     wconvert(::Type{SerializedMemoryRef}, x::MemoryRef) =
         SerializedMemoryRef(1+(x.ptr_or_offset - x.mem.ptr)*x.mem.length÷sizeof(x.mem), x.mem)
 
-    rconvert(::Type{<:MemoryRef}, x::SerializedMemoryRef) = memoryref(x.ref, x.index)
+    rconvert(::Type{<:MemoryRef}, x::SerializedMemoryRef) = memoryref(x.ref, Int(x.index))
 end

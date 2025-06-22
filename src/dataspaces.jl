@@ -75,23 +75,25 @@ WriteDataspace(f::JLDFile, x::Array{T,0}, ::Any) where {T} =
     WriteDataspace(DS_SIMPLE, (Length(1),),
               (WrittenAttribute(f, :dimensions, EMPTY_DIMENSIONS),))
 
-# Memory is basically a vector but needs an additional attribute
-# Ghost type array
-WriteDataspace(f::JLDFile, x::Memory{T}, ::Nothing) where {T} =
-   WriteDataspace(DS_NULL, (),
-             (WrittenAttribute(f, :dimensions, collect(Int64, reverse(size(x)))),
-             WrittenAttribute(f, :Memory, true)))
+@static if VERSION >= v"1.11"
+    # Memory is basically a vector but needs an additional attribute
+    # Ghost type array
+    WriteDataspace(f::JLDFile, x::Memory{T}, ::Nothing) where {T} =
+    WriteDataspace(DS_NULL, (),
+                (WrittenAttribute(f, :dimensions, collect(Int64, reverse(size(x)))),
+                WrittenAttribute(f, :Memory, true)))
 
-# Reference array
-WriteDataspace(f::JLDFile, x::Memory{T}, ::Type{RelOffset}) where {T} =
-    WriteDataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))),
-              (WrittenAttribute(f, :julia_type, write_ref(f, T, f.datatype_wsession)),
-              WrittenAttribute(f, :Memory, true)))
+    # Reference array
+    WriteDataspace(f::JLDFile, x::Memory{T}, ::Type{RelOffset}) where {T} =
+        WriteDataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))),
+                (WrittenAttribute(f, :julia_type, write_ref(f, T, f.datatype_wsession)),
+                WrittenAttribute(f, :Memory, true)))
 
-# isbitstype array
-WriteDataspace(f::JLDFile, x::Memory, ::Any) =
-    WriteDataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))),
-    (WrittenAttribute(f, :Memory, true),))
+    # isbitstype array
+    WriteDataspace(f::JLDFile, x::Memory, ::Any) =
+        WriteDataspace(DS_SIMPLE, convert(Tuple{Vararg{Length}}, reverse(size(x))),
+        (WrittenAttribute(f, :Memory, true),))
+end
 
 
 jlsizeof(::Union{WriteDataspace{N},Type{WriteDataspace{N}}}) where {N} = 4 + jlsizeof(Length)*N
