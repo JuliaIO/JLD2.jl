@@ -231,7 +231,7 @@ end
     ismem = !isnothing(attributes) && any(attr->attr.name==:Memory, attributes)
     v = @static if VERSION >= v"1.11"
         if ismem
-            Memory{T}(undef, jlread(io, Int64))
+            Memory{T}(undef, Int(jlread(io, Int64)))
         else
             construct_array(io, T, Int(ndims))
         end
