@@ -109,7 +109,7 @@ const MMAP_CUTOFF = 1048576
     obj
 end
 
-function read_array!(v::Array{T}, f::JLDFile{<:MemoryBackedIO}, ::SameRepr{T}) where T
+function read_array!(v::ArrayMemory{T}, f::JLDFile{<:MemoryBackedIO}, ::SameRepr{T}) where T
     inptr = f.io.curptr
     n = length(v)
     unsafe_copyto!(pointer(v), pconvert(Ptr{T}, inptr), n)
@@ -117,7 +117,7 @@ function read_array!(v::Array{T}, f::JLDFile{<:MemoryBackedIO}, ::SameRepr{T}) w
     v
 end
 
-function read_array!(v::Array{T}, f::JLDFile{<:MemoryBackedIO}, rr::ReadRepresentation{T}) where T
+function read_array!(v::ArrayMemory{T}, f::JLDFile{<:MemoryBackedIO}, rr::ReadRepresentation{T}) where T
     cp0 = f.io.curptr
     @simd for i in eachindex(v)
         cp = cp0 + (i-1)*odr_sizeof(rr)
@@ -146,7 +146,7 @@ function write_data(io::MemoryBackedIO, f::JLDFile, data, odr, ::HasReferences, 
     nothing
 end
 
-function write_data(io::MemoryBackedIO, f::JLDFile, data::Array, odr, ::ReferenceFree, wsession::JLDWriteSession)
+function write_data(io::MemoryBackedIO, f::JLDFile, data::ArrayMemory{T}, odr::Type, ::ReferenceFree, wsession::JLDWriteSession) where T
     ensureroom(io, odr_sizeof(odr) * length(data))
     cp0 = io.curptr
     @simd for i = 1:length(data)
@@ -158,7 +158,7 @@ function write_data(io::MemoryBackedIO, f::JLDFile, data::Array, odr, ::Referenc
     nothing
 end
 
-function write_data(io::MemoryBackedIO, f::JLDFile, data::Array, odr::ODR, ::HasReferences, wsession::JLDWriteSession) where ODR
+function write_data(io::MemoryBackedIO, f::JLDFile, data::ArrayMemory, odr::ODR, ::HasReferences, wsession::JLDWriteSession) where ODR
     ensureroom(io, odr_sizeof(odr) * length(data))
     cp = IndirectPointer(io)
 
@@ -174,7 +174,7 @@ function write_data(io::MemoryBackedIO, f::JLDFile, data::Array, odr::ODR, ::Has
     nothing
 end
 
-write_data(io::MemoryBackedIO, ::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree, ::JLDWriteSession) where {T} =
+write_data(io::MemoryBackedIO, ::JLDFile, data::ArrayMemory{T}, odr::Type{T}, ::ReferenceFree, ::JLDWriteSession) where {T} =
     unsafe_write(io, Ptr{UInt8}(pointer(data)), odr_sizeof(odr) * length(data))
 
 
@@ -191,12 +191,12 @@ function read_scalar(f::JLDFile, rr, header_offset::RelOffset)
 end
 
 
-function read_array!(v::Array{T}, f::JLDFile, ::SameRepr{T}) where {T}
+function read_array!(v::ArrayMemory{T}, f::JLDFile, ::SameRepr{T}) where {T}
     unsafe_read(f.io, pointer(v), odr_sizeof(T)*length(v))
     v
 end
 
-function read_array!(v::Array{T}, f::JLDFile, rr::ReadRepresentation{T}) where {T}
+function read_array!(v::ArrayMemory{T}, f::JLDFile, rr::ReadRepresentation{T}) where {T}
     n = length(v)
     nb = odr_sizeof(rr)*n
     data = read!(f.io, Vector{UInt8}(undef, nb))
@@ -213,7 +213,7 @@ function read_array!(v::Array{T}, f::JLDFile, rr::ReadRepresentation{T}) where {
 end
 
 
-function write_data(io::IO, f::JLDFile, data::Array{T}, odr::Type{T}, ::ReferenceFree,
+function write_data(io::IO, f::JLDFile, data::ArrayMemory{T}, odr::Type{T}, ::ReferenceFree,
                     wsession::JLDWriteSession) where T
     unsafe_write(io, Ptr{UInt8}(pointer(data)), odr_sizeof(odr) * length(data))
     nothing
@@ -229,7 +229,7 @@ function write_data(io::IO, f::JLDFile, data, odr, _, wsession::JLDWriteSession)
     nothing
 end
 
-function write_data(io::IO, f::JLDFile, data::Array, odr, wm::DataMode, wsession::JLDWriteSession)
+function write_data(io::IO, f::JLDFile, data::ArrayMemory, odr, wm::DataMode, wsession::JLDWriteSession)
     nb = odr_sizeof(odr) * length(data)
     buf = Vector{UInt8}(undef, nb)
     pos = position(io)
@@ -255,7 +255,7 @@ end
 read_bytestring(io::Union{IOStream, IOBuffer}) = String(readuntil(io, 0x00))
 
 # Late addition for MmapIO that can't be defined in mmapio.jl due to include ordering
-function read_array!(v::Array{T}, f::JLDFile{MmapIO}, ::SameRepr{T}) where T
+function read_array!(v::ArrayMemory{T}, f::JLDFile{MmapIO}, ::SameRepr{T}) where T
     io = f.io
     inptr = io.curptr
     n = length(v)
