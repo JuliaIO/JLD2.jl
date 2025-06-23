@@ -46,5 +46,9 @@ using TestItemRunner
         deps_compat = (;
             ignore = [:Mmap,],
         ),
+        ambiguities = (;
+            # There is are ambiguity that can never be hit
+            exclude = [JLD2.write_data, JLD2.WriteDataspace],
+        )
     )
 end

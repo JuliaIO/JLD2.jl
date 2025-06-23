@@ -888,3 +888,28 @@ end
         end
     end
 end
+
+@static if VERSION >= v"1.11"
+    @testset "Support for Memory" begin
+        fn = joinpath(mktempdir(), "memorytype.jld2")
+        m = Memory{Int}(undef, 10)
+        mr = memoryref(m, 5)
+        jldsave(fn; m, mr)
+        d = load(fn)
+        @test d["m"] isa Memory
+        @test d["m"] == m
+        @test d["mr"][] == mr[]
+        @test d["mr"].mem === d["m"]
+
+        m = Memory{String}(undef, 2)
+        m[1] = "1"
+        m[2] = "2"
+        mr = memoryref(m, 2)
+        jldsave(fn; m, mr)
+        d = load(fn)
+        @test d["m"] isa Memory
+        @test d["m"] == m
+        @test d["mr"][] == mr[]
+        @test d["mr"].mem === d["m"]
+    end
+end

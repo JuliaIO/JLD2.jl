@@ -1,3 +1,6 @@
+## 0.5.14
+ - Add support for `Memory` and `MemoryRef`
+
 ## 0.5.13
  - Make UnPack.jl compat into an extension
  - bumps lower compat for julia to v1.9

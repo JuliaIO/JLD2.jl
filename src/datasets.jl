@@ -225,14 +225,23 @@ end
                     attributes::Union{Vector{ReadAttribute},Nothing})
     T = julia_repr(rr)
     io = f.io
-    data_offset = layout.data_offset
-    if !ischunked(layout) || (layout.chunk_indexing_type == 1)
-        ndims, offset = get_ndims_offset(f, dataspace, attributes)
+    ndims, offset = get_ndims_offset(f, dataspace, attributes)
+    seek(io, offset)
+    # figure out whether to construct an Array or a Memory
+    ismem = !isnothing(attributes) && any(attr->attr.name==:Memory, attributes)
+    v = @static if VERSION >= v"1.11"
+        if ismem
+            Memory{T}(undef, Int(jlread(io, Int64)))
+        else
+            construct_array(io, T, Int(ndims))
+        end
+    else
+        construct_array(io, T, Int(ndims))
+    end
 
-        seek(io, offset)
-        v = construct_array(io, T, Int(ndims))
+    if !ischunked(layout) || (layout.chunk_indexing_type == 1)
         n = length(v)
-        seek(io, data_offset)
+        seek(io, layout.data_offset)
         if iscompressed(filters)
             read_compressed_array!(v, f, rr, layout.data_length, filters)
         else
@@ -241,10 +250,7 @@ end
         track_weakref!(f, header_offset, v)
         v
     else
-        ndims, offset = get_ndims_offset(f, dataspace, attributes)
-        seek(io, offset)
-        v = construct_array(io, T, Int(ndims))
-        if layout.version == 3 
+        if layout.version == 3
             # version 1 B-tree
             # This version appears to be padding incomplete chunks
             chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)                
@@ -309,11 +315,11 @@ end
     psz = payload_size_without_storage_message(dataspace, datatype)
     psz += CONTINUATION_MSG_SIZE
 
-    # Figure out the layout 
-    if datasz == 0 || (!(data isa Array) && datasz < 8192)
+    # Figure out the layout
+    if datasz == 0 || (!(data isa ArrayMemory) && datasz < 8192)
         layout_class = LcCompact
         psz += jlsizeof(Val(HmDataLayout); layout_class, data_size=datasz)
-    elseif data isa Array && compress != false && isconcretetype(eltype(data)) && isbitstype(eltype(data))
+    elseif data isa ArrayMemory && compress != false && isconcretetype(eltype(data)) && isbitstype(eltype(data))
         # Only now figure out if the compression argument is valid
         invoke_again, filter_id, compressor = get_compressor(compress)
         if invoke_again

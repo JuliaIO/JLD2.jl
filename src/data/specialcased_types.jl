@@ -198,12 +198,18 @@ writeas(::Type{Ptr{T}}) where {T} = Nothing
 rconvert(::Type{Ptr{T}}, ::Nothing) where {T} = Ptr{T}(0)
 
 ## Arrays
+# In most cases, Memory must be treated in the exact same way as arrays.
+@static if VERSION >= v"1.11"
+    const ArrayMemory{T} = Union{Array{T}, Memory{T}}
+else
+    const ArrayMemory{T} = Array{T}
+end
 
-h5fieldtype(::JLDFile, ::Type{T}, ::Type{T}, ::Initialized) where {T<:Array} =
+h5fieldtype(::JLDFile, ::Type{T}, ::Type{T}, ::Initialized) where {T<:ArrayMemory} =
     ReferenceDatatype()
-fieldodr(::Type{T}, ::Bool) where {T<:Array} = RelOffset
+fieldodr(::Type{T}, ::Bool) where {T<:ArrayMemory} = RelOffset
 
-function odr(A::Type{<:Array})
+function odr(A::Type{<:ArrayMemory})
     T = eltype(A)
     writtenas = writeas(T)
     CustomSerialization(writtenas, T, fieldodr(writtenas, false))
@@ -213,18 +219,18 @@ end
 # array, it writes a reference to the actual array where the datatype is
 # committed and has a written_type attribute.
 function h5fieldtype(f::JLDFile, ::Type{T}, readas::DataType,
-                     ::Initialized) where T<:Array
+                     ::Initialized) where T<:ArrayMemory
     @lookup_committed f readas
     commit(f, ReferenceDatatype(), T, readas)
 end
-h5type(f::JLDFile, ::Type{T}, x) where {T<:Array} =
+h5type(f::JLDFile, ::Type{T}, x) where {T<:ArrayMemory} =
     h5fieldtype(f, T, typeof(x), Val{true})
 
-function h5type(f::JLDFile, ::Type{T}, ::T) where T<:Array
-    if T <: Array{Union{}}
+function h5type(f::JLDFile, ::Type{T}, ::T) where T<:ArrayMemory
+    if T <: ArrayMemory{Union{}}
         return ReferenceDatatype()
     end
-    ty = T.parameters[1]
+    ty = eltype(T)
     writtenas = writeas(ty)
     if !hasfielddata(writtenas)
         # This is a hacky way to generate an instance of ty
@@ -237,14 +243,14 @@ function h5type(f::JLDFile, ::Type{T}, ::T) where T<:Array
     end
 end
 
-_odr(writtenas::Type{T}, readas::Type{T}, odr) where {T<:Array} = odr
-_odr(writtenas::Type{T}, readas::DataType, odr) where {T<:Array} =
+_odr(writtenas::Type{T}, readas::Type{T}, odr) where {T<:ArrayMemory} = odr
+_odr(writtenas::Type{T}, readas::DataType, odr) where {T<:ArrayMemory} =
     CustomSerialization{writtenas,RelOffset}
 
 function constructrr(::JLDFile, ::Type{T}, dt::BasicDatatype,
-                     attrs::Vector{ReadAttribute}) where T<:Array
+                     attrs::Vector{ReadAttribute}) where T<:ArrayMemory
     dt.class == DT_REFERENCE || throw(UnsupportedFeatureException())
-    (MappedRepr{Array, RelOffset}(), true)
+    (MappedRepr{T, RelOffset}(), true)
 end
 
 ## SimpleVectors
@@ -322,4 +328,19 @@ end
 function jlconvert(::MappedRepr{Module,CustomSerialization{String,Vlen{String}}},
     f::JLDFile, ptr::Ptr, header_offset::RelOffset)
 rconvert(Module, jlconvert(MappedRepr{String, Vlen{String}}(), f, ptr, header_offset))
+end
+
+
+## MemoryRef
+@static if VERSION >= v"1.11"
+    struct SerializedMemoryRef
+        index::Int64
+        ref::Memory
+    end
+
+    writeas(::Type{<:MemoryRef}) = SerializedMemoryRef
+    wconvert(::Type{SerializedMemoryRef}, x::MemoryRef) =
+        SerializedMemoryRef(1+(x.ptr_or_offset - x.mem.ptr)*x.mem.length÷sizeof(x.mem), x.mem)
+
+    rconvert(::Type{<:MemoryRef}, x::SerializedMemoryRef) = memoryref(x.ref, Int(x.index))
 end
