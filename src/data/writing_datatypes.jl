@@ -1,7 +1,7 @@
 # Initial ODR for DataType
 const DataTypeODR = OnDiskRepresentation{(0, odr_sizeof(Vlen{String})),Tuple{String,Vector{Any}},Tuple{Vlen{String},Vlen{RelOffset}}, odr_sizeof(Vlen{String})+odr_sizeof(Vlen{RelOffset})}
 
-const NULL_COMMITTED_DATATYPE = CommittedDatatype(RelOffset(0), 0)
+const NULL_COMMITTED_DATATYPE = CommittedDatatype(UNDEFINED_ADDRESS, 0)
 
 function track_weakref!(f::JLDFile, header_offset::RelOffset, @nospecialize v)
     header_offset !== NULL_REFERENCE && (f.jloffset[header_offset] = WeakRef(v))
@@ -543,8 +543,8 @@ function jlconvert(::MappedRepr{Union, UnionTypeODR}, f::JLDFile,
     ptr += odr_sizeof(Vlen{String})
     # Reconstruct a Union by reading a list of DataTypes and UnionAlls
     # Lookup of RelOffsets is taken from jlconvert of DataTypes
-    datatypes, = types_from_refs(f, ptr)
-    unionalls, = types_from_refs(f, ptr+odr_sizeof(Vlen{RelOffset}))
+    datatypes = types_from_refs(f, ptr)
+    unionalls = types_from_refs(f, ptr+odr_sizeof(Vlen{RelOffset}))
 
     v = Union{datatypes..., unionalls...}
     track_weakref!(f, header_offset, v)
