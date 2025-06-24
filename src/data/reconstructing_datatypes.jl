@@ -313,9 +313,6 @@ function types_from_refs(f::JLDFile, ptr::Ptr)
     end
 end
 
-using Base.ScopedValues
-const TYPE_AS_DATA = ScopedValues.ScopedValue(true)
-
 """
     find_type(typepath::String)
 
@@ -342,7 +339,7 @@ function find_type(typepath::String)
 end
 
 """
-    default_typemap(f::JLDFile, typepath::String, params, type_as_data::Bool)
+    default_typemap(f::JLDFile, typepath::String, params)
 
 Default type mapping function used by JLD2 to resolve data types read from files.
 
@@ -350,10 +347,8 @@ Arguments:
 - `f::JLDFile`: The JLD file being read.
 - `typepath::String`: The path to the type as a string, e.g. `"Main.MyModule.MyType"`.
 - `params`: A list of type parameters for the type (may be empty).
-- `type_as_data::Bool`: Whether the return value will be used as data or as a type.
-    This does not affect the return value in this implementation, but may be used by custom typemap functions to conditionally wrap the return value in an `Upgrade(type)`.
 """
-function default_typemap(f::JLDFile, typepath::String, params, type_as_data::Bool)
+function default_typemap(f::JLDFile, typepath::String, params::Vector)
     type = find_type(typepath)
     if isnothing(type)
         return UnknownType{Symbol(typepath), Tuple{params...}}
@@ -382,7 +377,7 @@ Signal to the `jlconvert` function that the type being read will be treated as e
 or a type. This is needed to allow a custom typemap function to return an `Upgrade` object
 when the type is going to be used for reconstructing an instance. (as a type)
 """
-const TYPE_AS_DATA = ScopedValues.ScopedValue(true)
+const TYPE_AS_DATA = ScopedValue(true)
 
 # Read a type. Returns an instance of UnknownType if the type or parameters
 # could not be resolved.
@@ -394,15 +389,16 @@ function jlconvert(rr::MappedRepr{<:Type,DataTypeODR}, f::JLDFile, ptr::Ptr, ::R
     params = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8}))
 
     # Legacy support for typemap as a Dict
-    if f.typemap isa Dict
+    type = if f.typemap isa Dict
         if mypath in keys(f.typemap)
-            m = f.typemap[mypath]
-            return (m isa Upgrade && TYPE_AS_DATA[]) ? m.target : m
+            f.typemap[mypath]
+        else
+            default_typemap(f, mypath, params)
         end
-        return default_typemap(f, mypath, params, TYPE_AS_DATA[])
+    else
+        f.typemap(f, mypath, params)
     end
-
-    return f.typemap(f, mypath, params, TYPE_AS_DATA[])
+    return (type isa Upgrade && TYPE_AS_DATA[]) ? type.target : type
 end
 
 constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute}) where {T<:DataType} =
