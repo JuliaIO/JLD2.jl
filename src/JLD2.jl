@@ -230,7 +230,6 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         close(f)
         throw(e)
     end
-    merge!(f.typemap, typemap)
     return f
 end
 
@@ -294,10 +293,10 @@ end
 function jldopen(io::IO, writable::Bool, create::Bool, truncate::Bool;
                 plain::Bool=false,
                 compress=false,
-                typemap::Dict{String}=Dict{String,Any}(),
+                typemap=default_typemap,
                 )
     verify_compressor(compress)
-    # figure out what kind of io object this is 
+    # figure out what kind of io object this is
     # for now assume it is
     !io.readable && throw("IO object is not readable")
     if io.seekable && writable && iswritable(io)
@@ -305,14 +304,13 @@ function jldopen(io::IO, writable::Bool, create::Bool, truncate::Bool;
         # that just ensures API is defined
         created = truncate
         io = RWBuffer(io)
-        f = JLDFile(io, "RWBuffer", writable, created, plain, compress, false)
+        f = JLDFile(io, "RWBuffer", writable, created, plain, compress, false, typemap)
     elseif (false == writable == create == truncate)
         # Were trying to read, so let's hope `io` implements `read` and bytesavailable
         io = ReadOnlyBuffer(io)
-        f = JLDFile(io, "ReadOnlyBuffer", false, false, plain, compress, false)
+        f = JLDFile(io, "ReadOnlyBuffer", false, false, plain, compress, false, typemap)
     end
     initialize_fileobject!(f)
-    merge!(f.typemap, typemap)
     return f
 end
 
