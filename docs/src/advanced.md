@@ -3,7 +3,7 @@
 ## Explicit Type Remapping
 
 Sometimes you store data using `struct`s that you defined yourself or are
-shipped with some package and weeks later, when you want to 
+shipped with some package and weeks later, when you want to
 load the data, the structs have changed.
 
 ```julia
@@ -30,9 +30,8 @@ Dict{String, Any} with 1 entry:
   "a" => var"##A#257"(42)
 ```
 
-As of JLD2 version 0.4.21 there is a fix. The `JLDFile` struct contains a `typemap` dictionary that allows for explicit type remapping.
-Now you can define a struct
-that matches the old definition and load your data.
+The `JLDFile` struct contains a `typemap` field that allows for explicit type remapping.
+You can define a struct that matches the old definition and load your data.
 
 ```julia-repl
 julia> struct A_old
@@ -48,7 +47,7 @@ A_old(42)
 ```
 
 ## Upgrading old structures on load
-The section above explains how you can make JLD2 load old structs with a different DataType name as target.
+The section above explains how you can make JLD2 load old structs with a different Datatype name as target.
 A different method for loading old data is described here:
 
 ```julia
@@ -77,6 +76,78 @@ JLD2.rconvert(::Type{UpdatedStruct}, nt::NamedTuple) = UpdatedStruct(Float64(nt.
 # to an `Upgrade` instance with the new struct.
 load("test.jld2", "data"; typemap=Dict("Main.OldStructVersion" => JLD2.Upgrade(UpdatedStruct)))
 ```
+
+## Full control over type reconstruction
+The recommended and more powerful option is to take full control over type mapping by
+providing a custom mapping function that gets full access to all stored information
+including the type parameters.
+Example like above:
+
+```julia
+
+struct OldStruct{T}
+    x::T
+end
+
+old_int = OldStruct(42)
+old_float = OldStruct(3.14)
+jldsave("test.jld2"; old_int, old_float, inttype=OldStruct{Int}, floattype=OldStruct{Float64}, )
+
+###
+
+struct NormalStruct{T}
+    x::T
+end
+
+struct SquaredStruct{T}
+    xsquared::T
+end
+
+JLD2.rconvert(::Type{SquaredStruct{T}}, nt) where T = SquaredStruct{T}(nt.x^2)
+
+typemap = function(f::JLD2.JLDFile, typepath::String, params::Vector)
+    if typepath == "Main.OldStruct"
+        if params[1] == Int
+            @info "Mapping an OldStruct{Int} to SquaredStruct{Int} with conversion"
+            # If the type param is Int, map to squared struct
+            # and wrap in `Upgrade` to trigger custom conversion with `rconvert`
+            return JLD2.Upgrade(SquaredStruct{Int})
+        else
+            @info "Mapping an OldStruct{T} to NormalStruct{T} without conversion"
+            # All other OldStructs just get updated to NormalStruct
+            return NormalStruct{params...}
+        end
+    end
+    # This typemap functino is called for every single type that is decoded.
+    # All types that do not need special handling should be forwarded to the default
+    # implementation.
+    @info "Forwarding $typepath with parameters $params to default type mapping"
+    return JLD2.default_typemap(f, typepath, params)
+end
+
+load("test.jld2"; typemap)
+```
+
+```
+[ Info: Forwarding Core.Int64 with parameters Any[] to default type mapping
+[ Info: Mapping an OldStruct{Int} to SquaredStruct{Int} with conversion
+[ Info: Forwarding Core.Float64 with parameters Any[] to default type mapping
+[ Info: Mapping an OldStruct{T} to NormalStruct{T} without conversion
+[ Info: Forwarding Core.Int64 with parameters Any[] to default type mapping
+[ Info: Mapping an OldStruct{Int} to SquaredStruct{Int} with conversion
+[ Info: Forwarding Core.Float64 with parameters Any[] to default type mapping
+[ Info: Mapping an OldStruct{T} to NormalStruct{T} without conversion
+Dict{String, Any} with 4 entries:
+  "inttype"   => SquaredStruct{Int64}
+  "old_float" => NormalStruct{Float64}(3.14)
+  "old_int"   => SquaredStruct{Int64}(1764)
+  "floattype" => NormalStruct{Float64}
+```
+
+
+Note that the dictionary approach and the mapping function are mutually exclusive.
+
+
 
 ## Groups - Appending to files
 

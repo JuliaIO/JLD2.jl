@@ -265,7 +265,7 @@ function initialize_fileobject!(f::JLDFile)
 end
 
 """
-    jldopen(file, mode::AbstractString; iotype=MmapIO, compress=false, typemap=Dict())
+    jldopen(file, mode::AbstractString; iotype=MmapIO, compress=false, typemap=JLD2.default_typemap)
 
 Opens a JLD2 file at path `file`. Alternatively `file` may be a suitable IO object.
 
