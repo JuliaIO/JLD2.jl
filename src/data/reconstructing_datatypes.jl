@@ -98,11 +98,15 @@ function jltype(f::JLDFile, sdt::Union{SharedDatatype,CommittedDatatype})
 
     f.plain && return f.h5jltype[cdt] = jltype(f, dt)
 
-    datatype = read_attr_data(f, julia_type_attr)
+    datatype = with(TYPE_AS_DATA => false) do
+        read_attr_data(f, julia_type_attr)
+    end
 
     if !isnothing(written_type_attr)
         # Custom serialization
-        custom_datatype = read_attr_data(f, written_type_attr)
+        custom_datatype = with(TYPE_AS_DATA => false) do
+            read_attr_data(f, written_type_attr)
+        end
         read_as = _readas(custom_datatype, datatype)
         if read_as <: UnknownType
             @warn("custom serialization of $(typestring(read_as))" *
@@ -280,111 +284,121 @@ function constructrr(f::JLDFile, T::UnionAll, dt::CompoundDatatype,
 end
 
 # Find types in modules
-# returns the result of searching for the type in the specified module m
-function _resolve_type_singlemodule(::MappedRepr{T,DataTypeODR},
-                                    m,
-                                    parts,
-                                    mypath,
-                                    hasparams::Bool,
-                                    params) where T
-    for part in parts
-        sym = Symbol(part)
-        (!isa(m, Module) || !isdefined(m, sym)) && return nothing
-        m = getfield(m, sym)
-    end
-    (!isa(m, DataType) && !isa(m, UnionAll)) && return nothing
-    return m
-end
-
 isunknowntype(x) = false
 isunknowntype(::Type{Union{}}) = false
 isunknowntype(x::Type) = x <: UnknownType ? true : false
 
-function _resolve_type(rr::MappedRepr{T,DataTypeODR},
-                       f::JLDFile,
-                       ptr::Ptr,
-                       header_offset::RelOffset,
-                       mypath,
-                       hasparams::Bool,
-                       params) where T
-    parts = split(mypath, '.')
-    for mod in Base.loaded_modules_array()
-        resolution_attempt = _resolve_type_singlemodule(rr,
-                                                        mod,
-                                                        parts,
-                                                        mypath,
-                                                        hasparams,
-                                                        params)
-        !isnothing(resolution_attempt) && return resolution_attempt
-    end
-    return UnknownType{Symbol(mypath), Tuple{ifelse(hasparams,params,())...}}
-end
-
-
-
 function types_from_refs(f::JLDFile, ptr::Ptr)
     # Test for a potential null pointer indicating an empty array
     isinit = jlunsafe_load(pconvert(Ptr{UInt32}, ptr)) != 0
-    unknown_params = false
-    if isinit
-        refs = jlconvert(MappedRepr{RelOffset, Vlen{RelOffset}}(), f, ptr, NULL_REFERENCE)
-        params =  Any[let
-            # If the reference is to a committed datatype, read the datatype
-            nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
-            cdt = get(f.datatype_locations, ref, nulldt)
-            res = cdt !== nulldt ? julia_repr(jltype(f, cdt)) : load_dataset(f, ref)
-            res isa Upgrade && (res = res.target)
-            unknown_params |= isunknowntype(res) || isreconstructed(res)
-            res
-        end for ref in refs]
-        return params, unknown_params
+    with(TYPE_AS_DATA => true) do
+        if isinit
+            refs = jlconvert(MappedRepr{RelOffset, Vlen{RelOffset}}(), f, ptr, NULL_REFERENCE)
+            params =  Any[let
+                # If the reference is to a committed datatype, read the datatype
+                cdt = get(f.datatype_locations, ref, NULL_COMMITTED_DATATYPE)
+                if cdt !== NULL_COMMITTED_DATATYPE
+                    julia_repr(jltype(f, cdt))
+                else
+                    res = load_dataset(f, ref)
+                    # For cross-platform compatibility convert
+                    # integer type parameters to system precision
+                    res isa Union{Int64,Int32} && (res = Int(res))
+                    res
+                end
+            end for ref in refs]
+            return params
+        end
+        return []
     end
-    return [], unknown_params
 end
 
-# Read a type. Returns an instance of UnknownType if the type or parameters
-# could not be resolved.
-function jlconvert(rr::MappedRepr{<:Type,DataTypeODR},
-                   f::JLDFile,
-                   ptr::Ptr,
-                   header_offset::RelOffset)
+"""
+    find_type(typepath::String)
 
-    params, unknown_params = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8}))
-    # For cross-platform compatibility convert integer type parameters to system precision
-    params = map(params) do p
-        if p isa Union{Int64,Int32}
-            Int(p)
-        else
-            p
+Finds a type in the loaded modules by its path as a string.
+The type path should be a dot-separated string, e.g. `"Main.MyModule.MyType"`.
+If the type is found, it returns the corresponding `DataType` or `UnionAll`.
+If the type is not found, it returns `nothing`.
+"""
+function find_type(typepath::String)
+    parts = split(typepath, '.')
+    # Find a type in the loaded modules by traversing the parts
+    for mod in Base.loaded_modules_array()
+        for part in parts
+            sym = Symbol(part)
+            (!isa(mod, Module) || !isdefined(mod, sym)) && break
+            mod = getfield(mod, sym)
+        end
+        if mod isa DataType || mod isa UnionAll
+            # We found a type, so we can stop searching
+            return mod
         end
     end
-    hasparams = !isempty(params)
-    mypath = String(jlconvert(MappedRepr{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE))
+    return nothing
+end
 
-    if mypath in keys(f.typemap)
-        m = f.typemap[mypath]
-        m isa Upgrade && return m
-    else
-        m = _resolve_type(rr, f, ptr, header_offset, mypath, hasparams, hasparams ? params : nothing)
-    end
-    isunknowntype(m) && return m
-    unknown_params && return UnknownType{m, Tuple{params...}}
-    if hasparams
-        if f.plain && !(m === Tuple)
+"""
+    default_typemap(f::JLDFile, typepath::String, params)
+
+Default type mapping function used by JLD2 to resolve data types read from files.
+
+Arguments:
+- `f::JLDFile`: The JLD file being read.
+- `typepath::String`: The path to the type as a string, e.g. `"Main.MyModule.MyType"`.
+- `params`: A list of type parameters for the type (may be empty).
+"""
+function default_typemap(f::JLDFile, typepath::String, params::Vector)
+    type = find_type(typepath)
+    if isnothing(type)
+        return UnknownType{Symbol(typepath), Tuple{params...}}
+    elseif any(T -> isunknowntype(T) || isreconstructed(T), params)
+        return UnknownType{type, Tuple{params...}}
+    elseif !isempty(params)
+        if f.plain && !(type === Tuple)
             return Any
         end
         try
-            m = m{params...}
-        catch e
-            return UnknownType{m, Tuple{params...}}
+            return type{params...}
+        catch
+            return UnknownType{type, Tuple{params...}}
         end
-    elseif m === Tuple
+    elseif type === Tuple
         # Need to instantiate with no parameters, since Tuple is really
         # Tuple{Vararg{Any}}
-        m = Tuple{}
+        return Tuple{}
     end
-    track_weakref!(f, header_offset, m)
-    return m
+    return type
+end
+
+"""
+    TYPE_AS_DATA::ScopedValue{Bool}
+Signal to the `jlconvert` function that the type being read will be treated as either data
+or a type. This is needed to allow a custom typemap function to return an `Upgrade` object
+when the type is going to be used for reconstructing an instance. (as a type)
+"""
+const TYPE_AS_DATA = ScopedValue(true)
+
+# Read a type. Returns an instance of UnknownType if the type or parameters
+# could not be resolved.
+function jlconvert(rr::MappedRepr{<:Type,DataTypeODR}, f::JLDFile, ptr::Ptr, ::RelOffset)
+
+    # Read name of type as string e.g. "Main.MyModule.MyType"
+    mypath = jlconvert(MappedRepr{String,Vlen{String}}(), f, ptr, NULL_REFERENCE)
+    # Read list of type parameters. `[]` if no parameters are present.
+    params = types_from_refs(f, ptr+odr_sizeof(Vlen{UInt8}))
+
+    # Legacy support for typemap as a Dict
+    type = if f.typemap isa Dict
+        if mypath in keys(f.typemap)
+            f.typemap[mypath]
+        else
+            default_typemap(f, mypath, params)
+        end
+    else
+        f.typemap(f, mypath, params)
+    end
+    return (type isa Upgrade && TYPE_AS_DATA[]) ? type.target : type
 end
 
 constructrr(::JLDFile, ::Type{T}, dt::CompoundDatatype, ::Vector{ReadAttribute}) where {T<:DataType} =

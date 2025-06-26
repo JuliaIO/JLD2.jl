@@ -1,3 +1,6 @@
+## 0.5.15
+ - Add full control over type mapping by providing a typemap function
+
 ## 0.5.14
  - Add support for `Memory` and `MemoryRef`
 

@@ -913,3 +913,29 @@ end
         @test d["mr"].mem === d["m"]
     end
 end
+
+
+@testset "Advanced typemap" begin
+    fn = joinpath(mktempdir(), "advancedtypemap.jld2")
+    z = 1 + 2im # Complex{Int}
+    zf = 1f0 + 2f0*im # Complex{Float32}
+    jldsave(fn; z, type = Complex{Int}, zf)
+
+    typemap = function(f, typepath, params)
+        @info "typepath: $typepath, params: $params"
+        if typepath == "Base.Complex" && params == [Int]
+            return JLD2.Upgrade(Complex{Float64})
+        end
+        JLD2.default_typemap(f, typepath, params)
+    end
+
+    JLD2.rconvert(::Type{Complex{Float64}}, nt::NamedTuple) =
+        Complex{Float64}(nt.re + 1, nt.im)
+
+    d = load(fn; typemap)
+    @test d["z"] isa Complex{Float64}
+    @test d["z"] == 2.0 + 2.0im
+    @test d["type"] == Complex{Float64}
+    @test d["zf"] isa Complex{Float32}
+    @test d["zf"] == 1.0 + 2.0im
+end

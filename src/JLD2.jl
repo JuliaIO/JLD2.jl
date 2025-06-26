@@ -5,6 +5,7 @@ using Mmap: Mmap
 using TranscodingStreams: TranscodingStreams
 using FileIO: load, save
 export load, save
+using ScopedValues: ScopedValue, with
 using PrecompileTools: @setup_workload, @compile_workload
 export jldopen, @load, @save, save_object, load_object, jldsave
 
@@ -91,7 +92,7 @@ mutable struct JLDFile{T<:IO}
     datatype_locations::OrderedDict{RelOffset,CommittedDatatype}
     datatypes::Vector{H5Datatype}
     datatype_wsession::JLDWriteSession{Dict{UInt,Tuple{RelOffset,WeakRef}}}
-    typemap::Dict{String, Any}
+    typemap
     jlh5type::IdDict{Any,Any}
     h5jltype::IdDict{Any,Any}
     jloffset::Dict{RelOffset,WeakRef}
@@ -108,18 +109,19 @@ mutable struct JLDFile{T<:IO}
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
                         plain::Bool,
                         compress,#::Union{Bool,Symbol},
-                        mmaparrays::Bool) where T
+                        mmaparrays::Bool,
+                        typemap=default_typemap) where T
         f = new(io, path, writable, written, plain, compress, mmaparrays, 1, false,
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
-            JLDWriteSession(), Dict{String,Any}(), IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
+            JLDWriteSession(), typemap, IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             DATA_START, Dict{RelOffset,GlobalHeap}(),
             GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group{JLDFile{T}}}(), UNDEFINED_ADDRESS)
         finalizer(jld_finalizer, f)
         f
     end
 end
-JLDFile(io::IO, path::AbstractString, writable::Bool, written::Bool, plain::Bool, compress, mmaparrays::Bool) =
-    JLDFile{typeof(io)}(io, path, writable, written, plain, compress, mmaparrays)
+JLDFile(io::IO, path::AbstractString, writable::Bool, written::Bool, plain::Bool, compress, mmaparrays::Bool, typemap=default_typemap) =
+    JLDFile{typeof(io)}(io, path, writable, written, plain, compress, mmaparrays, typemap)
 
 """
     fileoffset(f::JLDFile, x::RelOffset)
@@ -164,7 +166,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                  fallback::Union{Type, Nothing} = FallbackType(iotype),
                  compress=false,
                  mmaparrays::Bool=false,
-                 typemap::Dict{String}=Dict{String,Any}(),
+                 typemap=default_typemap,
                  parallel_read::Bool=false,
                  plain::Bool=false
                  ) where T<:Union{Type{IOStream},Type{MmapIO}}
@@ -214,7 +216,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         io = openfile(iotype, fname, wr, create, truncate, fallback)
         created = !exists || truncate
         rname = realpath(fname)
-        f = JLDFile(io, rname, wr, created, plain, compress, mmaparrays)
+        f = JLDFile(io, rname, wr, created, plain, compress, mmaparrays, typemap)
 
         !parallel_read && (OPEN_FILES[rname] = WeakRef(f))
 
@@ -228,7 +230,6 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         close(f)
         throw(e)
     end
-    merge!(f.typemap, typemap)
     return f
 end
 
@@ -264,7 +265,7 @@ function initialize_fileobject!(f::JLDFile)
 end
 
 """
-    jldopen(file, mode::AbstractString; iotype=MmapIO, compress=false, typemap=Dict())
+    jldopen(file, mode::AbstractString; iotype=MmapIO, compress=false, typemap=JLD2.default_typemap)
 
 Opens a JLD2 file at path `file`. Alternatively `file` may be a suitable IO object.
 
@@ -292,10 +293,10 @@ end
 function jldopen(io::IO, writable::Bool, create::Bool, truncate::Bool;
                 plain::Bool=false,
                 compress=false,
-                typemap::Dict{String}=Dict{String,Any}(),
+                typemap=default_typemap,
                 )
     verify_compressor(compress)
-    # figure out what kind of io object this is 
+    # figure out what kind of io object this is
     # for now assume it is
     !io.readable && throw("IO object is not readable")
     if io.seekable && writable && iswritable(io)
@@ -303,14 +304,13 @@ function jldopen(io::IO, writable::Bool, create::Bool, truncate::Bool;
         # that just ensures API is defined
         created = truncate
         io = RWBuffer(io)
-        f = JLDFile(io, "RWBuffer", writable, created, plain, compress, false)
+        f = JLDFile(io, "RWBuffer", writable, created, plain, compress, false, typemap)
     elseif (false == writable == create == truncate)
         # Were trying to read, so let's hope `io` implements `read` and bytesavailable
         io = ReadOnlyBuffer(io)
-        f = JLDFile(io, "ReadOnlyBuffer", false, false, plain, compress, false)
+        f = JLDFile(io, "ReadOnlyBuffer", false, false, plain, compress, false, typemap)
     end
     initialize_fileobject!(f)
-    merge!(f.typemap, typemap)
     return f
 end
 
