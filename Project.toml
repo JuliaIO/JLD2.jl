@@ -13,11 +13,18 @@ TranscodingStreams = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
 
 [weakdeps]
 UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
+CodecZstd = "6b39b394-51ab-5f42-8807-6242bab2b4c2"
+CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
+
 
 [extensions]
 UnPackExt = "UnPack"
+CodecZstdExt = "CodecZstd"
+CodecZlibExt = "CodecZlib"
 
 [compat]
+CodecZstd = "0.7, 0.8"
+CodecZlib = "0.7"
 FileIO = "1.5"
 MacroTools = "0.5.10"
 OrderedCollections = "1"

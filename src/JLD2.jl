@@ -171,7 +171,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                  plain::Bool=false
                  ) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
-    verify_compressor(compress)
+    filters = normalize_filters(compress)
 
     # Can only open multiple in parallel if mode is "r"
     if parallel_read && (wr, create, truncate)  != (false, false, false)
@@ -201,8 +201,8 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                         current = wr ? "read/write" : "read-only"
                         previous = f.writable ? "read/write" : "read-only"
                         throw(ArgumentError("attempted to open file $(current), but file was already open $(previous)"))
-                    elseif f.compress != compress
-                        throw(ArgumentError("attempted to open file with compress=$(compress), but file was already open with compress=$(f.compress)"))
+                    elseif f.compress != filters
+                        throw(ArgumentError("attempted to open file with compress=$(filters), but file was already open with compress=$(f.compress)"))
                     elseif f.mmaparrays != mmaparrays
                         throw(ArgumentError("attempted to open file with mmaparrays=$(mmaparrays), but file was already open with mmaparrays=$(f.mmaparrays)"))
                     end
@@ -216,7 +216,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
         io = openfile(iotype, fname, wr, create, truncate, fallback)
         created = !exists || truncate
         rname = realpath(fname)
-        f = JLDFile(io, rname, wr, created, plain, compress, mmaparrays, typemap)
+        f = JLDFile(io, rname, wr, created, plain, filters, mmaparrays, typemap)
 
         !parallel_read && (OPEN_FILES[rname] = WeakRef(f))
 
@@ -295,7 +295,7 @@ function jldopen(io::IO, writable::Bool, create::Bool, truncate::Bool;
                 compress=false,
                 typemap=default_typemap,
                 )
-    verify_compressor(compress)
+    filters = normalize_filters(compress)
     # figure out what kind of io object this is
     # for now assume it is
     !io.readable && throw("IO object is not readable")
@@ -304,11 +304,11 @@ function jldopen(io::IO, writable::Bool, create::Bool, truncate::Bool;
         # that just ensures API is defined
         created = truncate
         io = RWBuffer(io)
-        f = JLDFile(io, "RWBuffer", writable, created, plain, compress, false, typemap)
+        f = JLDFile(io, "RWBuffer", writable, created, plain, filters, false, typemap)
     elseif (false == writable == create == truncate)
         # Were trying to read, so let's hope `io` implements `read` and bytesavailable
         io = ReadOnlyBuffer(io)
-        f = JLDFile(io, "ReadOnlyBuffer", false, false, plain, compress, false, typemap)
+        f = JLDFile(io, "ReadOnlyBuffer", false, false, plain, filters, false, typemap)
     end
     initialize_fileobject!(f)
     return f
@@ -475,6 +475,8 @@ include("dataspaces.jl")
 include("attributes.jl")
 include("datatypes.jl")
 include("datalayouts.jl")
+include("filters/Filters.jl")
+include("filters/reading_writing_filters.jl")
 include("datasets.jl")
 include("global_heaps.jl")
 include("fractal_heaps.jl")
@@ -492,7 +494,6 @@ include("loadsave.jl")
 include("backwards_compatibility.jl")
 include("inlineunion.jl")
 include("fileio.jl")
-include("compression.jl")
 include("explicit_datasets.jl")
 include("committed_datatype_introspection.jl")
 
