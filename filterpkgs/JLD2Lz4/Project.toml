@@ -1,0 +1,12 @@
+name = "JLD2Lz4"
+uuid = "49ca2578-dfa4-4b24-b5ab-b610893dc52a"
+authors = ["Jonas Isensee <jonas.isensee@web.de>"]
+version = "0.1.0"
+
+[deps]
+CodecLz4 = "5ba52731-8f18-5e0d-9241-30f10d1ec561"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+
+[compat]
+CodecLz4 = "0.4.6"
+JLD2 = "0.5.15"

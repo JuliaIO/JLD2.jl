@@ -16,7 +16,7 @@ function load_dataset(f::JLDFile{IO}, offset::RelOffset) where IO
     attrs = EMPTY_READ_ATTRIBUTES
     dt::H5Datatype = PlaceholderH5Datatype()
     layout::DataLayout = DataLayout(0,LcCompact,0,-1)
-    filter_pipeline::FilterPipeline = EMPTY_FILTER_PIPELINE
+    filter_pipeline::FilterPipeline = FilterPipeline()
 
     for msg in HeaderMessageIterator(f, offset)
         if msg.type == HmDataspace
@@ -134,14 +134,14 @@ function read_data(f::JLDFile,
                 end
                 seek(io, startpos)
                 return read_array(f, dataspace, rr,
-                                  layout, FilterPipeline(), header_offset, attributes)
+                                  layout, filters, header_offset, attributes)
             end
         end
     elseif dataspace.dataspace_type == DS_NULL
         return read_empty(f, MappedRepr{Union{},nothing}(), dataspace, attributes, header_offset)
     elseif dataspace.dataspace_type == DS_V1
         return read_array(f, dataspace, MappedRepr{Any,RelOffset}(),
-                                  layout, FilterPipeline(), header_offset, attributes)
+                                  layout, filters, header_offset, attributes)
     end
     throw(UnsupportedFeatureException("Dataspace type $(dataspace.dataspace_type) not implemented"))
 end
@@ -319,14 +319,9 @@ end
     if datasz == 0 || (!(data isa ArrayMemory) && datasz < 8192)
         layout_class = LcCompact
         psz += jlsizeof(Val(HmDataLayout); layout_class, data_size=datasz)
-    elseif data isa ArrayMemory && compress != false && isconcretetype(eltype(data)) && isbitstype(eltype(data))
-        # Only now figure out if the compression argument is valid
-        invoke_again, filter_id, compressor = get_compressor(compress)
-        if invoke_again
-            return Base.invokelatest(write_dataset, f, dataspace, datatype, odr, data, wsession, compress)::RelOffset
-        end
+    elseif data isa ArrayMemory && iscompressed(compress) && isconcretetype(eltype(data)) && isbitstype(eltype(data))
         layout_class = LcChunked
-        psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(filter_id::UInt16)
+        psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(compress)
     else
         layout_class = LcContiguous
         psz += jlsizeof(Val(HmDataLayout); layout_class)
@@ -358,11 +353,15 @@ end
         write_continuation_placeholder(cio)
         jlwrite(io, end_checksum(cio))
     elseif layout_class == LcChunked
-        write_filter_pipeline_message(cio, filter_id)
 
-        deflated = deflate_data(f, data, odr, wsession, compressor)
+        # Note: deflate_data updates the Shuffle filter's element size field
+        # that is (only) used within write_filter_pipeline_message
+        # (if the Shuffle filter is used)
+        # The order of the two functions is therefore important
+        deflated = deflate_data(f, data, odr, wsession, compress)
+        write_filter_pipeline_message(cio, compress)
 
-        write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))        
+        write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
         write_continuation_placeholder(cio)
         jlwrite(f.io, end_checksum(cio))
     
