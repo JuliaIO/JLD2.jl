@@ -9,10 +9,10 @@ Mmap = "a63ad114-7e13-5084-954f-fe012c677804"
 OrderedCollections = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 ScopedValues = "7e506255-f358-4e82-b7e4-beb19740aa63"
-TranscodingStreams = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
 
 [weakdeps]
 UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
+CodecBzip2 = "523fee87-0ab8-5b00-afb7-3ecf72e48cfd"
 CodecZstd = "6b39b394-51ab-5f42-8807-6242bab2b4c2"
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 CodecLz4 = "5ba52731-8f18-5e0d-9241-30f10d1ec561"
@@ -21,6 +21,7 @@ Blosc = "a74b3585-a348-5f62-a45c-50e91977d574"
 
 [extensions]
 UnPackExt = "UnPack"
+CodecBzip2Ext = "CodecBzip2"
 CodecZstdExt = "CodecZstd"
 CodecZlibExt = "CodecZlib"
 Lz4Ext = "CodecLz4"

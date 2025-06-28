@@ -47,7 +47,6 @@ Depending on the filter type, this may include something like a compression leve
 """
 client_values(::Filter) = ()
 
-# Generic implementation of register_filter
 """
     register_filter(::Type{F}) where F <: Filter
 
@@ -62,8 +61,7 @@ end
 """
     FilterPipeline(filters)
 
-The filter pipeline associated with `plist`.
-
+Container for a sequence of JLD2 compression filters.
 """
 struct FilterPipeline{T}
     filters::T
@@ -71,7 +69,6 @@ struct FilterPipeline{T}
 end
 FilterPipeline(filters::Array{<:Filter}) = FilterPipeline(filters...)
 FilterPipeline(filters::Tuple) = FilterPipeline(filters...)
-
 
 iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
 Base.iterate(fp::FilterPipeline, state=1) = iterate(fp.filters, state)
@@ -83,15 +80,15 @@ function compress(fp::FilterPipeline, buf::Vector{UInt8}, elsize)
     buf
 end
 
-function decompress(filter::FilterPipeline, io::IO, data_length, element_size)
+function decompress(filter::FilterPipeline, io::IO, data_length, elsize)
     buf = read!(io, Vector{UInt8}(undef, data_length))
-    decompress(filter, buf, data_length, element_size)
+    decompress(filter, buf, data_length, elsize)
 end
 
-function decompress(filter::FilterPipeline, io::MemoryBackedIO, data_length, element_size)
+function decompress(filter::FilterPipeline, io::MemoryBackedIO, data_length, elsize)
     ensureroom(io, data_length)
     buf = unsafe_wrap(Array, Ptr{UInt8}(io.curptr), data_length)
-    decompress(filter, buf, data_length, element_size)
+    decompress(filter, buf, data_length, elsize)
 end
 
 function decompress(fp::FilterPipeline, buf::Vector{UInt8}, data_length, args...)
@@ -102,60 +99,15 @@ function decompress(fp::FilterPipeline, buf::Vector{UInt8}, data_length, args...
     buf
 end
 
-
-
-## Shuffle Filter implementation
-mutable struct Shuffle <: Filter
-    element_size::UInt32
-end
-Shuffle() = Shuffle(0)
-filterid(::Type{Shuffle}) = UInt16(2)
-client_values(filter::Shuffle) = (filter.element_size,)
-register_filter(Shuffle)
-
-
-
-function compress(fil::Shuffle, data::Vector{UInt8}, element_size)
-    fil.element_size = element_size
-    # Start with all least significant bytes, then work your way up
-    # I'll leave this for someone else to make performant
-    data_length = length(data)
-    @assert length(data) % element_size == 0
-    num_elements = data_length ÷ element_size
-    data_new = similar(data)
-    for n = eachindex(data_new)
-        j = 1 + (n-1)*num_elements
-        i = mod1(j , data_length) + (j-1)÷data_length
-        data_new[i] = data[n]
-    end
-    return data_new
-end
-
-function decompress(::Shuffle, data::Vector{UInt8}, data_length, element_size)
-    # Start with all least significant bytes, then work your way up
-    # I'll leave this for someone else to make performant
-    @assert data_length == length(data)
-    @assert data_length % element_size == 0
-    num_elements =  data_length÷element_size
-    data_new = similar(data)
-    for n = eachindex(data_new)
-        j = 1 + (n-1)*num_elements
-        i = mod1(j , data_length) + (j-1)÷data_length
-        data_new[n] = data[i]
-    end
-    return data_new
-end
-
-
-
 # For loading need filter_ids as keys
 const KNOWN_FILTERS = Dict(
     UInt16(1) => ("Deflate", "JLD2Deflate"),
     UInt16(2) => ("Shuffle", "JLD2"),
-    UInt16(307) => (:CodecBzip2, :Bzip2Compressor, :Bzip2Decompressor, "BZIP2"),
-    #UInt16(32001) => (:Blosc, :BloscCompressor, :BloscDecompressor, "BLOSC"),
-    UInt16(32004) => (:CodecLz4, :LZ4FrameCompressor, :LZ4FrameDecompressor, "LZ4"),
-    UInt16(32015) => (:CodecZstd, :ZstdFrameCompressor, :ZstdDecompressor, "ZSTD"),
+    UInt16(307) => ("Bzip2Filter", "JLD2Bzip2"),
+    UInt16(32001) => ("BloscFilter", "JLD2Blosc"),
+    UInt16(32004) => ("LZ4Filter", "JLD2Lz4"),
+    UInt16(32008) => ("BitshuffleFilter", "JLD2Bitshuffle"),
+    UInt16(32015) => ("ZstdFilter", "JLD2Zstd"),
 )
 
 function Filter(id, args...)
@@ -196,5 +148,48 @@ function normalize_filters(compress)
     throw(ArgumentError("Failed to interpret the compression argument."))
 end
 
+
+##############################################################################
+## Shuffle Filter implementation
+##############################################################################
+
+mutable struct Shuffle <: Filter
+    element_size::UInt32
+end
+Shuffle() = Shuffle(0)
+filterid(::Type{Shuffle}) = UInt16(2)
+client_values(filter::Shuffle) = (filter.element_size,)
+register_filter(Shuffle)
+
+function compress(fil::Shuffle, data::Vector{UInt8}, element_size)
+    fil.element_size = element_size
+    # Start with all least significant bytes, then work your way up
+    # I'll leave this for someone else to make performant
+    data_length = length(data)
+    @assert length(data) % element_size == 0
+    num_elements = data_length ÷ element_size
+    data_new = similar(data)
+    for n = eachindex(data_new)
+        j = 1 + (n-1)*num_elements
+        i = mod1(j , data_length) + (j-1)÷data_length
+        data_new[i] = data[n]
+    end
+    return data_new
+end
+
+function decompress(::Shuffle, data::Vector{UInt8}, data_length, element_size)
+    # Start with all least significant bytes, then work your way up
+    # I'll leave this for someone else to make performant
+    @assert data_length == length(data)
+    @assert data_length % element_size == 0
+    num_elements =  data_length÷element_size
+    data_new = similar(data)
+    for n = eachindex(data_new)
+        j = 1 + (n-1)*num_elements
+        i = mod1(j , data_length) + (j-1)÷data_length
+        data_new[n] = data[i]
+    end
+    return data_new
+end
 
 end # module

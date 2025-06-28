@@ -2,3 +2,11 @@ name = "JLD2Bzip2"
 uuid = "84687f94-9f67-4744-9d95-d64e07ea2a3b"
 authors = ["Jonas Isensee <jonas.isensee@web.de>"]
 version = "0.1.0"
+
+[deps]
+CodecBzip2 = "523fee87-0ab8-5b00-afb7-3ecf72e48cfd"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+
+[compat]
+CodecBzip2 = "0.8.5"
+JLD2 = "0.5.15"

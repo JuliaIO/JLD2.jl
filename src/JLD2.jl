@@ -2,7 +2,6 @@ module JLD2
 using OrderedCollections: OrderedDict
 using MacroTools: MacroTools, @capture
 using Mmap: Mmap
-using TranscodingStreams: TranscodingStreams
 using FileIO: load, save
 export load, save
 using ScopedValues: ScopedValue, with
@@ -10,10 +9,6 @@ using PrecompileTools: @setup_workload, @compile_workload
 export jldopen, @load, @save, save_object, load_object, jldsave
 
 include("types.jl")
-
-
-
-
 include("macros_utils.jl")
 include("io/mmapio.jl")
 include("io/bufferedio.jl")
@@ -22,7 +17,6 @@ include("file_header.jl")
 include("Lookup3.jl")
 include("superblock.jl")
 include("misc.jl")
-
 
 is_win7() = Sys.iswindows() && Sys.windows_version().major <= 6 && Sys.windows_version().minor <= 1
 # Windows 7 doesn't support mmap, falls back to IOStream
