@@ -2,7 +2,7 @@ module CodecBzip2Ext
 
 using JLD2
 import JLD2.Filters: Filter, register_filter, filterid, filtername
-import JLD2.Filters: compress, decompress
+import JLD2.Filters: compress, decompress, client_values
 using CodecBzip2
 
 const H5Z_FILTER_BZIP2 = UInt16(307)

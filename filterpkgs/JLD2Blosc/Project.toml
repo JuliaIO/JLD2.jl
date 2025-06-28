@@ -1,0 +1,12 @@
+name = "JLD2Blosc"
+uuid = "7f28b69e-c83f-4960-977f-81f66861f7ce"
+authors = ["Jonas Isensee <jonas.isensee@web.de>"]
+version = "0.1.0"
+
+[deps]
+Blosc = "a74b3585-a348-5f62-a45c-50e91977d574"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+
+[compat]
+Blosc = "0.7.3"
+JLD2 = "0.5.15"

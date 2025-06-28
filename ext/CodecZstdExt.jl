@@ -2,7 +2,7 @@ module CodecZstdExt
 
 using JLD2
 import JLD2.Filters: Filter, register_filter, filterid, filtername
-import JLD2.Filters: compress, decompress
+import JLD2.Filters: compress, decompress, client_values
 using CodecZstd
 
 const H5Z_FILTER_ZSTD = UInt16(32015)
