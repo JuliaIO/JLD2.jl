@@ -39,7 +39,7 @@ FilterPipeline(hm::Hmessage) =
     FilterPipeline(WrittenFilterPipeline(hm))
 
 FilterPipeline(fp::WrittenFilterPipeline) =
-    FilterPipeline([Filter(fil.id, fil.client_data...) for fil in fp])
+    FilterPipeline([Filter(fil.id, fil.client_data...) for fil in fp.filters])
 
 
 function pipeline_message_size(fp::FilterPipeline)

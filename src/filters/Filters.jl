@@ -67,14 +67,14 @@ The filter pipeline associated with `plist`.
 """
 struct FilterPipeline{T}
     filters::T
-    FilterPipeline(filters::Vararg{<:Filter}) = FilterPipeline(filters)
+    FilterPipeline(filters::Vararg{<:Filter}) = new{typeof(filters)}(filters)
 end
-FilterPipeline(filters::Array{Filter}) = FilterPipeline(filters...)
+FilterPipeline(filters::Array{<:Filter}) = FilterPipeline(filters...)
 FilterPipeline(filters::Tuple) = FilterPipeline(filters...)
 
 
 iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
-Base.iterate(fp::FilterPipeline, state=nothing) = iterate(fp.filters, state)
+Base.iterate(fp::FilterPipeline, state=1) = iterate(fp.filters, state)
 
 function compress(fp::FilterPipeline, buf::Vector{UInt8}, elsize)
     for filter in fp
@@ -83,19 +83,19 @@ function compress(fp::FilterPipeline, buf::Vector{UInt8}, elsize)
     buf
 end
 
-function decompress(filter::Filter, io::IO, data_length, element_size, n)
+function decompress(filter::FilterPipeline, io::IO, data_length, element_size)
     buf = read!(io, Vector{UInt8}(undef, data_length))
-    decompress(filter, buf, data_length, element_size, n)
+    decompress(filter, buf, data_length, element_size)
 end
 
-function decompress(filter::Filter, io::MemoryBackedIO, data_length, element_size, n)
+function decompress(filter::FilterPipeline, io::MemoryBackedIO, data_length, element_size)
     ensureroom(io, data_length)
     buf = unsafe_wrap(Array, Ptr{UInt8}(io.curptr), data_length)
-    decompress(filter, buf, data_length, element_size, n)
+    decompress(filter, buf, data_length, element_size)
 end
 
 function decompress(fp::FilterPipeline, buf::Vector{UInt8}, data_length, args...)
-    for filter in reverse(fp)
+    for filter in reverse(fp.filters)
         buf = decompress(filter, buf, data_length, args...)
         data_length = length(buf)
     end
@@ -178,7 +178,7 @@ end
 
 function normalize_filters(compress)
     if compress isa Bool && compress == false
-        return FilterPipeline(nothing)
+        return FilterPipeline(())
     elseif compress isa Bool && compress == true
         if !haskey(FILTERS, UInt16(1))
             throw(ArgumentError("""
