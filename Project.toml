@@ -16,6 +16,7 @@ UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 CodecZstd = "6b39b394-51ab-5f42-8807-6242bab2b4c2"
 CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 CodecLz4 = "5ba52731-8f18-5e0d-9241-30f10d1ec561"
+bitshuffle_jll = "228fe19c-1b83-5282-a626-13744502a320"
 
 
 [extensions]
@@ -23,6 +24,7 @@ UnPackExt = "UnPack"
 CodecZstdExt = "CodecZstd"
 CodecZlibExt = "CodecZlib"
 Lz4Ext = "CodecLz4"
+BitshuffleExt = "bitshuffle_jll"
 
 [compat]
 CodecZstd = "0.7, 0.8"
