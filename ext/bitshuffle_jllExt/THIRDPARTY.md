@@ -1,7 +1,11 @@
-JLD2Bzip2 - Transitional package to JLD2/CodecBzip2Ext.
-Provides the HDF5 Bzip2 filter as a compression option for JLD2.
+bitshuffle_jllExt is based on the implementation in H5Zbitshuffle.jl:
 
-Copyright (c) 2025: Jonas Isensee and contributors: https://github.com/JuliaIO/JLD2.jl/contributors
+
+H5Zbitshuffle - Julia wrapping of bitshuffle HDF5 Filter for improving
+compression of typed binary data.
+
+Copyright (c) Australian Nuclear Science and Technology Organisation
+2022
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

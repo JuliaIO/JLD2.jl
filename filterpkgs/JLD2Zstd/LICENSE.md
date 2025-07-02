@@ -1,7 +1,7 @@
 JLD2Zstd - Transitional package to JLD2/CodecZstdExt.
 Provides the HDF5 zstd filter as a compression option for JLD2.
 
-Copyright (c) 2025: Jonas Isensee
+Copyright (c) 2025: Jonas Isensee and contributors: https://github.com/JuliaIO/JLD2.jl/contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
