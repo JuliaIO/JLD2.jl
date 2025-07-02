@@ -24,8 +24,8 @@ UnPackExt = "UnPack"
 CodecBzip2Ext = "CodecBzip2"
 CodecZstdExt = "CodecZstd"
 CodecZlibExt = "CodecZlib"
-Lz4Ext = "CodecLz4"
-BitshuffleExt = "bitshuffle_jll"
+CodecLz4Ext = "CodecLz4"
+bitshuffle_jllExt = "bitshuffle_jll"
 BloscExt = "Blosc"
 
 [compat]

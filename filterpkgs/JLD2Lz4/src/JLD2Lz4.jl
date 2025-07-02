@@ -1,18 +1,17 @@
 """
     JLD2Lz4
 
-Transitional package to JLD2/CodecLz4Ext.
-
-The contents of this package are now contained within the package extension
-CodecLz4Ext. Loading this package will load the package extension.
+Transitional package to the extension package JLD2/CodecLz4Ext which implements the
+Lz4 compression filter for JLD2.
+Loading this package will load the package extension.
 """
 module JLD2Lz4
 
 using JLD2: JLD2
 using CodecLz4: CodecLz4
-const Lz4Ext = Base.get_extension(JLD2, :Lz4Ext)
+const CodecLz4Ext = Base.get_extension(JLD2, :CodecLz4Ext)
 
-using .Lz4Ext: Lz4Filter
+using .CodecLz4Ext: Lz4Filter
 
 export Lz4Filter
 
