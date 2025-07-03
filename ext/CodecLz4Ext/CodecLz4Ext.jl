@@ -9,7 +9,7 @@ H5Zlz4 is originally a copyright of HDF Group. License: licenses/H5Zlz4_LICENSE.
 The following license applies to the Julia port.
 Copyright (c) 2021 Mark Kittisopikul and Howard Hughes Medical Institute. License MIT, see LICENSE.txt
 =#
-module Lz4Ext
+module CodecLz4Ext
 
 using JLD2
 import JLD2.Filters: Filter, register_filter, filterid, filtername
@@ -21,16 +21,16 @@ const DEFAULT_BLOCK_SIZE = 1 << 30
 const lz4_name = "HDF5 lz4 filter; see http://www.hdfgroup.org/services/contributions.html"
 
 """
-    Lz4Filter(blockSize)
+    Lz4Filter(blocksize)
 
-Apply LZ4 compression. `blockSize` is the main argument. The filter id is 32004.
+Apply LZ4 compression. `blocksize` is the main argument. The filter id is 32004.
 
 # External Links
 * [LZ4 HDF5 Filter ID 32004](https://portal.hdfgroup.org/display/support/Filters#Filters-32004)
 * [LZ4 HDF5 Plugin Repository (C code)](https://github.com/nexusformat/HDF5-External-Filter-Plugins/tree/master/LZ4)
 """
 struct Lz4Filter <: Filter
-    blockSize::Cuint
+    blocksize::Cuint
 end
 Lz4Filter() = Lz4Filter(DEFAULT_BLOCK_SIZE)
 
@@ -43,11 +43,11 @@ const LZ4_AGGRESSION = Ref(1)
 
 function compress(filter::Lz4Filter, buf::Vector{UInt8}, args...)
     nbytes = length(buf)
-    blockSize = min(filter.blockSize, nbytes)
+    blocksize = min(filter.blocksize, nbytes)
     nbytes > typemax(Int32) && error("Can only compress chunks up to 2GB")
-    nBlocks = (nbytes - 1) ÷ blockSize + 1
+    nBlocks = (nbytes - 1) ÷ blocksize + 1
     maxDestSize =
-        nBlocks * CodecLz4.LZ4_compressBound(blockSize) + 4 + 8 + nBlocks * 4
+        nBlocks * CodecLz4.LZ4_compressBound(blocksize) + 4 + 8 + nBlocks * 4
     maxDestSize <= 0 &&
         error("H5Zlz4: Non-positive maxDestSize for malloc: $maxDestSize")
 
@@ -61,48 +61,48 @@ function compress(filter::Lz4Filter, buf::Vector{UInt8}, args...)
         unsafe_store!(Ptr{UInt64}(roBuf), hton(UInt64(nbytes)))
         roBuf += 8
 
-        unsafe_store!(Ptr{UInt32}(roBuf), hton(UInt32(blockSize)))
+        unsafe_store!(Ptr{UInt32}(roBuf), hton(UInt32(blocksize)))
         roBuf += 4
 
         outSize = 12
 
         for block in 0:(nBlocks - 1)
-            # compBlockSize::UInt32
-            origWritten = Csize_t(block * blockSize)
-            if nbytes - origWritten < blockSize # the last block may be < blockSize
-                blockSize = nbytes - origWritten
+            # compblocksize::UInt32
+            origWritten = Csize_t(block * blocksize)
+            if nbytes - origWritten < blocksize # the last block may be < blocksize
+                blocksize = nbytes - origWritten
             end
 
             # aggression = 1 is the same LZ4_compress_default
-            @debug "LZ4_compress_fast args" rpos outBuf roBuf roBuf + 4 blockSize nBlocks CodecLz4.LZ4_compressBound(
-                blockSize
+            @debug "LZ4_compress_fast args" rpos outBuf roBuf roBuf + 4 blocksize nBlocks CodecLz4.LZ4_compressBound(
+                blocksize
             )
-            compBlockSize = UInt32(
+            compblocksize = UInt32(
                 CodecLz4.LZ4_compress_fast(
                     rpos,
                     roBuf + 4,
-                    blockSize,
-                    CodecLz4.LZ4_compressBound(blockSize),
+                    blocksize,
+                    CodecLz4.LZ4_compressBound(blocksize),
                     LZ4_AGGRESSION[]
                 )
             )
-            @debug "Compressed block size" compBlockSize
+            @debug "Compressed block size" compblocksize
 
-            if compBlockSize == 0
+            if compblocksize == 0
                 error("Could not compress block $block")
             end
 
-            if compBlockSize >= blockSize # compression did not save any space, do a memcpy instead
-                compBlockSize = blockSize
-                unsafe_copyto!(roBuf + 4, rpos, blockSize)
+            if compblocksize >= blocksize # compression did not save any space, do a memcpy instead
+                compblocksize = blocksize
+                unsafe_copyto!(roBuf + 4, rpos, blocksize)
             end
 
-            unsafe_store!(Ptr{UInt32}(roBuf), hton(UInt32(compBlockSize))) # write blocksize
+            unsafe_store!(Ptr{UInt32}(roBuf), hton(UInt32(compblocksize))) # write blocksize
             roBuf += 4
 
-            rpos += blockSize
-            roBuf += compBlockSize
-            outSize += compBlockSize + 4
+            rpos += blocksize
+            roBuf += compblocksize
+            outSize += compblocksize + 4
         end
     end
     resize!(outBuf, outSize) # resize the output buffer to the actual size
@@ -120,9 +120,9 @@ function decompress(filter::Lz4Filter, buf::Vector{UInt8}, args...)
 
         # Next read the next four bytes from the buffer as a big endian UInt32
         # This is the blocksize
-        blockSize = ntoh(unsafe_load(Ptr{UInt32}(rpos)))
+        blocksize = ntoh(unsafe_load(Ptr{UInt32}(rpos)))
         rpos += 4
-        blockSize = min(blockSize, origSize) # blockSize should not be less than origSize
+        blocksize = min(blocksize, origSize) # blocksize should not be less than origSize
 
         # malloc a byte buffer of origSize
         # outBuf = Vector{UInt8}(undef, origSize)
@@ -132,35 +132,35 @@ function decompress(filter::Lz4Filter, buf::Vector{UInt8}, args...)
         @GC.preserve outBuf begin
             roBuf = Ptr{UInt8}(pointer(outBuf))
             decompSize = 0
-            # Start with the first blockSize
+            # Start with the first blocksize
             while decompSize < origSize
-                # compressedBlockSize = UInt32(0)
-                if origSize - decompSize < blockSize # the last block can be smaller than block size
-                    blockSize = origSize - decompSize
+                # compressedblocksize = UInt32(0)
+                if origSize - decompSize < blocksize # the last block can be smaller than block size
+                    blocksize = origSize - decompSize
                 end
 
-                compressedBlockSize = ntoh(unsafe_load(Ptr{UInt32}(rpos)))
+                compressedblocksize = ntoh(unsafe_load(Ptr{UInt32}(rpos)))
                 rpos += 4
 
-                if compressedBlockSize == blockSize
+                if compressedblocksize == blocksize
                     # There was no compression
-                    # memcpy(roBuf, rpos, blockSize)
-                    unsafe_copyto!(roBuf, rpos, blockSize)
-                    decompressedBytes = blockSize
+                    # memcpy(roBuf, rpos, blocksize)
+                    unsafe_copyto!(roBuf, rpos, blocksize)
+                    decompressedBytes = blocksize
                 else
                     # do the compression
                     # LZ4_decompress_fast, version number 10300 ?
-                    @debug "decompress_safe" rpos roBuf compressedBlockSize (
+                    @debug "decompress_safe" rpos roBuf compressedblocksize (
                         origSize - decompSize
                     )
                     decompressedBytes = CodecLz4.LZ4_decompress_safe(
-                        rpos, roBuf, compressedBlockSize, origSize - decompSize
+                        rpos, roBuf, compressedblocksize, origSize - decompSize
                     )
                     @debug "decompressedBytes" decompressedBytes
                 end
 
-                rpos += compressedBlockSize
-                roBuf += blockSize
+                rpos += compressedblocksize
+                roBuf += blocksize
                 decompSize += decompressedBytes
             end
         end
@@ -172,4 +172,4 @@ end
 __init__() = register_filter(Lz4Filter)
 
 
-end # module Lz4Ext
+end # module CodecLz4Ext

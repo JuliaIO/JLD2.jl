@@ -10,19 +10,19 @@ const H5Z_FILTER_BZIP2 = UInt16(307)
 const bzip2_name = "HDF5 bzip2 filter; see http://www.hdfgroup.org/services/contributions.html"
 
 struct Bzip2Filter <: Filter
-    blockSize100k::Cuint
+    blocksize100k::Cuint
 end
 Bzip2Filter() = Bzip2Filter(9)
 
-filterid(::Type{Bzip2Filter}) = H5Z_FILTER_ZSTD
-filtername(::Type{Bzip2Filter}) = bzip_name
-client_values(filter::Bzip2Filter) = (filter.blockSize100k, )
+filterid(::Type{Bzip2Filter}) = H5Z_FILTER_BZIP2
+filtername(::Type{Bzip2Filter}) = bzip2_name
+client_values(filter::Bzip2Filter) = (filter.blocksize100k, )
 
 
 compress(filter::Bzip2Filter, buf::Vector{UInt8}, args...) =
-    transcode(Bzip2Compressor(; filter.blockSize100k), buf)
+    transcode(Bzip2Compressor(; filter.blocksize100k), buf)
 
-decompresss(::Bzip2Filter, buf::Vector{UInt8}, args...) =
+decompress(::Bzip2Filter, buf::Vector{UInt8}, args...) =
     transcode(Bzip2Decompressor(), buf)
 
 __init__() = register_filter(Bzip2Filter)

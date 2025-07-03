@@ -1,6 +1,6 @@
 using JLD2, Test, FileIO
 using Pkg: Pkg
-using CodecZlib, CodecBzip2, CodecLz4, CodecZstd
+using JLD2Deflate, JLD2Bzip2, JLD2Lz4, JLD2Zstd, JLD2Blosc
 
 
 # This is for testing the different syntax versions as well as the library
@@ -8,17 +8,17 @@ using CodecZlib, CodecBzip2, CodecLz4, CodecZstd
     fn = joinpath(mktempdir(), "test.jld2")
 
     randomdata = repeat(rand(2000), 10)
-    @save fn {compress=ZlibCompressor()} randomdata
+    @save fn {compress=true} randomdata
     r = jldopen(f -> f["randomdata"], fn, "r")
     @test r == randomdata
 
-    jldopen(fn, "w"; compress=ZlibCompressor()) do f
+    jldopen(fn, "w"; compress=Deflate()) do f
         f["randomdata"] = randomdata
     end
     @test load(fn, "randomdata") == randomdata
 
     jldopen(fn, "w") do f
-        write(f, "randomdata", randomdata; compress=ZlibCompressor())
+        write(f, "randomdata", randomdata; compress=Deflate())
     end
     @test load(fn, "randomdata") == randomdata
 end
@@ -28,7 +28,7 @@ end
     fn = joinpath(mktempdir(), "test.jld2")
 
     randomdata = repeat(rand(2000), 10)
-    @save fn {compress=Bzip2Compressor()} randomdata
+    @save fn {compress=Bzip2Filter()} randomdata
 
     r = jldopen(f -> f["randomdata"], fn, "r")
     @test r == randomdata
@@ -39,7 +39,7 @@ end
     fn = joinpath(mktempdir(), "test.jld2")
 
     randomdata = repeat(rand(2000), 10)
-    @save fn {compress=LZ4FrameCompressor()} randomdata
+    @save fn {compress=Lz4Filter()} randomdata
 
     r = jldopen(f -> f["randomdata"], fn, "r")
     @test r == randomdata
@@ -49,7 +49,7 @@ end
     fn = joinpath(mktempdir(), "test.jld2")
 
     randomdata = repeat(rand(2000), 10)
-    @save fn {compress=ZstdFrameCompressor()} randomdata
+    @save fn {compress=ZstdFilter()} randomdata
 
     r = jldopen(f -> f["randomdata"], fn, "r")
     @test r == randomdata
@@ -62,23 +62,5 @@ end
 
     jldopen(fn, "w") do f
         @test_throws ArgumentError write(f, "x", zeros(10); compress = π)
-    end
-end
-
-
-@testset "issue #368 - dynamically loaded CodecZlib" begin
-    testprojectpath = Pkg.project().path
-    # Simply test if this fails
-    code = """
-    using JLD2
-
-    N = 100
-    a = (rand(N, N), rand(N, N))
-    save("test.jld2", "a", a; compress = true)
-    """
-
-    cd(mktempdir()) do
-        my_cmd = `$(Base.julia_cmd()) --project=$(testprojectpath) -e $(code)`
-        @test better_success(my_cmd)
     end
 end

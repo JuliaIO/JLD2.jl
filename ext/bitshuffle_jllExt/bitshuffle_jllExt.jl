@@ -8,7 +8,7 @@ Originally authored by "James.Hester <jxh@ansto.gov.au>" as H5Zbitshuffle
 The bitshuffle filter for HDF5. See https://portal.hdfgroup.org/display/support/Filters#Filters-32008
 and https://github.com/kiyo-masui/bitshuffle for details.
 """
-module BitshuffleExt
+module bitshuffle_jllExt
 
 using JLD2
 import JLD2.Filters: Filter, register_filter, filterid, filtername
@@ -292,4 +292,4 @@ end
 
 __init__() = register_filter(BitshuffleFilter)
 
-end
+end # module bitshuffle_jllExt
