@@ -8,5 +8,5 @@ CodecZstd = "6b39b394-51ab-5f42-8807-6242bab2b4c2"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 
 [compat]
-CodecZstd = "0.8.6"
+CodecZstd = "0.8"
 JLD2 = "0.5.15"

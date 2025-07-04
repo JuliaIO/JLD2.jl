@@ -9,6 +9,6 @@ JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 bitshuffle_jll = "228fe19c-1b83-5282-a626-13744502a320"
 
 [compat]
-CodecBzip2 = "0.8.5"
+CodecBzip2 = "0.8"
 JLD2 = "0.5.15"
 bitshuffle_jll = "0.5.2"

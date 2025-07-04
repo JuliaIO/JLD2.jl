@@ -22,7 +22,7 @@ end
 
 When reading a file `JLD2` detects compression and automatically decompresses the data
 so it is not necessary to pass any extra parameters for that case.
-However, JLD2 will prompt you to install and load the necessary filter packages if they are
+However, `JLD2` will prompt you to install and load the necessary filter packages if they are
 not yet available.
 
 ## Compression Filter API
@@ -32,8 +32,8 @@ These can be used individually and even chained which can be useful for some typ
 The filter used by `compress = true` is the `Deflate()` compression filter.
 
 !!! note
-    The default Deflate compression requires the `JLD2Deflate` package to be installed.
-    JLD2 will throw an error if the required filter package is not loaded, prompting
+    The default `Deflate()` compression requires the `JLD2Deflate` package to be installed.
+    `JLD2` will throw an error if the required filter package is not loaded, prompting
     you to install and load the appropriate package: `using JLD2, JLD2Deflate`.
 
 ### Installing Filter Packages
@@ -59,7 +59,7 @@ The compression filters available for JLD2 are:
 
 | Filter Package | Filter Type       | Notes                                                        |
 |:---------------|:------------------|:-------------------------------------------------------------|
-| JLD2 (builtin) | `Shuffle`         | Rearrangement of bytes useful as a preprocess filter for integer arrays |
+| JLD2 (builtin) | `Shuffle`         | Rearrangement of bytes useful as a preprocess filter         |
 | JLD2Deflate    | `Deflate`         | Default compression, very widely used, good compatibility    |
 | JLD2Blosc      | `BloscFilter`     | High-performance compression with multiple algorithms        |
 | JLD2Bzip2      | `Bzip2Filter`     | Good compression ratio, can be slower                        |
@@ -202,3 +202,13 @@ end
 
 The simplest usage option of `compress=true` still works, provided that you load
 `JLD2Deflate`.
+
+
+### API Docstrings
+
+```@docs
+JLD2.Filters
+JLD2.Filters.filtername
+JLD2.Filters.filterid
+JLD2.Filters.Shuffle
+```

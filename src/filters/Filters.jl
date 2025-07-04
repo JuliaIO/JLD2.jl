@@ -33,9 +33,8 @@ filterid(x::Filter) = filterid(typeof(x))
 """
     filtername(::Type{F}) where {F<:Filter}
 
-What is the name of a filter?
-Defaults to "Unnamed Filter"
-Returns a String describing the filter. See [`API.h5z_register`](@ref)
+What is the name of a filter? Defaults to "Unnamed Filter"
+Returns a String describing the filter.
 """
 filtername(::Type{F}) where {F<:Filter} = "Unnamed Filter"
 filtername(x::Filter) = filtername(typeof(x))
@@ -152,7 +151,20 @@ end
 ##############################################################################
 ## Shuffle Filter implementation
 ##############################################################################
+"""
+    Shuffle <: Filter
 
+The Shuffle filter can be used as part of a filter pipeline to compress datasets.
+It rearranges the bytes of elements in an array to improve compression
+efficiency. It is not a compression filter by itself, but can be used in conjunction
+with other compression filters like `Deflate`` or `ZstdFilter`.
+
+It can be useful when the array, for example, contains unsigned integer `UInt64` and all
+values are small. Then all the upper bytes of the eight byte integer are zero.
+This filter will rearrange the bytes so that all the least significant bytes are at the
+beginning of the array, followed by the second least significant bytes, and so on, which
+simplifies the compression of the data.
+"""
 mutable struct Shuffle <: Filter
     element_size::UInt32
 end

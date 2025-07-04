@@ -8,5 +8,5 @@ CodecBzip2 = "523fee87-0ab8-5b00-afb7-3ecf72e48cfd"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 
 [compat]
-CodecBzip2 = "0.8.5"
+CodecBzip2 = "0.8"
 JLD2 = "0.5.15"

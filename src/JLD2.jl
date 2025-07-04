@@ -23,18 +23,31 @@ is_win7() = Sys.iswindows() && Sys.windows_version().major <= 6 && Sys.windows_v
 const DEFAULT_IOTYPE = is_win7() ? IOStream : MmapIO
 
 """
-    Group{T}
-    Group(file::T)
+    Group(file::JLDFile, name::String)
+    Group(file::Group, name::String)
 
-JLD2 group object.
+Construct a `Group` in `file` with name `name`.
+`Group`s are JLD2s equivalent of folders and may be nested, so `file` itself may alread be a `Group` or a `JLDFile` file handle.
 
-## Advanced Usage
-Takes two optional keyword arguments:
+## Example usage
+```
+jldopen("example.jld2", "w") do f
+    g = Group(f, "subgroup")
+    g["data"] = 42
+end
+
+jldopen("example.jld2") do f
+    g = f["subgroup"]
+    f["subgroup/data"] == g["data"]
+end
+```
+
+## Keyword arguments:
 
 - `est_num_entries::Int` = 4
 - `est_link_name_len::Int` = 8
 
-These determine how much (additional) empty space should be allocated for the group description. (list of entries)
+Determine how much (additional) empty space should be allocated for the group description. (list of entries)
 This can be useful for performance when one expects to append many additional datasets after first writing the file.
 """
 mutable struct Group{T}
@@ -98,7 +111,7 @@ mutable struct JLDFile{T<:IO}
     root_group::Group{JLDFile{T}}
     types_group::Group{JLDFile{T}}
     base_address::UInt64
-    
+
 
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
                         plain::Bool,
@@ -184,7 +197,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
             f = get(OPEN_FILES, rname, (;value=nothing)).value
             # If in serial, return existing handle. In parallel always generate a new handle
             if !isnothing(f)
-                if parallel_read 
+                if parallel_read
                     f.writable && throw(ArgumentError("Tried to open file in a parallel context but it is open in write-mode elsewhere in a serial context."))
                 else
                     if truncate
