@@ -29,7 +29,7 @@ bitshuffle_jllExt = "bitshuffle_jll"
 BloscExt = "Blosc"
 
 [compat]
-CodecZstd = "0.7, 0.8"
+CodecZstd = "0.8"
 CodecZlib = "0.7"
 Blosc = "0.7.3"
 bitshuffle_jll = "0.5.2"
