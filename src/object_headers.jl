@@ -96,7 +96,7 @@ function print_header_messages(f::JLDFile, offset::RelOffset)
     for msg in hmitr
         print(msg)
         if msg.type == HmFilterPipeline
-            filter_pipeline = FilterPipeline(msg)
+            filter_pipeline = WrittenFilterPipeline(msg)
             @info filter_pipeline
         elseif msg.type == HmAttribute
             attr = read_attribute(f, msg)

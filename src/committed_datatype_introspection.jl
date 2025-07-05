@@ -57,7 +57,7 @@ function stringify_object(f, offset)
     attrs = EMPTY_READ_ATTRIBUTES
     datatype::H5Datatype = PlaceholderH5Datatype()
     layout::DataLayout = DataLayout(0,LcCompact,0,-1)
-    filter_pipeline::FilterPipeline = FilterPipeline(Filter[])
+    filter_pipeline::WrittenFilterPipeline = WrittenFilterPipeline()
     for msg in HeaderMessageIterator(f, offset)
         if msg.type == HmDataspace
             dataspace = ReadDataspace(f, msg)
@@ -66,7 +66,7 @@ function stringify_object(f, offset)
         elseif msg.type == HmDataLayout
             layout = DataLayout(f, msg)
         elseif msg.type == HmFilterPipeline
-            filter_pipeline = FilterPipeline(msg)
+            filter_pipeline = WrittenFilterPipeline(msg)
         elseif msg.type == HmAttribute
             if attrs === EMPTY_READ_ATTRIBUTES
                 attrs = ReadAttribute[read_attribute(f, msg)]

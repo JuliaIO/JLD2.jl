@@ -1,4 +1,19 @@
+```@meta
+    ShareDefaultModule=false
+```
+
 # Advanced Usage
+
+## Loading plain types
+
+```@repl
+using JLD2 #hide
+jldsave("test.jld2"; z= 1.0 + im * 2.0)
+load("test.jld2", "z")
+load("test.jld2", "z"; plain=true)
+@__MODULE__
+```
+
 
 ## Explicit Type Remapping
 
@@ -6,8 +21,8 @@ Sometimes you store data using `struct`s that you defined yourself or are
 shipped with some package and weeks later, when you want to
 load the data, the structs have changed.
 
-```julia
-using JLD2
+```@example
+using JLD2 #hide
 struct A
     x::Int
 end
@@ -16,41 +31,32 @@ jldsave("example.jld2"; a = A(42))
 
 This results in warnings and sometimes even errors when trying to load the
 file as demonstrated here.
-```julia-repl
-julia> using JLD2
-
-julia> struct A{T}
-           x::T
-       end
-
-julia> load("example.jld2")
-┌ Warning: read type A is not a leaf type in workspace; reconstructing
-└ @ JLD2 ~/.julia/dev/JLD2/src/data/reconstructing_datatypes.jl:273
-Dict{String, Any} with 1 entry:
-  "a" => var"##A#257"(42)
+```@repl
+using JLD2 #hide
+struct A{T}
+    x::T
+end
+load("example.jld2")
 ```
 
 The `JLDFile` struct contains a `typemap` field that allows for explicit type remapping.
 You can define a struct that matches the old definition and load your data.
 
-```julia-repl
-julia> struct A_old
-           x::Int
-       end
-
-julia> f = jldopen("example.jld2","r"; typemap=Dict("Main.A" => A_old))
-JLDFile /home/jonas/.julia/dev/JLD2/example.jld2 (read-only)
- └─🔢 a
-
-julia> f["a"]
-A_old(42)
+```@repl
+using JLD2 #hide
+struct A_old
+    x::Int
+end
+f = jldopen("example.jld2","r"; typemap=Dict("Main.A" => A_old))
+f["a"]
 ```
 
 ## Upgrading old structures on load
 The section above explains how you can make JLD2 load old structs with a different Datatype name as target.
 A different method for loading old data is described here:
 
-```julia
+```@example
+using JLD2 #hide
 # This is the old version of the struct stored in the file
 struct OldStructVersion
     x::Int
@@ -58,7 +64,9 @@ struct OldStructVersion
 end
 orig = OldStructVersion(1,2.0)
 jldsave("test.jld2"; data=orig)
-
+```
+```@example
+using JLD2 #hide
 ### new session
 
 # This is the new version of your struct
@@ -84,7 +92,6 @@ including the type parameters.
 Example like above:
 
 ```julia
-
 struct OldStruct{T}
     x::T
 end
@@ -92,8 +99,6 @@ end
 old_int = OldStruct(42)
 old_float = OldStruct(3.14)
 jldsave("test.jld2"; old_int, old_float, inttype=OldStruct{Int}, floattype=OldStruct{Float64}, )
-
-###
 
 struct NormalStruct{T}
     x::T
@@ -162,10 +167,8 @@ g = Group(file;
 These determine how much (additional) empty space should be allocated for the group description. (list of entries)
 This can be useful for performance when one expects to append many additional datasets after first writing the file.
 
-## JLD2DebugTools
-
-There is an experimental repository [JLD2DebugTools.jl](https://github.com/JonasIsensee/JLD2DebugTools.jl) that may help with debugging files.
-
 
 ## Fallback Behaviour
 By default JLD2 will attempt to open files using the `MmapIO` backend. If that fails, it retries using `IOStream`.
+
+

@@ -274,3 +274,40 @@ function read_array!(v::ArrayMemory{T}, f::JLDFile{MmapIO}, ::SameRepr{T}) where
     io.curptr = inptr + nb
     v
 end
+
+
+function read_compressed_array!(
+    v::Array{T},
+    f::JLDFile,
+    rr::ReadRepresentation{T,RR},
+    data_length::Integer,
+    filter,
+) where {T,RR}
+    io = f.io
+    data_offset = position(io)
+    element_size = odr_sizeof(RR)
+    data = Filters.decompress(filter, io, data_length, element_size)
+    GC.@preserve data begin
+        cp0 = Ptr{Cvoid}(pointer(data))
+        @simd for i = eachindex(v)
+            dataptr = cp0 + element_size * (i - 1)
+            if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
+                v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
+            end
+        end
+    end
+    seek(io, data_offset + data_length)
+    v
+end
+
+function deflate_data(f::JLDFile, data::Array{T}, odr::S, wsession, filter) where {T,S}
+    buf = Vector{UInt8}(undef, odr_sizeof(odr) * length(data))
+
+    cp = Ptr{Cvoid}(pointer(buf))
+    @simd for i = 1:length(data)
+        @inbounds h5convert!(cp, odr, f, data[i], wsession)
+        cp += odr_sizeof(odr)
+    end
+
+    Filters.compress(filter, buf, odr_sizeof(odr))
+end
