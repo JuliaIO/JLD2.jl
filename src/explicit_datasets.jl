@@ -133,7 +133,7 @@ function write_dataset(dataset::Dataset, data, wsession::JLDWriteSession=JLDWrit
         dataset.dataspace = WriteDataspace(f, data, odr)
     end
     dataspace = dataset.dataspace
-    compressor = normalize_filters(dataset.filters)
+    compressor = Filters.normalize_filters(dataset.filters)
     offset = write_dataset(f, dataspace, datatype, odr, data, wsession, compressor)
     !isempty(dataset.name) && (dataset.parent[dataset.name] = offset)
     # Attributes

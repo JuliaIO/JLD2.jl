@@ -321,7 +321,13 @@ end
         psz += jlsizeof(Val(HmDataLayout); layout_class, data_size=datasz)
     elseif data isa ArrayMemory && iscompressed(compress) && isconcretetype(eltype(data)) && isbitstype(eltype(data))
         layout_class = LcChunked
-        psz += chunked_storage_message_size(ndims(data)) + pipeline_message_size(compress)
+        psz += jlsizeof(Val(HmDataLayout);
+            layout_class,
+            dimensions = UInt64.((reverse(size(data))..., odr_sizeof(odr))),
+            # Dummy values for message size computation
+            data_size = 0, data_address = 0,
+        )
+        psz += Filters.pipeline_message_size(compress)
     else
         layout_class = LcContiguous
         psz += jlsizeof(Val(HmDataLayout); layout_class)
@@ -359,9 +365,16 @@ end
         # (if the Shuffle filter is used)
         # The order of the two functions is therefore important
         deflated = deflate_data(f, data, odr, wsession, compress)
-        write_filter_pipeline_message(cio, compress)
+        Filters.write_filter_pipeline_message(cio, compress)
 
-        write_chunked_storage_message(cio, odr_sizeof(odr), size(data), length(deflated), h5offset(f, f.end_of_data))
+        write_header_message(cio, Val(HmDataLayout);
+            layout_class,
+            # Reversed dimensions with element size as last dim
+            dimensions=UInt64.((reverse(size(data))..., odr_sizeof(odr))),
+            data_size=length(deflated),
+            data_address=h5offset(f, f.end_of_data)
+        )
+
         write_continuation_placeholder(cio)
         jlwrite(f.io, end_checksum(cio))
     

@@ -5,7 +5,8 @@ This module contains the interface for using filters in JLD2.jl.
 """
 module Filters
 
-using JLD2: JLD2, MemoryBackedIO, ensureroom
+using JLD2: JLD2, MemoryBackedIO, ensureroom, Hmessage, HmWrap, HmFilterPipeline, jlread, read_bytestring, HeaderMessage, Length, RelOffset, JLDFile, jlwrite
+
 
 """
     Filter
@@ -64,7 +65,10 @@ Container for a sequence of JLD2 compression filters.
 """
 struct FilterPipeline{T}
     filters::T
-    FilterPipeline(filters::Vararg{<:Filter}) = new{typeof(filters)}(filters)
+    function FilterPipeline(filters::Vararg)
+        @assert all(x -> x isa Filter, filters)
+        new{typeof(filters)}(filters)
+    end
 end
 FilterPipeline(filters::Array{<:Filter}) = FilterPipeline(filters...)
 FilterPipeline(filters::Tuple) = FilterPipeline(filters...)
@@ -182,8 +186,8 @@ function compress(fil::Shuffle, data::Vector{UInt8}, element_size)
     num_elements = data_length ÷ element_size
     data_new = similar(data)
     for n = eachindex(data_new)
-        j = 1 + (n-1)*num_elements
-        i = mod1(j , data_length) + (j-1)÷data_length
+        j = 1 + (n - 1) * num_elements
+        i = mod1(j, data_length) + (j - 1) ÷ data_length
         data_new[i] = data[n]
     end
     return data_new
@@ -194,14 +198,103 @@ function decompress(::Shuffle, data::Vector{UInt8}, data_length, element_size)
     # I'll leave this for someone else to make performant
     @assert data_length == length(data)
     @assert data_length % element_size == 0
-    num_elements =  data_length÷element_size
+    num_elements = data_length ÷ element_size
     data_new = similar(data)
     for n = eachindex(data_new)
-        j = 1 + (n-1)*num_elements
-        i = mod1(j , data_length) + (j-1)÷data_length
+        j = 1 + (n - 1) * num_elements
+        i = mod1(j, data_length) + (j - 1) ÷ data_length
         data_new[n] = data[i]
     end
     return data_new
+end
+
+############################################################################################
+## File level functions
+############################################################################################
+
+struct WrittenFilter
+    id::UInt16
+    flags::UInt16
+    name::String
+    client_data::Vector{UInt32}
+end
+
+struct WrittenFilterPipeline
+    filters::Vector{WrittenFilter}
+end
+
+WrittenFilterPipeline() = WrittenFilterPipeline(WrittenFilter[])
+iscompressed(fp::WrittenFilterPipeline) = !isempty(fp.filters)
+
+function WrittenFilterPipeline(msg_::Hmessage)
+    msg = HmWrap(HmFilterPipeline, msg_)
+    version = msg.version
+    nfilters = msg.nfilters
+    io = msg.m.io
+    seek(io, msg.m.address + 2)
+    version == 1 && skip(io, 6)
+    filters = map(1:nfilters) do _
+        id = jlread(io, UInt16)
+        name_length = (version == 2 && id < 255) ? zero(UInt16) : jlread(io, UInt16)
+        flags = jlread(io, UInt16)
+        nclient_vals = jlread(io, UInt16)
+        name = iszero(name_length) ? "" : read_bytestring(io)
+        skip(io, max(0, name_length - length(name) - 1))
+        client_data = jlread(io, UInt32, nclient_vals)
+        (version == 1 && isodd(nclient_vals)) && skip(io, 4)
+        WrittenFilter(id, flags, name, client_data)
+    end
+    return WrittenFilterPipeline(filters)
+end
+
+FilterPipeline(hm::Hmessage) =
+    FilterPipeline(WrittenFilterPipeline(hm))
+
+FilterPipeline(fp::WrittenFilterPipeline) =
+    FilterPipeline([Filter(fil.id, fil.client_data...) for fil in fp.filters])
+
+
+function pipeline_message_size(fp::FilterPipeline)
+    sz = 4 + 2
+    for filter in fp
+        sz += 6 + 4 * length(Filters.client_values(filter))
+        if filterid(filter) > 255
+            sz += 2
+            fnamelen = length(filtername(filter)) + 1
+            fnamelen += 8 - mod1(fnamelen, 8)
+            sz += fnamelen
+        end
+    end
+    sz
+end
+
+function write_filter_pipeline_message(io, fp::FilterPipeline)
+    hmsize = pipeline_message_size(fp) - 4
+    jlwrite(io, HeaderMessage(HmFilterPipeline, hmsize, 0))
+    jlwrite(io, UInt8(2))                   # Version
+    jlwrite(io, UInt8(length(fp.filters)))  # Number of Filters
+
+    for filter in fp.filters
+        filter_id = filterid(filter)
+        client_data = client_values(filter)
+        if filter_id > 255
+            filter_name = filtername(filter)
+            fnamelen = length(filter_name) + 1
+            fnamelen += 8 - mod1(fnamelen, 8)
+            padding = fnamelen - length(filter_name)
+        end
+        jlwrite(io, filter_id)                # Filter Identification Value
+        filter_id > 255 && jlwrite(io, UInt16(fnamelen))
+        # Length of Filter Name
+        jlwrite(io, UInt16(0))                # Flags
+        jlwrite(io, UInt16(length(client_data))) # Number of Client Data Values
+        filter_id > 255 && jlwrite(io, filter_name) # Filter Name
+        filter_id > 255 && (padding > 0) && jlwrite(io, zeros(UInt8, padding))
+        for v in client_data
+            jlwrite(io, UInt32(v))     # Client Data (Compression Level)
+        end
+    end
+    nothing
 end
 
 end # module

@@ -178,7 +178,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
                  plain::Bool=false
                  ) where T<:Union{Type{IOStream},Type{MmapIO}}
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
-    filters = normalize_filters(compress)
+    filters = Filters.normalize_filters(compress)
 
     # Can only open multiple in parallel if mode is "r"
     if parallel_read && (wr, create, truncate)  != (false, false, false)
@@ -302,7 +302,7 @@ function jldopen(io::IO, writable::Bool, create::Bool, truncate::Bool;
                 compress=false,
                 typemap=default_typemap,
                 )
-    filters = normalize_filters(compress)
+    filters = Filters.normalize_filters(compress)
     # figure out what kind of io object this is
     # for now assume it is
     !io.readable && throw("IO object is not readable")
@@ -349,6 +349,16 @@ function prewrite(f::JLDFile)
     !f.writable && throw(ArgumentError("file was opened read-only"))
     !f.written && load_datatypes(f)
     f.written = true
+end
+
+@nospecializeinfer function Base.write(
+    f::JLDFile,
+    name::AbstractString,
+    @nospecialize(obj),
+    wsession::JLDWriteSession=JLDWriteSession();
+    kwargs...
+)
+    write(f.root_group, name, obj, wsession; kwargs...)
 end
 
 Base.read(f::JLDFile, name::AbstractString) = Base.inferencebarrier(f.root_group[name])
@@ -482,8 +492,10 @@ include("dataspaces.jl")
 include("attributes.jl")
 include("datatypes.jl")
 include("datalayouts.jl")
-include("filters/Filters.jl")
-include("filters/reading_writing_filters.jl")
+
+include("Filters.jl")
+using .Filters: WrittenFilterPipeline, FilterPipeline, iscompressed
+
 include("datasets.jl")
 include("global_heaps.jl")
 include("fractal_heaps.jl")
