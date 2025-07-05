@@ -7,6 +7,7 @@ export load, save
 using ScopedValues: ScopedValue, with
 using PrecompileTools: @setup_workload, @compile_workload
 export jldopen, @load, @save, save_object, load_object, jldsave
+export Shuffle
 
 include("types.jl")
 include("macros_utils.jl")
@@ -494,7 +495,7 @@ include("datatypes.jl")
 include("datalayouts.jl")
 
 include("Filters.jl")
-using .Filters: WrittenFilterPipeline, FilterPipeline, iscompressed
+using .Filters: WrittenFilterPipeline, FilterPipeline, iscompressed, Shuffle
 
 include("datasets.jl")
 include("global_heaps.jl")
@@ -506,6 +507,7 @@ include("data/number_types.jl")
 include("data/custom_serialization.jl")
 include("data/writing_datatypes.jl")
 include("data/reconstructing_datatypes.jl")
+
 
 include("io/dataio.jl")
 include("io/io_wrappers.jl")

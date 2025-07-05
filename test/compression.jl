@@ -1,6 +1,6 @@
 using JLD2, Test, FileIO
 using Pkg: Pkg
-using JLD2Deflate, JLD2Bzip2, JLD2Lz4, JLD2Zstd, JLD2Blosc
+using JLD2Deflate, JLD2Bzip2, JLD2Lz4, JLD2Zstd, JLD2Blosc, JLD2Bitshuffle
 
 
 # This is for testing the different syntax versions as well as the library
@@ -24,36 +24,26 @@ using JLD2Deflate, JLD2Bzip2, JLD2Lz4, JLD2Zstd, JLD2Blosc
 end
 
 
-@testset "Compression with CodecBzip2" begin
+@testset "Compression with Filters" begin
     fn = joinpath(mktempdir(), "test.jld2")
+    filters = [
+        Deflate(),
+        Bzip2Filter(),
+        Lz4Filter(),
+        ZstdFilter(),
+        BloscFilter(),
+        BitshuffleFilter(),
+        [Shuffle(), Deflate()]
+    ]
 
-    randomdata = repeat(rand(2000), 10)
-    @save fn {compress=Bzip2Filter()} randomdata
-
-    r = jldopen(f -> f["randomdata"], fn, "r")
-    @test r == randomdata
+    randomdata = repeat(rand(200), 100)
+    for filter in filters
+        @save fn {compress=filter} randomdata
+        r = jldopen(f -> f["randomdata"], fn, "r")
+        @test r == randomdata
+    end
 end
 
-
-@testset "Compression with CodecLz4" begin
-    fn = joinpath(mktempdir(), "test.jld2")
-
-    randomdata = repeat(rand(2000), 10)
-    @save fn {compress=Lz4Filter()} randomdata
-
-    r = jldopen(f -> f["randomdata"], fn, "r")
-    @test r == randomdata
-end
-
-@testset "Compression with CodecZstd" begin
-    fn = joinpath(mktempdir(), "test.jld2")
-
-    randomdata = repeat(rand(2000), 10)
-    @save fn {compress=ZstdFilter()} randomdata
-
-    r = jldopen(f -> f["randomdata"], fn, "r")
-    @test r == randomdata
-end
 
 @testset "Verify Correctness of Compressor" begin
     fn = joinpath(mktempdir(), "test.jld2")
