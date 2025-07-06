@@ -199,8 +199,6 @@ function decompress(filter::BitshuffleFilter, buf::Vector{UInt8}, args...)
         # Get needed information
         (; major, minor, blocksize, compcode) = filter
         elem_size = filter.typesize
-        @info "Bitshuffle decompressing with $major.$minor, blocksize=$blocksize, compcode=$compcode, elem_size=$elem_size"
-        @info "Bitshuffle comp_lvl $(filter.comp_lvl)"
         if blocksize == 0
             blocksize = ccall(
                 (:bshuf_default_block_size, libbitshuffle), Csize_t, (Csize_t,), elem_size
@@ -213,7 +211,6 @@ function decompress(filter::BitshuffleFilter, buf::Vector{UInt8}, args...)
             nbytes_uncomp = ccall(
                 (:bshuf_read_uint64_BE, libbitshuffle), UInt64, (Ptr{Cvoid},), in_buf
             )
-            @info "Bitshuffle decompressing: nbytes_uncomp=$nbytes_uncomp"
             # Next 4 bytes are the block size
             blocksize =
                 ccall(
@@ -222,7 +219,6 @@ function decompress(filter::BitshuffleFilter, buf::Vector{UInt8}, args...)
                     (Ptr{Cvoid},),
                     in_buf + 8
                 ) ÷ elem_size
-            @info "Bitshuffle decompressing: blocksize=$blocksize"
             in_buf += 12
             buf_size_out = nbytes_uncomp
         else  # No compression required

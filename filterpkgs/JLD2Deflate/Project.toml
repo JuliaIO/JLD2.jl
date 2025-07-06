@@ -8,5 +8,5 @@ CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 
 [compat]
-CodecZlib = "0.7.0"
+CodecZlib = "0.7.8"
 JLD2 = "0.5.15"

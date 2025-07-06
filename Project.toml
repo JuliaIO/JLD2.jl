@@ -30,7 +30,7 @@ BloscExt = "Blosc"
 
 [compat]
 CodecZstd = "0.8"
-CodecZlib = "0.7"
+CodecZlib = "0.7.8"
 Blosc = "0.7.3"
 bitshuffle_jll = "0.5.2"
 CodecLz4 = "0.4.6"
