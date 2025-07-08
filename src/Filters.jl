@@ -181,7 +181,8 @@ function compress(fil::Shuffle, data::Vector{UInt8}, element_size)
     num_elements = data_length ÷ element_size
     data_new = similar(data)
     for n = eachindex(data_new)
-        j = 1 + (n - 1) * num_elements
+        # Throw in an Int64 to avoid overflow on 32bit systems
+        j = 1 + Int64(n - 1) * num_elements
         i = mod1(j, data_length) + (j - 1) ÷ data_length
         data_new[i] = data[n]
     end
@@ -196,7 +197,8 @@ function decompress(::Shuffle, data::Vector{UInt8}, data_length, element_size)
     num_elements = data_length ÷ element_size
     data_new = similar(data)
     for n = eachindex(data_new)
-        j = 1 + (n - 1) * num_elements
+            # Throw in an Int64 to avoid overflow on 32bit systems
+        j = 1 + Int64(n - 1) * num_elements
         i = mod1(j, data_length) + (j - 1) ÷ data_length
         data_new[n] = data[i]
     end
