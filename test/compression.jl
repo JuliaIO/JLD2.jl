@@ -30,7 +30,7 @@ end
         Deflate(),
         Bzip2Filter(),
         Lz4Filter(),
-        Lz4Filter(blocksize=10^5),
+        Lz4Filter(10^5),
         ZstdFilter(),
         BloscFilter(),
         BitshuffleFilter(),
