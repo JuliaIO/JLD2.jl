@@ -6,7 +6,7 @@ type fields.
 
 To enable the default compression, you can write:
 ```julia
-using JLD2, JLD2Deflate
+using JLD2
 save("example.jld2", "large_array", zeros(10000); compress = true)
 ```
 Alternatively use
@@ -32,19 +32,17 @@ These can be used individually and even chained which can be useful for some typ
 The filter used by `compress = true` is the `Deflate()` compression filter.
 
 !!! note
-    The default `Deflate()` compression requires the `JLD2Deflate` package to be installed.
+    The default `Deflate()` compression is always available but all others will need to be
+    installed separately.
     `JLD2` will throw an error if the required filter package is not loaded, prompting
-    you to install and load the appropriate package: `using JLD2, JLD2Deflate`.
+    you to install and load the appropriate package e.g. : `using JLD2, JLD2Blosc`.
 
 ### Installing Filter Packages
 
 To use compression filters, you need to install and load the corresponding packages:
 
 ```julia
-# For default Deflate compression
-using Pkg; Pkg.add("JLD2Deflate")
-using JLD2, JLD2Deflate
-
+using Pkg
 # For other compression algorithms
 Pkg.add(["JLD2Blosc", "JLD2Bzip2", "JLD2Lz4", "JLD2Zstd", "JLD2Bitshuffle"])
 using JLD2, JLD2Blosc  # Load the specific package you need
@@ -59,8 +57,8 @@ The compression filters available for JLD2 are:
 
 | Filter Package | Filter Type       | Notes                                                        |
 |:---------------|:------------------|:-------------------------------------------------------------|
-| JLD2 (builtin) | `Shuffle`         | Rearrangement of bytes useful as a preprocess filter         |
-| JLD2Deflate    | `Deflate`         | Default compression, very widely used, good compatibility    |
+| *built in*     | `Shuffle`         | Rearrangement of bytes useful as a preprocess filter         |
+| *built in*     | `Deflate`         | Default compression, very widely used, good compatibility    |
 | JLD2Blosc      | `BloscFilter`     | High-performance compression with multiple algorithms        |
 | JLD2Bzip2      | `Bzip2Filter`     | Good compression ratio, can be slower                        |
 | JLD2Lz4        | `LZ4Filter`       | Very fast compression/decompression                          |
@@ -99,7 +97,7 @@ This is particularly useful when combining preprocessing filters (like shuffling
 compression filters. Simply provide a vector of filters:
 
 ```julia
-using JLD2, JLD2Deflate
+using JLD2
 
 # Combine Shuffle preprocessing with Deflate compression
 filters = [Shuffle(), Deflate()]
@@ -116,7 +114,7 @@ end
 
 !!! note
     Filters in a pipeline are applied in order during compression and in reverse
-    order during decompression. Preprocessing filters (like Shuffle)
+    order during decompression. Preprocessing filters (like `Shuffle`)
     should typically come before compression filters.
 
 !!! note
@@ -161,7 +159,7 @@ that for others it is not worth the effort. For precise control, the
 settings.
 
 ```julia
-using JLD2, JLD2Deflate, JLD2Blosc
+using JLD2, JLD2Blosc
 
 jldopen("example.jld2", "w") do f
     # This can be efficiently compressed → use compression
@@ -194,21 +192,22 @@ For code migration, the main change is in how you specify compression filters:
 # jldopen("file.jld2", "w"; compress = ZlibCompressor()) do f
 
 # New API
-using JLD2, JLD2Deflate
+using JLD2
 jldopen("file.jld2", "w"; compress = Deflate()) do f
     # ...
 end
 ```
 
-The simplest usage option of `compress=true` still works, provided that you load
-`JLD2Deflate`.
+The simplest usage option of `compress=true` still works as before.
 
 
 ### API Docstrings
 
 ```@docs
 JLD2.Filters
+JLD2.Filters.Deflate
+JLD2.Filters.Shuffle
 JLD2.Filters.filtername
 JLD2.Filters.filterid
-JLD2.Filters.Shuffle
+
 ```

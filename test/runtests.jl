@@ -4,7 +4,6 @@ using Test
 using Pkg
 filterpath = joinpath(pkgdir(JLD2), "filterpkgs")
 Pkg.develop([
-    PackageSpec(name="JLD2Deflate", path=joinpath(filterpath, "JLD2Deflate")),
     PackageSpec(name="JLD2Bzip2", path=joinpath(filterpath, "JLD2Bzip2")),
     PackageSpec(name="JLD2Lz4", path=joinpath(filterpath, "JLD2Lz4")),
     PackageSpec(name="JLD2Zstd", path=joinpath(filterpath, "JLD2Zstd")),
@@ -12,8 +11,6 @@ Pkg.develop([
     PackageSpec(name="JLD2Bitshuffle", path=joinpath(filterpath, "JLD2Bitshuffle")),
 ])
 
-
-using JLD2Deflate
 
 function better_success(cmd)
     fn1, _ = mktemp()

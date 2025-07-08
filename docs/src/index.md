@@ -14,7 +14,6 @@ JLD2 stands for **Julia Data Format 2**, a file format and serialization library
 
 * ✅ **Save and load any Julia type**, including custom structs
 * ✅ **Fast and efficient**, thanks to native Julia code
-* ✅ **No external dependencies** — no need for HDF5 or C libraries
 * ✅ **Custom IO support** — can read and write to either `Vector{UInt8}` or custom IO implementations
 * ✅ **Portable within Julia versions** — great for caching, prototyping, and long-term storage
 * ✅ **Customizable type loading** — offers fine-grained control to update outdated stored structures upon load

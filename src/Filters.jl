@@ -104,7 +104,7 @@ end
 
 # For loading need filter_ids as keys
 const KNOWN_FILTERS = Dict(
-    UInt16(1) => ("Deflate", "JLD2Deflate"),
+    UInt16(1) => ("Deflate", "JLD2"),
     UInt16(2) => ("Shuffle", "JLD2"),
     UInt16(307) => ("Bzip2Filter", "JLD2Bzip2"),
     UInt16(32001) => ("BloscFilter", "JLD2Blosc"),
@@ -135,12 +135,7 @@ function normalize_filters(compress)
     if compress isa Bool && compress == false
         return FilterPipeline(())
     elseif compress isa Bool && compress == true
-        if !haskey(FILTERS, UInt16(1))
-            throw(ArgumentError("""
-                Default compresssion filter (Deflate) is not available.
-                Make sure to install and load the JLD2Deflate package."""))
-        end
-        return FilterPipeline(Filter(1))
+        return FilterPipeline(Deflate())
     elseif compress isa FilterPipeline
         return compress
     elseif compress isa Filter
@@ -206,6 +201,40 @@ function decompress(::Shuffle, data::Vector{UInt8}, data_length, element_size)
         data_new[n] = data[i]
     end
     return data_new
+end
+
+
+##############################################################################
+## Deflate Filter implementation
+##############################################################################
+using CodecZlib: CodecZlib
+
+"""
+    Deflate <: Filter
+
+The Deflate filter can be used to compress datasets.
+It uses the well-known and widely used zlib (deflate) compression algorithm.
+"""
+struct Deflate <: Filter
+    level::Cuint
+    Deflate(level=5) = new(clamp(level, 0, 9))
+end
+
+filterid(::Type{Deflate}) = UInt16(1)
+filtername(::Type{Deflate}) = ""
+client_values(filter::Deflate) = (filter.level, )
+__init__() = register_filter(Deflate)
+
+function compress(filter::Deflate, buf::Vector{UInt8}, args...)
+    CodecZlib.transcode(
+        CodecZlib.ZlibCompressor(; filter.level),
+        buf)
+end
+
+function decompress(::Deflate, buf::Vector{UInt8}, args...)
+    CodecZlib.transcode(
+        CodecZlib.ZlibDecompressor(),
+        buf)
 end
 
 ############################################################################################

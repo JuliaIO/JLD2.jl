@@ -1,10 +1,10 @@
 using JLD2, Test, FileIO
 using Pkg: Pkg
-using JLD2Deflate, JLD2Bzip2, JLD2Lz4, JLD2Zstd, JLD2Blosc, JLD2Bitshuffle
+using JLD2Bzip2, JLD2Lz4, JLD2Zstd, JLD2Blosc, JLD2Bitshuffle
 
 
 # This is for testing the different syntax versions as well as the library
-@testset "Compression with CodecZlib" begin
+@testset "Compression with Deflate" begin
     fn = joinpath(mktempdir(), "test.jld2")
 
     randomdata = repeat(rand(2000), 10)
