@@ -30,9 +30,12 @@ end
         Deflate(),
         Bzip2Filter(),
         Lz4Filter(),
+        Lz4Filter(blocksize=10^5),
         ZstdFilter(),
         BloscFilter(),
         BitshuffleFilter(),
+        BitshuffleFilter(compressor=:lz4),
+        BitshuffleFilter(compressor=:zstd),
         [Shuffle(), Deflate()]
     ]
 
