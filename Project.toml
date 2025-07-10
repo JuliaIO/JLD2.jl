@@ -12,7 +12,7 @@ PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 ScopedValues = "7e506255-f358-4e82-b7e4-beb19740aa63"
 
 [weakdeps]
-Blosc = "a74b3585-a348-5f62-a45c-50e91977d574"
+ChunkCodecLibBlosc = "c6a955be-ab7f-4fbb-b38f-caf93db6b928"
 ChunkCodecLibLz4 = "7e9cc85e-5614-42a3-ad86-b78f920b38a5"
 CodecBzip2 = "523fee87-0ab8-5b00-afb7-3ecf72e48cfd"
 CodecZstd = "6b39b394-51ab-5f42-8807-6242bab2b4c2"
@@ -20,7 +20,7 @@ UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 bitshuffle_jll = "228fe19c-1b83-5282-a626-13744502a320"
 
 [extensions]
-BloscExt = "Blosc"
+BloscExt = "ChunkCodecLibBlosc"
 Lz4Ext = "ChunkCodecLibLz4"
 CodecBzip2Ext = "CodecBzip2"
 CodecZstdExt = "CodecZstd"
@@ -28,7 +28,7 @@ UnPackExt = "UnPack"
 bitshuffle_jllExt = "bitshuffle_jll"
 
 [compat]
-Blosc = "0.7.3"
+ChunkCodecLibBlosc = "0.2.0"
 ChunkCodecLibLz4 = "0.2.1"
 CodecBzip2 = "0.8.5"
 CodecZlib = "0.7.8"

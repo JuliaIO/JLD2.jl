@@ -9,7 +9,7 @@ BloscExt. Loading this package will load the package extension.
 module JLD2Blosc
 
 using JLD2: JLD2
-using Blosc: Blosc, SHUFFLE, BITSHUFFLE, NOSHUFFLE
+using ChunkCodecLibBlosc: ChunkCodecLibBlosc
 const BloscExt = Base.get_extension(JLD2, :BloscExt)
 
 using .BloscExt: BloscFilter
