@@ -1,3 +1,6 @@
+## 0.5.16
+ - Improve `readmmap` to work on more types and misaligned data
+
 ## 0.5.15
  - Add full control over type mapping by providing a typemap function
 
