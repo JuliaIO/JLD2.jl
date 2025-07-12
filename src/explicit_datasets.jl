@@ -428,10 +428,11 @@ function readmmap(dset::Dataset)
     dims = reverse([jlread(io, Int64) for i in 1:ndims])
     iobackend = io isa IOStream ? io : io.f
     seek(iobackend, DataLayout(f, dset.layout).data_offset)
-
-    if (data_offset % 8 == 0) ||
-       (data_offset % 2 == 0 && sizeof(T) == 2) ||
-       (data_offset % 4 == 0 && sizeof(T) == 4) ||
+    # May be pos != data_offset for files with custom offset
+    pos = position(iobackend)
+    if (pos % 8 == 0) ||
+       (pos % 2 == 0 && sizeof(T) == 2) ||
+       (pos % 4 == 0 && sizeof(T) == 4) ||
        (sizeof(T) == 1)
         # These are cases where we can directly mmap the data.
         Mmap.mmap(iobackend, Array{T,Int(ndims)}, dims)
