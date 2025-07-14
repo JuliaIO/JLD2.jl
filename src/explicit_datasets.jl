@@ -435,7 +435,7 @@ function readmmap(dset::Dataset)
        (pos % 4 == 0 && sizeof(T) == 4) ||
        (sizeof(T) == 1)
         # These are cases where we can directly mmap the data.
-        Mmap.mmap(iobackend, Array{T,Int(ndims)}, dims)
+        Mmap.mmap(iobackend, Array{T,Int(ndims)}, (dims...,))
     else
         # A fallback for all other cases is to mmap the data as UInt8 and reinterpret it.
         reinterpret(reshape, T,
