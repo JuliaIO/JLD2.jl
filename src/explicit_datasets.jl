@@ -79,7 +79,11 @@ function Base.show(io::IO, ::MIME"text/plain", dset::Dataset)
         ds = dset.dataspace
         if ds isa HmWrap{HmDataspace}#Hmessage
             println(io, prefix*"dataspace:")
-            spacetype = ("Scalar", "Simple", "Null", "V1")[Int(ds.dataspace_type)+1]
+            spacetype = Dict(
+                0x00=>"Scalar",
+                0x01=>"Simple",
+                0x02=>"Null",
+                0xff=>"V1")[ds.dataspace_type]
             println(io, prefix*"\ttype: $(spacetype)")
             println(io, prefix*"\tdimensions: $(ds.dimensions)")
         else
@@ -437,9 +441,10 @@ function readmmap(dset::Dataset)
         # These are cases where we can directly mmap the data.
         Mmap.mmap(iobackend, Array{T,Int(ndims)}, (dims...,))
     else
+        dims[1] *= sizeof(T)
         # A fallback for all other cases is to mmap the data as UInt8 and reinterpret it.
-        reinterpret(reshape, T,
-            Mmap.mmap(iobackend, Array{UInt8,Int(ndims) + 1}, (sizeof(T), dims...);)
+        reinterpret(T,
+            Mmap.mmap(iobackend, Array{UInt8,Int(ndims)}, (dims...);)
         )
     end
 end
