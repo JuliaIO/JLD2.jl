@@ -280,13 +280,16 @@ end
 To choose the io type `IOStream` instead of the default `MmapIO` use 
 `jldsave(fn, IOStream; kwargs...)`.
 """
-@nospecializeinfer function jldsave(filename::AbstractString, compress=false, iotype::Union{Type{IOStream},Type{MmapIO}}=DEFAULT_IOTYPE; 
+@nospecializeinfer function jldsave(
+filename::AbstractString,
+compress=false,
+iotype::Union{Type{IOStream},Type{MmapIO}}=default_iotype(); 
                     @nospecialize(kwargs...)
                     )
     f = jldopen(filename, "w"; compress, iotype)
     try
         wsession = JLDWriteSession()
-        for (k,v) in pairs(kwargs)
+        for (k, v) in pairs(kwargs)
             write(f, string(k), v, wsession)
         end
     finally

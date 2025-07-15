@@ -1,3 +1,6 @@
+## 0.5.16
+ - Make default iotype selection dynamic. Makes precompile files relocatable to win7. (#632)
+
 ## 0.5.15
  - Add full control over type mapping by providing a typemap function
 
