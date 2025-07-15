@@ -9,7 +9,7 @@ function track_weakref!(f::JLDFile, header_offset::RelOffset, @nospecialize v)
 end
 
 function track_weakref_if_untracked!(f::JLDFile, header_offset::RelOffset, @nospecialize v)
-    if header_offset !== NULL_REFERENCE 
+    if header_offset !== NULL_REFERENCE
         if !haskey(f.jloffset, header_offset) || isnothing(f.jloffset[header_offset].value)
             f.jloffset[header_offset] = WeakRef(v)
         end
@@ -59,7 +59,7 @@ function samelayout(@nospecialize(T::DataType))::Bool
         !samelayout(ty) && return false
         offset += sizeof(ty)
     end
-    return offset == sizeof(T)
+    return offset == Base.aligned_sizeof(T)
 end
 samelayout(::Type) = false
 
@@ -175,7 +175,7 @@ check_writtenas_type(::Any) = throw(ArgumentError("writeas(leaftype) must return
             anynondefault = true
             continue
         end
-        
+
         if isa(dtype, CommittedDatatype)
             # HDF5 cannot store relationships among committed
             # datatypes. We store these separately in an attribute.
@@ -387,7 +387,7 @@ function h5fieldtype(f::JLDFile, ::Type{T}, readas::Type, ::Initialized) where T
         @lookup_committed f readas
         return commit(f, H5TYPE_DATATYPE, DataType, readas)
     end
-    
+
     @lookup_committed f DataType
     io = f.io
     offset = f.end_of_data
@@ -472,7 +472,7 @@ function h5convert!(out::Pointers, ::Type{DataTypeODR}, f::JLDFile, T::Type{<: N
             # this also catches NTuples with indeterminate length
             refs = refs_from_types(f, params, wsession)
             store_vlen!(out+odr_sizeof(Vlen{UInt8}), RelOffset, f, refs, f.datatype_wsession)
-        end     
+        end
     else # actual NTuple with more than one entry
         store_vlen!(out, UInt8, f, unsafe_wrap(Vector{UInt8}, "NTuple"), f.datatype_wsession)
         ET = params[1] # T === Tuple{ET,ET,ET,...}
