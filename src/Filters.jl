@@ -6,7 +6,7 @@ This module contains the interface for using filters in JLD2.jl.
 module Filters
 
 using JLD2: JLD2, MemoryBackedIO, ensureroom, Hmessage, HmWrap, HmFilterPipeline, jlread, read_bytestring, HeaderMessage, Length, RelOffset, JLDFile, jlwrite
-
+using JLD2: odr_sizeof, h5convert!
 
 """
     Filter
@@ -14,13 +14,6 @@ using JLD2: JLD2, MemoryBackedIO, ensureroom, Hmessage, HmWrap, HmFilterPipeline
 Abstract type to describe HDF5 Filters.
 """
 abstract type Filter end
-
-"""
-    FILTERS
-
-Maps filter id to filter type.
-"""
-const FILTERS = Dict{UInt16,Type{<:Filter}}()
 
 """
     filterid(F) where {F <: Filter}
@@ -48,15 +41,14 @@ Depending on the filter type, this may include something like a compression leve
 client_values(::Filter) = ()
 
 """
-    register_filter(::Type{F}) where F <: Filter
+    filtertype(id)
 
-Register a filter with JLD2.
+Retrive the filter type for a given id.
 """
-function register_filter(::Type{F}) where {F<:Filter}
-    id = filterid(F)
-    FILTERS[id] = F
-    return nothing
-end
+function filtertype end
+filtertype(id::Integer) = filtertype(Val(Int(id)))
+filtertype(::Val) = nothing
+
 
 """
     FilterPipeline(filters)
@@ -76,11 +68,36 @@ FilterPipeline(filters::Tuple) = FilterPipeline(filters...)
 iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
 Base.iterate(fp::FilterPipeline, state=1) = iterate(fp.filters, state)
 
-function compress(fp::FilterPipeline, buf::Vector{UInt8}, elsize)
-    for filter in fp
-        buf = compress(filter, buf, elsize)
+function compress(fp::FilterPipeline, data, odr, f::JLDFile, wsession)
+    fil, fil_rest... = fp
+    buf = compress(fil, data, odr, f, wsession)
+    for fil in fil_rest
+        buf = compress(fil, buf, odr_sizeof(odr))
     end
     buf
+end
+
+# General case: serialize data to a buffer, then compress it
+function compress(filter::Filter, data::Array{T}, odr::S, f::JLDFile, wsession) where {T,S}
+    buf = Vector{UInt8}(undef, odr_sizeof(odr) * length(data))
+    cp = Ptr{Cvoid}(pointer(buf))
+    @simd for i = 1:length(data)
+        @inbounds h5convert!(cp, odr, f, data[i], wsession)
+        cp += odr_sizeof(odr)
+    end
+    compress(filter, buf, odr_sizeof(odr))
+end
+
+# Special case of `samelayout` data: Use unsafe_wrap to avoid copying
+function compress(filter::Filter, data::Array{T}, odr::T, f::JLDFile, wsession) where {T}
+    GC.@preserve data begin
+        buf = unsafe_wrap(
+            Vector{UInt8},
+            Ptr{UInt8}(pointer(data)),
+            odr_sizeof(odr) * length(data)
+        )
+        return compress(filter, buf, odr_sizeof(odr))
+    end
 end
 
 function decompress(filter::FilterPipeline, io::IO, data_length, elsize)
@@ -110,26 +127,8 @@ const KNOWN_FILTERS = Dict(
     UInt16(32001) => ("BloscFilter", "JLD2Blosc"),
     UInt16(32004) => ("LZ4Filter", "JLD2Lz4"),
     UInt16(32008) => ("BitshuffleFilter", "JLD2Bitshuffle"),
-    UInt16(32015) => ("ZstdFilter", "JLD2Zstd"),
+    UInt16(32015) => ("ZstdFilter", "JLD2"),
 )
-
-function Filter(id, args...)
-    F = get(FILTERS, id, nothing)
-    if isnothing(F)
-        if haskey(KNOWN_FILTERS, id)
-            fil, pkg = KNOWN_FILTERS[id]
-            throw(ArgumentError("""
-            Written dataset is encoded with filter $(fil) from package $(pkg).
-            Make sure to load the package before reading the dataset.
-            """))
-        else
-            throw(ArgumentError("""
-            Written dataset is encoded with unknown filter with id $(id).
-            """))
-        end
-    end
-    return F(args...)
-end
 
 function normalize_filters(compress)
     if compress isa Bool && compress == false
@@ -170,7 +169,7 @@ end
 Shuffle() = Shuffle(0)
 filterid(::Type{Shuffle}) = UInt16(2)
 client_values(filter::Shuffle) = (filter.element_size,)
-register_filter(Shuffle)
+filtertype(::Val{2}) = Shuffle
 
 function compress(fil::Shuffle, data::Vector{UInt8}, element_size)
     fil.element_size = element_size
@@ -181,7 +180,7 @@ function compress(fil::Shuffle, data::Vector{UInt8}, element_size)
     num_elements = data_length ÷ element_size
     data_new = similar(data)
     for n = eachindex(data_new)
-        # Throw in an Int64 to avoid overflow on 32bit systems
+        # Convert to an Int64 to avoid overflow on 32bit systems
         j = 1 + Int64(n - 1) * num_elements
         i = mod1(j, data_length) + (j - 1) ÷ data_length
         data_new[i] = data[n]
@@ -197,7 +196,7 @@ function decompress(::Shuffle, data::Vector{UInt8}, data_length, element_size)
     num_elements = data_length ÷ element_size
     data_new = similar(data)
     for n = eachindex(data_new)
-            # Throw in an Int64 to avoid overflow on 32bit systems
+            # Convert to an Int64 to avoid overflow on 32bit systems
         j = 1 + Int64(n - 1) * num_elements
         i = mod1(j, data_length) + (j - 1) ÷ data_length
         data_new[n] = data[i]
@@ -209,13 +208,17 @@ end
 ##############################################################################
 ## Deflate Filter implementation
 ##############################################################################
-using CodecZlib: CodecZlib
+using ChunkCodecLibZlib: ZlibEncodeOptions, ZlibDecodeOptions, encode, decode
 
 """
     Deflate <: Filter
 
 The Deflate filter can be used to compress datasets.
 It uses the well-known and widely used zlib (deflate) compression algorithm.
+
+## Arguments:
+- `level`: Compression level, between 0 and 9. Default is 5.
+Larger numbers lead to better compression, but also to longer runtime.
 """
 struct Deflate <: Filter
     level::Cuint
@@ -225,22 +228,54 @@ end
 filterid(::Type{Deflate}) = UInt16(1)
 filtername(::Type{Deflate}) = ""
 client_values(filter::Deflate) = (filter.level, )
-__init__() = register_filter(Deflate)
+filtertype(::Val{1}) = Deflate
 
 function compress(filter::Deflate, buf::Vector{UInt8}, args...)
-    CodecZlib.transcode(
-        CodecZlib.ZlibCompressor(; filter.level),
-        buf)
+    encode(ZlibEncodeOptions(; filter.level), buf)
 end
 
 function decompress(::Deflate, buf::Vector{UInt8}, args...)
-    CodecZlib.transcode(
-        CodecZlib.ZlibDecompressor(),
-        buf)
+    decode(ZlibDecodeOptions(), buf)
 end
 
+##############################################################################
+## Zstd Filter implementation
+##############################################################################
+using ChunkCodecLibZstd: ChunkCodecLibZstd, ZstdEncodeOptions, ZstdDecodeOptions
+
+"""
+    ZstdFilter <: Filter
+
+The ZstdFilter can be used to compress datasets using the Zstandard compression algorithm.
+
+## Arguments:
+- `level`: Compression level, between 1 and 22.
+Larger numbers lead to better compression, but also to longer runtime.
+
+"""
+struct ZstdFilter <: Filter
+    level::Cuint
+    ZstdFilter(level=ChunkCodecLibZstd.ZSTD_defaultCLevel()) =
+        new(clamp(level,
+            ChunkCodecLibZstd.ZSTD_minCLevel(),
+            ChunkCodecLibZstd.ZSTD_maxCLevel()
+        )
+        )
+end
+
+filterid(::Type{ZstdFilter}) = UInt16(32015)
+filtername(::Type{ZstdFilter}) = "Zstandard compression: http://www.zstd.net"
+client_values(filter::ZstdFilter) = (filter.level, )
+filtertype(::Val{32015}) = ZstdFilter
+
+compress(filter::ZstdFilter, buf::Vector{UInt8}, args...) =
+    encode(ZstdEncodeOptions(; filter.level), buf)
+
+decompress(::ZstdFilter, buf::Vector{UInt8}, args...) =
+    decode(ZstdDecodeOptions(), buf)
+
 ############################################################################################
-## File level functions
+## Intermediate representation and reading/writing of filter pipelines to file
 ############################################################################################
 
 struct WrittenFilter
@@ -282,7 +317,28 @@ FilterPipeline(hm::Hmessage) =
     FilterPipeline(WrittenFilterPipeline(hm))
 
 FilterPipeline(fp::WrittenFilterPipeline) =
-    FilterPipeline([Filter(fil.id, fil.client_data...) for fil in fp.filters])
+    FilterPipeline([Filter(fil) for fil in fp.filters])
+
+
+function Filter(fil::WrittenFilter)
+    F = filtertype(fil.id)
+    if isnothing(F)
+        if haskey(KNOWN_FILTERS, id)
+            fil, pkg = KNOWN_FILTERS[id]
+            throw(ArgumentError("""
+            Written dataset is encoded with filter $(fil) from package $(pkg).
+            Make sure to load the package before reading the dataset.
+            """))
+        else
+            throw(ArgumentError("""
+            Written dataset is encoded with unknown filter with id $(id) and
+            description "$(fil.name)".
+            If you think this is a bug, please open an issue at https://github.com/JuliaIO/JLD2.jl/
+            """))
+        end
+    end
+    return F(fil.client_data...)
+end
 
 
 function pipeline_message_size(fp::FilterPipeline)

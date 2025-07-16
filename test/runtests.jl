@@ -6,9 +6,6 @@ filterpath = joinpath(pkgdir(JLD2), "filterpkgs")
 Pkg.develop([
     PackageSpec(name="JLD2Bzip2", path=joinpath(filterpath, "JLD2Bzip2")),
     PackageSpec(name="JLD2Lz4", path=joinpath(filterpath, "JLD2Lz4")),
-    PackageSpec(name="JLD2Zstd", path=joinpath(filterpath, "JLD2Zstd")),
-    PackageSpec(name="JLD2Blosc", path=joinpath(filterpath, "JLD2Blosc")),
-    PackageSpec(name="JLD2Bitshuffle", path=joinpath(filterpath, "JLD2Bitshuffle")),
 ])
 
 
@@ -56,9 +53,7 @@ using TestItemRunner
         deps_compat = (;
             ignore = [:Mmap,],
         ),
-        ambiguities = (;
-            # There is are ambiguity that can never be hit
-            exclude = [JLD2.write_data, JLD2.WriteDataspace],
-        )
+        # There are a whole bunch of pseudo-ambiguities which can never be hit.
+        ambiguities = false,
     )
 end

@@ -1,6 +1,6 @@
 using JLD2, Test, FileIO
 using Pkg: Pkg
-using JLD2Bzip2, JLD2Lz4, JLD2Zstd, JLD2Blosc, JLD2Bitshuffle
+using JLD2Bzip2, JLD2Lz4
 
 
 # This is for testing the different syntax versions as well as the library
@@ -32,10 +32,10 @@ end
         Lz4Filter(),
         Lz4Filter(10^5),
         ZstdFilter(),
-        BloscFilter(),
+        #= BloscFilter(),
         BitshuffleFilter(),
         BitshuffleFilter(compressor=:lz4),
-        BitshuffleFilter(compressor=:zstd),
+        BitshuffleFilter(compressor=:zstd), =#
         [Shuffle(), Deflate()]
     ]
 

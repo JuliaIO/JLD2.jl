@@ -28,7 +28,7 @@ function load_dataset(f::JLDFile{IO}, offset::RelOffset) where IO
         elseif msg.type == HmFilterPipeline
             filter_pipeline = FilterPipeline(msg)
         elseif msg.type == HmAttribute
-            isempty(attrs) && (attrs = ReadAttribute[]) 
+            isempty(attrs) && (attrs = ReadAttribute[])
             push!(attrs, read_attribute(f, msg))
         elseif (msg.hflags & 2^3) != 0
             throw(UnsupportedFeatureException())
@@ -60,7 +60,7 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
 """
 @nospecializeinfer function read_data(f::JLDFile, dataspace::ReadDataspace,
                    @nospecialize(dt::H5Datatype),
-                   layout::DataLayout, 
+                   layout::DataLayout,
                    filters::FilterPipeline=FilterPipeline(),
                    header_offset::RelOffset=NULL_REFERENCE,
                    attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
@@ -198,7 +198,7 @@ function get_ndims_offset(f::JLDFile, dataspace::ReadDataspace, attributes::Abst
             if x.name == :dimensions
                 (x.dataspace.dataspace_type == DS_SIMPLE &&
                  x.dataspace.dimensionality == 1) || throw(InvalidDataException())
-                x.datatype == h5fieldtype(f, Int64, Int64, Val{true}) || throw(UnsupportedFeatureException())             
+                x.datatype == h5fieldtype(f, Int64, Int64, Val{true}) || throw(UnsupportedFeatureException())
                 seek(f.io, x.dataspace.dimensions_offset)
                 ndims = UInt8(jlread(f.io, Length))
                 offset = x.data_offset
@@ -253,7 +253,7 @@ end
         if layout.version == 3
             # version 1 B-tree
             # This version appears to be padding incomplete chunks
-            chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)                
+            chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)
             vchunk = Array{T, Int(ndims)}(undef, reverse(layout.chunk_dimensions)...)
             for chunk in chunks
                 cidx = chunk.idx::NTuple{Int(ndims+1), Int}
@@ -261,11 +261,11 @@ end
                 seek(io, fileoffset(f, chunk.offset))
                 indexview =  (:).(idx .+1, min.(idx .+ reverse(layout.chunk_dimensions), size(v)))
                 indexview2 = (:).(1, length.(indexview))
-        
+
                 if iscompressed(filters)
                     if chunk.filter_mask == 0
                         read_compressed_array!(vchunk, f, rr, chunk.chunk_size, filters)
-                        v[indexview...] = @view vchunk[indexview2...]    
+                        v[indexview...] = @view vchunk[indexview2...]
                     else
                         if length(filters.filters) == 1
                             read_array!(vchunk, f, rr)
@@ -303,11 +303,11 @@ function payload_size_without_storage_message(dataspace::WriteDataspace, datatyp
     sz
 end
 
-@nospecializeinfer function write_dataset(f::JLDFile, 
-        dataspace::WriteDataspace, 
-        datatype::H5Datatype, 
-        @nospecialize(odr), 
-        @nospecialize(data), 
+@nospecializeinfer function write_dataset(f::JLDFile,
+        dataspace::WriteDataspace,
+        datatype::H5Datatype,
+        @nospecialize(odr),
+        @nospecialize(data),
         wsession::JLDWriteSession,
         @nospecialize(compress = f.compress),)
     io = f.io
@@ -360,30 +360,28 @@ end
         jlwrite(io, end_checksum(cio))
     elseif layout_class == LcChunked
 
-        # Note: deflate_data updates the Shuffle filter's element size field
-        # that is (only) used within write_filter_pipeline_message
-        # (if the Shuffle filter is used)
-        # The order of the two functions is therefore important
-        deflated = deflate_data(f, data, odr, wsession, compress)
+        # Note: Filters.compress may modify the internal state of the filters.
+        # Therefore, it must be called before writing the filter pipeline message.
+        compressed = Filters.compress(compress, data, odr, f, wsession)
         Filters.write_filter_pipeline_message(cio, compress)
 
         write_header_message(cio, Val(HmDataLayout);
             layout_class,
             # Reversed dimensions with element size as last dim
             dimensions=UInt64.((reverse(size(data))..., odr_sizeof(odr))),
-            data_size=length(deflated),
+            data_size=length(compressed),
             data_address=h5offset(f, f.end_of_data)
         )
 
         write_continuation_placeholder(cio)
         jlwrite(f.io, end_checksum(cio))
-    
+
         seek(f.io, f.end_of_data)
-        f.end_of_data += length(deflated)
-        jlwrite(f.io, deflated)
+        f.end_of_data += length(compressed)
+        jlwrite(f.io, compressed)
     else
         data_address = f.end_of_data + 8 - mod1(f.end_of_data, 8)
-        write_header_message(cio, Val(HmDataLayout); 
+        write_header_message(cio, Val(HmDataLayout);
             layout_class, data_address=h5offset(f, data_address), data_size=datasz)
         write_continuation_placeholder(cio)
         jlwrite(io, end_checksum(cio))

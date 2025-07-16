@@ -7,7 +7,7 @@ export load, save
 using ScopedValues: ScopedValue, with
 using PrecompileTools: @setup_workload, @compile_workload
 export jldopen, @load, @save, save_object, load_object, jldsave
-export Shuffle, Deflate
+export Shuffle, Deflate, ZstdFilter
 
 include("types.jl")
 include("macros_utils.jl")
@@ -495,7 +495,8 @@ include("datatypes.jl")
 include("datalayouts.jl")
 
 include("Filters.jl")
-using .Filters: WrittenFilterPipeline, FilterPipeline, iscompressed, Shuffle, Deflate
+using .Filters: WrittenFilterPipeline, FilterPipeline, iscompressed
+using .Filters: Shuffle, Deflate, ZstdFilter
 
 include("datasets.jl")
 include("global_heaps.jl")

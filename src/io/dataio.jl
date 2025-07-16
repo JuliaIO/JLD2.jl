@@ -299,15 +299,3 @@ function read_compressed_array!(
     seek(io, data_offset + data_length)
     v
 end
-
-function deflate_data(f::JLDFile, data::Array{T}, odr::S, wsession, filter) where {T,S}
-    buf = Vector{UInt8}(undef, odr_sizeof(odr) * length(data))
-
-    cp = Ptr{Cvoid}(pointer(buf))
-    @simd for i = 1:length(data)
-        @inbounds h5convert!(cp, odr, f, data[i], wsession)
-        cp += odr_sizeof(odr)
-    end
-
-    Filters.compress(filter, buf, odr_sizeof(odr))
-end

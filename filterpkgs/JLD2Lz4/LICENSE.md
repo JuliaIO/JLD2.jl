@@ -1,4 +1,4 @@
-JLD2Lz4 - Transitional package to JLD2/CodecLz4Ext.
+JLD2Lz4
 Provides the HDF5 lz4 filter as a compression option for JLD2.
 
 Copyright (c) 2025: Jonas Isensee and contributors: https://github.com/JuliaIO/JLD2.jl/contributors
