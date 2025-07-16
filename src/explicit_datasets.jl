@@ -79,7 +79,11 @@ function Base.show(io::IO, ::MIME"text/plain", dset::Dataset)
         ds = dset.dataspace
         if ds isa HmWrap{HmDataspace}#Hmessage
             println(io, prefix*"dataspace:")
-            spacetype = ("Scalar", "Simple", "Null", "V1")[Int(ds.dataspace_type)+1]
+            spacetype = Dict(
+                0x00=>"Scalar",
+                0x01=>"Simple",
+                0x02=>"Null",
+                0xff=>"V1")[ds.dataspace_type]
             println(io, prefix*"\ttype: $(spacetype)")
             println(io, prefix*"\tdimensions: $(ds.dimensions)")
         else
@@ -374,10 +378,9 @@ end
 Check if a dataset can be memory-mapped. This can be useful for large arrays and for editing written arrays.
 
 An Array dataset may be mmapped if:
-    - `JLD2.samelayout(T) == true`: The element type is `isbits` and has a size that is a multiple of 8 bytes.
+    - `JLD2.samelayout(T) == true`: The element type is `isbits` and has a size that either 1, 2, 4, or a multiple of 8 bytes.
     - Uncompressed: Compressed arrays cannot be memory-mapped
     - Uses a contiguous layout: This is true for all array datasets written by JLD2 with version ≥ v0.4.52
-    - Offset in file is a multiple of 8 bytes: This is a requirement for Mmap.
     - Windows: The file must be opened in read-only mode. This is a limitation of Mmap on Windows.
 """
 function ismmappable(dset::Dataset)
@@ -418,10 +421,24 @@ function readmmap(dset::Dataset)
 
     io = f.io
     seek(io, offset)
-    dims = [jlread(io, Int64) for i in 1:ndims]
+    dims = reverse([jlread(io, Int64) for i in 1:ndims])
     iobackend = io isa IOStream ? io : io.f
     seek(iobackend, DataLayout(f, dset.layout).data_offset)
-    return Mmap.mmap(iobackend, Array{T, Int(ndims)}, (reverse(dims)..., ))
+    # May be pos != data_offset for files with custom offset
+    pos = position(iobackend)
+    if (pos % 8 == 0) ||
+       (pos % 2 == 0 && sizeof(T) == 2) ||
+       (pos % 4 == 0 && sizeof(T) == 4) ||
+       (sizeof(T) == 1)
+        # These are cases where we can directly mmap the data.
+        Mmap.mmap(iobackend, Array{T,Int(ndims)}, (dims...,))
+    else
+        dims[1] *= sizeof(T)
+        # A fallback for all other cases is to mmap the data as UInt8 and reinterpret it.
+        reinterpret(T,
+            Mmap.mmap(iobackend, Array{UInt8,Int(ndims)}, (dims...);)
+        )
+    end
 end
 
 @static if !Sys.iswindows()

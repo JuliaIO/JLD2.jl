@@ -19,9 +19,9 @@ include("Lookup3.jl")
 include("superblock.jl")
 include("misc.jl")
 
-is_win7() = Sys.iswindows() && Sys.windows_version().major <= 6 && Sys.windows_version().minor <= 1
 # Windows 7 doesn't support mmap, falls back to IOStream
-const DEFAULT_IOTYPE = is_win7() ? IOStream : MmapIO
+is_win7() = Sys.iswindows() && Sys.windows_version().major <= 6 && Sys.windows_version().minor <= 1
+default_iotype() = is_win7() ? IOStream : MmapIO
 
 """
     Group(file::JLDFile, name::String)
@@ -170,19 +170,22 @@ FallbackType(::Type{IOStream}) = nothing
 
 const OPEN_FILES = Dict{String,WeakRef}()
 const OPEN_FILES_LOCK = ReentrantLock()
-function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, iotype::T=DEFAULT_IOTYPE;
-                 fallback::Union{Type, Nothing} = FallbackType(iotype),
-                 compress=false,
-                 mmaparrays::Bool=false,
-                 typemap=default_typemap,
-                 parallel_read::Bool=false,
-                 plain::Bool=false
-                 ) where T<:Union{Type{IOStream},Type{MmapIO}}
-    mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog=1
+
+function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool,
+    iotype::T=default_iotype();
+    fallback::Union{Type,Nothing}=FallbackType(iotype),
+    compress=false,
+    mmaparrays::Bool=false,
+    typemap=default_typemap,
+    parallel_read::Bool=false,
+    plain::Bool=false
+) where T<:Union{Type{IOStream},Type{MmapIO}}
+  
+    mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog = 1
     filters = Filters.normalize_filters(compress)
 
     # Can only open multiple in parallel if mode is "r"
-    if parallel_read && (wr, create, truncate)  != (false, false, false)
+    if parallel_read && (wr, create, truncate) != (false, false, false)
         throw(ArgumentError("Cannot open file in a parallel context unless mode is \"r\""))
     end
 
@@ -195,7 +198,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool, 
             # catch existing file system entities that are not regular files
             !isfile(rname) && throw(ArgumentError("not a regular file: $fname"))
 
-            f = get(OPEN_FILES, rname, (;value=nothing)).value
+            f = get(OPEN_FILES, rname, (; value=nothing)).value
             # If in serial, return existing handle. In parallel always generate a new handle
             if !isnothing(f)
                 if parallel_read
@@ -284,7 +287,7 @@ Options for `mode`:
 - `"a"`/`"a+"`: Open for reading and writing, creating a new file if none exists, but
                 preserving the existing file if one is present
 """
-function jldopen(fname::Union{AbstractString, IO}, mode::AbstractString="r"; iotype=DEFAULT_IOTYPE, kwargs...)
+function jldopen(fname::Union{AbstractString, IO}, mode::AbstractString="r"; iotype=default_iotype(), kwargs...)
     (wr, create, truncate) = mode == "r"  ? (false, false, false) :
                              mode == "r+" ? (true, false, false) :
                              mode == "a" || mode == "a+" ? (true, true, false) :

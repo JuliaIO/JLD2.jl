@@ -6,10 +6,10 @@ release and adapt Artifacts.toml and the line below accordingly.
     git clone git@github.com:JonasIsensee/JLD2TestFiles.git
 add file & commit
     git tag v0.1.X
-    git push 
+    git push
     git push --tags
 go to github and create a new release with name "v0.1.x"
-update Artifacts.toml: 
+update Artifacts.toml:
 1) navigate to testdir
 2) launch repl and run
     using Pkg
@@ -24,13 +24,13 @@ update Artifacts.toml:
         lazy=true)
 update artifact string below to reflect new version number
 =#
-testfiles = artifact"testfiles/JLD2TestFiles-0.1.6/artifacts"
+testfiles = artifact"testfiles/JLD2TestFiles-0.1.7/artifacts"
 
 @testset "HDF5 compat test files" begin
     # These are test files copied from the HDF5.jl test suite
-    
+
     fn = joinpath(testfiles,"compound.h5")
-    jldopen(fn) do f 
+    jldopen(fn) do f
         data = f["data"]
         @test data[1] == data[2]
         nt = data[1]
@@ -44,7 +44,7 @@ testfiles = artifact"testfiles/JLD2TestFiles-0.1.6/artifacts"
     fn = joinpath(testfiles,"h5ex_t_enum.h5")
     jldopen(fn) do f
         @test size(f["DS1"]) == (7,4)
-    end 
+    end
 
     fn = joinpath(testfiles,"h5ex_t_array.h5")
     jldopen(fn) do f
@@ -142,7 +142,7 @@ testfiles = artifact"testfiles/JLD2TestFiles-0.1.6/artifacts"
         @test f["shuffle_compressed_chunks"] == reshape(1:1000, 25, 40)
         @test size(f["incomplete_allocation"]) == (50,50,10)
         @test f["incomplete_allocation"][1:50,1:50, 2] == reshape(1:2500, 50,50)
-        #f["incomplete_allocation"][1,1,1] == 0 
+        #f["incomplete_allocation"][1,1,1] == 0
     end
 end
 
@@ -172,7 +172,7 @@ end
     fn = joinpath(testfiles, "unionall_typeparam.jld2")
     data = load(fn, "test")
     @test propertynames(data) == (:val,)
-    @test data.val == 4 
+    @test data.val == 4
 end
 
 module RecoverableChangesInStructs
@@ -292,4 +292,13 @@ end
 
     ms = load(fn, "ms"; plain=true)
     @test ms == (; a=1, d=2.0)
+end
+
+@testset "Mmap with misaligned data" begin
+    fn = joinpath(testfiles, "mmapfile.h5")
+    f = jldopen(fn)
+    ds = JLD2.get_dataset(f, "arr")
+    arr = JLD2.readmmap(ds)
+    @test arr isa Base.ReinterpretArray
+    @test arr == 1:100
 end
