@@ -148,7 +148,7 @@ define_packed(RelOffset)
 
 RelOffset(r::RelOffset) = r
 Base.:(==)(x::RelOffset, y::RelOffset) = x === y
-Base.hash(x::RelOffset) = hash(x.offset)
+Base.hash(x::RelOffset, u::UInt) = hash(x.offset, u)
 Base.:(+)(x::RelOffset, y::Integer) = RelOffset(UInt64(x.offset + y))
 Base.:(-)(x::RelOffset, y::Integer) = RelOffset(UInt64(x.offset - y))
 
