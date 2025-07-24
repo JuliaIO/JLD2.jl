@@ -1,3 +1,6 @@
+## 0.5.17
+ - update `hash` implementation for internal types to eliminate downstream invalidations 
+
 ## 0.5.16
  - Improve `readmmap` to work on more types and misaligned data
  - Make default iotype selection dynamic. Makes precompile files relocatable to win7. (#632)
