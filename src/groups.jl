@@ -99,6 +99,28 @@ function Base.getindex(g::Group, name::AbstractString)
     Base.inferencebarrier(load_dataset(f, roffset))
 end
 
+@nospecializeinfer function Base.write(
+        g::Group,
+        name::AbstractString,
+        @nospecialize(obj),
+        wsession::JLDWriteSession=JLDWriteSession();
+        compress=nothing
+        )
+    f = g.f
+    prewrite(f)
+    (g, name) = pathize(g, name, true)
+    if !isnothing(compress)
+        if obj isa Array
+            filters = Filters.normalize_filters(compress)
+            g[name] = write_dataset(f, obj, wsession, filters)
+            return nothing
+        end
+        @warn "Only arrays can be compressed."
+    end
+    g[name] = write_dataset(f, obj, wsession)
+    nothing
+end
+
 function Base.setindex!(g::Group, obj, name::AbstractString)
     write(g, name, obj)
     g
@@ -181,9 +203,9 @@ Base.keytype(::Group) = String
 function load_group(f::JLDFile, offset::RelOffset)
     # Messages
     links = OrderedDict{String,RelOffset}()
-    
+
     next_link_offset::Int64 = -1
-    link_phase_change_max_compact::Int64 = -1 
+    link_phase_change_max_compact::Int64 = -1
     link_phase_change_min_dense::Int64 = -1
     est_num_entries::Int64 = 4
     est_link_name_len::Int64 = 8
@@ -208,7 +230,7 @@ function load_group(f::JLDFile, offset::RelOffset)
             wmsg = HmWrap(HmGroupInfo, msg)
             if wmsg.size > 2
                 # Version Flag
-                wmsg.version == 0 || throw(UnsupportedFeatureException()) 
+                wmsg.version == 0 || throw(UnsupportedFeatureException())
                 flag = wmsg.flags::UInt8
                 if flag%2 == 1 # first bit set
                     link_phase_change_max_compact = wmsg.link_phase_change_max_compact
@@ -226,7 +248,7 @@ function load_group(f::JLDFile, offset::RelOffset)
         elseif msg.type == HmSymbolTable
             wmsg = HmWrap(HmSymbolTable, msg)
             v1btree_address = wmsg.v1btree_address
-            name_index_heap = wmsg.name_index_heap            
+            name_index_heap = wmsg.name_index_heap
         end
     end
 
@@ -248,7 +270,7 @@ function load_group(f::JLDFile, offset::RelOffset)
     continuation_msg_address = chunk_end - CONTINUATION_MSG_SIZE
     chunk_start < next_link_offset < chunk_end || (next_link_offset = -1)
 
-    Group{typeof(f)}(f, chunk_start, continuation_msg_address, chunk_end, next_link_offset, 
+    Group{typeof(f)}(f, chunk_start, continuation_msg_address, chunk_end, next_link_offset,
                      est_num_entries, est_link_name_len,
                      OrderedDict{String,RelOffset}(), OrderedDict{String,Group}(), links)
 end
@@ -311,7 +333,7 @@ function save_group(g::Group)
         g.last_chunk_checksum_offset = f.end_of_data + sz
         f.end_of_data += sz + 4
         seek(io, g.last_chunk_start_offset)
-        
+
         # Object header
         jlwrite(io, ObjectStart(size_flag(totalsize)))
         write_size(io, totalsize)
@@ -406,7 +428,7 @@ end
 Base.show(io::IO, g::Group) = print(io, "JLD2.Group")
 
 function Base.show(io::IO, ::MIME"text/plain", g::Group)
-    print(io, "JLD2.Group") 
+    print(io, "JLD2.Group")
     if get(io, :compact, false)
         return
     else

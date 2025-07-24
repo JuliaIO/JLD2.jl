@@ -17,13 +17,13 @@ end
 
 @pseudostruct HmLinkInfo begin
     version::UInt8 = 0x00
-    flags::UInt8 = 0x00 
+    flags::UInt8 = 0x00
     isset(flags,0) && max_creation_index::Int64
     fractal_heap_address::RelOffset = UNDEFINED_ADDRESS
     v2_btree_name_index::RelOffset = UNDEFINED_ADDRESS
     isset(flags, 1) && (v2_btree_creation_order_index::RelOffset = UNDEFINED_ADDRESS)
 end
- 
+
 @pseudostruct HmDatatype begin
     if isset(hflags,1)
         version::UInt8 = 3
@@ -48,7 +48,7 @@ end
         space_allocation_time::UInt8
         fill_value_write_time::UInt8
         fill_value_defined::UInt8
-        if !(version > 1 && fill_value_defined==0) 
+        if !(version > 1 && fill_value_defined==0)
             size::UInt32
             fill_value::@Blob(size)
         end
@@ -60,7 +60,7 @@ end
     end
 end
 
-@pseudostruct HmLinkMessage begin 
+@pseudostruct HmLinkMessage begin
     version::UInt8 = 1
     flags::UInt8 = (0x10 | size_flag(sizeof(kw.link_name)))
     isset(flags, 3) && link_type::UInt8
@@ -79,7 +79,7 @@ end
     end
 end
 
-@pseudostruct HmExternalFileList begin 
+@pseudostruct HmExternalFileList begin
     version::UInt8
     @skip(3)
     allocated_slots::UInt16
@@ -97,7 +97,7 @@ end
         (layout_class != LcCompact) && data_address::RelOffset
         dimensions::NTuple{Int(dimensionality), Int32}
         (layout_class == LcChunked) && element_size::UInt32
-        if (layout_class == LcCompact) 
+        if (layout_class == LcCompact)
             data_size::@Int(4)
             data_address::@Offset
             data::@Blob(data_size)
@@ -121,14 +121,14 @@ end
             data_size::@Int(4)#UInt32#element_size::UInt32
         end
         if version == 4 && layout_class == LcChunked
-            flags::UInt8
-            dimensionality::UInt8 = length(kw.dimensions) 
+            flags::UInt8 = 2 # Single index with filter
+            dimensionality::UInt8 = length(kw.dimensions)
             dim_size::UInt8 = 8 # 8 bytes per dimension
             dimensions::NTuple{Int(dimensionality), uintofsize(dim_size)}
-            chunk_indexing_type::UInt8
+            chunk_indexing_type::UInt8 = 1 # Single Chunk
             if chunk_indexing_type == 1 # Single Chunk
                 data_size::@Int(8)#Int64 # Lengths
-                filters::UInt32
+                filters::UInt32 = 0
             end
             if chunk_indexing_type == 3
                 page_bits::UInt8

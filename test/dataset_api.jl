@@ -1,7 +1,7 @@
 using JLD2, Test
 
 @testset "Dataset API" begin
-    cd(mktempdir()) do 
+    cd(mktempdir()) do
         fn = "test.jld2"
         jldopen(fn, "w") do f
             dset = JLD2.create_dataset(f, "d")
@@ -26,7 +26,7 @@ using JLD2, Test
 
         jldopen(fn, "w") do f
             dset = JLD2.create_dataset(f, "d")
-            dset.filters = JLD2.FilterPipeline([JLD2.Filter(1, 0, "", [])])
+            dset.filters = Deflate()
             JLD2.write_dataset(dset, zeros(1000,1000))
         end
         @test load(fn)["d"] == zeros(1000,1000)
@@ -34,13 +34,13 @@ using JLD2, Test
 end
 
 @testset "Slicing & Updating" begin
-    cd(mktempdir()) do 
+    cd(mktempdir()) do
         fn = "test.jld2"
         jldsave(fn; a=42, b = [42 43 44; 45 46 47], c = [(0x00, 1f0), (0x42, 2f0)])
         jldopen(fn) do f
             dset = JLD2.get_dataset(f, "a")
             @test dset[] == 42
-            
+
             dset = JLD2.get_dataset(f, "b")
             @test dset[] == [42 43 44; 45 46 47]
             @test dset[1] == 42

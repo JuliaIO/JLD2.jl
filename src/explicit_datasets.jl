@@ -137,15 +137,7 @@ function write_dataset(dataset::Dataset, data, wsession::JLDWriteSession=JLDWrit
         dataset.dataspace = WriteDataspace(f, data, odr)
     end
     dataspace = dataset.dataspace
-    if !isempty(dataset.filters.filters)
-        filter_id = dataset.filters.filters[1].id
-        invoke_again, compressor = get_compressor(filter_id)
-        if invoke_again
-            return Base.invokelatest(write_dataset, dset, data)::RelOffset
-        end
-    else
-        compressor = nothing
-    end
+    compressor = Filters.normalize_filters(dataset.filters)
     offset = write_dataset(f, dataspace, datatype, odr, data, wsession, compressor)
     !isempty(dataset.name) && (dataset.parent[dataset.name] = offset)
     # Attributes
