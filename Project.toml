@@ -18,7 +18,7 @@ UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 UnPackExt = "UnPack"
 
 [compat]
-FileIO = "1.5"
+FileIO = "1.5.1"
 MacroTools = "0.5.10"
 OrderedCollections = "1"
 PrecompileTools = "1"
