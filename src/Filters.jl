@@ -267,7 +267,9 @@ struct ZstdFilter <: Filter
     level::Cuint
     ZstdFilter(level=ChunkCodecLibZstd.ZSTD_defaultCLevel()) =
         new(clamp(level,
-            ChunkCodecLibZstd.ZSTD_minCLevel(),
+            # This library theoretically supports negative compression levels, which is at odds with hdf5 level repr using UInt32. Limit to 1 instead
+            #ChunkCodecLibZstd.ZSTD_minCLevel(),
+            1,
             ChunkCodecLibZstd.ZSTD_maxCLevel()
         )
         )
