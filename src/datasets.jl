@@ -309,7 +309,7 @@ end
         @nospecialize(odr),
         @nospecialize(data),
         wsession::JLDWriteSession,
-        @nospecialize(compress = f.compress),)
+        @nospecialize(filters = f.compress),)
     io = f.io
     datasz = (odr_sizeof(odr)::Int * numel(dataspace))::Int
     psz = payload_size_without_storage_message(dataspace, datatype)
@@ -319,7 +319,7 @@ end
     if datasz == 0 || (!(data isa ArrayMemory) && datasz < 8192)
         layout_class = LcCompact
         psz += jlsizeof(Val(HmDataLayout); layout_class, data_size=datasz)
-    elseif data isa ArrayMemory && iscompressed(compress) && isconcretetype(eltype(data)) && isbitstype(eltype(data))
+    elseif data isa ArrayMemory && iscompressed(filters) && isconcretetype(eltype(data)) && isbitstype(eltype(data))
         layout_class = LcChunked
         psz += jlsizeof(Val(HmDataLayout);
             layout_class,
@@ -327,7 +327,7 @@ end
             # Dummy values for message size computation
             data_size = 0, data_address = 0,
         )
-        psz += Filters.pipeline_message_size(compress)
+        psz += Filters.pipeline_message_size(filters)
     else
         layout_class = LcContiguous
         psz += jlsizeof(Val(HmDataLayout); layout_class)
@@ -360,10 +360,11 @@ end
         jlwrite(io, end_checksum(cio))
     elseif layout_class == LcChunked
 
-        # Note: Filters.compress may modify the internal state of the filters.
-        # Therefore, it must be called before writing the filter pipeline message.
-        compressed = Filters.compress(compress, data, odr, f, wsession)
-        Filters.write_filter_pipeline_message(cio, compress)
+        foreach(filters) do filter
+            Filters.set_local!(filter, odr, dataspace, ())
+        end
+        compressed, retcodes = Filters.compress(filters, data, odr, f, wsession)
+        Filters.write_filter_pipeline_message(cio, filters)
 
         write_header_message(cio, Val(HmDataLayout);
             layout_class,

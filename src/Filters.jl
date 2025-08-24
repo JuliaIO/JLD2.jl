@@ -43,12 +43,29 @@ client_values(::Filter) = ()
 """
     filtertype(id)
 
-Retrive the filter type for a given id.
+Retrieve the filter type for a given id.
 """
 function filtertype end
 filtertype(id::Integer) = filtertype(Val(Int(id)))
 filtertype(::Val) = nothing
 
+"""
+    apply_filter!(filter, ref, forward::Bool=true)
+
+Apply the filter to the `UInt8` vector stored in `ref`.
+By default, the filter is applied in the forward direction (compression).
+Setting `forward` to `false` applies the filter in the reverse direction (decompression).
+The result is stored back in `ref` and the function returns an integer return code (0 on success).
+"""
+function apply_filter! end
+
+
+"""
+    set_local!(filter, odr, dataspace, datasetcreationprops)
+
+Some filters use information about the dataset, like element size, element type, and layout. Filters may optionally implement this function for this purpose.
+"""
+set_local!(filter::Filter, odr, dataspace, datasetcreationprops) = nothing
 
 """
     FilterPipeline(filters)
@@ -67,56 +84,56 @@ FilterPipeline(filters::Tuple) = FilterPipeline(filters...)
 
 iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
 Base.iterate(fp::FilterPipeline, state=1) = iterate(fp.filters, state)
-
-function compress(fp::FilterPipeline, data, odr, f::JLDFile, wsession)
-    fil, fil_rest... = fp
-    buf = compress(fil, data, odr, f, wsession)
-    for fil in fil_rest
-        buf = compress(fil, buf, odr_sizeof(odr))
-    end
-    buf
-end
+Base.length(fp::FilterPipeline) = length(fp.filters)
 
 # General case: serialize data to a buffer, then compress it
-function compress(filter::Filter, data::Array{T}, odr::S, f::JLDFile, wsession) where {T,S}
+function compress(fp::FilterPipeline, data::Array{T}, odr::S, f::JLDFile, wsession) where {T,S}
     buf = Vector{UInt8}(undef, odr_sizeof(odr) * length(data))
-    cp = Ptr{Cvoid}(pointer(buf))
-    @simd for i = 1:length(data)
-        @inbounds h5convert!(cp, odr, f, data[i], wsession)
-        cp += odr_sizeof(odr)
+    @GC.preserve buf begin
+        cp = Ptr{Cvoid}(pointer(buf))
+        @simd for i = 1:length(data)
+            @inbounds h5convert!(cp, odr, f, data[i], wsession)
+            cp += odr_sizeof(odr)
+        end
     end
-    compress(filter, buf, odr_sizeof(odr))
+    ref = Ref(buf)
+    retcodes = map(fil -> apply_filter!(fil, ref), fp)
+    ref[], retcodes
 end
 
 # Special case of `samelayout` data: Use unsafe_wrap to avoid copying
-function compress(filter::Filter, data::Array{T}, odr::T, f::JLDFile, wsession) where {T}
+function compress(fp::FilterPipeline, data::Array{T}, odr::T, f::JLDFile, wsession) where {T}
     GC.@preserve data begin
         buf = unsafe_wrap(
             Vector{UInt8},
             Ptr{UInt8}(pointer(data)),
             odr_sizeof(odr) * length(data)
         )
-        return compress(filter, buf, odr_sizeof(odr))
+        ref = Ref(buf)
+        retcodes = map(fil -> apply_filter!(fil, ref), fp)
+        # Do a copy if all compression failed to not return the original unsafe_wrap
+        ref[] === buf && (ref[] = copy(buf))
+        ref[], retcodes
     end
 end
 
-function decompress(filter::FilterPipeline, io::IO, data_length, elsize)
+function decompress(filter::FilterPipeline, io::IO, data_length)
     buf = read!(io, Vector{UInt8}(undef, data_length))
-    decompress(filter, buf, data_length, elsize)
+    _decompress(filter, buf)
 end
 
-function decompress(filter::FilterPipeline, io::MemoryBackedIO, data_length, elsize)
+function decompress(filter::FilterPipeline, io::MemoryBackedIO, data_length)
     ensureroom(io, data_length)
     buf = unsafe_wrap(Array, Ptr{UInt8}(io.curptr), data_length)
-    decompress(filter, buf, data_length, elsize)
+    _decompress(filter, buf)
 end
 
-function decompress(fp::FilterPipeline, buf::Vector{UInt8}, data_length, args...)
+function _decompress(fp::FilterPipeline, buf::Vector{UInt8})
+    ref = Ref(buf)
     for filter in reverse(fp.filters)
-        buf = decompress(filter, buf, data_length, args...)
-        data_length = length(buf)
+        apply_filter!(filter, ref, false)
     end
-    buf
+    ref[]
 end
 
 # For loading need filter_ids as keys
@@ -171,39 +188,31 @@ filterid(::Type{Shuffle}) = UInt16(2)
 client_values(filter::Shuffle) = (filter.element_size,)
 filtertype(::Val{2}) = Shuffle
 
-function compress(fil::Shuffle, data::Vector{UInt8}, element_size)
-    fil.element_size = element_size
-    # Start with all least significant bytes, then work your way up
-    # I'll leave this for someone else to make performant
-    data_length = length(data)
-    @assert length(data) % element_size == 0
-    num_elements = data_length ÷ element_size
-    data_new = similar(data)
-    for n = eachindex(data_new)
+function set_local!(fil::Shuffle, odr, dataspace, datasetcreationprops)
+    fil.element_size = odr_sizeof(odr)
+    nothing
+end
+
+function apply_filter!(fil::Shuffle, ref, forward::Bool=true)
+    buf = ref[]
+    (; element_size) = fil
+    nbytes = length(buf)
+    @assert length(buf) % element_size == 0
+    nelems = nbytes ÷ element_size
+    newbuf = similar(buf)
+    for n = eachindex(newbuf)
         # Convert to an Int64 to avoid overflow on 32bit systems
-        j = 1 + Int64(n - 1) * num_elements
-        i = mod1(j, data_length) + (j - 1) ÷ data_length
-        data_new[i] = data[n]
+        j = 1 + Int64(n - 1) * nelems
+        i = mod1(j, nbytes) + (j - 1) ÷ nbytes
+        if forward
+            newbuf[i] = buf[n]
+        else
+            newbuf[n] = buf[i]
+        end
     end
-    return data_new
+    ref[] = newbuf
+    return 0
 end
-
-function decompress(::Shuffle, data::Vector{UInt8}, data_length, element_size)
-    # Start with all least significant bytes, then work your way up
-    # I'll leave this for someone else to make performant
-    @assert data_length == length(data)
-    @assert data_length % element_size == 0
-    num_elements = data_length ÷ element_size
-    data_new = similar(data)
-    for n = eachindex(data_new)
-            # Convert to an Int64 to avoid overflow on 32bit systems
-        j = 1 + Int64(n - 1) * num_elements
-        i = mod1(j, data_length) + (j - 1) ÷ data_length
-        data_new[n] = data[i]
-    end
-    return data_new
-end
-
 
 ##############################################################################
 ## Deflate Filter implementation
@@ -230,12 +239,13 @@ filtername(::Type{Deflate}) = ""
 client_values(filter::Deflate) = (filter.level, )
 filtertype(::Val{1}) = Deflate
 
-function compress(filter::Deflate, buf::Vector{UInt8}, args...)
-    encode(ZlibEncodeOptions(; filter.level), buf)
-end
-
-function decompress(::Deflate, buf::Vector{UInt8}, args...)
-    decode(ZlibDecodeOptions(), buf)
+function apply_filter!(filter::Deflate, ref, forward::Bool=true)
+    if forward
+        ref[] = encode(ZlibEncodeOptions(; filter.level), ref[])
+    else
+        ref[] = decode(ZlibDecodeOptions(), ref[])
+    end
+    return 0
 end
 
 ##############################################################################
@@ -268,11 +278,16 @@ filtername(::Type{ZstdFilter}) = "Zstandard compression: http://www.zstd.net"
 client_values(filter::ZstdFilter) = (filter.level, )
 filtertype(::Val{32015}) = ZstdFilter
 
-compress(filter::ZstdFilter, buf::Vector{UInt8}, args...) =
-    encode(ZstdEncodeOptions(; filter.level), buf)
+function apply_filter!(filter::ZstdFilter, ref, forward::Bool=true)
+    if forward
+        ref[] = encode(ZstdEncodeOptions(; filter.level), ref[])
+    else
+        ref[] = decode(ZstdDecodeOptions(), ref[])
+    end
+    return 0
+end
 
-decompress(::ZstdFilter, buf::Vector{UInt8}, args...) =
-    decode(ZstdDecodeOptions(), buf)
+
 
 ############################################################################################
 ## Intermediate representation and reading/writing of filter pipelines to file

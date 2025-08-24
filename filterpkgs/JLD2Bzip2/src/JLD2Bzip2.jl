@@ -6,31 +6,31 @@ Loading this package provides the filter type `BzipFilter`.
 """
 module JLD2Bzip2
 
-using JLD2: JLD2
-import JLD2.Filters: Filter, filterid, filtername, filtertype, compress, decompress, client_values
+using JLD2: JLD2, Filters
 using ChunkCodecLibBzip2
 
-struct Bzip2Filter <: Filter
+struct Bzip2Filter <: Filters.Filter
     blocksize100k::Cuint
 end
 Bzip2Filter() = Bzip2Filter(9)
 
-filterid(::Type{Bzip2Filter}) = UInt16(307)
-filtername(::Type{Bzip2Filter}) = "HDF5 bzip2 filter; see http://www.hdfgroup.org/services/contributions.html"
-client_values(filter::Bzip2Filter) = (filter.blocksize100k, )
-filtertype(::Val{307}) = Bzip2Filter
+Filters.filterid(::Type{Bzip2Filter}) = UInt16(307)
+Filters.filtername(::Type{Bzip2Filter}) = "HDF5 bzip2 filter; see http://www.hdfgroup.org/services/contributions.html"
+Filters.client_values(filter::Bzip2Filter) = (filter.blocksize100k, )
+Filters.filtertype(::Val{307}) = Bzip2Filter
 
-function compress(filter::Bzip2Filter, buf::Vector{UInt8}, args...)
-    encode(
-        BZ2EncodeOptions(;
-            blockSize100k=filter.blocksize100k,
-        ),
-        buf
-    )
-end
-
-function decompress(::Bzip2Filter, buf::Vector{UInt8}, args...)
-    decode(BZ2DecodeOptions(), buf)
+function Filters.apply_filter!(filter::Bzip2Filter, ref::Ref, forward::Bool=true)
+    if forward
+        ref[] = encode(
+            BZ2EncodeOptions(;
+                blockSize100k=filter.blocksize100k,
+            ),
+            ref[]
+        )
+    else
+        ref[] = decode(BZ2DecodeOptions(), ref[])
+    end
+    return 0
 end
 
 export Bzip2Filter
