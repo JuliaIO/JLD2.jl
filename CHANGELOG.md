@@ -1,5 +1,12 @@
+## 0.6.0
+ - **Breaking**: Rework compression API. Expose filter approach of hdf5 broadly similar to HDF5.jl.
+ See docs for description. The basic `compress=true` api still works but backend libraries were
+ replaced.
+ - Added new filter pkgs `JLD2Lz4` and `JLD2Bzip2` to enable lz4 and bzip2 filters without making
+ them dependencies by default.
+
 ## 0.5.17
- - update `hash` implementation for internal types to eliminate downstream invalidations 
+ - update `hash` implementation for internal types to eliminate downstream invalidations
 
 ## 0.5.16
  - Improve `readmmap` to work on more types and misaligned data
