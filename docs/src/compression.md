@@ -32,10 +32,10 @@ These can be used individually and even chained which can be useful for some typ
 The filter used by `compress = true` is the `Deflate()` compression filter.
 
 !!! note
-    The default `Deflate()` compression is always available but all others will need to be
+    The default `Deflate()` compression is always available but some others will need to be
     installed separately.
     `JLD2` will throw an error if the required filter package is not loaded, prompting
-    you to install and load the appropriate package e.g. : `using JLD2, JLD2Blosc`.
+    you to install and load the appropriate package e.g. : `using JLD2, JLD2Lz4`.
 
 ### Installing Filter Packages
 
@@ -44,8 +44,8 @@ To use compression filters, you need to install and load the corresponding packa
 ```julia
 using Pkg
 # For other compression algorithms
-Pkg.add(["JLD2Blosc", "JLD2Bzip2", "JLD2Lz4", "JLD2Zstd", "JLD2Bitshuffle"])
-using JLD2, JLD2Blosc  # Load the specific package you need
+Pkg.add("JLD2Lz4")
+using JLD2, JLD2Lz4  # Load the package you need
 ```
 
 ### Available Compression Filters
@@ -59,36 +59,28 @@ The compression filters available for JLD2 are:
 |:---------------|:------------------|:-------------------------------------------------------------|
 | *built in*     | `Shuffle`         | Rearrangement of bytes useful as a preprocess filter         |
 | *built in*     | `Deflate`         | Default compression, very widely used, good compatibility    |
-| JLD2Blosc      | `BloscFilter`     | High-performance compression with multiple algorithms        |
+| *built in*     | `ZstdFilter`      | Fast, wide range of compression size vs speed trade-offs     |
 | JLD2Bzip2      | `Bzip2Filter`     | Good compression ratio, can be slower                        |
 | JLD2Lz4        | `LZ4Filter`       | Very fast compression/decompression                          |
-| JLD2Zstd       | `ZstdFilter`      | Fast, wide range of compression size vs speed trade-offs     |
-| JLD2Bitshuffle | `BitshuffleFilter`| Bit-level shuffling to improve compression of numeric data   |
 
 ### Using Specific Filters
 
 To use a specific compression filter, pass an instance of the filter instead of `true`:
 
 ```julia
-using JLD2, JLD2Blosc
+using JLD2, JLD2Lz4
 
-# Using Blosc compression
-jldopen("example.jld2", "w"; compress = BloscFilter()) do f
+# Using Lz4 compression
+jldopen("example.jld2", "w"; compress = Lz4Filter()) do f
     f["large_array"] = zeros(10000)
 end
 
-# Blosc with custom settings
-jldopen("example.jld2", "w"; compress = BloscFilter(level=9, compressor="zstd")) do f
+# Zstd with non-standard compression level
+jldopen("example.jld2", "w"; compress = ZstdFilter(9)) do f
     f["large_array"] = zeros(10000)
 end
 ```
 
-```julia
-using JLD2, JLD2Zstd
-
-# Using Zstd compression
-jldsave("example.jld2", ZstdFilter(level=3); large_array=zeros(10000))
-```
 
 ### Using Multiple Filters
 
@@ -117,32 +109,24 @@ end
     order during decompression. Preprocessing filters (like `Shuffle`)
     should typically come before compression filters.
 
-!!! note
-    Both `BloscFilter` and `BitshuffleFilter` have optional builtin support for shuffling
-    that may be more performant than the sequential example above.
-
 
 ### Filter Configuration Examples
 
 Different filters support various configuration options:
 
 ```julia
-using JLD2, JLD2Blosc, JLD2Zstd, JLD2Bzip2
-
-# Blosc with different algorithms and settings
-blosc_lz4 = BloscFilter(level=5, shuffle=true, compressor="lz4")
-blosc_zstd = BloscFilter(level=3, shuffle=false, compressor="zstd")
+using JLD2, JLD2Lz4, JLD2Bzip2
 
 # Zstd with different compression levels
 zstd_fast = ZstdFilter(level=1)    # Fast compression
-zstd_best = ZstdFilter(level=9)   # Best compression
+zstd_best = ZstdFilter(level=22)   # Best compression
 
 # Bzip2 with custom block size
-bzip2_filter = Bzip2Filter(blocksize=9)
+bzip2_filter = Bzip2Filter(10)
 
 # Example usage
 jldopen("example.jld2", "w") do f
-    write(f, "fast_data", large_array; compress=blosc_lz4)
+    write(f, "fast_data", large_array; compress=zstd_fast)
     write(f, "small_data", small_array; compress=zstd_best)
     write(f, "archive_data", archive_array; compress=bzip2_filter)
 end
@@ -159,7 +143,7 @@ that for others it is not worth the effort. For precise control, the
 settings.
 
 ```julia
-using JLD2, JLD2Blosc
+using JLD2
 
 jldopen("example.jld2", "w") do f
     # This can be efficiently compressed → use compression
@@ -169,7 +153,7 @@ jldopen("example.jld2", "w") do f
     write(f, "random_array", rand(10000); compress=false)
 
     # Use a different filter for this specific dataset
-    write(f, "fast_compressed", rand(10000); compress=BloscFilter(compressor="lz4"))
+    write(f, "fast_compressed", rand(10000); compress=ZstdFilter())
 end
 ```
 
@@ -207,7 +191,5 @@ The simplest usage option of `compress=true` still works as before.
 JLD2.Filters
 JLD2.Filters.Deflate
 JLD2.Filters.Shuffle
-JLD2.Filters.filtername
-JLD2.Filters.filterid
-
+JLD2.Filters.ZstdFilter
 ```

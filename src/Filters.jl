@@ -141,9 +141,7 @@ const KNOWN_FILTERS = Dict(
     UInt16(1) => ("Deflate", "JLD2"),
     UInt16(2) => ("Shuffle", "JLD2"),
     UInt16(307) => ("Bzip2Filter", "JLD2Bzip2"),
-    UInt16(32001) => ("BloscFilter", "JLD2Blosc"),
     UInt16(32004) => ("LZ4Filter", "JLD2Lz4"),
-    UInt16(32008) => ("BitshuffleFilter", "JLD2Bitshuffle"),
     UInt16(32015) => ("ZstdFilter", "JLD2"),
 )
 
@@ -340,15 +338,15 @@ FilterPipeline(fp::WrittenFilterPipeline) =
 function Filter(fil::WrittenFilter)
     F = filtertype(fil.id)
     if isnothing(F)
-        if haskey(KNOWN_FILTERS, id)
-            fil, pkg = KNOWN_FILTERS[id]
+        if haskey(KNOWN_FILTERS, fil.id)
+            filname, pkg = KNOWN_FILTERS[fil.id]
             throw(ArgumentError("""
-            Written dataset is encoded with filter $(fil) from package $(pkg).
+            Written dataset is encoded with filter $(filname) from package $(pkg).
             Make sure to load the package before reading the dataset.
             """))
         else
             throw(ArgumentError("""
-            Written dataset is encoded with unknown filter with id $(id) and
+            Written dataset is encoded with unknown filter with id $(fil.id) and
             description "$(fil.name)".
             If you think this is a bug, please open an issue at https://github.com/JuliaIO/JLD2.jl/
             """))
