@@ -47,6 +47,24 @@ end
     end
 end
 
+@testset "Compress Arrays with non-trivial layout" begin
+    fn = joinpath(mktempdir(), "compress_with_conversion.jld2")
+    fn2 = joinpath(mktempdir(), "no_compress_with_conversion.jld2")
+
+    data = [(nothing, 0x00) for n in 1:1000]
+    @save fn {compress=true} data
+    @save fn2 {compress=false} data
+    r = jldopen(f -> f["data"], fn, "r")
+    @test r == data
+    @test filesize(fn) < filesize(fn2)
+
+    data = [(1, 0x00) for n in 1:1000]
+    @save fn {compress=true} data
+    @save fn2 {compress=false} data
+    r = jldopen(f -> f["data"], fn, "r")
+    @test r == data
+    @test filesize(fn) < filesize(fn2)
+end
 
 @testset "Verify Correctness of Compressor" begin
     fn = joinpath(mktempdir(), "test.jld2")
