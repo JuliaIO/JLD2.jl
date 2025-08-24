@@ -161,7 +161,7 @@ end
 Base.:(==)(x::CompoundDatatype, y::CompoundDatatype) =
     x.size == y.size && x.names == y.names && x.offsets == y.offsets &&
     x.members == y.members
-Base.hash(::CompoundDatatype) = throw(ArgumentError("hash not defined for CompoundDatatype"))
+Base.hash(::CompoundDatatype, h::UInt) = throw(ArgumentError("hash not defined for CompoundDatatype"))
 
 class(dt::CompoundDatatype) = DT_COMPOUND
 function jlsizeof(dt::CompoundDatatype)
@@ -254,7 +254,7 @@ Base.:(==)(x::VariableLengthDatatype, y::VariableLengthDatatype) =
     x.class<<4 == y.class<<4 && x.bitfield1 == y.bitfield1 &&
     x.bitfield2 == y.bitfield2 && x.size == y.size &&
     x.basetype == y.basetype
-Base.hash(::VariableLengthDatatype) = throw(ArgumentError("hash not defined for CompoundDatatype"))
+Base.hash(::VariableLengthDatatype, h::UInt) = throw(ArgumentError("hash not defined for CompoundDatatype"))
 
 class(dt::VariableLengthDatatype) = dt.class
 jlsizeof(dt::VariableLengthDatatype) =
