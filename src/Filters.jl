@@ -87,7 +87,7 @@ Base.iterate(fp::FilterPipeline, state=1) = iterate(fp.filters, state)
 Base.length(fp::FilterPipeline) = length(fp.filters)
 
 # General case: serialize data to a buffer, then compress it
-function compress(fp::FilterPipeline, data::Array{T}, odr::S, f::JLDFile, wsession) where {T,S}
+function compress(fp::FilterPipeline, data::Array{T}, odr::Type, f::JLDFile, wsession) where {T}
     buf = Vector{UInt8}(undef, odr_sizeof(odr) * length(data))
     @GC.preserve buf begin
         cp = Ptr{Cvoid}(pointer(buf))
@@ -102,7 +102,7 @@ function compress(fp::FilterPipeline, data::Array{T}, odr::S, f::JLDFile, wsessi
 end
 
 # Special case of `samelayout` data: Use unsafe_wrap to avoid copying
-function compress(fp::FilterPipeline, data::Array{T}, odr::T, f::JLDFile, wsession) where {T}
+function compress(fp::FilterPipeline, data::Array{T}, odr::Type{T}, f::JLDFile, wsession) where {T}
     GC.@preserve data begin
         buf = unsafe_wrap(
             Vector{UInt8},
