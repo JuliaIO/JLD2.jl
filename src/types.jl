@@ -8,7 +8,7 @@ after ensuring that there is enough memory allocated.
 It needs to provide:
  - `getproperty(io, :curptr)` to get the current pointer
  - `ensureroom(io, nb)` to ensure that there are at least nb bytes available
- - `position(io)` to get the current (zero-based) position 
+ - `position(io)` to get the current (zero-based) position
  - `seek(io, pos)` to set the current position (zero-based)
 """
 abstract type MemoryBackedIO <: IO end
@@ -107,7 +107,7 @@ jlwrite(io, lc::LayoutClass) = jlwrite(io, UInt8(lc))
 end
 
 
-## Exceptions 
+## Exceptions
 
 struct UnsupportedVersionException <: Exception
     msg::String
@@ -155,7 +155,7 @@ Base.:(-)(x::RelOffset, y::Integer) = RelOffset(UInt64(x.offset - y))
 const UNDEFINED_ADDRESS = RelOffset(0xffffffffffffffff)
 const NULL_REFERENCE = RelOffset(0)
 
-function Base.show(io::IO, x::RelOffset) 
+function Base.show(io::IO, x::RelOffset)
     if x == UNDEFINED_ADDRESS
         print(io, "UNDEFINED_ADDRESS")
     else
@@ -270,21 +270,6 @@ struct Upgrade
     target
 end
 
-struct Filter
-    id::UInt16
-    flags::UInt16
-    name::String
-    client_data::Vector{UInt32}
-end
-
-struct FilterPipeline
-    filters::Vector{Filter}
-end
-
-FilterPipeline() = FilterPipeline(Filter[])
-iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
-const EMPTY_FILTER_PIPELINE = FilterPipeline()
-
 """
     HeaderMessage
 
@@ -319,7 +304,7 @@ struct Message{IO}
         new{typeof(io)}(type, UInt64(address), o, io)
 end
 Message(type::UInt8, args...) = Message(HeaderMessageType(type), args...)
-Message(type::HeaderMessageType, f, offset::RelOffset) = 
+Message(type::HeaderMessageType, f, offset::RelOffset) =
     Message(type, fileoffset(f, offset), offset, f.io)
 Message(type::HeaderMessageType, io::IO) = Message(type, position(io), UNDEFINED_ADDRESS, io)
 Message(type::HeaderMessageType, data::Vector{UInt8}) = Message(type, 0, UNDEFINED_ADDRESS, IOBuffer(data))
@@ -329,8 +314,8 @@ Message(type::HeaderMessageType, data::Vector{UInt8}) = Message(type, 0, UNDEFIN
     IndirectPointer
 
 When writing data, we may need to enlarge the memory mapping, which would invalidate any
-memory addresses arising from the old `mmap` pointer. `IndirectPointer` holds an offset relative to the 
-MemoryBackedIO. It defers computing a memory address until converted to a `Ptr{T}`, 
+memory addresses arising from the old `mmap` pointer. `IndirectPointer` holds an offset relative to the
+MemoryBackedIO. It defers computing a memory address until converted to a `Ptr{T}`,
 so the memory mapping can be enlarged and addresses will remain valid.
 """
 struct IndirectPointer{P<:MemoryBackedIO}
@@ -345,3 +330,8 @@ pconvert(::Type{Ptr{T}}, x::IndirectPointer) where {T} = Ptr{T}(x.io.curptr - bu
 
 # Use internal convert function (for pointer conversion) to avoid invalidations
 pconvert(T, x) = Base.convert(T, x)
+
+
+# This function writes a julia object to file or a buffers and first applies the required
+# conversions to the on-disk representation.
+function h5convert! end

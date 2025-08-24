@@ -52,24 +52,3 @@ function DataLayout(f::JLD2.JLDFile, msg::HmWrap{HmDataLayout})
         throw(UnsupportedVersionException("Data layout message version $version is not supported"))
     end
 end
-
-function FilterPipeline(msg_::Hmessage)
-    msg = HmWrap(HmFilterPipeline, msg_)
-    version = msg.version
-    nfilters = msg.nfilters
-    io = msg.m.io
-    seek(io, msg.m.address+2)
-    version == 1 && skip(io, 6)
-    filters = map(1:nfilters) do _
-        id = jlread(io, UInt16)
-        name_length = (version == 2 && id < 255) ? zero(UInt16) : jlread(io, UInt16)
-        flags = jlread(io, UInt16)
-        nclient_vals = jlread(io, UInt16)
-        name = iszero(name_length) ? "" : read_bytestring(io)
-        skip(io, max(0, 8-mod1(name_length, 8)-1))
-        client_data = jlread(io, UInt32, nclient_vals)
-        (version == 1 && isodd(nclient_vals)) && skip(io, 4)
-        Filter(id, flags, name, client_data)
-    end
-    return FilterPipeline(filters)
-end

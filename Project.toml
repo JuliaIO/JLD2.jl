@@ -1,15 +1,16 @@
 name = "JLD2"
 uuid = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
-version = "0.5.17"
+version = "0.6"
 
 [deps]
+ChunkCodecLibZlib = "4c0bbee4-addc-4d73-81a0-b6caacae83c8"
+ChunkCodecLibZstd = "55437552-ac27-4d47-9aa3-63184e8fd398"
 FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 Mmap = "a63ad114-7e13-5084-954f-fe012c677804"
 OrderedCollections = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 ScopedValues = "7e506255-f358-4e82-b7e4-beb19740aa63"
-TranscodingStreams = "3bb67fe8-82b1-5028-8e26-92a6c54297fa"
 
 [weakdeps]
 UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
@@ -18,11 +19,12 @@ UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 UnPackExt = "UnPack"
 
 [compat]
+ChunkCodecLibZlib = "0.2.1"
+ChunkCodecLibZstd = "0.2.1"
 FileIO = "1.5.1"
 MacroTools = "0.5.10"
 OrderedCollections = "1"
 PrecompileTools = "1.0.3"
-UnPack = "1"
 ScopedValues = "1.3"
-TranscodingStreams = "0.9, 0.10, 0.11"
+UnPack = "1"
 julia = "1.9"

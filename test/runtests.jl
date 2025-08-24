@@ -1,6 +1,13 @@
 using JLD2, FileIO
 using Test
-using CodecZlib, CodecBzip2, CodecZstd, CodecLz4
+
+using Pkg
+filterpath = joinpath(pkgdir(JLD2), "filterpkgs")
+Pkg.develop([
+    PackageSpec(name="JLD2Bzip2", path=joinpath(filterpath, "JLD2Bzip2")),
+    PackageSpec(name="JLD2Lz4", path=joinpath(filterpath, "JLD2Lz4")),
+])
+
 
 function better_success(cmd)
     fn1, _ = mktemp()
@@ -46,9 +53,7 @@ using TestItemRunner
         deps_compat = (;
             ignore = [:Mmap,],
         ),
-        ambiguities = (;
-            # There is are ambiguity that can never be hit
-            exclude = [JLD2.write_data, JLD2.WriteDataspace],
-        )
+        # There are a whole bunch of pseudo-ambiguities which can never be hit.
+        ambiguities = false,
     )
 end
