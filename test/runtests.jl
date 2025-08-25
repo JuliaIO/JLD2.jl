@@ -7,7 +7,7 @@ Pkg.develop([
     PackageSpec(name="JLD2Bzip2", path=joinpath(filterpath, "JLD2Bzip2")),
     PackageSpec(name="JLD2Lz4", path=joinpath(filterpath, "JLD2Lz4")),
 ])
-
+using JLD2Bzip2, JLD2Lz4
 
 function better_success(cmd)
     fn1, _ = mktemp()

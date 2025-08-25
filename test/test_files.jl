@@ -24,7 +24,7 @@ update Artifacts.toml:
         lazy=true)
 update artifact string below to reflect new version number
 =#
-testfiles = artifact"testfiles/JLD2TestFiles-0.1.7/artifacts"
+testfiles = artifact"testfiles/JLD2TestFiles-0.1.8/artifacts"
 
 @testset "HDF5 compat test files" begin
     # These are test files copied from the HDF5.jl test suite
@@ -301,4 +301,18 @@ end
     arr = JLD2.readmmap(ds)
     @test arr isa Base.ReinterpretArray
     @test arr == 1:100
+    close(f)
+end
+
+@testset "data created with JLD2@0.5 filters" begin
+    fn = joinpath(testfiles, "jld2-0.5-filters.jld2")
+    f = jldopen(fn)
+    @testset "$(cname)" for (cname) in ["bzip2", "zlib", "lz4f", "zstd"]
+        @test f["$(cname)-1"] == zeros(10000)
+        @test f["$(cname)-2"] == ones(10000)
+        @test f["$(cname)-3"] == zeros(1)
+        @test f["$(cname)-4"] == zeros(UInt8, 1)
+        @test f["$(cname)-5"] == f["random_numbers_uncompressed"]
+    end
+    close(f)
 end
