@@ -1,15 +1,7 @@
 [testfiles]
-git-tree-sha1 = "a7ed11c46dd79d18f1a38d5f0ae62aca9141df78"
+git-tree-sha1 = "d4755c3d8c930d316e1c70e44bd37c95180c22ae"
 lazy = true
 
     [[testfiles.download]]
-    sha256 = "b20722c3297fdba34ac8079fec5ead6dfeb14936ae95c2b19d4a2bf0117ef271"
-    url = "https://github.com/JonasIsensee/JLD2TestFiles/archive/refs/tags/v0.1.7.tar.gz"
-
-[oldfilters]
-git-tree-sha1 = "0b41aa41c702c583b95b98e5622c6973c22787ff"
-lazy = true
-
-    [[oldfilters.download]]
-    sha256 = "45b96a2e6567c6ba571a34dd1c01d702c87d5374c25e1b6c8fcfa6e05ceb4912"
-    url = "https://github.com/user-attachments/files/21961500/oldjld2.tar.gz"
+    sha256 = "5bcc6346d442839946132fd707b8dea6f7aebec9251b44a7abcb2a60a22e0d59"
+    url = "https://github.com/JonasIsensee/JLD2TestFiles/archive/refs/tags/v0.1.8.tar.gz"
