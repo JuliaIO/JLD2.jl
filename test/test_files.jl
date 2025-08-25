@@ -302,3 +302,17 @@ end
     @test arr isa Base.ReinterpretArray
     @test arr == 1:100
 end
+
+import JLD2Bzip2, JLD2Lz4
+using StableRNGs: StableRNG
+@testset "data created with JLD2@0.5 filters" begin
+    fn = artifact"oldfilters/oldjld2/jld2-0.5-filters.jld2"
+    f = jldopen(fn)
+    @testset "$(cname)" for (cname) in ["bzip2", "zlib", "lz4f", "zstd"]
+        @test f["$(cname)-1"] == zeros(10000)
+        @test f["$(cname)-2"] == ones(10000)
+        @test f["$(cname)-3"] == zeros(1)
+        @test f["$(cname)-4"] == zeros(UInt8, 1)
+        @test f["$(cname)-5"] == rand(StableRNG(1234), UInt8, 10000)
+    end
+end

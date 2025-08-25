@@ -40,7 +40,17 @@ function Filters.apply_filter!(filter::Lz4Filter, ref::Ref, forward::Bool=true)
             ref[]
         )
     else
-        ref[] = decode(LZ4HDF5DecodeOptions(), ref[])
+        buf = ref[]
+        # For backwards compatibility with pre 0.6 JLD2 files
+        # check if this is actually the LZ4 Frame format
+        # Fortunately because LZ4 Frame and LZ4 HDF5 formats have incompatible
+        # headers, we can distinguish the formats by looking at the first 4 bytes.
+        # https://github.com/HDFGroup/hdf5_plugins/issues/134#issuecomment-2484434118
+        if length(buf) ≥ 4 && @view(buf[1:4]) == b"\x04\x22\x4D\x18"
+            ref[] = decode(LZ4FrameDecodeOptions(), ref[])
+        else
+            ref[] = decode(LZ4HDF5DecodeOptions(), ref[])
+        end
     end
     return 0
 end
