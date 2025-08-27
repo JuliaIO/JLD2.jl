@@ -8,6 +8,6 @@ ChunkCodecLibBzip2 = "2b723af9-f480-4e8d-a1e4-4a9f5a906122"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 
 [compat]
-ChunkCodecLibBzip2 = "0.2.1"
+ChunkCodecLibBzip2 = "0.2.1, 0.3"
 JLD2 = "0.6"
 julia = "1.9"
