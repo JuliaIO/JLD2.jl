@@ -19,8 +19,8 @@ UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 UnPackExt = "UnPack"
 
 [compat]
-ChunkCodecLibZlib = "0.2.1, 0.3"
-ChunkCodecLibZstd = "0.2.1, 0.3"
+ChunkCodecLibZlib = "1"
+ChunkCodecLibZstd = "1"
 FileIO = "1.5.1"
 MacroTools = "0.5.10"
 OrderedCollections = "1"
