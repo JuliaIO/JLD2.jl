@@ -146,15 +146,16 @@ settings.
 using JLD2
 
 jldopen("example.jld2", "w"; compress=ZstdFilter()) do f
-    # This can be efficiently compressed → use compression
-    write(f, "zlib_array", zeros(10000); compress=Deflate())
+    # This gets compressed with the ZstdFilter
+    write(f, "default_array", zeros(10000))
 
     # Don't compress this
     write(f, "random_array", rand(10000); compress=false)
 
-    write(f, "default_array", zeros(10000))
+    # Override the above compression filter and use a different one
+    write(f, "zlib_array", zeros(10000); compress=Deflate())
 
-    # Use a different filter for this specific dataset
+    # Alternatively, use the same filter but with different configuration
     write(f, "fast_compressed", rand(10000); compress=ZstdFilter(1))
 end
 ```
