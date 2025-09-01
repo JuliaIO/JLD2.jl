@@ -32,6 +32,14 @@ Filters.filtertype(::Val{32004}) = Lz4Filter
 
 function Filters.apply_filter!(filter::Lz4Filter, ref::Ref, forward::Bool=true)
     if forward
+        buf = ref[]
+        # This check is to avoid confusion with LZ4 Frame magic
+        # for backwards compatibility with pre 0.6 JLD2 files
+        # This is never going to error unless someone can encode about 
+        # 300 PB in a single chunk.
+        if UInt64(length(buf))>>32 == 0x0422_4D18
+            throw(UnsupportedFeatureException("This particular dataset size is disallowed for the Lz4Filter. Please use a different compression filter."))
+        end
         ref[] = encode(
             LZ4HDF5EncodeOptions(;
                 blockSize=filter.blocksize,
