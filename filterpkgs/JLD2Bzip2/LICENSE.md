@@ -1,4 +1,4 @@
-JLD2Bzip2 - Transitional package to JLD2/CodecBzip2Ext.
+JLD2Bzip2
 Provides the HDF5 Bzip2 filter as a compression option for JLD2.
 
 Copyright (c) 2025: Jonas Isensee and contributors: https://github.com/JuliaIO/JLD2.jl/contributors

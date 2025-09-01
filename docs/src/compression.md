@@ -61,7 +61,7 @@ The compression filters available for JLD2 are:
 | *built in*     | `Deflate`         | Default compression, very widely used, good compatibility    |
 | *built in*     | `ZstdFilter`      | Fast, wide range of compression size vs speed trade-offs     |
 | JLD2Bzip2      | `Bzip2Filter`     | Good compression ratio, can be slower                        |
-| JLD2Lz4        | `LZ4Filter`       | Very fast compression/decompression                          |
+| JLD2Lz4        | `Lz4Filter`       | Very fast compression/decompression                          |
 
 ### Using Specific Filters
 
@@ -95,12 +95,12 @@ using JLD2
 filters = [Shuffle(), Deflate()]
 
 jldopen("example.jld2", "w"; compress = filters) do f
-    # Benefits from bit shuffling
+    # Benefits from byte shuffling
     # Only the lowest byte of each element is non-zero
     # Shuffle() reorders the bytes of all elements from e.g.
     # [123123123] to [111222333]
     # where each digit refers to the nth byte of an array element.
-    f["numeric_data"] = UInt.(rand(UInt8, 10000)
+    f["numeric_data"] = UInt.(rand(UInt8, 10000))
 end
 ```
 
@@ -118,17 +118,17 @@ Different filters support various configuration options:
 using JLD2, JLD2Lz4, JLD2Bzip2
 
 # Zstd with different compression levels
-zstd_fast = ZstdFilter(level=1)    # Fast compression
-zstd_best = ZstdFilter(level=22)   # Best compression
+zstd_fast = ZstdFilter(1)    # Fast compression
+zstd_best = ZstdFilter(22)   # Best compression
 
 # Bzip2 with custom block size
-bzip2_filter = Bzip2Filter(10)
+bzip2_filter = Bzip2Filter(4)
 
 # Example usage
 jldopen("example.jld2", "w") do f
-    write(f, "fast_data", large_array; compress=zstd_fast)
-    write(f, "small_data", small_array; compress=zstd_best)
-    write(f, "archive_data", archive_array; compress=bzip2_filter)
+    write(f, "fast_data", zeros(UInt8, 10000); compress=zstd_fast)
+    write(f, "small_data", randn(10000); compress=zstd_best)
+    write(f, "archive_data", randn(1000); compress=bzip2_filter)
 end
 ```
 
@@ -145,28 +145,46 @@ settings.
 ```julia
 using JLD2
 
-jldopen("example.jld2", "w") do f
+jldopen("example.jld2", "w"; compress=ZstdFilter()) do f
     # This can be efficiently compressed → use compression
-    write(f, "compressed_array", zeros(10000); compress=Deflate())
+    write(f, "zlib_array", zeros(10000); compress=Deflate())
 
     # Don't compress this
     write(f, "random_array", rand(10000); compress=false)
 
+    write(f, "default_array", zeros(10000))
+
     # Use a different filter for this specific dataset
-    write(f, "fast_compressed", rand(10000); compress=ZstdFilter())
+    write(f, "fast_compressed", rand(10000); compress=ZstdFilter(1))
 end
 ```
 
-### Compatibility and Migration
+### Compatibility and Migration from v0.5 to v0.6
 
-The new filter-based API is fully compatible with the previous compression system:
-
-- **File Compatibility**: Files created with the new filter API can be read by older
-  versions of JLD2, and files created with the old API can be read with the new system.
+- **File Compatibility**: Files created with the old API can be read with the new system.
+  Files created with the v0.6 filter API may not be able to read by older versions of JLD2, see the compatibility table below for more information.
 - **Performance**: Compression performance and file sizes remain the same as the
   underlying compression libraries are unchanged.
 - **HDF5 Compatibility**: The new API is analogous to HDF5.jl, making it easier to
   work with HDF5 files and improving interoperability.
+
+#### Filter Compatibility Table
+
+The following table shows which JLD2 versions can decode data compressed using different filter features:
+
+| Filter feature | JLD2 versions able to decode |
+|:------------|:---------------|
+| `Deflate` | Since 0.2.0|
+| `Bzip2Filter` | Since 0.4.4|
+| `ZstdFilter` | Since 0.4.49|
+| `Shuffle` | Since 0.6.0 |
+| `Lz4Filter` | Since 0.6.0 |
+| multiple filters | Since 0.6.0 |
+
+**Notes:**
+- Data compressed with `LZ4FrameCompressor` in previous versions
+can be read if `JLD2Lz4` is loaded.
+Data compressed with `Lz4Filter` cannot be read by JLD2 versions before 0.6.0.
 
 For code migration, the main change is in how you specify compression filters:
 
