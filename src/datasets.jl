@@ -315,11 +315,15 @@ end
     psz = payload_size_without_storage_message(dataspace, datatype)
     psz += CONTINUATION_MSG_SIZE
 
+    local_filters = FilterPipeline(map(filters) do filter
+        Filters.set_local(filter, odr, dataspace, ())
+    end)
+
     # Figure out the layout
     if datasz == 0 || (!(data isa ArrayMemory) && datasz < 8192)
         layout_class = LcCompact
         psz += jlsizeof(Val(HmDataLayout); layout_class, data_size=datasz)
-    elseif data isa ArrayMemory && iscompressed(filters) && isconcretetype(eltype(data)) && isbitstype(eltype(data))
+    elseif data isa ArrayMemory && iscompressed(local_filters) && isconcretetype(eltype(data)) && isbitstype(eltype(data))
         layout_class = LcChunked
         psz += jlsizeof(Val(HmDataLayout);
             layout_class,
@@ -327,7 +331,7 @@ end
             # Dummy values for message size computation
             data_size = 0, data_address = 0,
         )
-        psz += Filters.pipeline_message_size(filters)
+        psz += Filters.pipeline_message_size(local_filters)
     else
         layout_class = LcContiguous
         psz += jlsizeof(Val(HmDataLayout); layout_class)
@@ -359,12 +363,8 @@ end
         write_continuation_placeholder(cio)
         jlwrite(io, end_checksum(cio))
     elseif layout_class == LcChunked
-
-        foreach(filters) do filter
-            Filters.set_local!(filter, odr, dataspace, ())
-        end
-        compressed, retcodes = Filters.compress(filters, data, odr, f, wsession)
-        Filters.write_filter_pipeline_message(cio, filters)
+        compressed, retcodes = Filters.compress(local_filters, data, odr, f, wsession)
+        Filters.write_filter_pipeline_message(cio, local_filters)
 
         write_header_message(cio, Val(HmDataLayout);
             layout_class,
