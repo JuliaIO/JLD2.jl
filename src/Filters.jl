@@ -61,11 +61,11 @@ function apply_filter! end
 
 
 """
-    set_local!(filter, odr, dataspace, datasetcreationprops)
+    set_local(filter, odr, dataspace, datasetcreationprops) -> filter
 
 Some filters use information about the dataset, like element size, element type, and layout. Filters may optionally implement this function for this purpose.
 """
-set_local!(filter::Filter, odr, dataspace, datasetcreationprops) = nothing
+set_local(filter::Filter, odr, dataspace, datasetcreationprops) = filter
 
 """
     FilterPipeline(filters)
@@ -178,7 +178,7 @@ This filter will rearrange the bytes so that all the least significant bytes are
 beginning of the array, followed by the second least significant bytes, and so on, which
 simplifies the compression of the data.
 """
-mutable struct Shuffle <: Filter
+struct Shuffle <: Filter
     element_size::UInt32
 end
 Shuffle() = Shuffle(0)
@@ -186,9 +186,8 @@ filterid(::Type{Shuffle}) = UInt16(2)
 client_values(filter::Shuffle) = (filter.element_size,)
 filtertype(::Val{2}) = Shuffle
 
-function set_local!(fil::Shuffle, odr, dataspace, datasetcreationprops)
-    fil.element_size = odr_sizeof(odr)
-    nothing
+function set_local(fil::Shuffle, odr, dataspace, datasetcreationprops)
+    Shuffle(UInt32(odr_sizeof(odr)))
 end
 
 function apply_filter!(fil::Shuffle, ref, forward::Bool=true)
