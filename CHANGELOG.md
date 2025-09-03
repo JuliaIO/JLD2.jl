@@ -1,3 +1,8 @@
+## 0.6.1
+ - Improved backwards compat for lz4 compression
+ - Docs improvements
+ - updated compat bounds for filter pkgs
+
 ## 0.6.0
  - **Breaking**: Rework compression API. Expose filter approach of hdf5 broadly similar to HDF5.jl.
  See docs for description. The basic `compress=true` api still works but backend libraries were
