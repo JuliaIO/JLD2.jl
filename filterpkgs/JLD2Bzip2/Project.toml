@@ -1,7 +1,7 @@
 name = "JLD2Bzip2"
 uuid = "84687f94-9f67-4744-9d95-d64e07ea2a3b"
 authors = ["Jonas Isensee <jonas.isensee@web.de>"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 ChunkCodecLibBzip2 = "2b723af9-f480-4e8d-a1e4-4a9f5a906122"
