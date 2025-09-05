@@ -182,6 +182,7 @@ struct Shuffle <: Filter
     element_size::UInt32
 end
 Shuffle() = Shuffle(0)
+filtername(::Type{Shuffle}) = ""
 filterid(::Type{Shuffle}) = UInt16(2)
 client_values(filter::Shuffle) = (filter.element_size,)
 filtertype(::Val{2}) = Shuffle
@@ -273,7 +274,7 @@ struct ZstdFilter <: Filter
 end
 
 filterid(::Type{ZstdFilter}) = UInt16(32015)
-filtername(::Type{ZstdFilter}) = "Zstandard compression: http://www.zstd.net"
+filtername(::Type{ZstdFilter}) = "ZSTD"
 client_values(filter::ZstdFilter) = (filter.level, )
 filtertype(::Val{32015}) = ZstdFilter
 

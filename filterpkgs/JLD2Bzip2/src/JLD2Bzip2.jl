@@ -9,13 +9,29 @@ module JLD2Bzip2
 using JLD2: JLD2, Filters
 using ChunkCodecLibBzip2
 
+"""
+    Bzip2Filter <: Filter
+
+The Bzip2Filter can be used to compress datasets using the bzip2 compression algorithm.
+This is filter id 307.
+
+## Arguments
+- `blocksize100k`: Specifies the block size to be used for compression.
+
+  It should be a value between 1 and 9 inclusive, and the actual block size used
+  is 100000 x this figure. The default 9 gives the best compression but takes the most memory.
+
+# External Links
+* [BZIP2 HDF5 Filter ID 307](https://github.com/HDFGroup/hdf5_plugins/blob/master/docs/RegisteredFilterPlugins.md)
+* [BZIP2 HDF5 Plugin Repository (C code)](https://github.com/HDFGroup/hdf5_plugins/tree/master/BZIP2/src)
+"""
 struct Bzip2Filter <: Filters.Filter
     blocksize100k::Cuint
 end
 Bzip2Filter() = Bzip2Filter(9)
 
 Filters.filterid(::Type{Bzip2Filter}) = UInt16(307)
-Filters.filtername(::Type{Bzip2Filter}) = "HDF5 bzip2 filter; see http://www.hdfgroup.org/services/contributions.html"
+Filters.filtername(::Type{Bzip2Filter}) = "BZIP2"
 Filters.client_values(filter::Bzip2Filter) = (filter.blocksize100k, )
 Filters.filtertype(::Val{307}) = Bzip2Filter
 
