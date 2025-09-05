@@ -16,8 +16,8 @@ const DEFAULT_BLOCK_SIZE = 1 << 30
 Apply LZ4 compression. `blocksize` is the main argument. The filter id is 32004.
 
 # External Links
-* [LZ4 HDF5 Filter ID 32004](https://portal.hdfgroup.org/display/support/Filters#Filters-32004)
-* [LZ4 HDF5 Plugin Repository (C code)](https://github.com/nexusformat/HDF5-External-Filter-Plugins/tree/master/LZ4)
+* [LZ4 HDF5 Filter ID 32004](https://github.com/HDFGroup/hdf5_plugins/blob/master/docs/RegisteredFilterPlugins.md)
+* [LZ4 HDF5 Plugin Repository (C code)](https://github.com/HDFGroup/hdf5_plugins/tree/master/LZ4/src)
 """
 struct Lz4Filter <: Filters.Filter
     blocksize::Cuint
@@ -26,7 +26,7 @@ Lz4Filter() = Lz4Filter(DEFAULT_BLOCK_SIZE)
 
 
 Filters.filterid(::Type{Lz4Filter}) = UInt16(32004)
-Filters.filtername(::Type{Lz4Filter}) = "HDF5 lz4 filter; see http://www.hdfgroup.org/services/contributions.html"
+Filters.filtername(::Type{Lz4Filter}) = "LZ4H5"
 Filters.client_values(filter::Lz4Filter) = (filter.blocksize, )
 Filters.filtertype(::Val{32004}) = Lz4Filter
 
