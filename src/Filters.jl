@@ -29,6 +29,7 @@ filterid(x::Filter) = filterid(typeof(x))
 
 What is the name of a filter? Defaults to "Unnamed Filter"
 Returns a String describing the filter.
+Filters with an id <= 255 do not need to define a filtername.
 """
 filtername(::Type{F}) where {F<:Filter} = "Unnamed Filter"
 filtername(x::Filter) = filtername(typeof(x))
@@ -232,7 +233,6 @@ struct Deflate <: Filter
 end
 
 filterid(::Type{Deflate}) = UInt16(1)
-filtername(::Type{Deflate}) = ""
 client_values(filter::Deflate) = (filter.level, )
 filtertype(::Val{1}) = Deflate
 
@@ -273,7 +273,7 @@ struct ZstdFilter <: Filter
 end
 
 filterid(::Type{ZstdFilter}) = UInt16(32015)
-filtername(::Type{ZstdFilter}) = "Zstandard compression: http://www.zstd.net"
+filtername(::Type{ZstdFilter}) = "ZSTD"
 client_values(filter::ZstdFilter) = (filter.level, )
 filtertype(::Val{32015}) = ZstdFilter
 
