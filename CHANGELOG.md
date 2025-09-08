@@ -1,3 +1,6 @@
+## 0.6.2
+ - Fix an edge case for `Vector{Union{}}`
+
 ## 0.6.1
  - Improved backwards compat for lz4 compression
  - Docs improvements
