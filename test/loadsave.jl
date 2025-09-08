@@ -944,7 +944,7 @@ end
     fn = joinpath(mktempdir(), "emptyunion_edgecase.jld2")
     x = [ _  for _ in ()]
     # Need a bogus dispatch here to trigger the edge case
-    JLD2.writeas(::Type{<:UnionAll}) = error("Should not be called")
+    JLD2.writeas(::Type{<:JLD2.JLDFile}) = error("Should not be called")
     jldsave(fn; x)
     loaded_x = load(fn, "x")
     @test loaded_x == x
