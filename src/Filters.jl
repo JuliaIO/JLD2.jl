@@ -29,6 +29,7 @@ filterid(x::Filter) = filterid(typeof(x))
 
 What is the name of a filter? Defaults to "Unnamed Filter"
 Returns a String describing the filter.
+Filters with an id <= 255 do not need to define a filtername.
 """
 filtername(::Type{F}) where {F<:Filter} = "Unnamed Filter"
 filtername(x::Filter) = filtername(typeof(x))
@@ -182,7 +183,6 @@ struct Shuffle <: Filter
     element_size::UInt32
 end
 Shuffle() = Shuffle(0)
-filtername(::Type{Shuffle}) = ""
 filterid(::Type{Shuffle}) = UInt16(2)
 client_values(filter::Shuffle) = (filter.element_size,)
 filtertype(::Val{2}) = Shuffle
@@ -233,7 +233,6 @@ struct Deflate <: Filter
 end
 
 filterid(::Type{Deflate}) = UInt16(1)
-filtername(::Type{Deflate}) = ""
 client_values(filter::Deflate) = (filter.level, )
 filtertype(::Val{1}) = Deflate
 
