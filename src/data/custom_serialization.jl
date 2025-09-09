@@ -2,6 +2,8 @@
 
 # The default, write a type as itself
 writeas(T::Type) = T
+# Union{} behaves oddly during dispatch. Define explicitly:
+writeas(::Type{Union{}}) = Union{}
 
 # wconvert and rconvert do type conversion before reading and writing,
 # respectively. These fall back to convert.

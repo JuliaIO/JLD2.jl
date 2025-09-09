@@ -471,7 +471,7 @@ if VERSION ≥ v"1.8"
 
 end
 
-## Issue #431 Identity-Preservation of nested structs with CustomSerialization 
+## Issue #431 Identity-Preservation of nested structs with CustomSerialization
 
 abstract type AT end
 Base.@kwdef mutable struct T1 <: AT
@@ -568,9 +568,9 @@ end
     ###########################
 
     # Open for non-read in parallel context
-    @test_throws ArgumentError jldopen(fn, "w"; parallel_read = true) do f end 
+    @test_throws ArgumentError jldopen(fn, "w"; parallel_read = true) do f end
     @test_throws ArgumentError jldopen(fn, "w+"; parallel_read = true) do f end
-    @test_throws ArgumentError jldopen(fn, "r+"; parallel_read = true) do f end 
+    @test_throws ArgumentError jldopen(fn, "r+"; parallel_read = true) do f end
     @test_throws ArgumentError jldopen(fn, "a+"; parallel_read = true) do f end
     @test_throws ArgumentError jldopen(fn, "a"; parallel_read = true) do f end
 
@@ -616,7 +616,7 @@ JLD2.rconvert(::Type{OldStructVersion}, nt::NamedTuple) = OldStructVersion(nt.x,
 end
 
 @testset "Issue #484 round-trip Tuple{Type{Int}}" begin
-    cd(mktempdir()) do 
+    cd(mktempdir()) do
         T = Tuple{Type{Int}}
 	jldsave("test.jld2"; T)
 	@test T == load("test.jld2", "T")
@@ -639,7 +639,7 @@ end
         a[(0, (1, 2, 3))] = 4
         @test a == (save_object("test.jld2", a); load_object("test.jld2"))
     end
-end 
+end
 
 @testset "FileIO.load of (nested) groups" begin
     cd(mktempdir()) do
@@ -663,7 +663,7 @@ end
 end
 
 @testset "Union{} in type signature Issue #532" begin
-    cd(mktempdir()) do 
+    cd(mktempdir()) do
         op = (1, pairs((;)))
         jldsave("testopempty.jld2"; op)
         @test op == load("testopempty.jld2", "op")
@@ -671,7 +671,7 @@ end
 end
 
 @testset "Issue #536 reading directly after writing" begin
-    cd(mktempdir()) do 
+    cd(mktempdir()) do
         x = (1, Dict(2=>3))
         jldopen("test.jld2", "w") do f
             f["x"] = x
@@ -688,7 +688,7 @@ end
     # Fill the struct
     obj = Structwithmanyfields(ntuple(i -> i, 256)...)
 
-    cd(mktempdir()) do 
+    cd(mktempdir()) do
         save_object("myStruct.jld2", obj)
         loaded = load_object("myStruct.jld2")
         @test loaded isa Structwithmanyfields
@@ -700,7 +700,7 @@ end
 #     ahat_normalized = String([0xc3, 0xa2])
 #     dummy_data = 42
 #     fn = "test.jld2"
-#     cd(mktempdir()) do 
+#     cd(mktempdir()) do
 #         jldopen(fn, "w") do f
 #             f[ahat_unnormalized] = dummy_data
 #             @test haskey(f, ahat_normalized)
@@ -730,7 +730,7 @@ module DummyModule
     JLD2.rconvert(::Type{DD}, nt::NamedTuple) = DD()
 end
 @testset "Upgrading a struct that was formerly singleton" begin
-    cd(mktempdir()) do     
+    cd(mktempdir()) do
         jldsave("testing.jld2"; a = DummyModule.AA())
         @test DummyModule.BB() == load("testing.jld2", "a"; typemap = Dict("Main.DummyModule.AA" => JLD2.Upgrade(DummyModule.BB)))
         @test DummyModule.BB() == load("testing.jld2", "a"; typemap = Dict("Main.DummyModule.AA" => DummyModule.BB))
@@ -802,7 +802,7 @@ end
     @test obj[1] == 1
     @test JLD2.isreconstructed(obj[2])
     @test obj[3] == 2
-    
+
 end
 
 if VERSION ≥ v"1.7"
@@ -938,4 +938,14 @@ end
     @test d["type"] == Complex{Float64}
     @test d["zf"] isa Complex{Float32}
     @test d["zf"] == 1.0 + 2.0im
+end
+
+@testset "Issue #673: Union{} edgecase" begin
+    fn = joinpath(mktempdir(), "emptyunion_edgecase.jld2")
+    x = [ _  for _ in ()]
+    # Need a bogus dispatch here to trigger the edge case
+    JLD2.writeas(::Type{<:JLD2.JLDFile}) = error("Should not be called")
+    jldsave(fn; x)
+    loaded_x = load(fn, "x")
+    @test loaded_x == x
 end
