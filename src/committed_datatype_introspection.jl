@@ -41,7 +41,7 @@ function stringify_committed_datatype(f, cdt; showfields=false)
         else
             # These are normal julia types
             dtrr = jltype(f, dt.members[i])
-            fieldtype = string(julia_type(dtrr))
+            fieldtype = string(julia_repr(dtrr))
         end
         push!(field_strs, "$(dt.names[i])::$(fieldtype)")
     end

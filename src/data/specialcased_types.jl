@@ -120,6 +120,7 @@ function jlconvert(rr::FixedLengthString{String}, ::JLDFile, ptr::Ptr, ::RelOffs
     String(data)
 end
 
+
 # Ascii String
 function jlconvert(rr::AsciiString{NullTerminated}, ::JLDFile, ptr::Ptr, ::RelOffset)
     data = Vector{UInt8}(undef, rr.length)
