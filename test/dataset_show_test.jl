@@ -39,7 +39,19 @@ end
                                 dset = JLD2.get_dataset(f, key)
 
                                 # Test that show doesn't throw errors
-                                @test_nowarn show(IOBuffer(), MIME("text/plain"), dset)
+                                # For files with custom structs, we expect reconstruction warnings
+                                if file in ["test_custom_structs.jld2", "test_complex_nested.jld2", "test_attributes_heavy.jld2"]
+                                    # Just test that no exception is thrown
+                                    show_output = try
+                                        show(IOBuffer(), MIME("text/plain"), dset)
+                                        true
+                                    catch e
+                                        false
+                                    end
+                                    @test show_output
+                                else
+                                    @test_nowarn show(IOBuffer(), MIME("text/plain"), dset)
+                                end
 
                                 # Test show output structure
                                 io = IOBuffer()

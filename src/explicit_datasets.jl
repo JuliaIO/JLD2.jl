@@ -198,7 +198,7 @@ function create_dataset(
         (parent, name) = pathize(g, path, true)
     else
         name = ""
-        parent = g.f
+        parent = g
     end
 
     return Dataset(parent, name, UNDEFINED_ADDRESS, datatype, dataspace,

@@ -35,15 +35,25 @@ function stringify_committed_datatype(f, cdt; showfields=false)
     field_strs = String[]
     do_report = false
     for (i, key) in enumerate(keys(field_datatypes))
+        # Find the corresponding index in dt.names
+        name_index = findfirst(name -> string(name) == string(key), dt.names)
+        if name_index === nothing
+            continue  # Skip if name not found
+        end
+
         if (ref = field_datatypes[string(key)]) != NULL_REFERENCE
             fieldtype = stringify_committed_datatype(f, f.datatype_locations[ref])[1]
             do_report = true
         else
             # These are normal julia types
-            dtrr = jltype(f, dt.members[i])
-            fieldtype = string(julia_repr(dtrr))
+            if name_index <= length(dt.members)
+                dtrr = jltype(f, dt.members[name_index])
+                fieldtype = string(julia_repr(dtrr))
+            else
+                fieldtype = "Unknown"
+            end
         end
-        push!(field_strs, "$(dt.names[i])::$(fieldtype)")
+        push!(field_strs, "$(dt.names[name_index])::$(fieldtype)")
     end
     if do_report == false
         empty!(field_strs)
@@ -87,7 +97,7 @@ function stringify_object(f, offset)
     else
         rr = jltype(f, datatype)
         seek(f.io, layout.data_offset)
-        read_dataspace = (dataspace, NULL_REFERENCE, layout, filter_pipeline)
+        read_dataspace = (dataspace, NULL_REFERENCE, layout, FilterPipeline(filter_pipeline))
         res = read_data(f, rr, read_dataspace, nothing)
         string(res)
     end    
