@@ -219,19 +219,48 @@ function Base.show(io::IO, ::MIME"text/plain", dset::Dataset)
         iscommitted = dt isa SharedDatatype && haskey(f.datatype_locations, dt.header_offset)
         print(io, prefix*"datatype: $(typeof(dt))", iscommitted ? " (committed)\n" : "\n")
         iscommitted && println(io, prefix*"\tcommitted at: $(dt.header_offset)")
-        rr = jltype(dset.parent.f, dt)
-        jt = julia_repr(rr)
-        println(io, prefix*"\twritten structure: $jt")
-        if iscommitted
-            juliatype, writtentype, fields = stringify_committed_datatype(f, f.datatype_locations[dt.header_offset], showfields=true)
-            println(io, prefix*"\ttype name: $(juliatype)")
-            if !isempty(writtentype)
-                println(io, prefix*"\twritten type name: $(writtentype)")
-            end
-            for field in fields
-                println(io, prefix*"\t\t$(field)")
+        # Use safe introspection that doesn't trigger reconstruction warnings
+        # For reference datatypes, also show the actual RelOffset for debugging
+        if dt isa BasicDatatype && dt.class == 0x37  # DT_REFERENCE
+            layout = DataLayout(f, dset.layout)
+            type_info = describe_reference_datatype_with_offset(dset.parent.f, dt, layout.data_offset)
+            println(io, prefix*"\twritten structure: $type_info")
+        else
+            # For committed datatypes, show detailed field information
+            if iscommitted
+                julia_type_str, written_type_str, field_strs = safe_introspect_committed_datatype(f, f.datatype_locations[dt.header_offset], showfields=true)
+
+                # Show the type with fields if available
+                if !isempty(field_strs)
+                    println(io, prefix*"\twritten structure: $julia_type_str")
+                    for field_str in field_strs
+                        println(io, prefix*"\t\t$field_str")
+                    end
+                else
+                    println(io, prefix*"\twritten structure: $julia_type_str")
+                end
+
+                # Show type name separately for clarity
+                println(io, prefix*"\ttype name: $julia_type_str")
+            else
+                # For non-committed datatypes
+                type_info = safe_introspect_datatype(dset.parent.f, dt)
+
+                # Handle special compound struct formatting
+                if startswith(type_info, "COMPOUND_STRUCT:")
+                    field_data = type_info[17:end]  # Remove "COMPOUND_STRUCT:" prefix
+                    field_strs = split(field_data, "|")
+                    println(io, prefix*"\twritten structure: compound struct")
+                    for field_str in field_strs
+                        println(io, prefix*"\t\t$field_str")
+                    end
+                else
+                    println(io, prefix*"\twritten structure: $type_info")
+                end
             end
         end
+
+        # Additional information for committed types is already shown above
     end
     if !isnothing(dset.dataspace)
         ds = dset.dataspace
@@ -264,9 +293,10 @@ function Base.show(io::IO, ::MIME"text/plain", dset::Dataset)
         println(io, prefix*"Attributes:")
         for (k, attr) in pairs(dset.attributes)
             if attr isa ReadAttribute
-                data = read_attr_data(dset.parent.f, attr)
-                println(io, prefix*"\t$(attr.name) = ",
-                    data isa String ? "\"$data\"" : data)
+                # Use safe attribute reading to avoid reconstruction issues
+                attr_name = attr.name
+                attr_info = safe_read_attribute_info(dset.parent.f, attr)
+                println(io, prefix*"\t$attr_name = $attr_info")
             else
                 println(io, prefix*"\t$(k) = $(attr)")
             end
