@@ -173,6 +173,9 @@ It rearranges the bytes of elements in an array to improve compression
 efficiency. It is not a compression filter by itself, but can be used in conjunction
 with other compression filters like `Deflate`` or `ZstdFilter`.
 
+## Arguments:
+- `element_size`: Size of each element in bytes. Default is 0 (auto-determined).
+
 It can be useful when the array, for example, contains unsigned integer `UInt64` and all
 values are small. Then all the upper bytes of the eight byte integer are zero.
 This filter will rearrange the bytes so that all the least significant bytes are at the
@@ -182,7 +185,7 @@ simplifies the compression of the data.
 struct Shuffle <: Filter
     element_size::UInt32
 end
-Shuffle() = Shuffle(0)
+Shuffle(; element_size::UInt32=0) = Shuffle(element_size)
 filterid(::Type{Shuffle}) = UInt16(2)
 client_values(filter::Shuffle) = (filter.element_size,)
 filtertype(::Val{2}) = Shuffle
@@ -230,6 +233,7 @@ Larger numbers lead to better compression, but also to longer runtime.
 struct Deflate <: Filter
     level::Cuint
     Deflate(level=5) = new(clamp(level, 0, 9))
+    Deflate(; level=5) = Deflate(level)
 end
 
 filterid(::Type{Deflate}) = UInt16(1)
@@ -270,6 +274,7 @@ struct ZstdFilter <: Filter
             ChunkCodecLibZstd.ZSTD_maxCLevel()
         )
         )
+    ZstdFilter(; level=ChunkCodecLibZstd.ZSTD_defaultCLevel()) = ZstdFilter(level)
 end
 
 filterid(::Type{ZstdFilter}) = UInt16(32015)
