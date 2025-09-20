@@ -4,6 +4,104 @@ using LazyArtifacts
 # NOTE: Keep this artifact version in sync with test_files.jl
 testfiles = artifact"testfiles/JLD2TestFiles-0.1.9/artifacts"
 
+# Helper functions for testing
+function test_dataset_show_basic(dset, key, filename)
+    # Test that show doesn't throw errors
+    if filename in ["test_dataset_show_structs.jld2", "test_dataset_show_nested.jld2"]
+        show_success = try
+            show(IOBuffer(), MIME("text/plain"), dset)
+            true
+        catch
+            false
+        end
+        @test show_success
+    else
+        @test_nowarn show(IOBuffer(), MIME("text/plain"), dset)
+    end
+end
+
+function get_dataset_show_output(dset)
+    io = IOBuffer()
+    show(io, MIME("text/plain"), dset)
+    String(take!(io))
+end
+
+function test_dataset_format_structure(output, key)
+    @test startswith(output, "┌─ Dataset:")
+    @test contains(output, "\"$key\"")
+    @test endswith(strip(output), "└─")
+
+    # Check proper indentation
+    lines = split(output, '\n')
+    content_lines = filter(line -> contains(line, "│"), lines)
+    !isempty(content_lines) && @test all(line -> startswith(line, "│"), content_lines)
+end
+
+function test_dataset_written_info(dset, output)
+    if JLD2.iswritten(dset)
+        @test contains(output, "datatype:")
+        @test contains(output, "written structure:")
+        !isnothing(dset.dataspace) && @test contains(output, "dataspace:")
+        !isnothing(dset.layout) && @test contains(output, "layout:")
+    else
+        @test contains(output, "(unwritten)")
+    end
+end
+
+function test_dataset_detailed_output(dset, key, output)
+    @testset "Detailed output validation for $key" begin
+        lines = split(output, '\n')
+        @test length(lines) >= 2
+
+        # Test header and footer
+        @test startswith(lines[1], "┌─ Dataset:") && contains(lines[1], "\"$key\"")
+
+        non_empty_lines = filter(line -> !isempty(strip(line)), lines)
+        !isempty(non_empty_lines) && @test strip(non_empty_lines[end]) == "└─"
+
+        # Test content lines structure
+        length(non_empty_lines) > 2 && foreach(line -> @test(startswith(line, "│")), non_empty_lines[2:end-1])
+
+        # Test dimension information
+        if contains(key, "scalar")
+            @test contains(output, "dimensions: ()")
+        elseif contains(key, "array") || contains(key, "matrix")
+            @test contains(output, "dimensions:")
+        end
+
+        # Test type information presence (relaxed)
+        if JLD2.iswritten(dset) && contains(output, "written structure:")
+            type_patterns = ["::", "Int", "Float", "String", "Bool", "Nothing", "Symbol"]
+            type_info_present = any(pattern -> any(line -> contains(line, pattern), lines), type_patterns)
+            !type_info_present && @test_skip "Type information not always recognizable in display"
+        end
+    end
+end
+
+function test_dataset_display_modes(dset, key)
+    @testset "Display modes for $key" begin
+        # Test compact display
+        compact_output = sprint(show, dset)
+        @test !isempty(compact_output)
+        @test contains(compact_output, "Dataset") || contains(compact_output, key)
+    end
+end
+
+function test_dataset_edge_cases(dset)
+    @testset "Edge cases" begin
+        # Test with different IO contexts
+        for io_context in [IOBuffer(), IOContext(IOBuffer(), :color => false)]
+            @test_nowarn show(io_context, MIME("text/plain"), dset)
+            output = String(take!(io_context isa IOContext ? io_context.io : io_context))
+            @test !isempty(output) && startswith(output, "┌─ Dataset:")
+        end
+
+        # Test string representation
+        str_repr = string(dset)
+        @test !isempty(str_repr) && contains(str_repr, "Dataset")
+    end
+end
+
 @testset "Dataset Show Function Tests" begin
     # Test dataset show functionality with comprehensive test files
 
@@ -23,133 +121,16 @@ testfiles = artifact"testfiles/JLD2TestFiles-0.1.9/artifacts"
 
                 for key in keys(f)
                     @testset "Dataset: $key" begin
-                        # Get the dataset
                         dset = JLD2.get_dataset(f, key)
 
-                        # Test that show doesn't throw errors
-                        # For files with custom structs, we expect reconstruction warnings
-                        if filename in ["test_dataset_show_structs.jld2", "test_dataset_show_nested.jld2"]
-                            # Just test that no exception is thrown
-                            show_success = try
-                                show(IOBuffer(), MIME("text/plain"), dset)
-                                true
-                            catch e
-                                false
-                            end
-                            @test show_success
-                        else
-                            @test_nowarn show(IOBuffer(), MIME("text/plain"), dset)
-                        end
-
-                        # Test show output structure
-                        io = IOBuffer()
-                        show(io, MIME("text/plain"), dset)
-                        output = String(take!(io))
-
-                        # Basic structure tests
-                        @test startswith(output, "┌─ Dataset:")
-                        @test contains(output, "\"$key\"")
-                        @test endswith(strip(output), "└─")
-
-                        # Check for proper indentation using │
-                        lines = split(output, '\n')
-                        content_lines = [line for line in lines if contains(line, "│")]
-                        if !isempty(content_lines)
-                            @test all(line -> startswith(line, "│"), content_lines)
-                        end
-
-                        # Test that we have datatype information for written datasets
-                        if JLD2.iswritten(dset)
-                            @test contains(output, "datatype:")
-                            @test contains(output, "written structure:")
-
-                            # Test dataspace information
-                            if !isnothing(dset.dataspace)
-                                @test contains(output, "dataspace:")
-                            end
-
-                            # Test layout information
-                            if !isnothing(dset.layout)
-                                @test contains(output, "layout:")
-                            end
-                        else
-                            @test contains(output, "(unwritten)")
-                        end
-
-                        # Additional comprehensive tests
-                        @testset "Detailed output validation for $key" begin
-                            # Test line-by-line structure
-                            lines = split(output, '\n')
-                            @test length(lines) >= 2  # At least header and footer
-
-                            # Test header format
-                            header = lines[1]
-                            @test startswith(header, "┌─ Dataset:")
-                            @test contains(header, "\"$key\"")
-
-                            # Test footer (handle trailing newlines)
-                            non_empty_lines = [line for line in lines if !isempty(strip(line))]
-                            if !isempty(non_empty_lines)
-                                footer = strip(non_empty_lines[end])
-                                @test footer == "└─"
-                            end
-
-                            # Test content lines have proper prefix (excluding header and footer)
-                            content_lines = non_empty_lines[2:end-1]  # Skip header and footer
-                            for line in content_lines
-                                @test startswith(line, "│")
-                            end
-
-                            # Test specific content based on data type
-                            if contains(key, "scalar")
-                                @test contains(output, "dimensions: ()")
-                            elseif contains(key, "array") || contains(key, "matrix")
-                                @test contains(output, "dimensions:")
-                            end
-
-                            # Test datatype representation quality
-                            if JLD2.iswritten(dset) && contains(output, "written structure:")
-                                # Should have meaningful type information (more relaxed)
-                                type_info_present = any(line -> contains(line, "::"), lines) ||
-                                                  any(line -> contains(line, "Int") || contains(line, "Float") ||
-                                                           contains(line, "String") || contains(line, "Bool") ||
-                                                           contains(line, "Nothing") || contains(line, "Symbol"), lines)
-                                # Not all datatypes may show recognizable type info, so make this optional
-                                if !type_info_present
-                                    @test_skip "Type information not always recognizable in display"
-                                end
-                            end
-                        end
-
-                        # Test different display modes
-                        @testset "Display modes for $key" begin
-                            # Test compact display
-                            io_compact = IOBuffer()
-                            show(io_compact, dset)  # Without MIME, should be compact
-                            compact_output = String(take!(io_compact))
-                            @test !isempty(compact_output)
-                            # Note: compact mode is often more detailed than full mode
-
-                            # Test that both outputs contain dataset identifier
-                            @test contains(compact_output, "Dataset") || contains(compact_output, key)
-                        end
-
-                        # Test edge cases
-                        @testset "Edge cases for $key" begin
-                            # Test with different IO types
-                            for io_type in [IOBuffer(), IOContext(IOBuffer(), :color => false)]
-                                local_io = io_type
-                                @test_nowarn show(local_io, MIME("text/plain"), dset)
-                                local_output = String(take!(local_io isa IOContext ? local_io.io : local_io))
-                                @test !isempty(local_output)
-                                @test startswith(local_output, "┌─ Dataset:")
-                            end
-
-                            # Test string representation consistency
-                            str_repr = string(dset)
-                            @test !isempty(str_repr)
-                            @test contains(str_repr, "Dataset")
-                        end
+                        # Test show functionality
+                        test_dataset_show_basic(dset, key, filename)
+                        output = get_dataset_show_output(dset)
+                        test_dataset_format_structure(output, key)
+                        test_dataset_written_info(dset, output)
+                        test_dataset_detailed_output(dset, key, output)
+                        test_dataset_display_modes(dset, key)
+                        test_dataset_edge_cases(dset)
                     end
                 end
             end

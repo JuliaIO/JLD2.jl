@@ -40,106 +40,83 @@ function safe_read_committed_type_strings(f::JLDFile, cdt)
     return safe_describe_datatype(f, dt)
 end
 
-# Helper to read string data from an attribute without type reconstruction
 function read_string_from_attribute(f::JLDFile, attr)
+    attr.dataspace.dataspace_type != DS_SCALAR && return "unsupported_dataspace"
+
     try
-        # Handle different attribute datatype cases
-        if attr.dataspace.dataspace_type == DS_SCALAR
-            if isa(attr.datatype, VariableLengthDatatype)
-                # Direct variable-length string
-                seek(f.io, attr.data_offset)
-                vlen_length = jlread(f.io, UInt32)
-                global_heap_id = jlread(f.io, UInt32)
-
-                if vlen_length > 0 && global_heap_id == 0 && vlen_length < 10000
-                    string_bytes = Vector{UInt8}(undef, vlen_length)
-                    unsafe_read(f.io, pointer(string_bytes), vlen_length)
-                    null_pos = findfirst(isequal(0), string_bytes)
-                    if !isnothing(null_pos)
-                        string_bytes = string_bytes[1:null_pos-1]
-                    end
-                    return String(string_bytes)
-                elseif global_heap_id != 0
-                    return "global_heap_string"
-                end
-            elseif isa(attr.datatype, SharedDatatype)
-                # The attribute datatype is a committed datatype
-                # Need to look up the actual datatype and read accordingly
-                datatype_location = f.datatype_locations[attr.datatype.header_offset]
-                actual_dt, _ = read_shared_datatype(f, datatype_location)
-
-                if isa(actual_dt, CompoundDatatype)
-                    # This is a DataType ODR structure - read the name field manually
-                    # Create a buffer for the compound data
-                    seek(f.io, attr.data_offset)
-                    compound_size = actual_dt.size  # Should be 32 bytes
-                    compound_data = Vector{UInt8}(undef, compound_size)
-                    unsafe_read(f.io, pointer(compound_data), compound_size)
-
-                    # Now manually call jlconvert for the Vlen{UInt8} at offset 0
-                    @GC.preserve compound_data begin
-                        ptr = pointer(compound_data)
-                        try
-                            # This should call the same conversion logic as the working code
-                            mypath_bytes = jlconvert(MappedRepr{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE)
-                            mypath = String(mypath_bytes)
-
-                            # Clean up the module prefix like the original code does
-                            if startswith(mypath, r"Core|Main")
-                                mypath = last(split(mypath, "."; limit=2))
-                            end
-
-                            # Also try to read type parameters like the original code
-                            full_type = try
-                                params = typestring_from_refs(f, ptr + odr_sizeof(Vlen{UInt8}))
-                                if !isempty(params)
-                                    mypath*"{"*join(params, ",")*"}"
-                                else
-                                    mypath
-                                end
-                            catch
-                                # If parameter reading fails, just return the base type name
-                                mypath
-                            end
-
-                            # Apply NamedTuple macro conversion if applicable
-                            if startswith(full_type, "NamedTuple{")
-                                return convert_namedtuple_to_macro_syntax(full_type)
-                            else
-                                return full_type
-                            end
-                        catch e
-                            return "jlconvert_error: $(typeof(e)): $e"
-                        end
-                    end
-                end
-            else
-                # Try reading as fixed-length string
-                seek(f.io, attr.data_offset)
-                current_pos = position(f.io)
-                remaining = f.end_of_data - current_pos
-                max_read = min(1000, remaining)
-
-                if max_read > 0
-                    string_bytes = Vector{UInt8}(undef, max_read)
-                    unsafe_read(f.io, pointer(string_bytes), max_read)
-                    null_pos = findfirst(isequal(0), string_bytes)
-                    if !isnothing(null_pos)
-                        string_bytes = string_bytes[1:null_pos-1]
-                    end
-                    result = String(string_bytes)
-
-                    if length(result) > 0 && all(c -> isprint(c) || c == '\n' || c == '\t', result)
-                        return result
-                    end
-                end
-            end
-        end
-
-        return "unsupported_dataspace"
+        isa(attr.datatype, VariableLengthDatatype) && return read_vlen_string_attribute(f, attr)
+        isa(attr.datatype, SharedDatatype) && return read_shared_datatype_attribute(f, attr)
+        return read_fixed_string_attribute(f, attr)
     catch e
         return "unreadable_type_string: $(typeof(e)): $e"
     end
+end
+
+function read_vlen_string_attribute(f::JLDFile, attr)
+    seek(f.io, attr.data_offset)
+    vlen_length = jlread(f.io, UInt32)
+    global_heap_id = jlread(f.io, UInt32)
+
+    global_heap_id != 0 && return "global_heap_string"
+    (vlen_length == 0 || vlen_length >= 10000) && return "invalid_length"
+
+    string_bytes = Vector{UInt8}(undef, vlen_length)
+    unsafe_read(f.io, pointer(string_bytes), vlen_length)
+    null_pos = findfirst(isequal(0), string_bytes)
+    !isnothing(null_pos) && (string_bytes = string_bytes[1:null_pos-1])
+    return String(string_bytes)
+end
+
+function read_shared_datatype_attribute(f::JLDFile, attr)
+    datatype_location = f.datatype_locations[attr.datatype.header_offset]
+    actual_dt, _ = read_shared_datatype(f, datatype_location)
+
+    !isa(actual_dt, CompoundDatatype) && return "non_compound_shared"
+
+    seek(f.io, attr.data_offset)
+    compound_data = Vector{UInt8}(undef, actual_dt.size)
+    unsafe_read(f.io, pointer(compound_data), actual_dt.size)
+
+    @GC.preserve compound_data begin
+        ptr = pointer(compound_data)
+        try
+            mypath_bytes = jlconvert(MappedRepr{UInt8,Vlen{UInt8}}(), f, ptr, NULL_REFERENCE)
+            mypath = String(mypath_bytes)
+
+            startswith(mypath, r"Core|Main") && (mypath = last(split(mypath, "."; limit=2)))
+
+            full_type = try
+                params = typestring_from_refs(f, ptr + odr_sizeof(Vlen{UInt8}))
+                isempty(params) ? mypath : "$mypath{$(join(params, ","))}"
+            catch
+                mypath
+            end
+
+            return apply_namedtuple_conversion(full_type)
+        catch e
+            return "jlconvert_error: $(typeof(e)): $e"
+        end
+    end
+end
+
+function read_fixed_string_attribute(f::JLDFile, attr)
+    seek(f.io, attr.data_offset)
+    remaining = f.end_of_data - position(f.io)
+    max_read = min(1000, remaining)
+
+    max_read <= 0 && return "no_data"
+
+    string_bytes = Vector{UInt8}(undef, max_read)
+    unsafe_read(f.io, pointer(string_bytes), max_read)
+    null_pos = findfirst(isequal(0), string_bytes)
+    !isnothing(null_pos) && (string_bytes = string_bytes[1:null_pos-1])
+    result = String(string_bytes)
+
+    (length(result) > 0 && all(c -> isprint(c) || c == '\n' || c == '\t', result)) ? result : "invalid_string"
+end
+
+function apply_namedtuple_conversion(type_str::AbstractString)
+    startswith(type_str, "NamedTuple{") ? convert_namedtuple_to_macro_syntax(type_str) : type_str
 end
 
 # Safe description of basic datatypes with reconstruction for fundamental types
@@ -190,43 +167,29 @@ function safe_describe_datatype(f::JLDFile, dt::H5Datatype)
     end
 end
 
-# Safe reconstruction of basic Julia types that we know are always available
+# Safe types that can be reconstructed without warnings
+const SAFE_BASIC_TYPES = Set(["Int8", "Int16", "Int32", "Int64", "Int128",
+                             "UInt8", "UInt16", "UInt32", "UInt64", "UInt128",
+                             "Float16", "Float32", "Float64", "Bool", "Char",
+                             "String", "Symbol", "Nothing", "Missing"])
+
 function safe_reconstruct_basic_type(f::JLDFile, dt::H5Datatype)
-    # Check for reference datatypes first (before trying reconstruction)
-    if dt isa BasicDatatype && dt.class == 0x37  # DT_REFERENCE | 0x3<<4
-        return describe_reference_datatype(f, dt)
-    end
+    dt isa BasicDatatype && dt.class == 0x37 && return describe_reference_datatype(f, dt)
 
     try
-        # Only reconstruct fundamental Julia types that are guaranteed to exist
         rr = jltype(f, dt)
-        jtype = julia_repr(rr)
+        type_str = string(julia_repr(rr))
 
-        # Check if this is a basic type we're confident about
-        type_str = string(jtype)
-        if type_str in ["Int8", "Int16", "Int32", "Int64", "Int128",
-                       "UInt8", "UInt16", "UInt32", "UInt64", "UInt128",
-                       "Float16", "Float32", "Float64",
-                       "Bool", "Char", "String", "Symbol",
-                       "Nothing", "Missing"]
-            return type_str
-        end
+        type_str ∈ SAFE_BASIC_TYPES && return type_str
 
-        # Also handle some basic composite types
-        if startswith(type_str, "Tuple{") || startswith(type_str, "Pair{") ||
-           startswith(type_str, "Complex{") || startswith(type_str, "Rational{")
-            return type_str
-        end
+        # Handle basic composite types
+        any(prefix -> startswith(type_str, prefix), ["Tuple{", "Pair{", "Complex{", "Rational{"]) && return type_str
 
         # Handle NamedTuple with macro syntax conversion
-        if startswith(type_str, "NamedTuple{")
-            return convert_namedtuple_to_macro_syntax(type_str)
-        end
+        startswith(type_str, "NamedTuple{") && return convert_namedtuple_to_macro_syntax(type_str)
 
-        # If it's not a basic type, fall back to safe description
         return safe_describe_datatype(f, dt)
     catch
-        # If reconstruction fails, fall back to safe description
         return safe_describe_datatype(f, dt)
     end
 end

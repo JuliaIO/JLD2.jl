@@ -208,101 +208,109 @@ end
 iswritten(dset::Dataset) = (dset.offset != UNDEFINED_ADDRESS)
 
 function Base.show(io::IO, ::MIME"text/plain", dset::Dataset)
-    f = dset.parent.f
+    print_dataset_header(io, dset)
+    prefix = "│  "
+    print_datatype_info(io, dset, prefix)
+    print_dataspace_info(io, dset, prefix)
+    print_layout_info(io, dset, prefix)
+    print_filters_info(io, dset, prefix)
+    print_attributes_info(io, dset, prefix)
+    println(io, "└─")
+end
+
+function print_dataset_header(io::IO, dset::Dataset)
     print(io, "┌─ Dataset:")
     print(io, isempty(dset.name) ? " (unnamed)" : " \"$(dset.name)\"")
-    print(io, iswritten(dset) ? " at $(dset.offset)" : " (unwritten)", "\n")
-    prefix = "│  "
-    #println(io, prefix*"parent: $(dset.parent)")
-    if !isnothing(dset.datatype)
-        dt = dset.datatype
-        iscommitted = dt isa SharedDatatype && haskey(f.datatype_locations, dt.header_offset)
-        print(io, prefix*"datatype: $(typeof(dt))", iscommitted ? " (committed)\n" : "\n")
-        iscommitted && println(io, prefix*"\tcommitted at: $(dt.header_offset)")
-        # Use safe introspection that doesn't trigger reconstruction warnings
-        # For reference datatypes, also show the actual RelOffset for debugging
-        if dt isa BasicDatatype && dt.class == 0x37  # DT_REFERENCE
-            layout = DataLayout(f, dset.layout)
-            type_info = describe_reference_datatype_with_offset(dset.parent.f, dt, layout.data_offset)
-            println(io, prefix*"\twritten structure: $type_info")
+    println(io, iswritten(dset) ? " at $(dset.offset)" : " (unwritten)")
+end
+
+function print_datatype_info(io::IO, dset::Dataset, prefix::String)
+    isnothing(dset.datatype) && return
+
+    dt = dset.datatype
+    f = dset.parent.f
+    iscommitted = dt isa SharedDatatype && haskey(f.datatype_locations, dt.header_offset)
+
+    println(io, prefix, "datatype: ", typeof(dt), iscommitted ? " (committed)" : "")
+    iscommitted && println(io, prefix, "\tcommitted at: ", dt.header_offset)
+
+    print_datatype_structure(io, dset, dt, f, iscommitted, prefix)
+end
+
+function print_datatype_structure(io::IO, dset::Dataset, dt::H5Datatype, f::JLDFile, iscommitted::Bool, prefix::String)
+    if dt isa BasicDatatype && dt.class == 0x37  # DT_REFERENCE
+        layout = DataLayout(f, dset.layout)
+        type_info = describe_reference_datatype_with_offset(f, dt, layout.data_offset)
+        println(io, prefix, "\twritten structure: ", type_info)
+    elseif iscommitted
+        print_committed_datatype_structure(io, dt, f, prefix)
+    else
+        print_basic_datatype_structure(io, dt, f, prefix)
+    end
+end
+
+function print_committed_datatype_structure(io::IO, dt::SharedDatatype, f::JLDFile, prefix::String)
+    julia_type_str, _, field_strs = safe_introspect_committed_datatype(f, f.datatype_locations[dt.header_offset], showfields=true)
+
+    println(io, prefix, "\twritten structure: ", julia_type_str)
+    !isempty(field_strs) && foreach(field_str -> println(io, prefix, "\t\t", field_str), field_strs)
+    println(io, prefix, "\ttype name: ", julia_type_str)
+end
+
+function print_basic_datatype_structure(io::IO, dt::H5Datatype, f::JLDFile, prefix::String)
+    type_info = safe_introspect_datatype(f, dt)
+
+    if startswith(type_info, "COMPOUND_STRUCT:")
+        field_strs = split(type_info[17:end], "|")
+        println(io, prefix, "\twritten structure: compound struct")
+        foreach(field_str -> println(io, prefix, "\t\t", field_str), field_strs)
+    else
+        println(io, prefix, "\twritten structure: ", type_info)
+    end
+end
+
+function print_dataspace_info(io::IO, dset::Dataset, prefix::String)
+    isnothing(dset.dataspace) && return
+
+    ds = dset.dataspace
+    if ds isa HmWrap{HmDataspace}
+        spacetype_map = Dict(0x00=>"Scalar", 0x01=>"Simple", 0x02=>"Null", 0xff=>"V1")
+        println(io, prefix, "dataspace:")
+        println(io, prefix, "\ttype: ", spacetype_map[ds.dataspace_type])
+        println(io, prefix, "\tdimensions: ", ds.dimensions)
+    else
+        println(io, prefix, "dataspace: ", ds)
+    end
+end
+
+function print_layout_info(io::IO, dset::Dataset, prefix::String)
+    isnothing(dset.layout) && return
+
+    layout = dset.layout
+    if layout isa HmWrap{HmDataLayout}
+        println(io, prefix, "layout:")
+        println(io, prefix, "\tclass: ", layout.layout_class)
+    else
+        println(io, prefix, "layout: ", layout)
+    end
+end
+
+function print_filters_info(io::IO, dset::Dataset, prefix::String)
+    (!isnothing(dset.filters) && !isempty(dset.filters.filters)) && println(io, prefix, "filters: ", dset.filters)
+end
+
+function print_attributes_info(io::IO, dset::Dataset, prefix::String)
+    isempty(dset.attributes) && return
+
+    println(io, prefix, "Attributes:")
+    for (k, attr) in pairs(dset.attributes)
+        if attr isa ReadAttribute
+            attr_info = safe_read_attribute_info(dset.parent.f, attr)
+            println(io, prefix, "\t", attr.name, " = ", attr_info)
         else
-            # For committed datatypes, show detailed field information
-            if iscommitted
-                julia_type_str, written_type_str, field_strs = safe_introspect_committed_datatype(f, f.datatype_locations[dt.header_offset], showfields=true)
-
-                # Show the type with fields if available
-                if !isempty(field_strs)
-                    println(io, prefix*"\twritten structure: $julia_type_str")
-                    for field_str in field_strs
-                        println(io, prefix*"\t\t$field_str")
-                    end
-                else
-                    println(io, prefix*"\twritten structure: $julia_type_str")
-                end
-
-                # Show type name separately for clarity
-                println(io, prefix*"\ttype name: $julia_type_str")
-            else
-                # For non-committed datatypes
-                type_info = safe_introspect_datatype(dset.parent.f, dt)
-
-                # Handle special compound struct formatting
-                if startswith(type_info, "COMPOUND_STRUCT:")
-                    field_data = type_info[17:end]  # Remove "COMPOUND_STRUCT:" prefix
-                    field_strs = split(field_data, "|")
-                    println(io, prefix*"\twritten structure: compound struct")
-                    for field_str in field_strs
-                        println(io, prefix*"\t\t$field_str")
-                    end
-                else
-                    println(io, prefix*"\twritten structure: $type_info")
-                end
-            end
-        end
-
-        # Additional information for committed types is already shown above
-    end
-    if !isnothing(dset.dataspace)
-        ds = dset.dataspace
-        if ds isa HmWrap{HmDataspace}#Hmessage
-            println(io, prefix*"dataspace:")
-            spacetype = Dict(
-                0x00=>"Scalar",
-                0x01=>"Simple",
-                0x02=>"Null",
-                0xff=>"V1")[ds.dataspace_type]
-            println(io, prefix*"\ttype: $(spacetype)")
-            println(io, prefix*"\tdimensions: $(ds.dimensions)")
-        else
-            println(io, prefix*"dataspace: $(dset.dataspace)")
+            println(io, prefix, "\t", k, " = ", attr)
         end
     end
-    if !isnothing(dset.layout)
-        layout = dset.layout
-        if layout isa HmWrap{HmDataLayout}
-            println(io, prefix*"layout:")
-            println(io, prefix*"\tclass: $(layout.layout_class)")
-        else
-            println(io, prefix*"layout: $(dset.layout)")
-        end
-    end
-    if !isnothing(dset.filters) && !isempty(dset.filters.filters)
-        println(io, prefix*"filters: $(dset.filters)")
-    end
-    if !isempty(dset.attributes)
-        println(io, prefix*"Attributes:")
-        for (k, attr) in pairs(dset.attributes)
-            if attr isa ReadAttribute
-                # Use safe attribute reading to avoid reconstruction issues
-                attr_name = attr.name
-                attr_info = safe_read_attribute_info(dset.parent.f, attr)
-                println(io, prefix*"\t$attr_name = $attr_info")
-            else
-                println(io, prefix*"\t$(k) = $(attr)")
-            end
-        end
-    end
-    println(io, "└─")
 end
 
 """
