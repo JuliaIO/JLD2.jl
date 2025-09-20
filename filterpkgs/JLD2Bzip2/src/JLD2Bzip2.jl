@@ -29,7 +29,7 @@ struct Bzip2Filter <: Filters.Filter
     blocksize100k::Cuint
 end
 Bzip2Filter() = Bzip2Filter(9)
-Bzip2Filter(; blocksize100k::Cuint=9) = Bzip2Filter(blocksize100k)
+Bzip2Filter(; blocksize100k=9) = Bzip2Filter(blocksize100k)
 
 Filters.filterid(::Type{Bzip2Filter}) = UInt16(307)
 Filters.filtername(::Type{Bzip2Filter}) = "BZIP2"
