@@ -185,6 +185,7 @@ simplifies the compression of the data.
 struct Shuffle <: Filter
     element_size::UInt32
 end
+Shuffle() = Shuffle(0)
 Shuffle(; element_size::UInt32=0) = Shuffle(element_size)
 filterid(::Type{Shuffle}) = UInt16(2)
 client_values(filter::Shuffle) = (filter.element_size,)
@@ -233,8 +234,8 @@ Larger numbers lead to better compression, but also to longer runtime.
 struct Deflate <: Filter
     level::Cuint
     Deflate(level=5) = new(clamp(level, 0, 9))
-    Deflate(; level=5) = Deflate(level)
 end
+Deflate(; level=5) = Deflate(level)
 
 filterid(::Type{Deflate}) = UInt16(1)
 client_values(filter::Deflate) = (filter.level, )
@@ -274,8 +275,8 @@ struct ZstdFilter <: Filter
             ChunkCodecLibZstd.ZSTD_maxCLevel()
         )
         )
-    ZstdFilter(; level=ChunkCodecLibZstd.ZSTD_defaultCLevel()) = ZstdFilter(level)
 end
+ZstdFilter(; level=ChunkCodecLibZstd.ZSTD_defaultCLevel()) = ZstdFilter(level)
 
 filterid(::Type{ZstdFilter}) = UInt16(32015)
 filtername(::Type{ZstdFilter}) = "ZSTD"

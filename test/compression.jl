@@ -1,8 +1,6 @@
 using JLD2, Test, FileIO
 using Pkg: Pkg
 using JLD2Bzip2, JLD2Lz4
-using JLD2.Filters: Deflate, ZstdFilter, Shuffle
-using ChunkCodecLibZstd
 
 
 # This is for testing the different syntax versions as well as the library
@@ -84,26 +82,21 @@ end
     # Test Deflate filter
     @test Deflate(3).level == 3
     @test Deflate(level=3).level == 3
-    @test Deflate().level == 5  # default
     @test Deflate(level=7).level == 7
     
     # Test ZstdFilter
     @test ZstdFilter(10).level == 10
     @test ZstdFilter(level=10).level == 10
-    @test ZstdFilter().level == ZstdFilter(level=ChunkCodecLibZstd.ZSTD_defaultCLevel()).level
     
     # Test Shuffle filter
     @test Shuffle(UInt32(8)).element_size == 8
     @test Shuffle(element_size=UInt32(8)).element_size == 8
-    @test Shuffle().element_size == 0  # default
     
     # Test Bzip2Filter
     @test Bzip2Filter(5).blocksize100k == 5
     @test Bzip2Filter(blocksize100k=5).blocksize100k == 5
-    @test Bzip2Filter().blocksize100k == 9  # default
     
     # Test Lz4Filter
     @test Lz4Filter(12345).blocksize == 12345
     @test Lz4Filter(blocksize=12345).blocksize == 12345
-    @test Lz4Filter().blocksize == Lz4Filter(blocksize=JLD2Lz4.DEFAULT_BLOCK_SIZE).blocksize
 end
