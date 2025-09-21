@@ -93,37 +93,39 @@ function read_virtual_data(f::JLDFile, dataspace::ReadDataspace,
                           filters::FilterPipeline,
                           header_offset::RelOffset,
                           attributes::Union{Vector{ReadAttribute},Nothing})
-    # For virtual datasets, we need to read the virtual dataset mappings
-    # from the global heap and then load data from the source files
+    # Parse virtual dataset layout from global heap
+    global_heap_address = layout.data_offset  # This contains the global heap address
+    heap_index = layout.chunk_indexing_type  # This contains the global heap index
 
-    # For now, implement a simple version that looks for virtual dataset metadata
-    # in attributes, as created by our SIMPLE_API_DEMO.jl style
+    try
+        # Read the virtual dataset layout from the global heap
+        virtual_layout = read_virtual_dataset_layout(f, global_heap_address, heap_index)
 
-    if !isnothing(attributes)
-        # Look for virtual dataset metadata in attributes
-        source_file = nothing
-        source_dataset = nothing
+        # Process the virtual dataset mappings to create the combined dataset
+        return combine_virtual_mappings(f, virtual_layout, dataspace, dt)
 
-        for attr in attributes
-            if attr.name == :_virtual_source || attr.name == Symbol("_virtual_source")
-                source_file = read_attr_data(f, attr)
-            elseif attr.name == :_virtual_dataset || attr.name == Symbol("_virtual_dataset")
-                source_dataset = read_attr_data(f, attr)
+    catch e
+        # Fall back to checking for legacy metadata-based virtual datasets
+        if !isnothing(attributes)
+            source_file = nothing
+            source_dataset = nothing
+
+            for attr in attributes
+                if attr.name == :_virtual_source || attr.name == Symbol("_virtual_source")
+                    source_file = read_attr_data(f, attr)
+                elseif attr.name == :_virtual_dataset || attr.name == Symbol("_virtual_dataset")
+                    source_dataset = read_attr_data(f, attr)
+                end
+            end
+
+            if !isnothing(source_file) && !isnothing(source_dataset)
+                return load_virtual_source_data(source_file, source_dataset, dt, dataspace, header_offset)
             end
         end
 
-        if !isnothing(source_file) && !isnothing(source_dataset)
-            # Load data from the source file
-            return load_virtual_source_data(source_file, source_dataset, dt, dataspace, header_offset)
-        end
+        # If we can't parse the virtual dataset, throw an error
+        throw(UnsupportedFeatureException("Cannot parse virtual dataset layout: $e"))
     end
-
-    # If we can't find simple attribute-based virtual dataset info,
-    # try to parse the proper HDF5 virtual dataset layout from the global heap
-    # This would need to implement the full VDS format specification
-
-    # For now, throw an informative error
-    throw(UnsupportedFeatureException("Virtual dataset detected but metadata could not be parsed. Only simple virtual datasets with _virtual_source and _virtual_dataset attributes are currently supported."))
 end
 
 function load_virtual_source_data(source_file::AbstractString, source_dataset::AbstractString,

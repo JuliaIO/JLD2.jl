@@ -50,8 +50,9 @@ function DataLayout(f::JLD2.JLDFile, msg::HmWrap{HmDataLayout})
             # Virtual dataset layout
             data_length = -1  # Virtual datasets don't have a fixed data length
             heap_address = msg.data_address
-            index = hasfield(typeof(msg), :index) ? msg.index : UInt32(0)
-            DataLayout(version, storage_type, data_length, fileoffset(f, heap_address), 0, 0, UInt64[])
+            index = msg.index
+            # Store the global heap address in data_offset for now
+            DataLayout(version, storage_type, data_length, fileoffset(f, heap_address), 0, index, UInt64[])
         else
             throw(UnsupportedFeatureException("Unknown data layout"))
         end
