@@ -75,3 +75,29 @@ end
         @test_throws ArgumentError write(f, "x", zeros(10); compress = π)
     end
 end
+
+@testset "Filter Constructor API" begin
+    # Test that both positional and keyword constructors work for all filters
+
+    # Test Deflate filter
+    @test Deflate(3).level == 3
+    @test Deflate(level=3).level == 3
+    @test Deflate(level=7).level == 7
+
+    # Test ZstdFilter
+    @test ZstdFilter(10).level == 10
+    @test ZstdFilter(level=10).level == 10
+    @test (ZstdFilter(-10) |> JLD2.Filters.client_values) == (-10 % UInt32, )
+
+    # Test Shuffle filter
+    @test Shuffle(UInt32(8)).element_size == 8
+    @test Shuffle(element_size=UInt32(8)).element_size == 8
+
+    # Test Bzip2Filter
+    @test Bzip2Filter(5).blocksize100k == 5
+    @test Bzip2Filter(blocksize100k=5).blocksize100k == 5
+
+    # Test Lz4Filter
+    @test Lz4Filter(12345).blocksize == 12345
+    @test Lz4Filter(blocksize=12345).blocksize == 12345
+end
