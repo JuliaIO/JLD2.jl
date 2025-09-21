@@ -145,34 +145,9 @@ function load_virtual_source_data(source_file::AbstractString, source_dataset::A
             source_path = source_file
         end
 
-        # Load using JLD2 first, fall back to HDF5.jl if needed
-        if endswith(source_path, ".jld2") || endswith(source_path, ".jld")
-            return jldopen(source_path, "r") do src_f
-                src_f[source_dataset]
-            end
-        else
-            # Try to load with HDF5.jl if available
-            try
-                # Try to use HDF5.jl if it's available
-                if isdefined(Main, :HDF5)
-                    return Main.HDF5.h5open(source_path, "r") do src_f
-                        read(src_f[source_dataset])
-                    end
-                else
-                    # If HDF5.jl is not loaded, try to load it
-                    @eval Main import HDF5
-                    return Main.HDF5.h5open(source_path, "r") do src_f
-                        read(src_f[source_dataset])
-                    end
-                end
-            catch e
-                # If HDF5.jl is not available or fails, try JLD2 anyway
-                return jldopen(source_path, "r") do src_f
-                    src_f[source_dataset]
-                end
-            end
+        return jldopen(source_path, "r") do src_f
+            src_f[source_dataset]
         end
-
     catch e
         @warn "Failed to load virtual dataset source: $source_file:/$source_dataset" exception=e
         throw(InvalidDataException("Could not load virtual dataset from source file: $source_file"))
