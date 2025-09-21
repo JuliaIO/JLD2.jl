@@ -69,32 +69,16 @@ function combine_virtual_mappings(f::JLDFile, virtual_layout::VirtualLayout,
     # Expand file pattern (like "./sub-%b.hdf5" -> ["./sub-0.hdf5", "./sub-1.hdf5"])
     expanded_files = expand_file_pattern(mapping.source_filename, f)
 
-    # Load data from each expanded file
+    # Load data from each expanded file using only JLD2
     datasets = []
     for file_path in expanded_files
         try
-            # Load the dataset from each source file
+            # Load the dataset from each source file using JLD2
             if isfile(file_path)
-                # Try with HDF5.jl first since these are likely .h5 files
-                try
-                    if isdefined(Main, :HDF5)
-                        data = Main.HDF5.h5open(file_path, "r") do src_f
-                            read(src_f[mapping.source_dataset_name])
-                        end
-                    else
-                        @eval Main import HDF5
-                        data = Main.HDF5.h5open(file_path, "r") do src_f
-                            read(src_f[mapping.source_dataset_name])
-                        end
-                    end
-                    push!(datasets, data)
-                catch e
-                    # Fall back to JLD2 if HDF5.jl fails
-                    data = jldopen(file_path, "r") do src_f
-                        src_f[mapping.source_dataset_name]
-                    end
-                    push!(datasets, data)
+                data = jldopen(file_path, "r") do src_f
+                    src_f[mapping.source_dataset_name]
                 end
+                push!(datasets, data)
             end
         catch e
             @warn "Failed to load virtual dataset source: $file_path" exception=e
@@ -123,18 +107,34 @@ function expand_file_pattern(pattern::String, f::JLDFile)
         # Simple expansion: try indices 0, 1, 2, ... until files don't exist
         expanded = String[]
         i = 0
+
+        # Try multiple file extensions to support both .hdf5 and .jld2 files
+        base_pattern = replace(pattern, r"\.[^.]*$" => "")  # Remove extension
+        extensions = [".hdf5", ".jld2", ".h5"]  # Try common HDF5/JLD2 extensions
+
         while true
-            file_path = replace(pattern, "%b" => string(i))
+            found_file = false
+            base_file = replace(base_pattern, "%b" => string(i))
+
             # Make path relative to virtual dataset file directory
-            if startswith(file_path, "./")
-                file_path = joinpath(vds_dir, file_path[3:end])
+            if startswith(base_file, "./")
+                base_file = joinpath(vds_dir, base_file[3:end])
             end
 
-            if isfile(file_path)
-                push!(expanded, file_path)
+            # Try different extensions
+            for ext in extensions
+                file_path = base_file * ext
+                if isfile(file_path)
+                    push!(expanded, file_path)
+                    found_file = true
+                    break  # Found file with this index, move to next index
+                end
+            end
+
+            if found_file
                 i += 1
             else
-                break
+                break  # No file found with this index, stop searching
             end
 
             # Safety limit
