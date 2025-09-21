@@ -185,7 +185,6 @@ simplifies the compression of the data.
 struct Shuffle <: Filter
     element_size::UInt32
 end
-Shuffle() = Shuffle(0)
 Shuffle(; element_size=0) = Shuffle(element_size)
 filterid(::Type{Shuffle}) = UInt16(2)
 client_values(filter::Shuffle) = (filter.element_size,)
@@ -233,9 +232,9 @@ Larger numbers lead to better compression, but also to longer runtime.
 """
 struct Deflate <: Filter
     level::Cuint
+    Deflate(level) = new(clamp(level, 0, 9))
 end
-Deflate(level) = Deflate(clamp(level, 0, 9))  # Positional, no default
-Deflate(; level=5) = Deflate(level)          # Keyword with default
+Deflate(; level=5) = Deflate(level)
 
 filterid(::Type{Deflate}) = UInt16(1)
 client_values(filter::Deflate) = (filter.level, )
@@ -267,13 +266,15 @@ Larger numbers lead to better compression, but also to longer runtime.
 """
 struct ZstdFilter <: Filter
     level::Cuint
+    ZstdFilter(level) =
+        new(clamp(level,
+            # This library theoretically supports negative compression levels, which is at odds with hdf5 level repr using UInt32. Limit to 1 instead
+            #ChunkCodecLibZstd.ZSTD_minCLevel(),
+            1,
+            ChunkCodecLibZstd.ZSTD_maxCLevel()
+        )
+        )
 end
-ZstdFilter(level) = ZstdFilter(clamp(level,
-    # This library theoretically supports negative compression levels, which is at odds with hdf5 level repr using UInt32. Limit to 1 instead
-    #ChunkCodecLibZstd.ZSTD_minCLevel(),
-    1,
-    ChunkCodecLibZstd.ZSTD_maxCLevel()
-))
 ZstdFilter(; level=ChunkCodecLibZstd.ZSTD_defaultCLevel()) = ZstdFilter(level)
 
 filterid(::Type{ZstdFilter}) = UInt16(32015)

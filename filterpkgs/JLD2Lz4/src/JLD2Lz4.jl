@@ -22,7 +22,6 @@ Apply LZ4 compression. `blocksize` is the main argument. The filter id is 32004.
 struct Lz4Filter <: Filters.Filter
     blocksize::Cuint
 end
-Lz4Filter() = Lz4Filter(DEFAULT_BLOCK_SIZE)
 Lz4Filter(; blocksize=DEFAULT_BLOCK_SIZE) = Lz4Filter(blocksize)
 
 
