@@ -22,24 +22,6 @@ function safe_introspect_datatype(f::JLDFile, dt::H5Datatype; showfields=false)
     end
 end
 
-# Read type strings from committed datatype without reconstruction
-function safe_read_committed_type_strings(f::JLDFile, cdt)
-    dt, attrs = read_shared_datatype(f, cdt)
-
-    for attr in attrs
-        if attr.name == :julia_type || attr.name == Symbol("julia type")
-            # Try manual string reading
-            result = read_string_from_attribute(f, attr)
-            if !startswith(result, "unreadable_type_string") && !startswith(result, "unsupported_dataspace")
-                return result
-            end
-        end
-    end
-
-    # Fallback: try to infer from datatype structure
-    return safe_describe_datatype(f, dt)
-end
-
 function read_string_from_attribute(f::JLDFile, attr)
     attr.dataspace.dataspace_type != DS_SCALAR && return "unsupported_dataspace"
 
@@ -279,39 +261,6 @@ function describe_reference_datatype_with_offset(f::JLDFile, dt::BasicDatatype, 
         # If reading fails, fall back to generic description
         return "Reference{unknown} -> offset unreadable"
     end
-end
-
-# Helper function to parse comma-separated values with proper brace handling
-function parse_comma_separated_with_braces(content::String)
-    if isempty(strip(content))
-        return String[]
-    end
-
-    parts = String[]
-    current = ""
-    brace_count = 0
-
-    for c in content
-        if c == '{'
-            brace_count += 1
-            current *= c
-        elseif c == '}'
-            brace_count -= 1
-            current *= c
-        elseif c == ',' && brace_count == 0
-            push!(parts, strip(current))
-            current = ""
-        else
-            current *= c
-        end
-    end
-
-    # Add the final part
-    if !isempty(strip(current))
-        push!(parts, strip(current))
-    end
-
-    return parts
 end
 
 # Convert NamedTuple{(:a, :b), Tuple{Int,Int}} to @NamedTuple{a::Int, b::Int}
