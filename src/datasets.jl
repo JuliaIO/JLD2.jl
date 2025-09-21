@@ -78,10 +78,103 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
         v = Array{T, 1}()
         track_weakref!(f, header_offset, v)
         return v
+    elseif isvirtual(layout)
+        # Handle virtual dataset
+        return read_virtual_data(f, dataspace, dt, layout, filters, header_offset, attributes)
     end
     seek(f.io, layout.data_offset)
     read_dataspace = (dataspace, header_offset, layout, filters)
     read_data(f, rr, read_dataspace, attributes)
+end
+
+function read_virtual_data(f::JLDFile, dataspace::ReadDataspace,
+                          @nospecialize(dt::H5Datatype),
+                          layout::DataLayout,
+                          filters::FilterPipeline,
+                          header_offset::RelOffset,
+                          attributes::Union{Vector{ReadAttribute},Nothing})
+    # For virtual datasets, we need to read the virtual dataset mappings
+    # from the global heap and then load data from the source files
+
+    # For now, implement a simple version that looks for virtual dataset metadata
+    # in attributes, as created by our SIMPLE_API_DEMO.jl style
+
+    if !isnothing(attributes)
+        # Look for virtual dataset metadata in attributes
+        source_file = nothing
+        source_dataset = nothing
+
+        for attr in attributes
+            if attr.name == :_virtual_source || attr.name == Symbol("_virtual_source")
+                source_file = read_attr_data(f, attr)
+            elseif attr.name == :_virtual_dataset || attr.name == Symbol("_virtual_dataset")
+                source_dataset = read_attr_data(f, attr)
+            end
+        end
+
+        if !isnothing(source_file) && !isnothing(source_dataset)
+            # Load data from the source file
+            return load_virtual_source_data(source_file, source_dataset, dt, dataspace, header_offset)
+        end
+    end
+
+    # If we can't find simple attribute-based virtual dataset info,
+    # try to parse the proper HDF5 virtual dataset layout from the global heap
+    # This would need to implement the full VDS format specification
+
+    # For now, throw an informative error
+    throw(UnsupportedFeatureException("Virtual dataset detected but metadata could not be parsed. Only simple virtual datasets with _virtual_source and _virtual_dataset attributes are currently supported."))
+end
+
+function load_virtual_source_data(source_file::AbstractString, source_dataset::AbstractString,
+                                 dt::H5Datatype, dataspace::ReadDataspace, header_offset::RelOffset)
+    # Attempt to load data from the source file
+    try
+        # Use the current directory as base path if source_file is relative
+        if !isabs(source_file)
+            # Try relative to current working directory first
+            source_path = joinpath(pwd(), source_file)
+            if !isfile(source_path)
+                # If not found, try relative to the virtual file's directory
+                # This is a simplified approach - proper VDS should handle paths more robustly
+                source_path = source_file
+            end
+        else
+            source_path = source_file
+        end
+
+        # Load using JLD2 first, fall back to HDF5.jl if needed
+        if endswith(source_path, ".jld2") || endswith(source_path, ".jld")
+            return jldopen(source_path, "r") do src_f
+                src_f[source_dataset]
+            end
+        else
+            # Try to load with HDF5.jl if available
+            try
+                # Try to use HDF5.jl if it's available
+                if isdefined(Main, :HDF5)
+                    return Main.HDF5.h5open(source_path, "r") do src_f
+                        read(src_f[source_dataset])
+                    end
+                else
+                    # If HDF5.jl is not loaded, try to load it
+                    @eval Main import HDF5
+                    return Main.HDF5.h5open(source_path, "r") do src_f
+                        read(src_f[source_dataset])
+                    end
+                end
+            catch e
+                # If HDF5.jl is not available or fails, try JLD2 anyway
+                return jldopen(source_path, "r") do src_f
+                    src_f[source_dataset]
+                end
+            end
+        end
+
+    catch e
+        @warn "Failed to load virtual dataset source: $source_file:/$source_dataset" exception=e
+        throw(InvalidDataException("Could not load virtual dataset from source file: $source_file"))
+    end
 end
 
 # Most types can only be scalars or arrays
