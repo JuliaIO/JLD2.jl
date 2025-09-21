@@ -1,3 +1,7 @@
+## 0.6.3
+ - Add keyword argument constructors to Filters
+ - Allow negative compression levels for the ZstdFilter
+
 ## 0.6.2
  - Fix an edge case for `Vector{Union{}}`
 

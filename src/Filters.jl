@@ -166,15 +166,12 @@ end
 ## Shuffle Filter implementation
 ##############################################################################
 """
-    Shuffle <: Filter
+    Shuffle() <: Filter
 
 The Shuffle filter can be used as part of a filter pipeline to compress datasets.
 It rearranges the bytes of elements in an array to improve compression
 efficiency. It is not a compression filter by itself, but can be used in conjunction
 with other compression filters like `Deflate`` or `ZstdFilter`.
-
-## Arguments:
-- `element_size`: Size of each element in bytes. Default is 0 (auto-determined).
 
 It can be useful when the array, for example, contains unsigned integer `UInt64` and all
 values are small. Then all the upper bytes of the eight byte integer are zero.
@@ -265,21 +262,16 @@ Larger numbers lead to better compression, but also to longer runtime.
 
 """
 struct ZstdFilter <: Filter
-    level::Cuint
-    ZstdFilter(level) =
-        new(clamp(level,
-            # This library theoretically supports negative compression levels, which is at odds with hdf5 level repr using UInt32. Limit to 1 instead
-            #ChunkCodecLibZstd.ZSTD_minCLevel(),
-            1,
-            ChunkCodecLibZstd.ZSTD_maxCLevel()
-        )
-        )
+    level::Int32
+    ZstdFilter(level) = new(min(level % Int32,
+        ChunkCodecLibZstd.ZSTD_maxCLevel())
+    )
 end
 ZstdFilter(; level=ChunkCodecLibZstd.ZSTD_defaultCLevel()) = ZstdFilter(level)
 
 filterid(::Type{ZstdFilter}) = UInt16(32015)
 filtername(::Type{ZstdFilter}) = "ZSTD"
-client_values(filter::ZstdFilter) = (filter.level, )
+client_values(filter::ZstdFilter) = (filter.level % UInt32, )
 filtertype(::Val{32015}) = ZstdFilter
 
 function apply_filter!(filter::ZstdFilter, ref, forward::Bool=true)
