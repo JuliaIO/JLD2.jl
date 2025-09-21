@@ -96,62 +96,11 @@ function read_virtual_data(f::JLDFile, dataspace::ReadDataspace,
     # Parse virtual dataset layout from global heap
     global_heap_address = layout.data_offset  # This contains the global heap address
     heap_index = layout.chunk_indexing_type  # This contains the global heap index
+    # Read the virtual dataset layout from the global heap
+    virtual_layout = read_virtual_dataset_layout(f, global_heap_address, heap_index)
 
-    try
-        # Read the virtual dataset layout from the global heap
-        virtual_layout = read_virtual_dataset_layout(f, global_heap_address, heap_index)
-
-        # Process the virtual dataset mappings to create the combined dataset
-        return combine_virtual_mappings(f, virtual_layout, dataspace, dt)
-
-    catch e
-        # Fall back to checking for legacy metadata-based virtual datasets
-        if !isnothing(attributes)
-            source_file = nothing
-            source_dataset = nothing
-
-            for attr in attributes
-                if attr.name == :_virtual_source || attr.name == Symbol("_virtual_source")
-                    source_file = read_attr_data(f, attr)
-                elseif attr.name == :_virtual_dataset || attr.name == Symbol("_virtual_dataset")
-                    source_dataset = read_attr_data(f, attr)
-                end
-            end
-
-            if !isnothing(source_file) && !isnothing(source_dataset)
-                return load_virtual_source_data(source_file, source_dataset, dt, dataspace, header_offset)
-            end
-        end
-
-        # If we can't parse the virtual dataset, throw an error
-        throw(UnsupportedFeatureException("Cannot parse virtual dataset layout: $e"))
-    end
-end
-
-function load_virtual_source_data(source_file::AbstractString, source_dataset::AbstractString,
-                                 dt::H5Datatype, dataspace::ReadDataspace, header_offset::RelOffset)
-    # Attempt to load data from the source file
-    try
-        # Use the current directory as base path if source_file is relative
-        if !isabs(source_file)
-            # Try relative to current working directory first
-            source_path = joinpath(pwd(), source_file)
-            if !isfile(source_path)
-                # If not found, try relative to the virtual file's directory
-                # This is a simplified approach - proper VDS should handle paths more robustly
-                source_path = source_file
-            end
-        else
-            source_path = source_file
-        end
-
-        return jldopen(source_path, "r") do src_f
-            src_f[source_dataset]
-        end
-    catch e
-        @warn "Failed to load virtual dataset source: $source_file:/$source_dataset" exception=e
-        throw(InvalidDataException("Could not load virtual dataset from source file: $source_file"))
-    end
+    # Process the virtual dataset mappings to create the combined dataset
+    return combine_virtual_mappings(f, virtual_layout, dataspace, dt)
 end
 
 # Most types can only be scalars or arrays
