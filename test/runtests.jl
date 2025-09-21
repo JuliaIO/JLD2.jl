@@ -43,6 +43,7 @@ include("dataset_api.jl")
 include("test_dataset_show.jl")
 include("mmap_test.jl")
 include("wrapped_io.jl")
+include("virtual_datasets.jl")
 
 using TestItemRunner
 

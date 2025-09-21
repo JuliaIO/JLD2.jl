@@ -148,8 +148,10 @@ end
             data_address::RelOffset
         end
         if layout_class == LcVirtual # Virtual Storage
-            data_address::RelOffset
-            index::UInt32
+            # Virtual Dataset Storage Layout
+            # Points to global heap containing virtual dataset mappings
+            data_address::RelOffset  # Global heap address containing VDS mappings
+            index::UInt32  # Index within the global heap collection
         end
     end
 end

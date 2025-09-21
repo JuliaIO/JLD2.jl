@@ -501,6 +501,7 @@ include("Filters.jl")
 using .Filters: WrittenFilterPipeline, FilterPipeline, iscompressed
 using .Filters: Shuffle, Deflate, ZstdFilter
 
+include("virtual_datasets.jl")
 include("datasets.jl")
 include("global_heaps.jl")
 include("fractal_heaps.jl")

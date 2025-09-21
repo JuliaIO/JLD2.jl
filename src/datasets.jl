@@ -78,10 +78,29 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
         v = Array{T, 1}()
         track_weakref!(f, header_offset, v)
         return v
+    elseif isvirtual(layout)
+        # Handle virtual dataset
+        return read_virtual_data(f, dataspace, dt, layout, filters, header_offset, attributes)
     end
     seek(f.io, layout.data_offset)
     read_dataspace = (dataspace, header_offset, layout, filters)
     read_data(f, rr, read_dataspace, attributes)
+end
+
+function read_virtual_data(f::JLDFile, dataspace::ReadDataspace,
+                          @nospecialize(dt::H5Datatype),
+                          layout::DataLayout,
+                          filters::FilterPipeline,
+                          header_offset::RelOffset,
+                          attributes::Union{Vector{ReadAttribute},Nothing})
+    # Parse virtual dataset layout from global heap
+    global_heap_address = layout.data_offset  # This contains the global heap address
+    heap_index = layout.chunk_indexing_type  # This contains the global heap index
+    # Read the virtual dataset layout from the global heap
+    virtual_layout = read_virtual_dataset_layout(f, global_heap_address, heap_index)
+
+    # Process the virtual dataset mappings to create the combined dataset
+    return combine_virtual_mappings(f, virtual_layout, dataspace, dt)
 end
 
 # Most types can only be scalars or arrays
