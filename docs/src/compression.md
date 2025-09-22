@@ -118,11 +118,11 @@ Different filters support various configuration options:
 using JLD2, JLD2Lz4, JLD2Bzip2
 
 # Zstd with different compression levels
-zstd_fast = ZstdFilter(1)    # Fast compression
-zstd_best = ZstdFilter(22)   # Best compression
+zstd_fast = ZstdFilter(level=1)    # Fast compression
+zstd_best = ZstdFilter(level=22)   # Best compression
 
 # Bzip2 with custom block size
-bzip2_filter = Bzip2Filter(4)
+bzip2_filter = Bzip2Filter(blocksize100k=4)
 
 # Example usage
 jldopen("example.jld2", "w") do f
@@ -156,7 +156,7 @@ jldopen("example.jld2", "w"; compress=ZstdFilter()) do f
     write(f, "zlib_array", zeros(10000); compress=Deflate())
 
     # Alternatively, use the same filter but with different configuration
-    write(f, "fast_compressed", rand(10000); compress=ZstdFilter(1))
+    write(f, "fast_compressed", rand(10000); compress=ZstdFilter(level= -20))
 end
 ```
 
