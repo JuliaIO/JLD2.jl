@@ -15,8 +15,8 @@ using ChunkCodecLibBzip2
 The Bzip2Filter can be used to compress datasets using the bzip2 compression algorithm.
 This is filter id 307.
 
-## Arguments
-- `blocksize100k`: Specifies the block size to be used for compression.
+## Keyword arguments:
+- `blocksize100k::Integer = 9`: Specifies the block size to be used for compression.
 
   It should be a value between 1 and 9 inclusive, and the actual block size used
   is 100000 x this figure. The default 9 gives the best compression but takes the most memory.
@@ -28,7 +28,7 @@ This is filter id 307.
 struct Bzip2Filter <: Filters.Filter
     blocksize100k::Cuint
 end
-Bzip2Filter(; blocksize100k=9) = Bzip2Filter(blocksize100k)
+Bzip2Filter(; blocksize100k::Integer=9) = Bzip2Filter(blocksize100k)
 
 Filters.filterid(::Type{Bzip2Filter}) = UInt16(307)
 Filters.filtername(::Type{Bzip2Filter}) = "BZIP2"

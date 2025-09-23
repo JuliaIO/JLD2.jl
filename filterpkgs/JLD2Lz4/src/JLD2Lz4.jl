@@ -11,9 +11,14 @@ using ChunkCodecLibLz4
 const DEFAULT_BLOCK_SIZE = 1 << 30
 
 """
-    Lz4Filter(blocksize)
 
-Apply LZ4 compression. `blocksize` is the main argument. The filter id is 32004.
+    Lz4Filter <: Filter
+
+The Lz4Filter can be used to compress datasets using the lz4 compression algorithm.
+This is filter id 32004.
+
+## Keyword arguments:
+- `blocksize::Integer = 2^30`: Block size in bytes at most 2,113,929,216 bytes. Default is 1 GiB.
 
 # External Links
 * [LZ4 HDF5 Filter ID 32004](https://github.com/HDFGroup/hdf5_plugins/blob/master/docs/RegisteredFilterPlugins.md)
@@ -22,7 +27,7 @@ Apply LZ4 compression. `blocksize` is the main argument. The filter id is 32004.
 struct Lz4Filter <: Filters.Filter
     blocksize::Cuint
 end
-Lz4Filter(; blocksize=DEFAULT_BLOCK_SIZE) = Lz4Filter(blocksize)
+Lz4Filter(; blocksize::Integer=DEFAULT_BLOCK_SIZE) = Lz4Filter(blocksize)
 
 
 Filters.filterid(::Type{Lz4Filter}) = UInt16(32004)

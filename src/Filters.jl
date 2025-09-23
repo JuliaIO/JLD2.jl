@@ -171,7 +171,7 @@ end
 The Shuffle filter can be used as part of a filter pipeline to compress datasets.
 It rearranges the bytes of elements in an array to improve compression
 efficiency. It is not a compression filter by itself, but can be used in conjunction
-with other compression filters like `Deflate`` or `ZstdFilter`.
+with other compression filters like `Deflate` or `ZstdFilter`.
 
 It can be useful when the array, for example, contains unsigned integer `UInt64` and all
 values are small. Then all the upper bytes of the eight byte integer are zero.
@@ -182,7 +182,7 @@ simplifies the compression of the data.
 struct Shuffle <: Filter
     element_size::UInt32
 end
-Shuffle(; element_size=0) = Shuffle(element_size)
+Shuffle() = Shuffle(UInt32(0))
 filterid(::Type{Shuffle}) = UInt16(2)
 client_values(filter::Shuffle) = (filter.element_size,)
 filtertype(::Val{2}) = Shuffle
@@ -222,16 +222,18 @@ using ChunkCodecLibZlib: ZlibEncodeOptions, ZlibDecodeOptions, encode, decode
 
 The Deflate filter can be used to compress datasets.
 It uses the well-known and widely used zlib (deflate) compression algorithm.
+This is filter id 1.
 
-## Arguments:
-- `level`: Compression level, between 0 and 9. Default is 5.
-Larger numbers lead to better compression, but also to longer runtime.
+## Keyword arguments:
+- `level::Integer = 5`: Compression level, between 0 and 9. Default is 5.
+
+  Larger numbers lead to better compression, but also to longer runtime.
 """
 struct Deflate <: Filter
     level::Cuint
     Deflate(level) = new(clamp(level, 0, 9))
 end
-Deflate(; level=5) = Deflate(level)
+Deflate(; level::Integer=5) = Deflate(level)
 
 filterid(::Type{Deflate}) = UInt16(1)
 client_values(filter::Deflate) = (filter.level, )
@@ -255,10 +257,17 @@ using ChunkCodecLibZstd: ChunkCodecLibZstd, ZstdEncodeOptions, ZstdDecodeOptions
     ZstdFilter <: Filter
 
 The ZstdFilter can be used to compress datasets using the Zstandard compression algorithm.
+This is filter id 32015.
 
-## Arguments:
-- `level`: Compression level, between 1 and 22.
-Larger numbers lead to better compression, but also to longer runtime.
+## Keyword arguments:
+- `level::Integer = 3`: Compression level, regular levels are 1-22.
+
+  Levels ≥ 20 should be used with caution, as they require more memory.
+  The zstd library also offers negative compression levels,
+  which extend the range of speed vs. ratio preferences.
+  The lower the level, the faster the speed (at the cost of compression).
+  0 is a special value for the default level.
+  The level will be clamped to the range allowed by the zstd library.
 
 """
 struct ZstdFilter <: Filter
@@ -267,7 +276,11 @@ struct ZstdFilter <: Filter
         ChunkCodecLibZstd.ZSTD_maxCLevel())
     )
 end
-ZstdFilter(; level=ChunkCodecLibZstd.ZSTD_defaultCLevel()) = ZstdFilter(level)
+function ZstdFilter(; level::Integer=Int32(3))
+    # zstd c library requires Int32 level
+    _level = clamp(level, Int32)
+    ZstdFilter(_level)
+end
 
 filterid(::Type{ZstdFilter}) = UInt16(32015)
 filtername(::Type{ZstdFilter}) = "ZSTD"

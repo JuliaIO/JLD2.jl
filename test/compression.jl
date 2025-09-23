@@ -91,7 +91,6 @@ end
 
     # Test Shuffle filter
     @test Shuffle(UInt32(8)).element_size == 8
-    @test Shuffle(element_size=UInt32(8)).element_size == 8
 
     # Test Bzip2Filter
     @test Bzip2Filter(5).blocksize100k == 5
