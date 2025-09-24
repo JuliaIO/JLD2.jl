@@ -8,8 +8,12 @@ using ScopedValues: ScopedValue, with
 using PrecompileTools: @setup_workload, @compile_workload
 export jldopen, @load, @save, save_object, load_object, jldsave
 export Shuffle, Deflate, ZstdFilter
+export create_external_link!, create_soft_link!, lookup_link
+export AbstractLink, HardLink, SoftLink, ExternalLink
+export configure_external_file_access!, get_external_file_access_policy
 
 include("types.jl")
+include("links.jl")
 include("macros_utils.jl")
 include("io/mmapio.jl")
 include("io/bufferedio.jl")
@@ -59,13 +63,14 @@ mutable struct Group{T}
     next_link_offset::Int64
     est_num_entries::Int
     est_link_name_len::Int
-    unwritten_links::OrderedDict{String,RelOffset}
+    unwritten_links::OrderedDict{String,AbstractLink}
     unwritten_child_groups::OrderedDict{String,Group{T}}
-    written_links::OrderedDict{String,RelOffset}
+    written_links::OrderedDict{String,AbstractLink}
 
     Group{T}(f; est_num_entries::Int=4, est_link_name_len::Int=8) where T =
         new(f, -1, -1, -1, -1, est_num_entries, est_link_name_len,
-        OrderedDict{String,RelOffset}(), OrderedDict{String,Group{T}}())
+        OrderedDict{String,AbstractLink}(), OrderedDict{String,Group{T}}(),
+        OrderedDict{String,AbstractLink}())
 
     Group{T}(f, last_chunk_start_offset, continuation_message_goes_here,
              last_chunk_checksum_offset, next_link_offset,
@@ -263,11 +268,17 @@ function initialize_fileobject!(f::JLDFile)
     end
     f.root_group = load_group(f, f.root_group_offset)
 
-    types_offset = get(f.root_group.written_links, "_types", UNDEFINED_ADDRESS)
+    types_offset = lookup_offset(f.root_group, "_types")
     if types_offset != UNDEFINED_ADDRESS
         f.types_group = f.loaded_groups[types_offset] = load_group(f, types_offset)
-        for (i, offset::RelOffset) in enumerate(values(f.types_group.written_links))
-            f.datatype_locations[offset] = CommittedDatatype(offset, i)
+        for (i, link) in enumerate(values(f.types_group.written_links))
+            # Types group should only contain hard links
+            if isa(link, HardLink)
+                offset = link.target
+                f.datatype_locations[offset] = CommittedDatatype(offset, i)
+            else
+                @warn "Unexpected link type in _types group: $(typeof(link))"
+            end
         end
         resize!(f.datatypes, length(f.datatype_locations))
     else
@@ -373,6 +384,13 @@ Base.isempty(f::JLDFile) = isempty(f.root_group)
 Base.keys(f::JLDFile) = filter!(x->x != "_types", keys(f.root_group))
 Base.keytype(f::JLDFile) = String
 Base.length(f::Union{JLDFile, Group}) = length(keys(f))
+
+# Convenience methods for link creation at file level (delegate to root group)
+create_external_link!(f::JLDFile, link_name::AbstractString, file_path::AbstractString, object_path::AbstractString) =
+    (create_external_link!(f.root_group, link_name, file_path, object_path); f)
+create_soft_link!(f::JLDFile, link_name::AbstractString, target_path::AbstractString) =
+    (create_soft_link!(f.root_group, link_name, target_path); f)
+lookup_link(f::JLDFile, name::AbstractString) = lookup_link(f.root_group, name)
 
 Base.get(default::Function, f::Union{JLDFile, Group}, name::AbstractString) =
     haskey(f, name) ? f[name] : default()
@@ -491,6 +509,8 @@ end
 
 include("object_headers.jl")
 include("headermessages.jl")
+include("path_resolution.jl")
+include("external_files.jl")
 include("groups.jl")
 include("dataspaces.jl")
 include("attributes.jl")
