@@ -77,11 +77,6 @@ This enables cross-file data dependencies and modular file organization.
 External links correspond to HDF5 link type 64. They contain two null-terminated
 strings: the external file path and the object path within that file.
 
-# Security Considerations
-External file paths are validated to prevent directory traversal attacks.
-Paths containing ".." components that would escape the intended directory
-structure are rejected.
-
 # Example
 ```julia
 # Link to /data/temperature in external_file.h5
@@ -96,11 +91,6 @@ struct ExternalLink <: AbstractLink
     function ExternalLink(file_path::String, object_path::String)
         isempty(file_path) && throw(ArgumentError("External file path cannot be empty"))
         isempty(object_path) && throw(ArgumentError("External object path cannot be empty"))
-
-        # Basic security validation - prevent directory traversal
-        if contains(file_path, "..")
-            throw(ArgumentError("External file path contains potentially unsafe '..' components: $file_path"))
-        end
 
         # Normalize path separators and validate object path format
         normalized_object_path = replace(object_path, '\\' => '/')
@@ -133,11 +123,6 @@ Validate external link paths. Returns normalized paths or throws ArgumentError i
 function validate_external_link_paths(file_path::String, object_path::String)
     isempty(file_path) && throw(ArgumentError("External file path cannot be empty"))
     isempty(object_path) && throw(ArgumentError("External object path cannot be empty"))
-
-    # Basic security validation - prevent directory traversal
-    if contains(file_path, "..")
-        throw(ArgumentError("External file path contains potentially unsafe '..' components: $file_path"))
-    end
 
     # Normalize path separators and validate object path format
     normalized_object_path = replace(object_path, '\\' => '/')

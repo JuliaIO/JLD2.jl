@@ -185,52 +185,51 @@ function get_dataset(g::Group, name::String)
     f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
 
     (g, name) = pathize(g, name, false)
-    roffset = lookup_offset(g, name)
-    if roffset == UNDEFINED_ADDRESS
-        if isempty(name)
-            # this is a group
-            return get_dataset(f, group_offset(g), g, name)
-        end
 
-        # Check if this is an external or soft link
-        link = lookup_link(g, name)
-        if isa(link, ExternalLink)
-            # Resolve external link
-            try
-                resolved_object = resolve_external_link(f, link)
-                # For datasets, return the resolved object directly
-                return resolved_object
-            catch e
-                if isa(e, SystemError) || isa(e, KeyError) || isa(e, ArgumentError)
-                    # Provide better error context for external link failures
-                    throw(e)  # Re-throw with original error type and message
-                else
-                    rethrow(e)
-                end
-            end
-        elseif isa(link, SoftLink)
-            # Resolve soft link within the same file
-            try
-                resolved_path = resolve_soft_link_path(group_path(g), link.path)
-                return f[resolved_path]
-            catch e
-                if isa(e, KeyError)
-                    # Try to include resolved path if it was computed successfully
-                    try
-                        resolved_path = resolve_soft_link_path(group_path(g), link.path)
-                        throw(KeyError("Soft link target not found: $(link.path) (resolved to: $resolved_path)"))
-                    catch
-                        throw(KeyError("Soft link target not found: $(link.path)"))
-                    end
-                else
-                    rethrow(e)
-                end
-            end
-        end
-
-        throw(KeyError(name))
+    if isempty(name)
+        # this is a group
+        return get_dataset(f, group_offset(g), g, name)
     end
-    get_dataset(f, roffset, g, name)
+
+    # Use lookup_link directly instead of lookup_offset → lookup_link pattern
+    link = lookup_link(g, name)
+    if link === nothing
+        throw(KeyError(name))
+    elseif isa(link, HardLink)
+        # Hard link - proceed with normal dataset retrieval
+        return get_dataset(f, link.target, g, name)
+    elseif isa(link, ExternalLink)
+        # For external links, provide informative error message instead of resolving
+        throw(ArgumentError(LazyString(
+            "get_dataset cannot be used on external links.\n",
+            "Link \"", name, "\" points to:\n",
+            "  • External file: \"", link.file_path, "\"\n",
+            "  • Object path: \"", link.object_path, "\"\n",
+            "Use f[\"", name, "\"] to access the external data directly."
+        )))
+    elseif isa(link, SoftLink)
+        # For soft links, check if they point to a regular dataset within the same file
+        resolved_path = resolve_soft_link_path(group_path(g), link.path)
+        # Use lookup_link for the resolved path as well to be consistent
+        target_link = lookup_link(f.root_group, resolved_path[2:end])  # Remove leading '/'
+        if target_link !== nothing && isa(target_link, HardLink)
+            # This is a soft link to a regular dataset within the same file - allow it
+            return get_dataset(f, target_link.target, g, name)
+        else
+            # The target doesn't exist or is itself a link
+            throw(ArgumentError(LazyString(
+                "get_dataset cannot be used on soft links that don't point to regular datasets.\n",
+                "Link \"", name, "\" points to:\n",
+                "  • Soft link path: \"", link.path, "\"\n",
+                "  • Resolved path: \"", resolved_path, "\"\n",
+                "The target is not a regular dataset in this file.\n",
+                "Use f[\"", name, "\"] to access the linked data directly."
+            )))
+        end
+    else
+        # Unknown link type
+        throw(ArgumentError("Unknown link type: $(typeof(link))"))
+    end
 end
 
 function get_dataset(f::JLDFile, offset::RelOffset, g=f.root_group, name="")
