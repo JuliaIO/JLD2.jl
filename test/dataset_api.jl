@@ -59,8 +59,10 @@ end
             @test dset[] == [1 43 5; -1 46 47]
 
             dset = JLD2.get_dataset(f, "c")
+            dset[1] = (0x12, 3f0)
             dset[2] = (0xff, 0f0)
-            @test f["c"] == [(0x00, 1f0), (0xff, 0f0)]
+            @test f["c"] == [(0x12, 3f0), (0xff, 0f0)]
         end
+        @test load(fn, "c")  == [(0x12, 3f0), (0xff, 0f0)]
     end
 end
