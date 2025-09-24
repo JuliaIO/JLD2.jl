@@ -113,11 +113,6 @@ function get_external_file(current_file_path::String, external_file_path::String
     handle = ExternalFileHandle(resolved_path)
 
     try
-        # Security check with access control policy
-        if !is_safe_external_path(resolved_path, current_file_path)
-            throw(ArgumentError("External file path failed security validation: $resolved_path"))
-        end
-
         # Check if file exists and is readable
         if !isfile(resolved_path)
             throw(SystemError("External file not found: $resolved_path"))

@@ -37,7 +37,9 @@ using JLD2, Test
         # Test ExternalLink validation
         @test_throws ArgumentError JLD2.ExternalLink("", "/dataset")
         @test_throws ArgumentError JLD2.ExternalLink("file.h5", "")
-        @test_throws ArgumentError JLD2.ExternalLink("../malicious/path", "/dataset")
+        # Path traversal is now allowed (security checks removed)
+        external_with_dotdot = JLD2.ExternalLink("../path/file.h5", "/dataset")
+        @test external_with_dotdot.file_path == "../path/file.h5"
 
         # Test relative object path warning (should not throw)
         @test_logs (:warn, r"relative") JLD2.ExternalLink("file.h5", "relative/path")
@@ -127,9 +129,10 @@ end
             @test retrieved_link isa JLD2.HardLink
             @test retrieved_link.target == offset
 
-            # Test lookup_offset backward compatibility
-            @test JLD2.lookup_offset(f.root_group, "test_hardlink") == offset
-            @test JLD2.lookup_offset(f.root_group, "nonexistent") == JLD2.UNDEFINED_ADDRESS
+            # Test lookup_link functionality that replaces lookup_offset
+            link = lookup_link(f.root_group, "test_hardlink")
+            @test link !== nothing && isa(link, HardLink) && link.target == offset
+            @test lookup_link(f.root_group, "nonexistent") === nothing
         end
     end
 end
@@ -192,7 +195,7 @@ end
 end
 
 using JLD2, Test
-using JLD2: ExternalLink, SoftLink, HardLink, lookup_link, lookup_offset
+using JLD2: ExternalLink, SoftLink, HardLink, lookup_link
 
 @testset "Phase 2: External Link Creation API" begin
 
@@ -292,13 +295,13 @@ using JLD2: ExternalLink, SoftLink, HardLink, lookup_link, lookup_offset
                 @test isa(ext_link, ExternalLink)
                 @test ext_link.file_path == "test_external.jld2"
 
-                # Test that lookup_offset works for hard links
-                hard_offset = lookup_offset(root, "original_data")
-                @test hard_offset != JLD2.UNDEFINED_ADDRESS
+                # Test that lookup_link works for hard links and returns correct link types
+                hard_link = lookup_link(root, "original_data")
+                @test hard_link !== nothing && isa(hard_link, HardLink)
 
-                # Test that lookup_offset returns UNDEFINED_ADDRESS for non-hard links
-                ext_offset = lookup_offset(root, "external_data")
-                @test ext_offset == JLD2.UNDEFINED_ADDRESS
+                # Test that lookup_link returns the correct link type for external links
+                ext_link_direct = lookup_link(root, "external_data")
+                @test ext_link_direct !== nothing && isa(ext_link_direct, ExternalLink)
             end
         end
 
@@ -318,7 +321,6 @@ end
 using JLD2, Test
 using JLD2: ExternalLink, SoftLink, HardLink
 using JLD2: get_reference_chain_info, get_cache_stats
-using JLD2: configure_external_file_access!, get_external_file_access_policy
 using JLD2: UnsupportedFeatureException
 
 @testset "Advanced Error Handling & Edge Cases" begin
@@ -405,125 +407,6 @@ using JLD2: UnsupportedFeatureException
         end
     end
 
-    @testset "Permission-Based Access Control" begin
-        mktempdir() do tmpdir
-            # Save original policy
-            original_policy = get_external_file_access_policy()
-
-            try
-                # Test 1: Allowed directories restriction
-                data_dir = joinpath(tmpdir, "data")
-                restricted_dir = joinpath(tmpdir, "restricted")
-                mkpath(data_dir)
-                mkpath(restricted_dir)
-
-                allowed_file = joinpath(data_dir, "allowed.jld2")
-                restricted_file = joinpath(restricted_dir, "restricted.jld2")
-                main_file = joinpath(data_dir, "main.jld2")
-
-                # Create test files
-                jldopen(allowed_file, "w") do f
-                    f["data"] = [1, 2, 3]
-                end
-
-                jldopen(restricted_file, "w") do f
-                    f["data"] = [4, 5, 6]
-                end
-
-                # Configure access control: only allow data directory
-                configure_external_file_access!(
-                    allowed_directories=[data_dir],
-                    audit_access=false
-                )
-
-                jldopen(main_file, "w") do f
-                    f["local_data"] = [0, 0, 0]
-                    # This should work (same allowed directory)
-                    create_external_link!(f, "allowed_link", allowed_file, "/data")
-                    # This should be blocked during access
-                    create_external_link!(f, "restricted_link", restricted_file, "/data")
-                end
-
-                jldopen(main_file, "r") do f
-                    # Access to allowed file should work
-                    @test f["allowed_link"] == [1, 2, 3]
-
-                    # Access to restricted file should fail
-                    @test_throws ArgumentError f["restricted_link"]
-                end
-
-                # Test 2: Same directory restriction
-                configure_external_file_access!(
-                    allowed_directories=String[],  # Clear previous restriction
-                    require_same_directory=true,
-                    audit_access=false
-                )
-
-                other_dir = joinpath(tmpdir, "other")
-                mkpath(other_dir)
-                other_file = joinpath(other_dir, "other.jld2")
-
-                jldopen(other_file, "w") do f
-                    f["data"] = [7, 8, 9]
-                end
-
-                jldopen(main_file, "w") do f
-                    f["local_data"] = [0, 0, 0]
-                    # This should be blocked (different directory)
-                    create_external_link!(f, "other_dir_link", other_file, "/data")
-                end
-
-                jldopen(main_file, "r") do f
-                    @test_throws ArgumentError f["other_dir_link"]
-                end
-
-                # Test 3: Extension restrictions
-                configure_external_file_access!(
-                    require_same_directory=false,
-                    allowed_extensions=["jld2", "h5"],
-                    audit_access=false
-                )
-
-                txt_file = joinpath(data_dir, "text.txt")
-                write(txt_file, "not an HDF5 file")
-
-                jldopen(main_file, "w") do f
-                    create_external_link!(f, "txt_link", txt_file, "/data")
-                end
-
-                jldopen(main_file, "r") do f
-                    @test_throws ArgumentError f["txt_link"]
-                end
-
-                # Test 4: Audit logging (should not throw)
-                configure_external_file_access!(
-                    allowed_extensions=String[],  # Allow all extensions
-                    audit_access=true
-                )
-
-                policy = get_external_file_access_policy()
-                @test policy.audit_access == true
-
-                # Test access policy retrieval
-                @test isa(policy.allowed_directories, Set{String})
-                @test isa(policy.blocked_directories, Set{String})
-                @test isa(policy.require_same_directory, Bool)
-                @test isa(policy.max_traversal_depth, Int)
-                @test isa(policy.allowed_extensions, Set{String})
-
-            finally
-                # Restore original policy settings
-                configure_external_file_access!(
-                    allowed_directories=collect(original_policy.allowed_directories),
-                    blocked_directories=collect(original_policy.blocked_directories),
-                    require_same_directory=original_policy.require_same_directory,
-                    max_traversal_depth=original_policy.max_traversal_depth,
-                    allowed_extensions=collect(original_policy.allowed_extensions),
-                    audit_access=original_policy.audit_access
-                )
-            end
-        end
-    end
 
     @testset "Network File System Retry Logic" begin
         # These tests verify the retry mechanism structure
@@ -932,6 +815,87 @@ end
                 @test f["level1/link_to_root"] == f["level1/data1"]
                 @test f["level3/link_to_level1"] == f["level1/data1"]
                 @test f["level5/link_to_top"] == f["level1/data1"]
+            end
+        end
+    end
+
+    @testset "get_dataset Error Messages for Links" begin
+        mktempdir() do tmpdir
+            external_file = joinpath(tmpdir, "external_data.jld2")
+            main_file = joinpath(tmpdir, "main.jld2")
+
+            # Create external data file
+            jldopen(external_file, "w") do f
+                f["temperature"] = [23.5, 24.1, 22.8]
+                f["metadata"] = "Test sensor data"
+            end
+
+            # Create main file with different types of links
+            jldopen(main_file, "w") do f
+                f["regular_dataset"] = [1, 2, 3, 4]
+
+                # External links
+                create_external_link!(f, "external_temp", external_file, "/temperature")
+                create_external_link!(f, "external_meta", external_file, "/metadata")
+
+                # Soft links
+                create_soft_link!(f, "local_alias", "/regular_dataset")  # Points to regular dataset
+                create_soft_link!(f, "external_alias", "/external_temp")  # Points to external link
+                create_soft_link!(f, "missing_target", "/nonexistent")  # Points to nonexistent target
+            end
+
+            jldopen(main_file, "r") do f
+                # Test 1: Regular dataset should work normally
+                @test isa(JLD2.get_dataset(f, "regular_dataset"), JLD2.Dataset)
+
+                # Test 2: External link should give informative error
+                @test_throws ArgumentError JLD2.get_dataset(f, "external_temp")
+                try
+                    JLD2.get_dataset(f, "external_temp")
+                catch e
+                    msg = string(e)
+                    @test contains(msg, "get_dataset cannot be used on external links")
+                    @test contains(msg, "external_temp")
+                    @test contains(msg, external_file)
+                    @test contains(msg, "/temperature")
+                    @test contains(msg, "Use f[\\\"external_temp\\\"]")
+                end
+
+                # Test 3: Soft link to regular dataset should work
+                @test isa(JLD2.get_dataset(f, "local_alias"), JLD2.Dataset)
+
+                # Test 4: Soft link to external link should give informative error
+                @test_throws ArgumentError JLD2.get_dataset(f, "external_alias")
+                try
+                    JLD2.get_dataset(f, "external_alias")
+                catch e
+                    msg = string(e)
+                    @test contains(msg, "get_dataset cannot be used on soft links that don't point to regular datasets")
+                    @test contains(msg, "external_alias")
+                    @test contains(msg, "/external_temp")
+                    @test contains(msg, "Use f[\\\"external_alias\\\"]")
+                end
+
+                # Test 5: Soft link to missing target should give informative error
+                @test_throws ArgumentError JLD2.get_dataset(f, "missing_target")
+                try
+                    JLD2.get_dataset(f, "missing_target")
+                catch e
+                    msg = string(e)
+                    @test contains(msg, "get_dataset cannot be used on soft links that don't point to regular datasets")
+                    @test contains(msg, "missing_target")
+                    @test contains(msg, "/nonexistent")
+                    @test contains(msg, "Use f[\\\"missing_target\\\"]")
+                end
+
+                # Test 6: Verify that normal data access still works for all link types
+                @test f["regular_dataset"] == [1, 2, 3, 4]
+                @test f["external_temp"] == [23.5, 24.1, 22.8]  # Through external link
+                @test f["local_alias"] == [1, 2, 3, 4]  # Through soft link to regular dataset
+                @test f["external_alias"] == [23.5, 24.1, 22.8]  # Through soft link to external link
+
+                # missing_target would throw KeyError during normal access, which is expected
+                @test_throws KeyError f["missing_target"]
             end
         end
     end

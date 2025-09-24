@@ -80,19 +80,24 @@ print_header_messages(f::JLDFile, name::AbstractString) =
 function print_header_messages(g::Group, name::AbstractString)
     g.f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
     (g, name) = pathize(g, name, false)
-    roffset = lookup_offset(g, name)
-    if roffset == UNDEFINED_ADDRESS
-        if isempty(name)
-            roffset = g.f.root_group_offset
-        else
-            # Check if this is an external or soft link
-            link = lookup_link(g, name)
-            if isa(link, ExternalLink)
-                throw(ArgumentError("Cannot print header messages for external link pointing to $(link.file_path):$(link.object_path)"))
-            elseif isa(link, SoftLink)
-                throw(ArgumentError("Cannot print header messages for soft link pointing to $(link.path)"))
-            end
+
+    if isempty(name)
+        # This is the group itself
+        roffset = g.f.root_group_offset
+    else
+        # Use lookup_link directly instead of lookup_offset → lookup_link pattern
+        link = lookup_link(g, name)
+        if link === nothing
             throw(ArgumentError("did not find a group or dataset named \"$name\""))
+        elseif isa(link, HardLink)
+            # Hard link - proceed with header message printing
+            roffset = link.target
+        elseif isa(link, ExternalLink)
+            throw(ArgumentError("Cannot print header messages for external link pointing to $(link.file_path):$(link.object_path)"))
+        elseif isa(link, SoftLink)
+            throw(ArgumentError("Cannot print header messages for soft link pointing to $(link.path)"))
+        else
+            throw(ArgumentError("Unknown link type: $(typeof(link))"))
         end
     end
     return print_header_messages(g.f, roffset)

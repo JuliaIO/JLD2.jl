@@ -16,41 +16,6 @@ Construct a group named `name` as a child of group `g`.
 """
 Group(g::Group{T}, name::AbstractString; kwargs...) where {T} = (g[name] = Group{T}(g.f; kwargs...))
 
-"""
-    lookup_offset(g::Group, name::AbstractString) -> RelOffset
-
-Lookup the offset of a dataset in a group. Returns `UNDEFINED_ADDRESS` if the dataset is
-not present. Does not inspect `unwritten_child_groups`.
-
-For backward compatibility, this function only works with hard links.
-For soft and external links, use `lookup_link` instead.
-"""
-function lookup_offset(g::Group, name::AbstractString)
-    if g.last_chunk_start_offset != -1
-        # Has been saved to file, so written_links exists
-        link = get(g.written_links, name, nothing)
-        if link !== nothing
-            if isa(link, HardLink)
-                return link.target
-            else
-                # Non-hard links cannot be resolved to a simple offset
-                return UNDEFINED_ADDRESS
-            end
-        end
-    end
-
-    link = get(g.unwritten_links, name, nothing)
-    if link !== nothing
-        if isa(link, HardLink)
-            return link.target
-        else
-            # Non-hard links cannot be resolved to a simple offset
-            return UNDEFINED_ADDRESS
-        end
-    end
-
-    return UNDEFINED_ADDRESS
-end
 
 """
     lookup_link(g::Group, name::AbstractString) -> Union{AbstractLink, Nothing}
@@ -87,26 +52,34 @@ function pathize(g::Group, name::AbstractString, create::Bool)
                 continue
             end
             # See if a group already exists
-            offset = lookup_offset(g, dir)
-            if offset == UNDEFINED_ADDRESS
-                if haskey(g.unwritten_child_groups, dir)
-                    # It's possible that lookup_offset fails because the group has not yet
-                    # been written to the file
-                    g = g.unwritten_child_groups[dir]
-                elseif create
-                    # No group exists, so create a new group
-                    newg = G(f)
-                    g.unwritten_child_groups[dir] = newg
-                    g = newg
-                else
-                    throw(KeyError(join(dirs[1:i], '/')))
-                end
-            elseif haskey(f.loaded_groups, offset)
-                g = f.loaded_groups[offset]::G
-            elseif !isgroup(f, offset)
-                throw(ArgumentError("path $(join(dirs[1:i], '/')) points to a dataset, not a group"))
+            # Check unwritten_child_groups first
+            if haskey(g.unwritten_child_groups, dir)
+                g = g.unwritten_child_groups[dir]
             else
-                g = f.loaded_groups[offset] = load_group(f, offset)::G
+                # Use lookup_link directly for consistency
+                link = lookup_link(g, dir)
+                if link === nothing
+                    if create
+                        # No group exists, so create a new group
+                        newg = G(f)
+                        g.unwritten_child_groups[dir] = newg
+                        g = newg
+                    else
+                        throw(KeyError(join(dirs[1:i], '/')))
+                    end
+                elseif isa(link, HardLink)
+                    offset = link.target
+                    if haskey(f.loaded_groups, offset)
+                        g = f.loaded_groups[offset]::G
+                    elseif !isgroup(f, offset)
+                        throw(ArgumentError("path $(join(dirs[1:i], '/')) points to a dataset, not a group"))
+                    else
+                        g = f.loaded_groups[offset] = load_group(f, offset)::G
+                    end
+                else
+                    # Non-hard links (soft/external) cannot be used for group navigation in pathize
+                    throw(ArgumentError("path $(join(dirs[1:i], '/')) contains a link that cannot be used for group navigation"))
+                end
             end
         end
 
@@ -126,63 +99,38 @@ function Base.getindex(g::Group, name::AbstractString)
 
     (g, name) = pathize(g, name, false)
     isempty(name) && return g
-    roffset = lookup_offset(g, name)
-    if roffset == UNDEFINED_ADDRESS
-        haskey(g.unwritten_child_groups, name) && return g.unwritten_child_groups[name]
 
-        # Check if this is an external or soft link
-        link = lookup_link(g, name)
-        if isa(link, ExternalLink)
-            # Resolve external link
-            try
-                return resolve_external_link(g.f, link)
-            catch e
-                if isa(e, SystemError) || isa(e, KeyError) || isa(e, ArgumentError)
-                    # Provide better error context for external link failures
-                    throw(e)  # Re-throw with original error type and message
-                else
-                    rethrow(e)
-                end
-            end
-        elseif isa(link, SoftLink)
-            # Resolve soft link within the same file
-            try
-                # For relative paths, resolve from the current group
-                # For absolute paths, resolve from root
-                if startswith(link.path, '/')
-                    # Absolute path - resolve from root
-                    resolved_path = JLD2.normalize_hdf5_path(link.path)
-                    return g.f[resolved_path]
-                else
-                    # Relative path - resolve from current group
-                    # Try to find the target by traversing from the current group
-                    return resolve_relative_soft_link(g, link.path)
-                end
-            catch e
-                if isa(e, KeyError)
-                    # Try to include resolved path if it was computed successfully
-                    try
-                        if startswith(link.path, '/')
-                            resolved_path = JLD2.normalize_hdf5_path(link.path)
-                        else
-                            # For relative paths, we might not be able to resolve the path
-                            # but we can provide a better error message
-                            resolved_path = "relative:$(link.path)"
-                        end
-                        throw(KeyError("Soft link target not found: $(link.path) (resolved to: $resolved_path)"))
-                    catch
-                        throw(KeyError("Soft link target not found: $(link.path)"))
-                    end
-                else
-                    rethrow(e)
-                end
-            end
-        end
+    # Check for unwritten child groups first
+    haskey(g.unwritten_child_groups, name) && return g.unwritten_child_groups[name]
 
+    # Use lookup_link directly instead of lookup_offset → lookup_link pattern
+    link = lookup_link(g, name)
+    if link === nothing
         throw(KeyError(name))
+    elseif isa(link, HardLink)
+        # Hard link - proceed with normal dataset/group loading
+        return Base.inferencebarrier(load_dataset(f, link.target))
+    elseif isa(link, ExternalLink)
+        # Resolve external link - resolve_external_link handles errors appropriately
+        return resolve_external_link(g.f, link)
+    elseif isa(link, SoftLink)
+        # Resolve soft link within the same file
+        # For relative paths, resolve from the current group
+        # For absolute paths, resolve from root
+        if startswith(link.path, '/')
+            # Absolute path - resolve from root
+            resolved_path = JLD2.normalize_hdf5_path(link.path)
+            # Attempt to resolve, let the file's getindex handle KeyError if target doesn't exist
+            # This approach provides better error messages automatically
+            return g.f[resolved_path]
+        else
+            # Relative path - resolve from current group
+            # resolve_relative_soft_link handles error cases appropriately
+            return resolve_relative_soft_link(g, link.path)
+        end
+    else
+        throw(ArgumentError("Unknown link type: $(typeof(link))"))
     end
-
-    Base.inferencebarrier(load_dataset(f, roffset))
 end
 
 @nospecializeinfer function Base.write(
@@ -310,21 +258,27 @@ function Base.haskey(g::Group, name::AbstractString)
             end
 
             # See if a group already exists
-            offset = lookup_offset(g, dir)
-            if offset == UNDEFINED_ADDRESS
-                if haskey(g.unwritten_child_groups, dir)
-                    # It's possible that lookup_offset fails because the group has not yet
-                    # been written to the file
-                    g = g.unwritten_child_groups[dir]::G
+            # Check unwritten_child_groups first
+            if haskey(g.unwritten_child_groups, dir)
+                g = g.unwritten_child_groups[dir]::G
+            else
+                # Use lookup_link directly for consistency
+                link = lookup_link(g, dir)
+                if link === nothing
+                    return false
+                elseif isa(link, HardLink)
+                    offset = link.target
+                    if haskey(f.loaded_groups, offset)
+                        g = f.loaded_groups[offset]::G
+                    elseif !isgroup(f, offset)
+                        return false
+                    else
+                        g = f.loaded_groups[offset] = load_group(f, offset)::G
+                    end
                 else
+                    # Non-hard links cannot be traversed for group navigation in haskey
                     return false
                 end
-            elseif haskey(f.loaded_groups, offset)
-                g = f.loaded_groups[offset]::G
-            elseif !isgroup(f, offset)
-                return false
-            else
-                g = f.loaded_groups[offset] = load_group(f, offset)::G
             end
         end
 

@@ -10,7 +10,6 @@ export jldopen, @load, @save, save_object, load_object, jldsave
 export Shuffle, Deflate, ZstdFilter
 export create_external_link!, create_soft_link!, lookup_link
 export AbstractLink, HardLink, SoftLink, ExternalLink
-export configure_external_file_access!, get_external_file_access_policy
 
 include("types.jl")
 include("links.jl")
@@ -268,8 +267,10 @@ function initialize_fileobject!(f::JLDFile)
     end
     f.root_group = load_group(f, f.root_group_offset)
 
-    types_offset = lookup_offset(f.root_group, "_types")
-    if types_offset != UNDEFINED_ADDRESS
+    # Use lookup_link directly instead of lookup_offset
+    types_link = lookup_link(f.root_group, "_types")
+    if types_link !== nothing && isa(types_link, HardLink)
+        types_offset = types_link.target
         f.types_group = f.loaded_groups[types_offset] = load_group(f, types_offset)
         for (i, link) in enumerate(values(f.types_group.written_links))
             # Types group should only contain hard links
