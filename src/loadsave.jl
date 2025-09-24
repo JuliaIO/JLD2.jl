@@ -140,7 +140,19 @@ macro load(filename, vars...)
         f = jldopen(filename)
         try
             for n in keys(f)
-                if !isgroup(f, lookup_offset(f.root_group, n))
+                # Check if this entry is a group, handling all link types
+                link = lookup_link(f.root_group, n)
+                is_a_group = if isa(link, HardLink)
+                    isgroup(f, link.target)
+                elseif haskey(f.root_group.unwritten_child_groups, n)
+                    true  # Unwritten groups are definitely groups
+                else
+                    # For external/soft links, we conservatively treat them as non-groups
+                    # since we can't easily resolve them without opening external files
+                    false
+                end
+
+                if !is_a_group
                     push!(vars, Symbol(n))
                 end
             end

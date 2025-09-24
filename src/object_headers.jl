@@ -85,6 +85,13 @@ function print_header_messages(g::Group, name::AbstractString)
         if isempty(name)
             roffset = g.f.root_group_offset
         else
+            # Check if this is an external or soft link
+            link = lookup_link(g, name)
+            if isa(link, ExternalLink)
+                throw(ArgumentError("Cannot print header messages for external link pointing to $(link.file_path):$(link.object_path)"))
+            elseif isa(link, SoftLink)
+                throw(ArgumentError("Cannot print header messages for soft link pointing to $(link.path)"))
+            end
             throw(ArgumentError("did not find a group or dataset named \"$name\""))
         end
     end

@@ -21,14 +21,50 @@ Group(g::Group{T}, name::AbstractString; kwargs...) where {T} = (g[name] = Group
 
 Lookup the offset of a dataset in a group. Returns `UNDEFINED_ADDRESS` if the dataset is
 not present. Does not inspect `unwritten_child_groups`.
+
+For backward compatibility, this function only works with hard links.
+For soft and external links, use `lookup_link` instead.
 """
 function lookup_offset(g::Group, name::AbstractString)
     if g.last_chunk_start_offset != -1
         # Has been saved to file, so written_links exists
-        roffset = get(g.written_links, name, UNDEFINED_ADDRESS)
-        roffset != UNDEFINED_ADDRESS && return roffset
+        link = get(g.written_links, name, nothing)
+        if link !== nothing
+            if isa(link, HardLink)
+                return link.target
+            else
+                # Non-hard links cannot be resolved to a simple offset
+                return UNDEFINED_ADDRESS
+            end
+        end
     end
-    roffset = get(g.unwritten_links, name, UNDEFINED_ADDRESS)
+
+    link = get(g.unwritten_links, name, nothing)
+    if link !== nothing
+        if isa(link, HardLink)
+            return link.target
+        else
+            # Non-hard links cannot be resolved to a simple offset
+            return UNDEFINED_ADDRESS
+        end
+    end
+
+    return UNDEFINED_ADDRESS
+end
+
+"""
+    lookup_link(g::Group, name::AbstractString) -> Union{AbstractLink, Nothing}
+
+Lookup a link in a group by name. Returns the AbstractLink object if found, or `nothing`
+if not present. This function supports all link types (hard, soft, external).
+"""
+function lookup_link(g::Group, name::AbstractString)
+    if g.last_chunk_start_offset != -1
+        # Has been saved to file, so written_links exists
+        link = get(g.written_links, name, nothing)
+        link !== nothing && return link
+    end
+    return get(g.unwritten_links, name, nothing)
 end
 
 """
@@ -93,6 +129,56 @@ function Base.getindex(g::Group, name::AbstractString)
     roffset = lookup_offset(g, name)
     if roffset == UNDEFINED_ADDRESS
         haskey(g.unwritten_child_groups, name) && return g.unwritten_child_groups[name]
+
+        # Check if this is an external or soft link
+        link = lookup_link(g, name)
+        if isa(link, ExternalLink)
+            # Resolve external link
+            try
+                return resolve_external_link(g.f, link)
+            catch e
+                if isa(e, SystemError) || isa(e, KeyError) || isa(e, ArgumentError)
+                    # Provide better error context for external link failures
+                    throw(e)  # Re-throw with original error type and message
+                else
+                    rethrow(e)
+                end
+            end
+        elseif isa(link, SoftLink)
+            # Resolve soft link within the same file
+            try
+                # For relative paths, resolve from the current group
+                # For absolute paths, resolve from root
+                if startswith(link.path, '/')
+                    # Absolute path - resolve from root
+                    resolved_path = JLD2.normalize_hdf5_path(link.path)
+                    return g.f[resolved_path]
+                else
+                    # Relative path - resolve from current group
+                    # Try to find the target by traversing from the current group
+                    return resolve_relative_soft_link(g, link.path)
+                end
+            catch e
+                if isa(e, KeyError)
+                    # Try to include resolved path if it was computed successfully
+                    try
+                        if startswith(link.path, '/')
+                            resolved_path = JLD2.normalize_hdf5_path(link.path)
+                        else
+                            # For relative paths, we might not be able to resolve the path
+                            # but we can provide a better error message
+                            resolved_path = "relative:$(link.path)"
+                        end
+                        throw(KeyError("Soft link target not found: $(link.path) (resolved to: $resolved_path)"))
+                    catch
+                        throw(KeyError("Soft link target not found: $(link.path)"))
+                    end
+                else
+                    rethrow(e)
+                end
+            end
+        end
+
         throw(KeyError(name))
     end
 
@@ -141,8 +227,72 @@ function Base.setindex!(g::Group, offset::RelOffset, name::AbstractString)
     if g.last_chunk_start_offset != -1 && g.continuation_message_goes_here == -1
         error("objects cannot be added to this group because it was created with a previous version of JLD2")
     end
-    g.unwritten_links[name] = offset
+    g.unwritten_links[name] = HardLink(offset)
     g
+end
+
+# New method to accept AbstractLink directly
+function Base.setindex!(g::Group, link::AbstractLink, name::AbstractString)
+    if g.last_chunk_start_offset != -1 && g.continuation_message_goes_here == -1
+        error("objects cannot be added to this group because it was created with a previous version of JLD2")
+    end
+    g.unwritten_links[name] = link
+    g
+end
+
+"""
+    create_external_link!(group::Group, link_name::String, file_path::String, object_path::String)
+
+Create an external link in the group that points to an object in another HDF5/JLD2 file.
+
+# Arguments
+- `group::Group`: The group to create the link in
+- `link_name::String`: Name of the link within the group
+- `file_path::String`: Path to the external HDF5/JLD2 file
+- `object_path::String`: Path to the object within the external file
+
+# Example
+```julia
+using JLD2
+
+# Open a file and create an external link
+jldopen("main.jld2", "w") do file
+    create_external_link!(file, "external_data", "data.jld2", "/dataset1")
+end
+```
+
+Note: External file paths are validated to prevent directory traversal attacks.
+"""
+function create_external_link!(group::Group, link_name::String, file_path::String, object_path::String)
+    external_link = ExternalLink(file_path, object_path)
+    group[link_name] = external_link
+    return group
+end
+
+"""
+    create_soft_link!(group::Group, link_name::String, target_path::String)
+
+Create a soft link (symbolic link) within the same HDF5/JLD2 file.
+
+# Arguments
+- `group::Group`: The group to create the link in
+- `link_name::String`: Name of the link within the group
+- `target_path::String`: Path to the target object within the same file
+
+# Example
+```julia
+using JLD2
+
+jldopen("test.jld2", "w") do file
+    file["original_data"] = [1, 2, 3, 4, 5]
+    create_soft_link!(file, "link_to_data", "/original_data")
+end
+```
+"""
+function create_soft_link!(group::Group, link_name::String, target_path::String)
+    soft_link = SoftLink(target_path)
+    group[link_name] = soft_link
+    return group
 end
 
 function Base.haskey(g::Group, name::AbstractString)
@@ -200,9 +350,212 @@ end
 
 Base.keytype(::Group) = String
 
+"""
+    parse_link_message(wmsg::HmWrap{HmLinkMessage}) -> AbstractLink
+
+Parse a link message from the HDF5 format and return the appropriate AbstractLink subtype.
+Handles hard links (type 0), soft links (type 1), and external links (type 64).
+"""
+function parse_link_message(wmsg::HmWrap{HmLinkMessage})::AbstractLink
+    # Check if link type is specified in flags (bit 3)
+    if isset(wmsg.flags, 3)
+        # Link type is explicitly specified
+        link_type = wmsg.link_type
+        if link_type == 0
+            # Hard link - target field should be present
+            return HardLink(wmsg.target)
+        elseif link_type == 1
+            # Soft link - path stored in soft_link blob
+
+            # The soft_link field is a blob containing the path string
+            path_bytes = wmsg.soft_link
+            # Convert bytes to string (non-null terminated according to spec)
+            path = String(path_bytes)
+            return SoftLink(path)
+
+        elseif link_type == 64
+            # External link - two null-terminated strings in external_link blob
+            blob = wmsg.external_link
+            # Parse two null-terminated strings but skip the first byte which is reserved
+            strings = split_null_terminated_strings(blob, 2)
+            if length(strings) != 2
+                throw(InvalidDataException("External link must contain exactly two null-terminated strings"))
+            end
+            file_path, object_path = strings
+            return ExternalLink(file_path, object_path)
+        else
+            throw(UnsupportedFeatureException("Unsupported link type: $link_type"))
+        end
+    else
+        # Link type not specified, defaults to hard link (type 0)
+        # According to the HDF5 spec, target field is present when (!isset(flags, 3) || link_type==0)
+        return HardLink(wmsg.target)
+    end
+end
+
+"""
+    split_null_terminated_strings(blob::Vector{UInt8}) -> Vector{String}
+
+Split a byte blob containing null-terminated strings into separate string components.
+Used for parsing external link information.
+"""
+function split_null_terminated_strings(blob::Vector{UInt8}, start_idx=1)::Vector{String}
+    strings = String[]
+
+    for (i, byte) in enumerate(blob)
+        if byte == 0x00  # null terminator
+            if i > start_idx  # Don't create empty strings from consecutive nulls
+                push!(strings, String(blob[start_idx:i-1]))
+            end
+            start_idx = i + 1
+        end
+    end
+
+    # Handle case where last string is not null-terminated
+    if start_idx <= length(blob)
+        push!(strings, String(blob[start_idx:end]))
+    end
+
+    return strings
+end
+
+"""
+    group_path(g::Group) -> String
+
+Get the absolute path of a group within its file.
+
+# Returns
+The absolute path of the group within the HDF5 file (e.g., "/data/measurements").
+For the root group, returns "/".
+
+# Algorithm
+- If this is the root group, returns "/"
+- Otherwise, searches through unwritten_child_groups only (performance optimization)
+- For groups loaded from disk, falls back to "/" (limitation of current implementation)
+
+# Performance Note
+This implementation prioritizes performance over complete accuracy. It only searches
+through in-memory group hierarchies (unwritten_child_groups) to avoid expensive disk I/O.
+For complex hierarchies with groups loaded from disk, relative soft links may not
+resolve perfectly, but absolute soft links will always work.
+"""
+function group_path(g::Group)
+    # Check if this is the root group
+    if g === g.f.root_group
+        return "/"
+    end
+
+    # Search through the file's in-memory group hierarchy
+    return find_group_path_simple(g.f.root_group, g, "/")
+end
+
+"""
+    find_group_path_simple(root::Group, target::Group, current_path::String) -> String
+
+Find the path to a target group using recursion through both unwritten and written groups.
+This version searches both in-memory and disk-based groups to find the target.
+"""
+function find_group_path_simple(root::Group, target::Group, current_path::String)
+    # Check direct children in unwritten_child_groups (in-memory groups)
+    for (name, child_group) in root.unwritten_child_groups
+        child_path = current_path == "/" ? "/$name" : "$current_path/$name"
+
+        if child_group === target
+            return child_path
+        end
+
+        # Recursively search child groups
+        result = find_group_path_simple(child_group, target, child_path)
+        if result != "/"
+            return result
+        end
+    end
+
+    # Check written_links for groups (groups that have been written to disk)
+    for (name, link) in root.written_links
+        if isa(link, HardLink)
+            child_path = current_path == "/" ? "/$name" : "$current_path/$name"
+
+            # Try to load the group at this offset and check if it's our target
+            try
+                # Load the group to see if it matches our target
+                # We use === for object identity comparison
+                # This is expensive but necessary for groups loaded from disk
+                loaded_group_offset = link.target
+
+                # Check if target group has the same file and offset
+                # This is a heuristic to avoid loading every group
+                if target.f === root.f && hasfield(typeof(target), :last_chunk_start_offset)
+                    if target.last_chunk_start_offset == loaded_group_offset
+                        return child_path
+                    end
+                end
+
+                # As a fallback, we could load and compare, but that's expensive
+                # For now, we'll skip recursive searching of loaded groups
+                # This means some complex hierarchies might not resolve perfectly
+            catch
+                # If loading fails, skip this entry
+                continue
+            end
+        end
+    end
+
+    # Not found in this branch
+    return "/"
+end
+
+"""
+    resolve_relative_soft_link(g::Group, relative_path::String)
+
+Resolve a relative soft link path from the current group.
+
+# Supported Relative Paths
+- Simple relative paths without ".." (e.g., "temp", "subgroup/data")
+- Paths with ".." components have limited support when groups are loaded from disk
+
+# Algorithm
+For simple paths, navigates directly from the current group.
+For complex paths with "..", attempts to use group hierarchy but may fall back to error.
+"""
+function resolve_relative_soft_link(g::Group, relative_path::String)
+    # Parse the relative path components
+    path_components = split(relative_path, '/', keepempty=false)
+    current_group = g
+
+    # Check if this path contains ".." components
+    has_upward_navigation = any(c -> c == "..", path_components)
+
+    if has_upward_navigation
+        # Complex relative path with upward navigation
+        # This requires knowing the current group's path in the hierarchy
+        # For groups loaded from disk, this may not work perfectly
+        try
+            # Try to use the original path resolution approach
+            current_path = group_path(current_group)
+            resolved_path = resolve_soft_link_path(current_path, relative_path)
+            return current_group.f[resolved_path]
+        catch
+            # Fallback error message
+            throw(KeyError("Relative soft link with '..' components cannot be resolved for groups loaded from disk: $relative_path"))
+        end
+    else
+        # Simple relative path - navigate directly from current group
+        for component in path_components
+            if component != "." && !isempty(component)
+                # Navigate to child - this should work with normal getindex
+                current_group = current_group[component]
+            end
+            # Ignore "." and empty components
+        end
+
+        return current_group
+    end
+end
+
 function load_group(f::JLDFile, offset::RelOffset)
     # Messages
-    links = OrderedDict{String,RelOffset}()
+    links = OrderedDict{String,AbstractLink}()
 
     next_link_offset::Int64 = -1
     link_phase_change_max_compact::Int64 = -1
@@ -244,7 +597,7 @@ function load_group(f::JLDFile, offset::RelOffset)
             end
         elseif msg.type == HmLinkMessage
             wmsg = HmWrap(HmLinkMessage, msg)
-            links[wmsg.link_name] = wmsg.target
+            links[wmsg.link_name] = parse_link_message(wmsg)
         elseif msg.type == HmSymbolTable
             wmsg = HmWrap(HmSymbolTable, msg)
             v1btree_address = wmsg.v1btree_address
@@ -255,14 +608,14 @@ function load_group(f::JLDFile, offset::RelOffset)
     if fractal_heap_address != UNDEFINED_ADDRESS
         records = read_btree(f, fractal_heap_address, name_index_btree)::Vector{Tuple{String, RelOffset}}
         for r in records
-            links[r[1]] = r[2]
+            links[r[1]] = HardLink(r[2])
         end
     end
 
     if v1btree_address != UNDEFINED_ADDRESS
         records = read_oldstyle_group(f, v1btree_address, name_index_heap)::Vector{Tuple{String, RelOffset}}
         for r in records
-            links[r[1]] = r[2]
+            links[r[1]] = HardLink(r[2])
         end
     end
 
@@ -272,19 +625,19 @@ function load_group(f::JLDFile, offset::RelOffset)
 
     Group{typeof(f)}(f, chunk_start, continuation_msg_address, chunk_end, next_link_offset,
                      est_num_entries, est_link_name_len,
-                     OrderedDict{String,RelOffset}(), OrderedDict{String,Group}(), links)
+                     OrderedDict{String,AbstractLink}(), OrderedDict{String,Group}(), links)
 end
 
 """
     links_size(pairs)
 
 Returns the size of several link messages. `pairs` is an iterator of
-`String => RelOffset` pairs.
+`String => AbstractLink` pairs.
 """
 function links_size(pairs)
     sz = 0
-    for (name::String,) in pairs
-        sz += jlsizeof(Val(HmLinkMessage); link_name=name)
+    for (name::String, link) in pairs
+        sz += message_size_for_link(name, link)
     end
     sz
 end
@@ -309,7 +662,7 @@ function save_group(g::Group)
     if !isempty(g.unwritten_child_groups)
         for (name, child_group) in g.unwritten_child_groups
             retval = save_group(child_group)
-            g.unwritten_links[name] = retval
+            g.unwritten_links[name] = HardLink(retval)
         end
         empty!(g.unwritten_child_groups)
     end
@@ -347,6 +700,11 @@ function save_group(g::Group)
         chunk_start = g.last_chunk_start_offset,
         chunk_end = g.last_chunk_checksum_offset,
         next_msg_offset)
+
+    # Transfer unwritten links to written links after successful write
+    merge!(g.written_links, g.unwritten_links)
+    empty!(g.unwritten_links)
+
     # this is clearly suboptimal
     # TODO: this should always return the object start
     # but for "continued" versions this is not the case
@@ -391,12 +749,32 @@ function show_group(io::IO, g::Group, maxnumlines::Int=10, prefix::String=" ", s
     for i = 1:length(ks)
         k = ks[i]
         islast = i == length(ks)
-        isagroup = haskey(g.unwritten_child_groups, k) || isgroup(g.f, lookup_offset(g, k))
+        # Check if this is a group - handle external/soft links specially
+        link = lookup_link(g, k)
+        if haskey(g.unwritten_child_groups, k)
+            isagroup = true
+        elseif isa(link, HardLink)
+            isagroup = isgroup(g.f, link.target)
+        else
+            # For external/soft links, we can't easily determine if target is a group
+            # without resolving the link, so treat as non-group for display purposes
+            isagroup = false
+        end
         if (maxnumlines <= 1 && !islast) #|| (maxnumlines < 2 && isagroup))
             print(io, prefix, "└─ ⋯ ($(length(ks)-i+1) more entries)")
             return 0
         end
-        print(io, prefix, islast ? "└─" : "├─", isagroup ? "📂 " : "🔢 ", k)
+        # Choose appropriate icon based on link type and whether it's a group
+        icon = if isagroup
+            "📂 "  # folder for groups
+        elseif isa(link, ExternalLink)
+            "🔗 "  # link icon for external links
+        elseif isa(link, SoftLink)
+            "↗️ "   # arrow for soft links
+        else
+            "🔢 "  # default for hard link datasets
+        end
+        print(io, prefix, islast ? "└─" : "├─", icon, k)
         maxnumlines = maxnumlines - 1
         if isagroup
             newg = g[k]

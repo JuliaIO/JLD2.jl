@@ -191,6 +191,43 @@ function get_dataset(g::Group, name::String)
             # this is a group
             return get_dataset(f, group_offset(g), g, name)
         end
+
+        # Check if this is an external or soft link
+        link = lookup_link(g, name)
+        if isa(link, ExternalLink)
+            # Resolve external link
+            try
+                resolved_object = resolve_external_link(f, link)
+                # For datasets, return the resolved object directly
+                return resolved_object
+            catch e
+                if isa(e, SystemError) || isa(e, KeyError) || isa(e, ArgumentError)
+                    # Provide better error context for external link failures
+                    throw(e)  # Re-throw with original error type and message
+                else
+                    rethrow(e)
+                end
+            end
+        elseif isa(link, SoftLink)
+            # Resolve soft link within the same file
+            try
+                resolved_path = resolve_soft_link_path(group_path(g), link.path)
+                return f[resolved_path]
+            catch e
+                if isa(e, KeyError)
+                    # Try to include resolved path if it was computed successfully
+                    try
+                        resolved_path = resolve_soft_link_path(group_path(g), link.path)
+                        throw(KeyError("Soft link target not found: $(link.path) (resolved to: $resolved_path)"))
+                    catch
+                        throw(KeyError("Soft link target not found: $(link.path)"))
+                    end
+                else
+                    rethrow(e)
+                end
+            end
+        end
+
         throw(KeyError(name))
     end
     get_dataset(f, roffset, g, name)
@@ -232,8 +269,68 @@ end
 
 # Links
 message_size(msg::Pair{String, RelOffset}) = jlsizeof(Val(HmLinkMessage); link_name=msg.first)
+message_size(msg::Pair{String, AbstractLink}) = message_size_for_link(msg.first, msg.second)
+
 write_header_message(io, f, msg::Pair{String, RelOffset}, _=nothing) =
     write_header_message(io, Val(HmLinkMessage); link_name=msg.first, target=msg.second)
+write_header_message(io, f, msg::Pair{String, AbstractLink}, _=nothing) =
+    write_link_message(io, msg.first, msg.second)
+
+"""
+    message_size_for_link(name::String, link::AbstractLink) -> Int
+
+Calculate the size of a link message for the given link type.
+"""
+function message_size_for_link(name::String, link::AbstractLink)
+    if isa(link, HardLink)
+        return jlsizeof(Val(HmLinkMessage); link_name=name)
+    elseif isa(link, SoftLink)
+        soft_link_data = Vector{UInt8}(link.path)
+        flags = UInt8(0x10 | 0x08 | size_flag(sizeof(name)))  # 0x08 = bit 3 set
+        return jlsizeof(Val(HmLinkMessage); link_name=name, flags=flags,
+                       link_type=UInt8(1), link_info_size=UInt16(length(soft_link_data)),
+                       soft_link=soft_link_data)
+    elseif isa(link, ExternalLink)
+        # External link data: two null-terminated strings
+        external_data = vcat(0x00, Vector{UInt8}(link.file_path), 0x00,
+                            Vector{UInt8}(link.object_path), 0x00)
+        flags = UInt8(0x10 | 0x08 | size_flag(sizeof(name)))  # 0x08 = bit 3 set
+        return jlsizeof(Val(HmLinkMessage); link_name=name, flags=flags,
+                       link_type=UInt8(64), link_info_size=UInt16(length(external_data)),
+                       external_link=external_data)
+    else
+        throw(UnsupportedFeatureException("Unsupported link type: $(typeof(link))"))
+    end
+end
+
+"""
+    write_link_message(io, name::String, link::AbstractLink)
+
+Write a link message for the given link type to the I/O stream.
+"""
+function write_link_message(io, name::String, link::AbstractLink)
+    if isa(link, HardLink)
+        write_header_message(io, Val(HmLinkMessage); link_name=name, target=link.target)
+    elseif isa(link, SoftLink)
+        soft_link_data = Vector{UInt8}(link.path)
+        # Set flags with bit 3 to indicate link_type is present
+        flags = UInt8(0x10 | 0x08 | size_flag(sizeof(name)))  # 0x08 = bit 3 set
+        write_header_message(io, Val(HmLinkMessage); link_name=name, flags=flags,
+                           link_type=UInt8(1), link_info_size=UInt16(length(soft_link_data)),
+                           soft_link=soft_link_data)
+    elseif isa(link, ExternalLink)
+        # External link data: two null-terminated strings
+        external_data = vcat(0x00, Vector{UInt8}(link.file_path), 0x00,
+                            Vector{UInt8}(link.object_path), 0x00)
+        # Set flags with bit 3 to indicate link_type is present
+        flags = UInt8(0x10 | 0x08 | size_flag(sizeof(name)))  # 0x08 = bit 3 set
+        write_header_message(io, Val(HmLinkMessage); link_name=name, flags=flags,
+                           link_type=UInt8(64), link_info_size=UInt16(length(external_data)),
+                           external_link=external_data)
+    else
+        throw(UnsupportedFeatureException("Unsupported link type: $(typeof(link))"))
+    end
+end
 
 function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession();
     chunk_start,
@@ -571,6 +668,6 @@ function Base.setindex!(A::ArrayDataset{T,N,ODR}, v, i::Integer) where {T,N,ODR}
     A.f.writable || throw(ArgumentError("Cannot edit in read-only mode"))
     A.writable || throw(ArgumentError("Dataset cannot be edited"))
     seek(A.f.io, A.data_address + (i-1)*odr_sizeof(A.rr))
-    write_data(A.f.io, A.f, v, T, datamode(ODR), JLDWriteSession())
+    write_data(A.f.io, A.f, v, odr(T), datamode(ODR), JLDWriteSession())
     return v
 end
