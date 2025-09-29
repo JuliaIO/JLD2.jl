@@ -163,17 +163,6 @@ function read_data(f::JLDFile,
     end
 end
 
-function find_dimensions_attr(attributes::Vector{ReadAttribute})
-    dimensions_attr_index = 0
-    for i = 1:length(attributes)
-        x = attributes[i]
-        if x.name == :dimensions
-            dimensions_attr_index = i
-        end
-    end
-    dimensions_attr_index
-end
-
 function read_empty(f::JLDFile, rr::ReadRepresentation{T}, dataspace, attributes, header_offset::RelOffset) where T
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
     seek(f.io, offset)
