@@ -470,11 +470,19 @@ function read_v1btree_dataset_chunks(f, offset, dimensionality)
     left_sibling = jlread(io, RelOffset)
     right_sibling = jlread(io, RelOffset)
     children = Any[]
-    for _ = 1:entries_used
+
+    # Read keys and children in the correct V1BTree format (interleaved)
+    for entry_idx = 1:entries_used
+        # Read key in V1ChunkKey format: chunk_size, filter_mask, then indices
         chunk_size = Int(jlread(io, UInt32))
         filter_mask = Int(jlread(io, UInt32))
-        index = jlread(io, UInt64, dimensionality)
-        push!(children, (offset=jlread(io, RelOffset), node_level, chunk_size, filter_mask, idx=tuple(Int.(index)...)))
+
+        # Read exactly dimensionality+1 indices (e.g., for 2D: 3 indices total)
+        idx = jlread(io, UInt64, Int(dimensionality)) .% Int |> splat(tuple)
+
+        # Read child offset (comes immediately after the key)
+        child_offset = jlread(io, RelOffset)
+        push!(children, (offset=child_offset, node_level, chunk_size, filter_mask, idx))
     end
 
     chunks = Any[]

@@ -521,6 +521,9 @@ include("Filters.jl")
 using .Filters: WrittenFilterPipeline, FilterPipeline, iscompressed
 using .Filters: Shuffle, Deflate, ZstdFilter
 
+include("v1btree.jl")
+include("v1btree_debug.jl")
+include("manual_chunking.jl")
 include("datasets.jl")
 include("global_heaps.jl")
 include("fractal_heaps.jl")

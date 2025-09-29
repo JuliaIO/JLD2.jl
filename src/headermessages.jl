@@ -115,10 +115,9 @@ end
             data_size::@Int(8) = 0# Lengths
         end
         if version == 3 && layout_class == LcChunked
-            dimensionality::UInt8
+            dimensionality::UInt8 = length(kw.dimensions)
             data_address::RelOffset
-            dimensions::NTuple{Int(dimensionality), Int32}
-            data_size::@Int(4)#UInt32#element_size::UInt32
+            dimensions::NTuple{Int(dimensionality), UInt32}
         end
         if version == 4 && layout_class == LcChunked
             flags::UInt8 = 2 # Single index with filter
