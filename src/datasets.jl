@@ -254,39 +254,49 @@ end
             # version 1 B-tree
             # This version appears to be padding incomplete chunks
             chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)
-            vchunk = Array{T, Int(ndims)}(undef, reverse(layout.chunk_dimensions)...)
+            # array cartesian indices
+            ids = CartesianIndices(v)
+            # chunk dimensions in same order as data dims
+            chunk_dims = reverse(layout.chunk_dimensions)[1:ndims]
+            # chunk indices starting at 1,1
+            chunk_ids = CartesianIndices(tuple(chunk_dims...))
+
+            # For V1 B-tree, layout.chunk_dimensions already excludes element size
             for chunk in chunks
-                cidx = chunk.idx::NTuple{Int(ndims+1), Int}
-                idx = reverse(cidx[1:end-1])
                 seek(io, fileoffset(f, chunk.offset))
-                indexview =  (:).(idx .+1, min.(idx .+ reverse(layout.chunk_dimensions), size(v)))
-                indexview2 = (:).(1, length.(indexview))
+
+                vchunk = Array{T, Int(ndims)}(undef, chunk_dims...)
 
                 if iscompressed(filters)
                     if chunk.filter_mask == 0
                         read_compressed_array!(vchunk, f, rr, chunk.chunk_size, filters)
-                        v[indexview...] = @view vchunk[indexview2...]
                     else
                         if length(filters.filters) == 1
                             read_array!(vchunk, f, rr)
-                            v[indexview...] = @view vchunk[indexview2...]
                         else
                             mask = Bool[chunk.filter_mask & 2^(n-1) == 0 for n=eachindex(filters.filters)]
                             if any(mask)
                                 rf = FilterPipeline(filters.filters[mask])
                                 read_compressed_array!(vchunk, f, rr, chunk.chunk_size, rf)
-                                v[indexview...] = @view vchunk[indexview2...]
                             else
                                 read_array!(vchunk, f, rr)
-                                v[indexview...] = @view vchunk[indexview2...]
                             end
-
                         end
                     end
                 else
                     read_array!(vchunk, f, rr)
-                    v[indexview...] = @view vchunk[indexview2...]
                 end
+
+                cidx = chunk.idx::NTuple{Int(ndims+1), Int}
+                chunk_root = CartesianIndex(reverse(cidx[1:end-1]))
+                # Index into v
+                vidxs = intersect(ids, chunk_ids .+ chunk_root)
+                # Index into chunk
+                ch_idx = CartesianIndices(size(vidxs))
+
+                @info cidx chunk_root vidxs ch_idx vchunk chunk
+                @show vchunk
+                @views v[vidxs] .= vchunk[ch_idx]
             end
             return v
         end
@@ -323,13 +333,15 @@ end
     if datasz == 0 || (!(data isa ArrayMemory) && datasz < 8192)
         layout_class = LcCompact
         psz += jlsizeof(Val(HmDataLayout); layout_class, data_size=datasz)
-    elseif data isa ArrayMemory && iscompressed(local_filters) && isconcretetype(eltype(data)) && isbitstype(eltype(data))
+    elseif data isa ArrayMemory && isconcretetype(eltype(data)) && isbitstype(eltype(data)) &&
+           iscompressed(local_filters)
         layout_class = LcChunked
         psz += jlsizeof(Val(HmDataLayout);
+            version = 3,
             layout_class,
-            dimensions = UInt64.((reverse(size(data))..., odr_sizeof(odr))),
+            dimensions = fill(1, ndims(data)+1),
             # Dummy values for message size computation
-            data_size = 0, data_address = 0,
+            data_address = 0,
         )
         psz += Filters.pipeline_message_size(local_filters)
     else
@@ -363,6 +375,7 @@ end
         write_continuation_placeholder(cio)
         jlwrite(io, end_checksum(cio))
     elseif layout_class == LcChunked
+        # Fall back to current simple compression approach
         compressed, retcodes = Filters.compress(local_filters, data, odr, f, wsession)
         Filters.write_filter_pipeline_message(cio, local_filters)
 
