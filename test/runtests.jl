@@ -43,6 +43,7 @@ include("dataset_api.jl")
 include("mmap_test.jl")
 include("wrapped_io.jl")
 include("links.jl")
+include("chunked_arrays.jl")
 
 using TestItemRunner
 
