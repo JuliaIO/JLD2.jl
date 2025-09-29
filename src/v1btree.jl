@@ -73,17 +73,19 @@ Helper structure for managing the entire V1 B-tree.
 - dimensionality: Number of dimensions in dataset
 - max_entries_per_node: Based on desired node size
 - file: Reference to file for I/O
+- pending_chunks: Chunks waiting to be written to the tree
 """
 mutable struct V1BTree
     root::RelOffset            # Address of root node
     dimensionality::UInt8      # Number of dimensions in dataset
     max_entries_per_node::UInt16 # Based on desired node size
     file::JLDFile             # Reference to file for I/O
+    pending_chunks::Vector{Tuple{V1ChunkKey, RelOffset}}  # Pending chunks to write
 
     function V1BTree(root::RelOffset, dimensionality::UInt8, max_entries_per_node::UInt16, file::JLDFile)
         dimensionality > 0 || throw(ArgumentError("dimensionality must be > 0"))
         max_entries_per_node > 0 || throw(ArgumentError("max_entries_per_node must be > 0"))
-        new(root, dimensionality, max_entries_per_node, file)
+        new(root, dimensionality, max_entries_per_node, file, Tuple{V1ChunkKey, RelOffset}[])
     end
 end
 
@@ -501,39 +503,17 @@ end
 Insert a chunk into the V1 B-tree, handling node splits and tree growth as needed.
 This is the main entry point for adding chunks to the tree.
 
-NOTE: This simplified implementation creates a single leaf node with all chunks.
-For production use, full B-tree balancing should be implemented.
+Chunks are accumulated in the btree's pending_chunks field and written out
+when finalize_btree! is called.
 """
 function insert_chunk!(btree::V1BTree, chunk_indices, chunk_address::RelOffset,
                       chunk_size::UInt32, filter_mask::UInt32 = 0x00000000)
 
     key = create_chunk_key(chunk_indices, chunk_size, filter_mask)
 
-    # For simplicity, create a single leaf node with all chunks
-    # TODO: Implement full B-tree splitting and balancing
-    if !hasfield(typeof(btree), :pending_chunks)
-        # Add a field to track pending chunks
-        btree_dict = Dict{Symbol, Any}()
-        for field in fieldnames(typeof(btree))
-            btree_dict[field] = getfield(btree, field)
-        end
-        btree_dict[:pending_chunks] = Tuple{V1ChunkKey, RelOffset}[]
-
-        # This is a hack - we'll store pending chunks in a global dict for now
-        if !haskey(PENDING_CHUNKS, btree.file)
-            PENDING_CHUNKS[btree.file] = Tuple{V1ChunkKey, RelOffset}[]
-        end
-    end
-
-    # Store the chunk for later processing
-    if !haskey(PENDING_CHUNKS, btree.file)
-        PENDING_CHUNKS[btree.file] = Tuple{V1ChunkKey, RelOffset}[]
-    end
-    push!(PENDING_CHUNKS[btree.file], (key, chunk_address))
+    # Store the chunk for later processing when finalize_btree! is called
+    push!(btree.pending_chunks, (key, chunk_address))
 end
-
-# Global storage for pending chunks (temporary solution)
-const PENDING_CHUNKS = Dict{JLDFile, Vector{Tuple{V1ChunkKey, RelOffset}}}()
 
 """
     finalize_btree!(btree::V1BTree)
@@ -542,21 +522,19 @@ Finalize the B-tree by writing all pending chunks. If there are more chunks
 than can fit in a single node, creates multiple nodes with proper B-tree structure.
 """
 function finalize_btree!(btree::V1BTree, max_indices)
-    if !haskey(PENDING_CHUNKS, btree.file) || isempty(PENDING_CHUNKS[btree.file])
+    if isempty(btree.pending_chunks)
         # No chunks to write
         btree.root = UNDEFINED_ADDRESS
         return
     end
 
-    chunks = PENDING_CHUNKS[btree.file]
-
     # Sort chunks by key for proper B-tree ordering
-    sort!(chunks, by=chunk -> chunk[1], lt=(a,b) -> compare_chunk_keys(a,b) < 0)
+    sort!(btree.pending_chunks, by=chunk -> chunk[1], lt=(a,b) -> compare_chunk_keys(a,b) < 0)
 
     keys = V1ChunkKey[]
     children = RelOffset[]
 
-    for (key, address) in chunks
+    for (key, address) in btree.pending_chunks
         push!(keys, key)
         push!(children, address)
     end
@@ -586,8 +564,8 @@ function finalize_btree!(btree::V1BTree, max_indices)
         println("🌳 B-tree root (multi-node): $(btree.root)")
     end
 
-    # Clean up
-    delete!(PENDING_CHUNKS, btree.file)
+    # Clear pending chunks after writing
+    empty!(btree.pending_chunks)
 end
 
 """
@@ -991,42 +969,28 @@ function write_chunked_dataset_with_v1btree(f::JLDFile, data, odr, local_filters
 end
 
 """
-    apply_chunk_filters(filters, chunk_data::Vector{UInt8})::Tuple{Vector{UInt8}, UInt32}
+    apply_chunk_filters(filters::FilterPipeline, chunk_data::Vector{UInt8})::Tuple{Vector{UInt8}, UInt32}
 
 Apply compression filters to a single chunk and return the compressed data and filter mask.
+Uses the JLD2.Filters module to apply compression correctly.
 """
-function apply_chunk_filters(filters, chunk_data::Vector{UInt8})::Tuple{Vector{UInt8}, UInt32}
-    if isempty(filters)
+function apply_chunk_filters(filters::Filters.FilterPipeline, chunk_data::Vector{UInt8})::Tuple{Vector{UInt8}, UInt32}
+    if isempty(filters.filters)
         return chunk_data, 0x00000000
     end
 
-    # For now, use the existing filter system
-    # TODO: This needs to be adapted to work per-chunk rather than entire dataset
-    filter_mask = 0x00000000
-    compressed_data = chunk_data
+    # Apply filters using the Filters module
+    ref = Ref(chunk_data)
+    retcodes = map(fil -> Filters.apply_filter!(fil, ref), filters)
 
-    # Apply each filter in sequence
-    for (i, filter) in enumerate(filters)
-        try
-            # Apply filter - this is a placeholder that needs integration with JLD2's filter system
-            compressed_data = apply_single_filter(filter, compressed_data)
-        catch
-            # If filter fails, mark it as skipped in the mask
-            filter_mask |= (0x00000001 << (i-1))
+    # Build filter mask from return codes
+    # A filter is marked as skipped (bit set) if it failed (retcode != 0)
+    filter_mask = UInt32(0)
+    for (i, retcode) in enumerate(retcodes)
+        if retcode != 0
+            filter_mask |= (UInt32(1) << (i - 1))
         end
     end
 
-    return compressed_data, filter_mask
-end
-
-"""
-    apply_single_filter(filter, data::Vector{UInt8})::Vector{UInt8}
-
-Apply a single compression filter to data.
-This is a placeholder that needs integration with JLD2's existing filter system.
-"""
-function apply_single_filter(filter, data::Vector{UInt8})::Vector{UInt8}
-    # Placeholder - in practice this would delegate to the JLD2.Filters module
-    # For now, just return the data unmodified
-    return data
+    return ref[], filter_mask
 end
