@@ -40,7 +40,8 @@ function DataLayout(f::JLD2.JLDFile, msg::HmWrap{HmDataLayout})
             chunked_storage = true
             DataLayout(version, storage_type, data_length, data_offset, msg.dimensionality, msg.chunk_indexing_type, chunk_dimensions) 
         elseif version == 3 && storage_type == LcChunked
-            data_length = Int64(msg.data_size)
+            # Version 3 chunked layouts don't have data_size field - it's calculated from the B-tree
+            data_length = 0  # Will be determined when reading chunks
 
             chunk_dimensions = Int[msg.dimensions[1:end-1]...] # drop element size as last dimension
             chunked_storage = true

@@ -78,6 +78,9 @@ function write_chunked_array(f::JLDFile, name::String, data::AbstractArray, chun
     btree, total_chunk_size, num_chunks = write_chunked_dataset_with_v1btree(f, data, odr, local_filters, wsession, chunk_dims)
 
     seek(cio, pos)
+    # Prepare DataLayout parameters
+    dl_dims = UInt32.([reverse(chunk_dims)..., odr_sizeof(odr)])
+
     # Write DataLayout message version 3 with V1 B-tree
     write_header_message(cio, Val(HmDataLayout);
         version=3,
@@ -85,7 +88,7 @@ function write_chunked_array(f::JLDFile, name::String, data::AbstractArray, chun
         dimensionality=UInt8(length(chunk_dims)+1 ),
         data_address=btree.root,
         # Reversed dimensions with element size as last dim for V3 format (Int32)
-        dimensions=UInt32.([reverse(chunk_dims)..., odr_sizeof(odr)])
+        dimensions=dl_dims
     )
 
     write_continuation_placeholder(cio)

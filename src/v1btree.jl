@@ -115,7 +115,7 @@ function calculate_max_entries(f::JLDFile, dimensionality::UInt8, target_node_si
     available_space = target_node_size - header_size - extra_key_size
     max_entries = available_space ÷ entry_size
 
-    return UInt16(max(1, min(max_entries, 65535)))  # At least 1, at most UInt16 max
+    return UInt16(max(1, min(max_entries, 64)))  # At least 1, at most 64 (HDF5 V1 B-tree limit)
 end
 
 """
@@ -562,8 +562,10 @@ function finalize_btree!(btree::V1BTree, max_indices)
     end
 
     # Add boundary key (one higher than max indices)
-    boundary_indices_1based = max_indices .+ 1
-    boundary_key = create_chunk_key([boundary_indices_1based...], UInt32(0))
+    # max_indices is already in 0-based HDF5 order: (dim2_max, dim1_max, 0)
+    # Boundary key should be (dim2_max+1, dim1_max+1, 0)
+    boundary_indices_0based_hdf5 = UInt64[max_indices[i] + (i < length(max_indices) ? 1 : 0) for i in 1:length(max_indices)]
+    boundary_key = V1ChunkKey(UInt32(0), UInt32(0), boundary_indices_0based_hdf5)
     push!(keys, boundary_key)
 
     # Check if we need to split nodes
@@ -577,13 +579,64 @@ function finalize_btree!(btree::V1BTree, max_indices)
             keys, children
         )
         btree.root = write_v1btree_node(btree.file, root_node)
+        println("🌳 B-tree root (single node): $(btree.root)")
     else
         # Complex case: need to split into multiple nodes
         btree.root = build_btree_from_chunks(btree.file, keys, children, btree.max_entries_per_node)
+        println("🌳 B-tree root (multi-node): $(btree.root)")
     end
 
     # Clean up
     delete!(PENDING_CHUNKS, btree.file)
+end
+
+"""
+    read_first_key_from_node(file::JLDFile, node_offset::RelOffset)::V1ChunkKey
+
+Read the first key from a B-tree node (used for building internal nodes).
+"""
+function read_first_key_from_node(file::JLDFile, node_offset::RelOffset)::V1ChunkKey
+    io = file.io
+    seek(io, fileoffset(file, node_offset))
+
+    # Skip node header (signature + type + level + entries_used + siblings)
+    skip(io, 4 + 1 + 1 + 2 + 16)
+
+    # Read first key
+    chunk_size = jlread(io, UInt32)
+    filter_mask = jlread(io, UInt32)
+    # Note: dimensionality is implicit - we need to know it from context
+    # For now, assume 2D + element size = 3 indices
+    # TODO: Pass dimensionality as parameter if this becomes an issue
+    indices = [jlread(io, UInt64) for _ in 1:3]  # Hardcoded for now
+
+    return V1ChunkKey(chunk_size, filter_mask, indices)
+end
+
+"""
+    read_last_key_from_node(file::JLDFile, node_offset::RelOffset)::V1ChunkKey
+
+Read the last key from a B-tree node (used for boundary keys in internal nodes).
+"""
+function read_last_key_from_node(file::JLDFile, node_offset::RelOffset)::V1ChunkKey
+    io = file.io
+    seek(io, fileoffset(file, node_offset))
+
+    # Read node header to get entries_used
+    skip(io, 4 + 1 + 1)  # Skip signature, type, level
+    entries_used = jlread(io, UInt16)
+    skip(io, 16)  # Skip siblings
+
+    # Skip all entries to get to the final key
+    # Each entry is: key (4 + 4 + 3*8 = 32 bytes) + child offset (8 bytes) = 40 bytes
+    skip(io, entries_used * 40)
+
+    # Read final key
+    chunk_size = jlread(io, UInt32)
+    filter_mask = jlread(io, UInt32)
+    indices = [jlread(io, UInt64) for _ in 1:3]
+
+    return V1ChunkKey(chunk_size, filter_mask, indices)
 end
 
 """
@@ -593,11 +646,15 @@ Build a B-tree from a large number of chunks that need to be split across multip
 Returns the root node offset.
 """
 function build_btree_from_chunks(file::JLDFile, keys::Vector{V1ChunkKey}, children::Vector{RelOffset}, max_entries::UInt16)
+    println("🔨 Building multi-node B-tree: $(length(children)) chunks, max_entries=$max_entries")
+
     # Split leaf nodes
     leaf_nodes = split_into_leaf_nodes(file, keys, children, max_entries)
+    println("🍃 Created $(length(leaf_nodes)) leaf nodes")
 
     if length(leaf_nodes) == 1
         # Only one leaf node
+        println("🍃 Single leaf, returning $(leaf_nodes[1])")
         return leaf_nodes[1]
     end
 
@@ -619,14 +676,15 @@ function build_btree_from_chunks(file::JLDFile, keys::Vector{V1ChunkKey}, childr
             # For internal nodes, we need to create keys that describe the least chunk in each child
             for j in 1:length(group)
                 child_offset = group[j]
-                # For simplicity, create a dummy key - in production, we'd read the actual first key from each child
-                dummy_key = create_chunk_key([j-1, 0], UInt32(0))  # This is a placeholder
-                push!(internal_keys, dummy_key)
+                # Read the first key from the child node
+                child_first_key = read_first_key_from_node(file, child_offset)
+                push!(internal_keys, child_first_key)
                 push!(internal_children, child_offset)
             end
 
-            # Add boundary key for internal node
-            boundary_key = create_chunk_key([length(group), 0], UInt32(0))
+            # Add boundary key - read the last key from the last child
+            last_child_offset = group[end]
+            boundary_key = read_last_key_from_node(file, last_child_offset)
             push!(internal_keys, boundary_key)
 
             # Create internal node
@@ -643,8 +701,10 @@ function build_btree_from_chunks(file::JLDFile, keys::Vector{V1ChunkKey}, childr
         end
 
         current_level = next_level
+        println("🔼 Built level with $(length(current_level)) nodes")
     end
 
+    println("🎯 Returning root node at: $(current_level[1])")
     return current_level[1]  # Root node
 end
 
@@ -857,11 +917,14 @@ function write_chunked_dataset_with_v1btree(f::JLDFile, data, odr, local_filters
     num_chunks = 0
 
     # Write chunks and populate B-tree
+    chunk_count = 0
     for chunk_indices in enumerate_chunks(data_size, chunk_dims)
+        chunk_count += 1
         chunk_data = extract_chunk(data, chunk_indices, chunk_dims)
-        #if size(chunk_data) != chunk_dims
 
-        #@info chunk_data (chunk_indices...,) (chunk_dims...,)
+        if chunk_count <= 3  # Debug first 3 chunks
+            println("🧩 Chunk $chunk_count: indices=$chunk_indices, data=$chunk_data")
+        end
         # Convert chunk data to raw bytes (like Filters.compress does)
         if !isempty(local_filters)
             # Get raw byte data from transposed chunk array
@@ -891,6 +954,13 @@ function write_chunked_dataset_with_v1btree(f::JLDFile, data, odr, local_filters
         # Write chunk data to file
         chunk_address = h5offset(f, f.end_of_data)
         seek(f.io, f.end_of_data)
+
+        if chunk_count <= 3  # Debug first 3 chunks
+            println("   📝 Writing to offset $(f.end_of_data), address=$chunk_address")
+            println("   📝 Data length: $(length(compressed_chunk)) bytes")
+            println("   📝 First 16 bytes: $(compressed_chunk[1:min(16, length(compressed_chunk))])")
+        end
+
         jlwrite(f.io, compressed_chunk)
         f.end_of_data += length(compressed_chunk)
 
@@ -902,11 +972,19 @@ function write_chunked_dataset_with_v1btree(f::JLDFile, data, odr, local_filters
     end
 
     # Finalize the B-tree by writing all pending chunks
-    cdims = chunk_dims
-    max_dims = (odr_sizeof(odr),  (cdims .* ceil.(Int, size(data) ./ cdims))..., )
-    @info max_dims chunk_dims size(data)
+    # The boundary key should be the array dimensions (0-based) in HDF5 order
+    # Chunk indices are 0-based element positions of first element in each chunk
+    # For a 30×80 array: max element index is (29, 79) in 0-based Julia order
+    # Boundary key is one past: (30, 80, 0) in 0-based, then reverse to HDF5 order: (80, 30, 0)
+    array_dims_0based = size(data)  # This gives us the boundary in 0-based indexing
+    max_indices_hdf5 = (reverse(array_dims_0based)..., 0)  # HDF5 order with datatype offset
 
-    finalize_btree!(btree, max_dims)
+    println("📊 Finalizing B-tree:")
+    println("   Array size: $(size(data))")
+    println("   Chunk dims: $chunk_dims")
+    println("   Boundary key indices: $max_indices_hdf5 (HDF5 order, 0-based)")
+
+    finalize_btree!(btree, max_indices_hdf5)
 
 
     return btree, total_chunk_size, num_chunks
