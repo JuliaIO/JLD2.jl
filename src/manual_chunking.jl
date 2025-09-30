@@ -18,8 +18,6 @@ function write_chunked_array(f::JLDFile, name::String, data::AbstractArray, chun
         @warn "Some chunk dimensions exceed array dimensions - chunks will be automatically clipped"
     end
 
-    println("📦 Writing chunked array: $(size(data)) with chunks $(chunk_dims)")
-
     # Use provided filters or fall back to file defaults
     if isnothing(filters) || (filters isa Tuple && isempty(filters))
         filters = f.compress

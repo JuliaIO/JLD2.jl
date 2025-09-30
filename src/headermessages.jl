@@ -116,7 +116,7 @@ end
         end
         if version == 3 && layout_class == LcChunked
             dimensionality::UInt8 = length(kw.dimensions)
-            data_address::RelOffset
+            data_address::RelOffset = UNDEFINED_ADDRESS
             dimensions::NTuple{Int(dimensionality), UInt32}
         end
         if version == 4 && layout_class == LcChunked
@@ -126,7 +126,7 @@ end
             dimensions::NTuple{Int(dimensionality), uintofsize(dim_size)}
             chunk_indexing_type::UInt8 = 1 # Single Chunk
             if chunk_indexing_type == 1 # Single Chunk
-                data_size::@Int(8)#Int64 # Lengths
+                data_size::@Int(8) = 0
                 filters::UInt32 = 0
             end
             if chunk_indexing_type == 3
@@ -144,7 +144,7 @@ end
                 splitpercent::UInt8
                 mergepercent::UInt8
             end
-            data_address::RelOffset
+            data_address::RelOffset = UNDEFINED_ADDRESS
         end
         if layout_class == LcVirtual # Virtual Storage
             data_address::RelOffset

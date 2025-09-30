@@ -278,11 +278,8 @@ end
            iscompressed(local_filters)
         layout_class = LcChunked
         psz += jlsizeof(Val(HmDataLayout);
-            version = 3,
             layout_class,
-            dimensions = fill(1, ndims(data)+1),
-            # Dummy values for message size computation
-            data_address = 0,
+            dimensions = ones(Int, ndims(data) + 1),
         )
         psz += Filters.pipeline_message_size(local_filters)
     else
