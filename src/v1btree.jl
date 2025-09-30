@@ -557,11 +557,9 @@ function finalize_btree!(btree::V1BTree, max_indices)
             keys, children
         )
         btree.root = write_v1btree_node(btree.file, root_node)
-        println("🌳 B-tree root (single node): $(btree.root)")
     else
         # Complex case: need to split into multiple nodes
         btree.root = build_btree_from_chunks(btree.file, keys, children, btree.max_entries_per_node)
-        println("🌳 B-tree root (multi-node): $(btree.root)")
     end
 
     # Clear pending chunks after writing
@@ -624,15 +622,12 @@ Build a B-tree from a large number of chunks that need to be split across multip
 Returns the root node offset.
 """
 function build_btree_from_chunks(file::JLDFile, keys::Vector{V1ChunkKey}, children::Vector{RelOffset}, max_entries::UInt16)
-    println("🔨 Building multi-node B-tree: $(length(children)) chunks, max_entries=$max_entries")
 
     # Split leaf nodes
     leaf_nodes = split_into_leaf_nodes(file, keys, children, max_entries)
-    println("🍃 Created $(length(leaf_nodes)) leaf nodes")
 
     if length(leaf_nodes) == 1
         # Only one leaf node
-        println("🍃 Single leaf, returning $(leaf_nodes[1])")
         return leaf_nodes[1]
     end
 
@@ -679,10 +674,7 @@ function build_btree_from_chunks(file::JLDFile, keys::Vector{V1ChunkKey}, childr
         end
 
         current_level = next_level
-        println("🔼 Built level with $(length(current_level)) nodes")
     end
-
-    println("🎯 Returning root node at: $(current_level[1])")
     return current_level[1]  # Root node
 end
 
@@ -900,9 +892,6 @@ function write_chunked_dataset_with_v1btree(f::JLDFile, data, odr, local_filters
         chunk_count += 1
         chunk_data = extract_chunk(data, chunk_indices, chunk_dims)
 
-        if chunk_count <= 3  # Debug first 3 chunks
-            println("🧩 Chunk $chunk_count: indices=$chunk_indices, data=$chunk_data")
-        end
         # Convert chunk data to raw bytes (like Filters.compress does)
         if !isempty(local_filters)
             # Get raw byte data from transposed chunk array
@@ -933,12 +922,6 @@ function write_chunked_dataset_with_v1btree(f::JLDFile, data, odr, local_filters
         chunk_address = h5offset(f, f.end_of_data)
         seek(f.io, f.end_of_data)
 
-        if chunk_count <= 3  # Debug first 3 chunks
-            println("   📝 Writing to offset $(f.end_of_data), address=$chunk_address")
-            println("   📝 Data length: $(length(compressed_chunk)) bytes")
-            println("   📝 First 16 bytes: $(compressed_chunk[1:min(16, length(compressed_chunk))])")
-        end
-
         jlwrite(f.io, compressed_chunk)
         f.end_of_data += length(compressed_chunk)
 
@@ -957,14 +940,7 @@ function write_chunked_dataset_with_v1btree(f::JLDFile, data, odr, local_filters
     array_dims_0based = size(data)  # This gives us the boundary in 0-based indexing
     max_indices_hdf5 = (reverse(array_dims_0based)..., 0)  # HDF5 order with datatype offset
 
-    println("📊 Finalizing B-tree:")
-    println("   Array size: $(size(data))")
-    println("   Chunk dims: $chunk_dims")
-    println("   Boundary key indices: $max_indices_hdf5 (HDF5 order, 0-based)")
-
     finalize_btree!(btree, max_indices_hdf5)
-
-
     return btree, total_chunk_size, num_chunks
 end
 
