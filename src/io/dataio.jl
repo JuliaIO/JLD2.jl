@@ -299,3 +299,41 @@ function read_compressed_array!(
     seek(io, data_offset + data_length)
     v
 end
+
+"""
+    read_chunk_with_filters!(vchunk::Array, f::JLDFile, rr, chunk_size::Int,
+                            filters::FilterPipeline, filter_mask::Int)
+
+Read chunk data from the current position in `f`, applying decompression based on
+`filters` and `filter_mask`. The `filter_mask` indicates which filters were skipped
+during compression (bit n set = filter n was skipped).
+"""
+function read_chunk_with_filters!(
+    vchunk::Array,
+    f::JLDFile,
+    rr,
+    chunk_size::Int,
+    filters::FilterPipeline,
+    filter_mask::Int
+)
+    if iscompressed(filters)
+        if filter_mask == 0
+            read_compressed_array!(vchunk, f, rr, chunk_size, filters)
+        else
+            if length(filters.filters) == 1
+                read_array!(vchunk, f, rr)
+            else
+                mask = Bool[filter_mask & 2^(n-1) == 0 for n in eachindex(filters.filters)]
+                if any(mask)
+                    rf = FilterPipeline(filters.filters[mask])
+                    read_compressed_array!(vchunk, f, rr, chunk_size, rf)
+                else
+                    read_array!(vchunk, f, rr)
+                end
+            end
+        end
+    else
+        read_array!(vchunk, f, rr)
+    end
+    return vchunk
+end

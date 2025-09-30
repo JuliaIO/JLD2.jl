@@ -229,6 +229,7 @@ end
     end
 
     if !ischunked(layout) || (layout.chunk_indexing_type == 1)
+        # Contiguous or compact storage - read directly
         n = length(v)
         seek(io, layout.data_offset)
         if iscompressed(filters)
@@ -239,55 +240,8 @@ end
         track_weakref!(f, header_offset, v)
         v
     else
-        if layout.version == 3
-            # version 1 B-tree
-            # This version appears to be padding incomplete chunks
-            chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)
-            # array cartesian indices
-            ids = CartesianIndices(v)
-            # chunk dimensions in same order as data dims
-            chunk_dims = reverse(layout.chunk_dimensions)[1:ndims]
-            # chunk indices starting at 1,1
-            chunk_ids = CartesianIndices(tuple(chunk_dims...))
-
-            # For V1 B-tree, layout.chunk_dimensions already excludes element size
-            for chunk in chunks
-                seek(io, fileoffset(f, chunk.offset))
-
-                vchunk = Array{T, Int(ndims)}(undef, chunk_dims...)
-
-                if iscompressed(filters)
-                    if chunk.filter_mask == 0
-                        read_compressed_array!(vchunk, f, rr, chunk.chunk_size, filters)
-                    else
-                        if length(filters.filters) == 1
-                            read_array!(vchunk, f, rr)
-                        else
-                            mask = Bool[chunk.filter_mask & 2^(n-1) == 0 for n=eachindex(filters.filters)]
-                            if any(mask)
-                                rf = FilterPipeline(filters.filters[mask])
-                                read_compressed_array!(vchunk, f, rr, chunk.chunk_size, rf)
-                            else
-                                read_array!(vchunk, f, rr)
-                            end
-                        end
-                    end
-                else
-                    read_array!(vchunk, f, rr)
-                end
-
-                cidx = chunk.idx::NTuple{Int(ndims+1), Int}
-                chunk_root = CartesianIndex(reverse(cidx[1:end-1]))
-                # Index into v
-                vidxs = intersect(ids, chunk_ids .+ chunk_root)
-                # Index into chunk
-                ch_idx = CartesianIndices(size(vidxs))
-
-                @views v[vidxs] .= vchunk[ch_idx]
-            end
-            return v
-        end
-        throw(UnsupportedVersionException("Encountered a chunked array ($layout) that is not implemented."))
+        # Chunked storage - dispatch to specialized handler
+        read_chunked_array(f, v, dataspace, rr, layout, filters, header_offset, Int(ndims))
     end
 end
 

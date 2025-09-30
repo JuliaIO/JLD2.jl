@@ -284,33 +284,58 @@ function _read_chunk_data(f::JLDFile, chunk_info, ::Type{T}, chunk_dims, rr, fil
     ndims = length(chunk_dims)
     vchunk = Array{T, ndims}(undef, chunk_dims...)
 
-    # Handle compression
-    if iscompressed(filters)
-        if chunk_info.filter_mask == 0
-            # All filters applied
-            read_compressed_array!(vchunk, f, rr, chunk_info.chunk_size, filters)
-        else
-            # Some filters were skipped
-            if length(filters.filters) == 1
-                # Single filter was skipped - read uncompressed
-                read_array!(vchunk, f, rr)
-            else
-                # Multiple filters - apply only those not masked
-                mask = Bool[chunk_info.filter_mask & 2^(n-1) == 0 for n in eachindex(filters.filters)]
-                if any(mask)
-                    rf = FilterPipeline(filters.filters[mask])
-                    read_compressed_array!(vchunk, f, rr, chunk_info.chunk_size, rf)
-                else
-                    read_array!(vchunk, f, rr)
-                end
-            end
-        end
-    else
-        # No compression
-        read_array!(vchunk, f, rr)
-    end
+    # Read chunk with appropriate filter handling
+    read_chunk_with_filters!(vchunk, f, rr, chunk_info.chunk_size, filters, chunk_info.filter_mask)
 
     return vchunk
+end
+
+"""
+    read_chunked_array(f::JLDFile, v::Array, dataspace::ReadDataspace,
+                      rr::ReadRepresentation, layout::DataLayout,
+                      filters::FilterPipeline, header_offset::RelOffset,
+                      ndims::Int)
+
+Read a chunked dataset from file into the preallocated array `v`.
+Handles V1 B-tree chunked storage with optional compression filters.
+"""
+function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
+                           @nospecialize(rr::ReadRepresentation), layout::DataLayout,
+                           filters::FilterPipeline, header_offset::RelOffset,
+                           ndims::Int) where T
+    io = f.io
+
+    if layout.version == 3
+        # version 1 B-tree
+        # This version appears to be padding incomplete chunks
+        chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)
+        # array cartesian indices
+        ids = CartesianIndices(v)
+        # chunk dimensions in same order as data dims
+        chunk_dims = reverse(layout.chunk_dimensions)[1:ndims]
+        # chunk indices starting at 1,1
+        chunk_ids = CartesianIndices(tuple(chunk_dims...))
+
+        # For V1 B-tree, layout.chunk_dimensions already excludes element size
+        for chunk in chunks
+            seek(io, fileoffset(f, chunk.offset))
+
+            vchunk = Array{T, Int(ndims)}(undef, chunk_dims...)
+            read_chunk_with_filters!(vchunk, f, rr, chunk.chunk_size, filters, chunk.filter_mask)
+
+            cidx = chunk.idx::NTuple{Int(ndims+1), Int}
+            chunk_root = CartesianIndex(reverse(cidx[1:end-1]))
+            # Index into v
+            vidxs = intersect(ids, chunk_ids .+ chunk_root)
+            # Index into chunk
+            ch_idx = CartesianIndices(size(vidxs))
+
+            @views v[vidxs] .= vchunk[ch_idx]
+        end
+        track_weakref!(f, header_offset, v)
+        return v
+    end
+    throw(UnsupportedVersionException("Encountered a chunked array ($layout) that is not implemented."))
 end
 
 # Export public API
