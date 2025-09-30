@@ -470,18 +470,36 @@ function read_v1btree_dataset_chunks(f, offset, dimensionality)
     left_sibling = jlread(io, RelOffset)
     right_sibling = jlread(io, RelOffset)
     children = Any[]
-    for _ = 1:entries_used
+
+    # Read keys and children in the correct V1BTree format (interleaved)
+    for entry_idx = 1:entries_used
+        # Read key in V1ChunkKey format: chunk_size, filter_mask, then indices
         chunk_size = Int(jlread(io, UInt32))
         filter_mask = Int(jlread(io, UInt32))
-        index = jlread(io, UInt64, dimensionality)
-        push!(children, (offset=jlread(io, RelOffset), node_level, chunk_size, filter_mask, idx=tuple(Int.(index)...)))
+
+        # Read exactly dimensionality indices (dimensionality includes element size dimension)
+        idx = jlread(io, UInt64, Int(dimensionality)) .% Int |> splat(tuple)
+
+        # Read child offset (comes immediately after the key)
+        child_offset = jlread(io, RelOffset)
+        push!(children, (offset=child_offset, chunk_size=chunk_size, filter_mask=filter_mask, idx=idx))
+    end
+
+    # Read the final key (only present if this is leaf node with entries)
+    if node_level == 0 && entries_used > 0
+        # Final key: chunk_size, filter_mask, indices (but no child offset)
+        final_chunk_size = Int(jlread(io, UInt32))
+        final_filter_mask = Int(jlread(io, UInt32))
+        final_idx = jlread(io, UInt64, Int(dimensionality)) .% Int |> splat(tuple)
     end
 
     chunks = Any[]
     for child in children
-        if child.node_level > 0
+        if node_level > 0
+            # This is an internal node, so children point to other B-tree nodes
             append!(chunks, read_v1btree_dataset_chunks(f, child.offset, dimensionality))
         else
+            # This is a leaf node, so children point to actual chunk data
             push!(chunks, child)
         end
     end

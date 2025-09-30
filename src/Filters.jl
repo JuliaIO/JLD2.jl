@@ -341,7 +341,7 @@ FilterPipeline(hm::Hmessage) =
     FilterPipeline(WrittenFilterPipeline(hm))
 
 FilterPipeline(fp::WrittenFilterPipeline) =
-    FilterPipeline([Filter(fil) for fil in fp.filters])
+    FilterPipeline(Filter[Filter(fil) for fil in fp.filters])
 
 
 function Filter(fil::WrittenFilter)
