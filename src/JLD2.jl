@@ -523,7 +523,6 @@ using .Filters: Shuffle, Deflate, ZstdFilter
 
 include("v1btree.jl")
 include("v1btree_debug.jl")
-include("manual_chunking.jl")
 include("chunked_array.jl")
 include("datasets.jl")
 include("global_heaps.jl")
