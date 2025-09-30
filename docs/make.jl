@@ -21,6 +21,7 @@ makedocs(;
         "HDF5 Compatibility" => "hdf5compat.md",
         "Advanced Usage" => "advanced.md",
         "Dataset Links" => "external_links.md",
+        "Chunked Arrays (Experimental)" => "chunked_arrays.md",
         "Legacy" => "legacy.md",
         "Troubleshooting" => "troubleshooting.md"
     ],
