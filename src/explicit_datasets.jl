@@ -571,6 +571,6 @@ function Base.setindex!(A::ArrayDataset{T,N,ODR}, v, i::Integer) where {T,N,ODR}
     A.f.writable || throw(ArgumentError("Cannot edit in read-only mode"))
     A.writable || throw(ArgumentError("Dataset cannot be edited"))
     seek(A.f.io, A.data_address + (i-1)*odr_sizeof(A.rr))
-    write_data(A.f.io, A.f, v, T, datamode(ODR), JLDWriteSession())
+    write_data(A.f.io, A.f, v, odr(T), datamode(ODR), JLDWriteSession())
     return v
 end
