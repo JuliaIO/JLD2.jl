@@ -1,4 +1,5 @@
-function write_chunked_array(f::JLDFile, name::String, data::AbstractArray, chunk_dims::Vector{Int})
+function write_chunked_array(f::JLDFile, name::String, data::AbstractArray, chunk_dims::Vector{Int},
+                            filters=nothing, wsession::JLDWriteSession=JLDWriteSession())
     if !f.writable
         throw(ArgumentError("Cannot write to file opened in read-only mode"))
     end
@@ -19,8 +20,12 @@ function write_chunked_array(f::JLDFile, name::String, data::AbstractArray, chun
 
     println("📦 Writing chunked array: $(size(data)) with chunks $(chunk_dims)")
 
-    # Create write session and get data type representation
-    wsession = JLDWriteSession()
+    # Use provided filters or fall back to file defaults
+    if isnothing(filters) || (filters isa Tuple && isempty(filters))
+        filters = f.compress
+    end
+
+    # Get group context
     g = f.root_group
     prewrite(f)
     (g, name) = pathize(g, name, true)
@@ -35,7 +40,6 @@ function write_chunked_array(f::JLDFile, name::String, data::AbstractArray, chun
     psz = payload_size_without_storage_message(dataspace, datatype)
     psz += CONTINUATION_MSG_SIZE
 
-    filters = f.compress
     local_filters = FilterPipeline(map(filters) do filter
         Filters.set_local(filter, odr, dataspace, ())
     end)

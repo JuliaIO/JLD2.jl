@@ -44,6 +44,7 @@ include("mmap_test.jl")
 include("wrapped_io.jl")
 include("links.jl")
 include("chunked_arrays.jl")
+include("chunked_array_api.jl")
 
 using TestItemRunner
 
