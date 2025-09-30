@@ -379,7 +379,7 @@ end
 
 Base.read(f::JLDFile, name::AbstractString) = Base.inferencebarrier(f.root_group[name])
 Base.getindex(f::JLDFile, name::AbstractString) = Base.inferencebarrier(f.root_group[name])
-Base.setindex!(f::JLDFile, obj, name::AbstractString) = (f.root_group[name] = obj; f)
+Base.setindex!(f::JLDFile, obj, name::AbstractString; kwargs...) = (setindex!(f.root_group, obj, name; kwargs...); f)
 Base.haskey(f::JLDFile, name::AbstractString) = haskey(f.root_group, name)
 Base.isempty(f::JLDFile) = isempty(f.root_group)
 Base.keys(f::JLDFile) = filter!(x->x != "_types", keys(f.root_group))
@@ -524,6 +524,7 @@ using .Filters: Shuffle, Deflate, ZstdFilter
 include("v1btree.jl")
 include("v1btree_debug.jl")
 include("manual_chunking.jl")
+include("chunked_array.jl")
 include("datasets.jl")
 include("global_heaps.jl")
 include("fractal_heaps.jl")
@@ -545,9 +546,11 @@ include("fileio.jl")
 include("explicit_datasets.jl")
 include("committed_datatype_introspection.jl")
 
+# Export the new chunking API
+export write_chunked_array
 
-if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
-    include("precompile.jl")
-end
+# if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
+#     include("precompile.jl")
+# end
 
 end

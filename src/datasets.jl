@@ -283,8 +283,6 @@ end
                 # Index into chunk
                 ch_idx = CartesianIndices(size(vidxs))
 
-                @info cidx chunk_root vidxs ch_idx vchunk chunk
-                @show vchunk
                 @views v[vidxs] .= vchunk[ch_idx]
             end
             return v

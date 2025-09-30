@@ -126,11 +126,40 @@ end
         name::AbstractString,
         @nospecialize(obj),
         wsession::JLDWriteSession=JLDWriteSession();
-        compress=nothing
+        compress=nothing,
+        chunk=nothing
         )
     f = g.f
     prewrite(f)
     (g, name) = pathize(g, name, true)
+
+    # Handle chunked arrays
+    if !isnothing(chunk)
+        if !(obj isa Array)
+            throw(ArgumentError("chunk parameter can only be used with arrays"))
+        end
+
+        # Convert chunk to Vector{Int}
+        chunk_dims = if chunk isa Tuple
+            collect(Int, chunk)
+        elseif chunk isa AbstractVector
+            collect(Int, chunk)
+        else
+            throw(ArgumentError("chunk must be a tuple or vector of integers"))
+        end
+
+        # Validate chunk dimensions
+        if length(chunk_dims) != ndims(obj)
+            throw(ArgumentError("chunk dimensions ($(length(chunk_dims))) must match array dimensions ($(ndims(obj)))"))
+        end
+
+        # Use write_chunked_array helper function
+        filters = isnothing(compress) ? () : Filters.normalize_filters(compress)
+        btree = write_chunked_array(f, name, obj, chunk_dims, filters, wsession)
+        return nothing
+    end
+
+    # Original behavior for non-chunked arrays
     if !isnothing(compress)
         if obj isa Array
             filters = Filters.normalize_filters(compress)
@@ -143,8 +172,8 @@ end
     nothing
 end
 
-function Base.setindex!(g::Group, obj, name::AbstractString)
-    write(g, name, obj)
+function Base.setindex!(g::Group, obj, name::AbstractString; chunk=nothing, compress=nothing)
+    write(g, name, obj; chunk, compress)
     g
 end
 
