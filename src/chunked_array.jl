@@ -343,6 +343,9 @@ function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
     elseif layout.version == 4 && layout.chunk_indexing_type == 4
         # Extensible Array indexing
         return read_extensible_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
+    elseif layout.version == 4 && layout.chunk_indexing_type == 5
+        # V2 B-tree indexing
+        return read_v2btree_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
     end
     throw(UnsupportedVersionException("Encountered a chunked array ($layout) that is not implemented."))
 end
