@@ -125,7 +125,7 @@ end
             dim_size::UInt8 = 8 # 8 bytes per dimension
             dimensions::NTuple{Int(dimensionality), uintofsize(dim_size)}
             chunk_indexing_type::UInt8 = 1 # Single Chunk
-            if chunk_indexing_type == 1 # Single Chunk
+            if chunk_indexing_type == 1 && isset(flags, 1) # Single Chunk with filters
                 data_size::@Int(8) = 0
                 filters::UInt32 = 0
             end
@@ -137,7 +137,7 @@ end
                 index_elements::UInt8
                 minpointers::UInt8
                 minelements::UInt8
-                page_bits::UInt16
+                page_bits::UInt8
             end
             if chunk_indexing_type == 5
                 node_size::UInt32

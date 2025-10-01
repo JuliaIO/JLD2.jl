@@ -21,7 +21,7 @@ struct ExtensibleArrayInfo <: ChunkIndexingInfo
     index_elements::UInt8
     min_pointers::UInt8
     min_elements::UInt8
-    page_bits::UInt16
+    page_bits::UInt8
 end
 
 struct V2BTreeInfo <: ChunkIndexingInfo
@@ -76,8 +76,11 @@ function DataLayout(f::JLD2.JLDFile, msg::HmWrap{HmDataLayout})
 
             # Extract indexing type information
             indexing_info = if chunk_indexing_type == 1
-                # Single Chunk
-                SingleChunkInfo(UInt64(msg.data_size), msg.filters)
+                # Single Chunk - data_size and filters only exist if filtered (flags & 0x02)
+                is_filtered = (msg.flags & 0x02) != 0
+                data_size = is_filtered ? UInt64(msg.data_size) : UInt64(0)
+                filters = is_filtered ? msg.filters : UInt32(0)
+                SingleChunkInfo(data_size, filters)
             elseif chunk_indexing_type == 2
                 # Implicit Index
                 ImplicitIndexInfo()
@@ -95,7 +98,7 @@ function DataLayout(f::JLD2.JLDFile, msg::HmWrap{HmDataLayout})
                 throw(UnsupportedFeatureException("Unknown chunk indexing type: $chunk_indexing_type"))
             end
 
-            data_length = chunk_indexing_type == 1 && isdefined(msg, :data_size) ? Int64(msg.data_size) : Int64(0)
+            data_length = chunk_indexing_type == 1 && (msg.flags & 0x02) != 0 ? Int64(msg.data_size) : Int64(0)
 
             return DataLayout(version, storage_type, data_length, data_offset,
                             msg.dimensionality, chunk_indexing_type, indexing_info, chunk_dimensions)

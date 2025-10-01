@@ -303,4 +303,31 @@ end
 
         rm(fn, force=true)
     end
+
+    @testset "Extensible Array Index (Type 4)" begin
+        # Test reading HDF5 files with v4 Extensible Array indexing
+        # This tests the read path for datasets with one unlimited dimension
+
+        fn = "test_v4_extensible.h5"
+
+        # Skip test if file doesn't exist
+        if isfile(fn)
+            data = jldopen(fn, "r") do f
+                f["extensible"]
+            end
+
+            @test size(data) == (10, 30)
+            @test sum(data) ≈ 44850.0
+            @test data[1,1] == 0.0f0
+            @test data[end,end] == 299.0f0
+            @test eltype(data) == Float32
+
+            # Verify a few more elements to ensure correct chunk navigation
+            @test data[5,15] == 144.0f0  # Middle element
+            @test data[1,30] == 290.0f0  # Last column, first row
+            @test data[10,1] == 9.0f0    # First column, last row
+        else
+            @warn "Skipping Extensible Array test: test_v4_extensible.h5 not found"
+        end
+    end
 end
