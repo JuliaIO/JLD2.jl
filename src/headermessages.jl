@@ -137,7 +137,7 @@ end
                 index_elements::UInt8
                 minpointers::UInt8
                 minelements::UInt8
-                page_bits:::UInt16
+                page_bits::UInt16
             end
             if chunk_indexing_type == 5
                 node_size::UInt32
