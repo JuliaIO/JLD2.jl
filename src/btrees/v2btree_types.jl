@@ -6,35 +6,46 @@ const V2_BTREE_INTERNAL_NODE_SIGNATURE = htol(0x4e495442) # UInt8['B', 'T', 'I',
 const V2_BTREE_LEAF_NODE_SIGNATURE = htol(0x464c5442) # UInt8['B', 'T', 'L', 'F']
 
 """
-    BTreeHeaderV2
+    V2BTreeHeader
 
-Header structure for V2 B-trees.
-V2 B-trees are used in HDF5 1.8+ for indexed groups and other structures.
+On-disk header structure for V2 B-trees (HDF5 1.8+).
+Used for both reading and writing. Uses exact HDF5 field types.
 
-Fields:
-- `offset`: File offset of the header
-- `type`: B-tree type (5 = link name for indexed group)
+Fields (in on-disk order):
+- `signature`: Always V2_BTREE_HEADER_SIGNATURE (0x44485442 = "BTHD")
+- `version`: Should be 0
+- `type`: B-tree type (5 = link names, 10 = chunked dataset storage)
 - `node_size`: Size of B-tree nodes in bytes
-- `record_size`: Size of records in bytes
-- `depth`: Depth of the tree (0 = root is leaf node)
+- `record_size`: Size of each record in bytes
+- `depth`: Tree depth (0 = root is leaf node)
 - `split_percent`: Percent full before splitting (typically 100)
 - `merge_percent`: Percent full before merging (typically 40)
-- `root_node_address`: File offset of the root node
-- `num_records_in_root_node`: Number of records in root node
-- `num_records_in_tree`: Total number of records in the entire tree
+- `root_node_address`: File offset of the root node (UInt64, not RelOffset for v2 btrees)
+- `num_records_root`: Number of records in root node
+- `total_records`: Total records in entire tree (variable-size Length type)
+
+Note: Checksum is NOT part of the struct - it's stored separately in the file
+and validated during reading. This replaces both the old BTreeHeaderV2 and
+the duplicate V2BTreeHeader.
 """
-struct BTreeHeaderV2
-    offset::RelOffset
-    type::Int
-    node_size::Int
-    record_size::Int
-    depth::Int
-    split_percent::Int
-    merge_percent::Int
-    root_node_address::RelOffset
-    num_records_in_root_node::Int
-    num_records_in_tree::Int
+struct V2BTreeHeader
+    signature::UInt32
+    version::UInt8
+    type::UInt8
+    node_size::UInt32
+    record_size::UInt16
+    depth::UInt16
+    split_percent::UInt8
+    merge_percent::UInt8
+    root_node_address::UInt64  # Not RelOffset! V2 B-trees use raw UInt64
+    num_records_root::UInt16
+    total_records::Length      # Variable-size field
 end
+define_packed(V2BTreeHeader)
+
+# Constructor for writing (auto-fills signature)
+V2BTreeHeader(type::UInt8, args...) = V2BTreeHeader(
+    V2_BTREE_HEADER_SIGNATURE, 0x00, type, args...)
 
 """
     BTreeNodeV2

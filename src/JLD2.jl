@@ -10,6 +10,7 @@ export jldopen, @load, @save, save_object, load_object, jldsave
 export Shuffle, Deflate, ZstdFilter
 export create_external_link!, create_soft_link!, lookup_link
 export AbstractLink, HardLink, SoftLink, ExternalLink
+export WriteChunkedArray, write_chunked
 
 include("types.jl")
 include("links.jl")
@@ -521,11 +522,18 @@ include("Filters.jl")
 using .Filters: WrittenFilterPipeline, FilterPipeline, iscompressed
 using .Filters: Shuffle, Deflate, ZstdFilter
 
+# Load BTrees before Chunking now that ChunkIterator decouples them
 include("btrees/BTrees.jl")
 using .BTrees: write_chunked_dataset_with_v1btree,
-    read_v1btree, read_symbol_table_node,
-    read_v2btree_header, read_records_in_node
-include("chunked_array.jl")
+    write_v2btree_chunked_dataset,
+    read_v1btree, read_v2btree_header,
+
+include("chunking/Chunking.jl")
+using .Chunking: WriteChunkedArray,
+    read_chunked_array,
+
+    get_chunked_array, chunk_dimensions, num_chunks, chunk_grid_size,
+    extract_chunk, extract_chunk_region
 include("datasets.jl")
 include("global_heaps.jl")
 include("fractal_heaps.jl")

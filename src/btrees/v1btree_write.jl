@@ -183,34 +183,25 @@ function split_into_nodes(file::JLDFile,
 end
 
 """
-    extract_chunk(data, chunk_indices::Vector{Int}, chunk_dims::Vector{Int})
-
-Extract a chunk of data at the given chunk starting positions with the specified chunk dimensions.
-Returns the chunk data as a contiguous array.
-"""
-function extract_chunk(data, chunk_indices, chunk_dims)
-    ndims(data) == length(chunk_indices) || throw(ArgumentError("chunk_indices dimensionality must match data"))
-
-    chunk = typeof(data)(undef, chunk_dims...)
-    avail_indices = range.(chunk_indices, min.(size(data), chunk_indices .+ chunk_dims .-1))
-    indexview = (:).(1, length.(avail_indices))
-
-    chunk[indexview...] .= @view data[avail_indices...]
-
-    chunk
-end
-
-"""
-    write_chunked_dataset_with_v1btree(f::JLDFile, data, odr, local_filters, wsession::JLDWriteSession,
-                                           chunk_dims::Vector{Int})
+    write_chunked_dataset_with_v1btree(f::JLDFile, chunk_iter, odr, data_size, chunk_dims)
 
 Write a chunked dataset using V1 B-tree indexing.
-This is the main integration function that replaces simple compression with proper chunking.
+
+# Arguments
+- `f`: JLDFile handle
+- `chunk_iter`: Iterator yielding ProcessedChunk objects (from ChunkIterator)
+- `odr`: Object data representation
+- `data_size`: Tuple of array dimensions
+- `chunk_dims`: Tuple of chunk dimensions
+
+# Returns
+`(btree, total_chunk_size, num_chunks)` tuple
+
+The chunk iterator handles extraction, filtering, and compression.
+This function only handles B-tree structure and file writing.
 """
-function write_chunked_dataset_with_v1btree(f::JLDFile, data, odr, local_filters, wsession::JLDWriteSession,
-                                           chunk_dims::Vector{Int})
+function write_chunked_dataset_with_v1btree(f::JLDFile, chunk_iter, odr, data_size, chunk_dims)
     dimensionality = UInt8(length(chunk_dims))
-    data_size = size(data)
 
     # Create V1 B-tree for chunk indexing
     max_entries = calculate_max_entries(f, dimensionality)
@@ -219,27 +210,26 @@ function write_chunked_dataset_with_v1btree(f::JLDFile, data, odr, local_filters
     total_chunk_size = 0
     num_chunks = 0
 
-    # Write chunks and populate B-tree
-    chunk_indices = Iterators.product(StepRange.(1, chunk_dims, data_size)...)
-    chunk_count = 0
-    for chunk_idx in chunk_indices
-        chunk_count += 1
-        chunk_data = extract_chunk(data, chunk_idx, chunk_dims)
-        compressed_chunk, filter_mask = Filters.compress(local_filters, chunk_data, odr, f, wsession)
+    # Process chunks from iterator and populate B-tree
+    for processed_chunk in chunk_iter
         # Write chunk data to file
         chunk_address = h5offset(f, f.end_of_data)
         seek(f.io, f.end_of_data)
 
-        jlwrite(f.io, compressed_chunk)
-        f.end_of_data += length(compressed_chunk)
+        jlwrite(f.io, processed_chunk.chunk_data)
+        f.end_of_data += length(processed_chunk.chunk_data)
 
         # Insert chunk into B-tree
-        insert_chunk!(btree, chunk_idx, chunk_address, UInt32(length(compressed_chunk)), filter_mask)
+        insert_chunk!(btree, processed_chunk.chunk_idx, chunk_address,
+                     UInt32(length(processed_chunk.chunk_data)), processed_chunk.filter_mask)
 
-        total_chunk_size += length(compressed_chunk)
+        total_chunk_size += length(processed_chunk.chunk_data)
         num_chunks += 1
     end
+
+    # Calculate boundary index for B-tree finalization
     boundary_index = data_size .+ chunk_dims .- mod1.(data_size, chunk_dims)
     finalize_btree!(btree, UInt64[reverse(boundary_index)..., odr_sizeof(odr)])
+
     return btree, total_chunk_size, num_chunks
 end

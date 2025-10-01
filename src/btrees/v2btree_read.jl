@@ -5,39 +5,29 @@
     read_v2btree_header(f, offset)
 
 Read a V2 B-tree header from the file.
-Returns a BTreeHeaderV2 structure containing tree metadata.
-This function is independent of fractal heaps.
+Returns a V2BTreeHeader structure containing tree metadata.
+Checksum is validated but not returned as part of the struct.
 """
 function read_v2btree_header(f, offset)
     io = f.io
     seek(io, fileoffset(f, offset))
+
+    # Read header with checksum validation
     cio = begin_checksum_read(io)
 
-    signature = jlread(cio, UInt32)
-    signature == V2_BTREE_HEADER_SIGNATURE || throw(InvalidDataException("Signature does not match."))
+    # Read the struct using define_packed (checksum computed over these fields)
+    hdr = jlread(cio, V2BTreeHeader)
 
-    version = jlread(cio, UInt8)
-    type = jlread(cio, UInt8)
-    node_size = jlread(cio, UInt32)
-    record_size = jlread(cio, UInt16)
-    depth = jlread(cio, UInt16)
-    split_percent = jlread(cio, UInt8)
-    merge_percent = jlread(cio, UInt8)
-    root_node_address = jlread(cio, RelOffset)
-    num_records_in_root_node = jlread(cio, UInt16)
-    num_records_in_tree = jlread(cio, Length)
+    # Validate checksum
+    computed_checksum = end_checksum(cio)
+    stored_checksum = jlread(io, UInt32)
+    computed_checksum == stored_checksum || throw(InvalidDataException("V2 B-tree header checksum mismatch"))
 
-    end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())
-    BTreeHeaderV2(  offset,
-                    type,
-                    node_size,
-                    record_size,
-                    depth,
-                    split_percent,
-                    merge_percent,
-                    root_node_address,
-                    num_records_in_root_node,
-                    num_records_in_tree)
+    # Validate signature and version
+    hdr.signature == V2_BTREE_HEADER_SIGNATURE || throw(InvalidDataException("Invalid V2 B-tree header signature"))
+    hdr.version == 0 || throw(UnsupportedVersionException("Unsupported V2 B-tree version $(hdr.version)"))
+
+    return hdr
 end
 
 """

@@ -143,7 +143,7 @@ function get_chunked_array(f::JLDFile, name::String)
     # Parse the B-tree to get all chunk metadata
     chunks = if layout.version == 3
         # Use existing function to read all chunks from V1 B-tree
-        raw_chunks = read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)
+        raw_chunks = JLD2.BTrees.read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)
         # Convert to ChunkInfo objects
         ChunkInfo[ChunkInfo(c.offset, c.chunk_size, c.filter_mask, c.idx) for c in raw_chunks]
     else
@@ -308,7 +308,7 @@ function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
     if layout.version == 3
         # version 1 B-tree
         # This version appears to be padding incomplete chunks
-        chunks = read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)
+        chunks = JLD2.BTrees.read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)
         # array cartesian indices
         ids = CartesianIndices(v)
         # chunk dimensions in same order as data dims
@@ -334,6 +334,18 @@ function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
         end
         track_weakref!(f, header_offset, v)
         return v
+    elseif layout.version == 4 && layout.chunk_indexing_type == 2
+        # Implicit Index - contiguous chunk storage
+        return read_implicit_index_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
+    elseif layout.version == 4 && layout.chunk_indexing_type == 3
+        # Fixed Array indexing
+        return read_fixed_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
+    elseif layout.version == 4 && layout.chunk_indexing_type == 4
+        # Extensible Array indexing
+        return read_extensible_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
+    elseif layout.version == 4 && layout.chunk_indexing_type == 5
+        # V2 B-tree indexing
+        return read_v2btree_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
     end
     throw(UnsupportedVersionException("Encountered a chunked array ($layout) that is not implemented."))
 end
@@ -369,20 +381,20 @@ function write_chunked_array(f::JLDFile, name::String, data::AbstractArray, chun
     (g, name) = pathize(g, name, true)
 
     y = data
-    odr = objodr(y)
-    dataspace = WriteDataspace(f, y, odr)
-    datatype = h5type(f, y)
+    odr = JLD2.objodr(y)
+    dataspace = JLD2.WriteDataspace(f, y, odr)
+    datatype = JLD2.h5type(f, y)
     io = f.io
 
-    datasz = (odr_sizeof(odr)::Int * numel(dataspace))::Int
-    psz = payload_size_without_storage_message(dataspace, datatype)
-    psz += CONTINUATION_MSG_SIZE
+    datasz = (odr_sizeof(odr)::Int * JLD2.numel(dataspace))::Int
+    psz = JLD2.payload_size_without_storage_message(dataspace, datatype)
+    psz += JLD2.CONTINUATION_MSG_SIZE
 
     local_filters = FilterPipeline(map(filters) do filter
         Filters.set_local(filter, odr, dataspace, ())
     end)
 
-    @assert data isa ArrayMemory
+    @assert data isa JLD2.ArrayMemory
     layout_class = LcChunked
     psz += jlsizeof(Val(HmDataLayout);
         version = 3,
@@ -417,7 +429,13 @@ function write_chunked_array(f::JLDFile, name::String, data::AbstractArray, chun
 
     pos = position(cio)
 
-    btree, total_chunk_size, num_chunks = write_chunked_dataset_with_v1btree(f, data, odr, local_filters, wsession, chunk_dims)
+    # Create chunk iterator to process and yield chunks
+    chunk_iter = ChunkIterator(data, chunk_dims, odr, local_filters, f, wsession)
+
+    # Write using V1 B-tree
+    btree, total_chunk_size, num_chunks = JLD2.BTrees.write_chunked_dataset_with_v1btree(
+        f, chunk_iter, odr, size(data), chunk_dims
+    )
 
     seek(cio, pos)
     # Prepare DataLayout parameters

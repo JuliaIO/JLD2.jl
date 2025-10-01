@@ -149,10 +149,14 @@ const KNOWN_FILTERS = Dict(
 )
 
 function normalize_filters(compress)
-    if compress isa Bool && compress == false
+    if isnothing(compress) || compress == () || (compress isa Bool && compress == false)
         return FilterPipeline(())
     elseif compress isa Bool && compress == true
         return FilterPipeline(Deflate())
+    elseif compress == :gzip || compress == :deflate
+        return FilterPipeline(Deflate())
+    elseif compress == :shuffle
+        return FilterPipeline(Shuffle())
     elseif compress isa FilterPipeline
         return compress
     elseif compress isa Filter
