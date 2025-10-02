@@ -605,18 +605,521 @@ function _write_single_chunk(f::JLDFile, name::String, data::AbstractArray{T,N},
     return dataset_offset
 end
 
-function _write_implicit_index(f, name, data, chunks, maxshape, fill_value, filters)
-    throw(UnsupportedFeatureException(
-        "Implicit index writing (Type 2) not yet implemented. " *
-        "This will be available in Phase 3."
-    ))
+"""
+    _write_implicit_index(f::JLDFile, name::String, data::AbstractArray, chunks, maxshape, fill_value, filters)
+
+Write a dataset using Implicit Index indexing (Type 2).
+
+Implicit Index stores chunks contiguously in the file starting at a base address.
+No explicit index structure is needed - chunk addresses are calculated as:
+    chunk_address = base_address + (chunk_index × chunk_size_bytes)
+
+This is the simplest chunk indexing type and is most memory-efficient for sparse datasets
+where a fill value is used for unallocated chunks.
+
+# Arguments
+- `f::JLDFile` - File handle (must be writable)
+- `name::String` - Dataset name
+- `data::AbstractArray` - Data to write
+- `chunks` - Chunk dimensions
+- `maxshape` - Maximum shape (must match data size for Type 2)
+- `fill_value` - Fill value for unallocated regions (required for Type 2)
+- `filters` - Optional compression filters (not supported for Type 2)
+"""
+function _write_implicit_index(f::JLDFile, name::String, data::AbstractArray{T,N},
+                                chunks, maxshape, fill_value, filters) where {T,N}
+    # Validate inputs
+    @assert f.writable "File must be writable"
+    @assert all(chunks .<= size(data)) "Chunk dimensions must be <= data dimensions"
+
+    # Implicit index requires fill_value
+    if isnothing(fill_value)
+        throw(ArgumentError(
+            "Implicit index (Type 2) requires a fill_value. " *
+            "Please specify fill_value in WriteChunkedArray constructor."
+        ))
+    end
+
+    # Implicit index doesn't support extensible dimensions
+    if !isnothing(maxshape) && maxshape != size(data)
+        throw(ArgumentError(
+            "Implicit index (Type 2) does not support extensible dimensions. " *
+            "For extensible datasets, use Extensible Array (Type 4) or V2 B-tree (Type 5)."
+        ))
+    end
+
+    # Filters not supported for implicit index (HDF5 spec requirement)
+    if !isnothing(filters)
+        throw(UnsupportedFeatureException(
+            "Compression/filters are not supported for Implicit Index (Type 2) chunk indexing. " *
+            "This is an HDF5 format requirement. Use Fixed Array (Type 3) for filtered chunks."
+        ))
+    end
+
+    # Get datatype and object data representation
+    odr = objodr(data)
+    datatype = h5type(f, data)
+    dataspace = WriteDataspace(f, data, odr)
+
+    # Calculate chunk grid dimensions
+    grid_dims = cld.(size(data), chunks)
+    n_chunks = prod(grid_dims)
+
+    # Calculate chunk size in bytes
+    chunk_size_bytes = prod(chunks) * odr_sizeof(odr)
+
+    # Allocate contiguous space for all chunks
+    chunks_start_offset = f.end_of_data
+    total_chunks_size = n_chunks * chunk_size_bytes
+    f.end_of_data = chunks_start_offset + total_chunks_size
+
+    # Write session for tracking
+    wsession = JLDWriteSession()
+
+    # Convert grid_dims to HDF5 order for linear indexing
+    grid_dims_hdf5 = reverse(grid_dims)
+    ndims_hdf5 = length(grid_dims_hdf5)
+
+    # Precompute down_chunks for HDF5 ordering
+    # This matches compute_chunk_index from fixed_array.jl
+    down_chunks = zeros(Int, ndims_hdf5)
+    acc = 1
+    for i in ndims_hdf5:-1:1
+        down_chunks[i] = acc
+        acc *= grid_dims_hdf5[i]
+    end
+
+    # Iterate through all chunks in Julia order, but write them in HDF5 linear order
+    for julia_chunk_idx in CartesianIndices(grid_dims)
+        # Convert Julia chunk coordinates to HDF5 coordinates (0-based, reversed)
+        hdf5_coords = reverse(Tuple(julia_chunk_idx) .- 1)
+
+        # Compute linear index using same logic as compute_chunk_index
+        linear_idx = 0
+        for i in 1:ndims_hdf5
+            linear_idx += down_chunks[i] * hdf5_coords[i]
+        end
+
+        # Calculate chunk address based on linear index
+        chunk_offset = chunks_start_offset + linear_idx * chunk_size_bytes
+
+        # Calculate data range for this chunk in Julia coordinates
+        chunk_coords = Tuple(julia_chunk_idx)
+        start_idx = (chunk_coords .- 1) .* chunks .+ 1
+        end_idx = min.(start_idx .+ chunks .- 1, size(data))
+
+        # Extract chunk data
+        chunk_data_partial = data[map(:, start_idx, end_idx)...]
+
+        # Pad partial chunks to full chunk size with fill_value
+        # HDF5 requires all chunks to be the same size
+        actual_chunk_size = size(chunk_data_partial)
+        chunk_data = if actual_chunk_size == chunks
+            chunk_data_partial
+        else
+            # Create full-size chunk filled with fill_value
+            full_chunk = fill(fill_value, chunks)
+            # Copy actual data into the full chunk
+            ranges = ntuple(i -> 1:actual_chunk_size[i], N)
+            full_chunk[ranges...] = chunk_data_partial
+            full_chunk
+        end
+
+        # Write chunk to its calculated position
+        seek(f.io, chunk_offset)
+        io_buf = IOBuffer()
+        write_data(io_buf, f, chunk_data, odr, datamode(odr), wsession)
+        chunk_bytes = take!(io_buf)
+        write(f.io, chunk_bytes)
+    end
+
+    # Calculate payload size for object header
+    psz = jlsizeof(Val(HmDataspace); dataspace.dataspace_type, dimensions=dataspace.size)
+    psz += jlsizeof(Val(HmDatatype), 1; dt=datatype)
+
+    # Add fill value message size
+    # Version 3 format with flags 0x20 (bit 5 set = fill value defined)
+    fill_value_size = odr_sizeof(odr)
+    fill_value_bytes = reinterpret(UInt8, [fill_value])
+    psz += jlsizeof(Val(HmFillValue); version=3, flags=UInt8(0x20),
+                    size=UInt32(fill_value_size), fill_value=fill_value_bytes)
+
+    # DataLayout message size (version 4, type 2)
+    # For Implicit Index, dimensions field contains CHUNK dimensions
+    layout_flags = UInt8(0x00)  # No filters
+    dimensionality = UInt8(N + 1)  # +1 for element size dimension
+
+    psz += jlsizeof(Val(HmDataLayout);
+        version = 4,
+        layout_class = LcChunked,
+        flags = layout_flags,
+        dimensionality = dimensionality,
+        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
+        chunk_indexing_type = 2,
+        data_address = h5offset(f, chunks_start_offset)
+    )
+
+    # Add continuation message size
+    psz += CONTINUATION_MSG_SIZE
+
+    # Calculate full object size
+    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
+
+    # Allocate space for object header and write it
+    obj_header_offset = f.end_of_data
+    seek(f.io, obj_header_offset)
+    f.end_of_data = obj_header_offset + fullsz
+
+    # Write object header
+    cio = begin_checksum_write(f.io, fullsz - 4)
+    jlwrite(cio, ObjectStart(size_flag(psz)))
+    write_size(cio, psz)
+
+    # Write header messages
+    write_header_message(cio, Val(HmDataspace);
+        dataspace.dataspace_type,
+        dimensions=dataspace.size)
+
+    write_header_message(cio, Val(HmDatatype), 1; dt=datatype)
+
+    # Write fill value message (version 3 format)
+    # Flags: 0x20 = bit 5 set (fill value defined)
+    write_header_message(cio, Val(HmFillValue);
+        version=3,
+        flags=UInt8(0x20),
+        size=UInt32(fill_value_size),
+        fill_value=fill_value_bytes)
+
+    # Write DataLayout message (version 4, type 2)
+    write_header_message(cio, Val(HmDataLayout);
+        version = 4,
+        layout_class = LcChunked,
+        flags = layout_flags,
+        dimensionality = dimensionality,
+        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
+        chunk_indexing_type = 2,
+        data_address = h5offset(f, chunks_start_offset)
+    )
+
+    # Write continuation message
+    write_continuation_placeholder(cio)
+
+    # Write checksum
+    jlwrite(f.io, end_checksum(cio))
+
+    # Commit the dataset to the parent group
+    dataset_offset = h5offset(f, obj_header_offset)
+    parent_group = f.root_group
+
+    # Use unwritten_links which gets persisted on file close
+    if haskey(parent_group, name)
+        @warn "Overwriting existing dataset" name
+    end
+    parent_group.unwritten_links[name] = HardLink(dataset_offset)
+
+    return dataset_offset
 end
 
-function _write_fixed_array(f, name, data, chunks, filters)
-    throw(UnsupportedFeatureException(
-        "Fixed array writing (Type 3) not yet implemented. " *
-        "This will be available in Phase 2."
-    ))
+"""
+    _write_fixed_array(f::JLDFile, name::String, data::AbstractArray, chunks, filters)
+
+Write a dataset using Fixed Array indexing (Type 3).
+
+Fixed Array is used for fixed-size chunked datasets where multiple chunks are needed.
+It stores chunk addresses in a pre-allocated index array for direct lookup.
+
+# Arguments
+- `f::JLDFile` - File handle (must be writable)
+- `name::String` - Dataset name
+- `data::AbstractArray` - Data to write
+- `chunks` - Chunk dimensions
+- `filters` - Optional compression filters
+"""
+function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
+                            chunks, filters) where {T,N}
+    # Validate inputs
+    @assert f.writable "File must be writable"
+    @assert all(chunks .<= size(data)) "Chunk dimensions must be <= data dimensions"
+
+    # TODO: Compression support for Fixed Array chunks needs investigation
+    # The current reading code may not handle compressed Fixed Array chunks correctly
+    if !isnothing(filters)
+        throw(UnsupportedFeatureException(
+            "Compression/filters are not yet supported for Fixed Array (Type 3) chunk indexing. " *
+            "Use single chunk indexing for compressed datasets, or disable filters for Fixed Array."
+        ))
+    end
+
+    # Get datatype and object data representation
+    odr = objodr(data)
+    datatype = h5type(f, data)
+    dataspace = WriteDataspace(f, data, odr)
+
+    # Normalize filters
+    normalized_filters = nothing  # Disabled for now
+
+    # Calculate chunk grid dimensions
+    grid_dims = cld.(size(data), chunks)
+    n_chunks = prod(grid_dims)
+
+    # Prepare filter pipeline for chunk compression
+    filter_pipeline = if isnothing(normalized_filters)
+        nothing
+    else
+        FilterPipeline(map(normalized_filters) do filter
+            Filters.set_local(filter, odr, dataspace, ())
+        end)
+    end
+
+    # Write all chunks and collect their addresses
+    chunk_addresses = Array{RelOffset,N}(undef, grid_dims...)
+    wsession = JLDWriteSession()
+
+    for chunk_idx in CartesianIndices(grid_dims)
+        # Calculate data range for this chunk
+        chunk_coords = Tuple(chunk_idx)
+        start_idx = (chunk_coords .- 1) .* chunks .+ 1
+        end_idx = min.(start_idx .+ chunks .- 1, size(data))
+
+        # Extract chunk data
+        chunk_data_partial = data[map(:, start_idx, end_idx)...]
+
+        # Pad partial chunks to full chunk size with zeros
+        # HDF5 requires all chunks to be the same size
+        actual_chunk_size = size(chunk_data_partial)
+        chunk_data = if actual_chunk_size == chunks
+            chunk_data_partial
+        else
+            # Create full-size chunk filled with zeros
+            full_chunk = zeros(T, chunks)
+            # Copy actual data into the full chunk
+            ranges = ntuple(i -> 1:actual_chunk_size[i], N)
+            full_chunk[ranges...] = chunk_data_partial
+            full_chunk
+        end
+
+        # Prepare chunk bytes (with optional compression)
+        chunk_bytes = if isnothing(filter_pipeline)
+            # No compression - serialize directly
+            io_buf = IOBuffer()
+            write_data(io_buf, f, chunk_data, odr, datamode(odr), wsession)
+            take!(io_buf)
+        else
+            # Apply compression
+            compressed, _ = Filters.compress(filter_pipeline, chunk_data, odr, f, wsession)
+            compressed
+        end
+
+        # Write chunk to file
+        chunk_offset = f.end_of_data
+        seek(f.io, chunk_offset)
+        write(f.io, chunk_bytes)
+        f.end_of_data = chunk_offset + sizeof(chunk_bytes)
+
+        # Store chunk address
+        chunk_addresses[chunk_idx] = h5offset(f, chunk_offset)
+    end
+
+    # Write Fixed Array data block
+    # Calculate data block size
+    entry_size = UInt8(jlsizeof(RelOffset))  # 8 bytes per chunk address
+    db_size = 4 +  # signature
+              1 +  # version
+              1 +  # client_id
+              8 +  # header address (will be filled later)
+              n_chunks * entry_size +  # chunk addresses
+              4    # checksum
+
+    data_block_offset = f.end_of_data
+    seek(f.io, data_block_offset)
+    f.end_of_data = data_block_offset + db_size
+
+    # Write data block (will update header address later)
+    db_cio = begin_checksum_write(f.io, db_size - 4)
+
+    # Signature
+    jlwrite(db_cio, FIXED_ARRAY_DATABLOCK_SIGNATURE)
+
+    # Version
+    jlwrite(db_cio, UInt8(0))
+
+    # Client ID (0 = non-filtered, 1 = filtered chunks)
+    client_id = isnothing(filter_pipeline) ? UInt8(0) : UInt8(1)
+    jlwrite(db_cio, client_id)
+
+    # Header address (placeholder, will be updated)
+    header_addr_pos = position(f.io)
+    jlwrite(db_cio, RelOffset(0))
+
+    # Write chunk addresses in HDF5 linear order
+    # HDF5 uses row-major-like ordering where the first dimension varies fastest
+    # We need to write chunks in the correct linear order that matches compute_chunk_index
+    chunk_addresses_linear = Vector{RelOffset}(undef, n_chunks)
+
+    # Convert grid_dims to HDF5 order (reversed)
+    grid_dims_hdf5 = reverse(grid_dims)
+
+    # Compute linear index for each chunk and store at that position
+    # This must match the compute_chunk_index function in fixed_array.jl
+    ndims_hdf5 = length(grid_dims_hdf5)
+
+    # Precompute down_chunks for HDF5 ordering
+    down_chunks = zeros(Int, ndims_hdf5)
+    acc = 1
+    for i in ndims_hdf5:-1:1
+        down_chunks[i] = acc
+        acc *= grid_dims_hdf5[i]
+    end
+
+    for julia_idx in CartesianIndices(grid_dims)
+        # Convert Julia chunk coordinates to HDF5 coordinates (0-based, reversed)
+        hdf5_coords = reverse(Tuple(julia_idx) .- 1)
+
+        # Compute linear index using same logic as compute_chunk_index
+        linear_idx = 0
+        for i in 1:ndims_hdf5
+            linear_idx += down_chunks[i] * hdf5_coords[i]
+        end
+
+        chunk_addresses_linear[linear_idx + 1] = chunk_addresses[julia_idx]
+    end
+
+    # Write in linear order
+    for addr in chunk_addresses_linear
+        jlwrite(db_cio, addr)
+    end
+
+    # Write checksum
+    jlwrite(f.io, end_checksum(db_cio))
+
+    # Write Fixed Array header
+    header_offset = f.end_of_data
+    header_size = 4 +  # signature
+                  1 +  # version
+                  1 +  # client_id
+                  1 +  # entry_size
+                  1 +  # page_bits
+                  8 +  # max_num_entries (Length type)
+                  8 +  # data_block_address
+                  4    # checksum
+
+    seek(f.io, header_offset)
+    f.end_of_data = header_offset + header_size
+
+    hdr_cio = begin_checksum_write(f.io, header_size - 4)
+
+    # Signature
+    jlwrite(hdr_cio, FIXED_ARRAY_HEADER_SIGNATURE)
+
+    # Version
+    jlwrite(hdr_cio, UInt8(0))
+
+    # Client ID
+    jlwrite(hdr_cio, client_id)
+
+    # Entry size (8 bytes for RelOffset)
+    jlwrite(hdr_cio, entry_size)
+
+    # Page bits (0 = no paging for simplicity)
+    page_bits = UInt8(0)
+    jlwrite(hdr_cio, page_bits)
+
+    # Max num entries (total number of chunks)
+    jlwrite(hdr_cio, Length(n_chunks))
+
+    # Data block address
+    jlwrite(hdr_cio, h5offset(f, data_block_offset))
+
+    # Write checksum
+    jlwrite(f.io, end_checksum(hdr_cio))
+
+    # Update data block header address (now that we know it)
+    current_pos = position(f.io)
+    seek(f.io, header_addr_pos)
+    jlwrite(f.io, h5offset(f, header_offset))
+    seek(f.io, current_pos)
+
+    # Calculate payload size for object header
+    psz = jlsizeof(Val(HmDataspace); dataspace.dataspace_type, dimensions=dataspace.size)
+    psz += jlsizeof(Val(HmDatatype), 1; dt=datatype)
+
+    # Add filter pipeline message size if present
+    if !isnothing(filter_pipeline)
+        psz += Filters.pipeline_message_size(filter_pipeline)
+    end
+
+    # DataLayout message size (version 4, type 3)
+    # For Fixed Array, dimensions field contains CHUNK dimensions, not array dimensions
+    layout_flags = isnothing(filter_pipeline) ? UInt8(0x00) : UInt8(0x02)
+    dimensionality = UInt8(N + 1)  # +1 for element size dimension
+
+    psz += jlsizeof(Val(HmDataLayout);
+        version = 4,
+        layout_class = LcChunked,
+        flags = layout_flags,
+        dimensionality = dimensionality,
+        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions, not array dimensions
+        chunk_indexing_type = 3,
+        page_bits = page_bits,
+        data_address = h5offset(f, header_offset)
+    )
+
+    # Add continuation message size
+    psz += CONTINUATION_MSG_SIZE
+
+    # Calculate full object size
+    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
+
+    # Allocate space for object header and write it
+    obj_header_offset = f.end_of_data
+    seek(f.io, obj_header_offset)
+    f.end_of_data = obj_header_offset + fullsz
+
+    # Write object header
+    cio = begin_checksum_write(f.io, fullsz - 4)
+    jlwrite(cio, ObjectStart(size_flag(psz)))
+    write_size(cio, psz)
+
+    # Write header messages
+    write_header_message(cio, Val(HmDataspace);
+        dataspace.dataspace_type,
+        dimensions=dataspace.size)
+
+    write_header_message(cio, Val(HmDatatype), 1; dt=datatype)
+
+    # Write filter pipeline message if present
+    if !isnothing(filter_pipeline)
+        Filters.write_filter_pipeline_message(cio, filter_pipeline)
+    end
+
+    # Write DataLayout message (version 4, type 3)
+    # For Fixed Array, dimensions field contains CHUNK dimensions, not array dimensions
+    write_header_message(cio, Val(HmDataLayout);
+        version = 4,
+        layout_class = LcChunked,
+        flags = layout_flags,
+        dimensionality = dimensionality,
+        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions, not array dimensions
+        chunk_indexing_type = 3,
+        page_bits = page_bits,
+        data_address = h5offset(f, header_offset)
+    )
+
+    # Write continuation placeholder and checksum
+    write_continuation_placeholder(cio)
+    jlwrite(f.io, end_checksum(cio))
+
+    # Link dataset to file hierarchy
+    parent_group = f.root_group
+    dataset_offset = h5offset(f, obj_header_offset)
+
+    # Add link to parent group
+    if haskey(parent_group, name)
+        @warn "Overwriting existing dataset" name
+    end
+    parent_group.unwritten_links[name] = HardLink(dataset_offset)
+
+    return dataset_offset
 end
 
 function _write_extensible_array(f, name, data, chunks, maxshape, filters)

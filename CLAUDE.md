@@ -1,124 +1,54 @@
-# CLAUDE.md
+# CLAUDE.md - JLD2 Development Guide
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This guide enables Claude instances to effectively develop JLD2, a Julia HDF5-compatible serialization package.
 
-## Project Overview
+## Quick Start
 
-JLD2 is a Julia package for saving and loading data in the Julia Data format. It provides HDF5-compatible serialization with high performance and complex nested structure support.
+```bash
+# Install and test
+julia --project -e 'using Pkg; Pkg.instantiate()'
+julia -e 'using Pkg; Pkg.test("JLD2")'  # Full suite: 5-7 minutes
 
-## Development Commands
+# Fast development iteration (reduce compilation)
+julia -O1 --project test_script.jl  # Reduces precompilation time
 
-### Testing
+# Build docs
+julia --project=docs docs/make.jl
+```
 
-- `julia -e 'using Pkg; Pkg.test("JLD2.jl")'` - Run all tests
-- `julia --project=test -e 'include("test/specific_test.jl")'` - Run individual test files
+## Architecture Essentials
 
-The test suite includes multiple test modules that must be developed and installed:
+### Core Structure
 
-- JLD2Bzip2 and JLD2Lz4 filter packages (automatically handled in runtests.jl)
-- Uses TestItemRunner for package-level tests
-- Includes Aqua.jl quality assurance tests
-
-### Documentation
-
-- `julia --project=docs docs/make.jl` - Build documentation locally
-- Documentation uses Documenter.jl and deploys to GitHub Pages
-
-### Package Management
-
-- `julia --project -e 'using Pkg; Pkg.instantiate()'` - Install dependencies
-- `julia --project -e 'using Pkg; Pkg.precompile()'` - Precompile package
-
-## Architecture Overview
-
-### Core File Structure
-
-- `src/JLD2.jl` - Main module file with core types (JLDFile, Group) and file operations
-- `src/types.jl` - Core type definitions and data structures
-- `src/datasets.jl` - Dataset handling and serialization
-- `src/groups.jl` - Group (folder-like) functionality
-- `src/loadsave.jl` - High-level load/save API (`jldsave`, `load`)
-
-### Data Handling
-
-- `src/data/` - Subdirectory containing type-specific serialization:
-  - `custom_serialization.jl` - User-defined serialization hooks
-  - `specialcased_types.jl` - Built-in type optimizations
+- `src/JLD2.jl` - Main module with JLDFile/Group types
+- `src/data/` - Type-specific serialization
+  - `custom_serialization.jl` - User hooks via `writeas`/`readas`
   - `writing_datatypes.jl` - HDF5 datatype generation
   - `reconstructing_datatypes.jl` - Deserialization logic
+- `src/io/` - I/O backends (mmap default, buffered fallback)
+- `src/headermessages.jl` - HDF5 message formats using @pseudostruct
+- `src/fractal_heaps.jl`, `src/global_heaps.jl` - Heap management (reusable patterns)
+- Filters in `src/Filters.jl` and `filterpkgs/`
 
-### HDF5 Implementation
+### Key Types
 
-- `src/file_header.jl`, `src/superblock.jl` - HDF5 file format structure
-- `src/object_headers.jl`, `src/headermessages.jl` - HDF5 object metadata
-- `src/global_heaps.jl`, `src/fractal_heaps.jl` - HDF5 heap management
-- `src/dataspaces.jl`, `src/datalayouts.jl` - HDF5 data organization
+```julia
+JLDFile{T<:IO}  # Main file handle
+Group{T}        # HDF5 groups (directories)
+RelOffset       # HDF5 relative offset (add 512 for absolute)
+```
 
-### I/O and Performance
+### Module Load Order (Critical)
 
-- `src/io/` - I/O backends:
-  - `mmapio.jl` - Memory-mapped I/O (default on most platforms)
-  - `bufferedio.jl` - Buffered I/O fallback
-  - `dataio.jl` - Core data reading/writing functions
+```julia
+include("types.jl")           # JLDFile type first
+include("links.jl")           # Core link hierarchy
+include("path_resolution.jl") # Needs link types
+include("external_files.jl")  # Needs JLDFile
+include("groups.jl")          # Needs all above
+```
 
-### Filters and Compression
-
-- `src/Filters.jl` - Compression filter system (Deflate, Zstd, Shuffle)
-- `filterpkgs/` - External filter package definitions
-
-## Key Design Patterns
-
-### File Handles
-
-- `JLDFile{T<:IO}` - Main file handle, parameterized by I/O backend type
-- `Group{T}` - Represents HDF5 groups (directories), can be nested
-- Files track whether they're writable, what compression is used, and maintain reference counting
-
-### Serialization System
-
-- Custom serialization via `writeas` and `readas` functions
-- Automatic struct handling with upgrade mechanisms for version compatibility
-- Type introspection for automatic HDF5 datatype generation
-
-### Memory Management
-
-- Automatic mmap fallback to IOStream on Windows 7
-- Reference tracking for open files to prevent conflicts
-- Finalizers handle cleanup when files go out of scope
-
-## Testing Patterns
-
-- Each test file focuses on a specific aspect (groups, compression, etc.)
-- `test/runtests.jl` orchestrates all tests and handles filter package setup
-- Uses `@testitem` macros for package-level testing with TestItemRunner
-- Tests include compatibility with external HDF5 tools and legacy formats
-
-## Dependencies and Extensions
-
-### Core Dependencies
-
-- FileIO.jl - File format detection and dispatch
-- OrderedCollections.jl - Ordered dictionaries for group contents
-- MacroTools.jl - Macro utilities for code generation
-- Mmap.jl - Memory mapping support
-
-### Compression Filters
-
-- ChunkCodecLibZlib.jl, ChunkCodecLibZstd.jl - Built-in compression
-- Optional filter packages in `filterpkgs/` for additional compression formats
-
-### Weak Dependencies
-
-- UnPack.jl - Optional struct unpacking support via extension
-
-## Development Best Practices
-
-### Julia Constructor Patterns
-
-- Inner constructors with validation should use `new()` inside struct definition
-- Avoid recursive constructor calls that create infinite loops
-- Use `isdefined(obj, :field)` to check field existence for conditional HDF5 fields
-- Ensure all fields are initialized in constructors to prevent UndefRefError
+## Critical Development Principles
 
 ### Code Quality Guidelines
 
@@ -127,389 +57,514 @@ The test suite includes multiple test modules that must be developed and install
 - Unit tests covering edge cases and error conditions
 - Validation functions separated from core constructors
 - Use specific error types (InvalidDataException, UnsupportedFeatureException) with context
-
-### Testing Strategies
-
-- Phase-based testing approach helps isolate functionality
-- Test both success and failure cases with flexible string matching
-- Use `@test_throws ErrorType expression` for expected exceptions
-- Use `Union{ErrorType1, ErrorType2}` for platform-dependent error types
-- OrderedCollections must be imported through JLD2 module structure
-- Test type checking with `eltype()` rather than hardcoded type assertions
-
-### HDF5 Compatibility
-
-- Must maintain compatibility with standard HDF5 tools
-- Validate with: `h5dump -H file.jld2`, `h5debug file.jld2`
-- Cross-validation possible with h5py
-- Use `@pseudostruct` system for HDF5 message format compliance
-- Conditional fields in messages require explicit flag setting
-
-### File I/O and Performance
-
-- Different I/O backends (mmap vs buffered) affect performance
-- Windows 7 has automatic fallback behavior
-- Reference counting prevents file conflicts
-- Groups use OrderedDict for maintaining insertion order
-- Memory-mapped I/O is default, with buffered fallback
-
-### Error Handling Patterns
-
-- Include context (file paths, operation type) in all error messages
-- Preserve original error types for proper exception handling
-- Use `hasfield()` and `getfield()` for safe error message enhancement
-- Different error handling strategies based on operation type
-- Fast error detection with minimal overhead
+- Always use `isnothing(variable)` instead of `variable === nothing` and `!isnothing(variable)` instead of `variable !== nothing`
+- Where it makes sense. In julia you can pass keyword arguments like this: `fun(; variable)` assuming that function `fun` takes a keyword named `variable` and that the calling scope has the value already stored in a var name `variable`. This makes for concise syntax. ( It requires the `;` !)
 - **Avoid try-catch blocks**: Usage of try-catch environments is usually a sign of bad code design. Functions should return well-defined values for expected conditions rather than throwing exceptions for normal control flow
 
-### Testing New JLD2 Features - Critical Validation Pattern
+- When writing data transformations that involve branching and possibly nested for loopes, like computing chunk indices, wrap them into separate functions and document their desired behaviour. These functions can often be greatly simplified in further editing steps by using higher order functions. However, this is an optimization that can follow later. Creating a working solution has priority.
 
-**ALWAYS validate file format before testing functionality:**
+### Build Tools First Approach
 
-When building new JLD2 features (especially file format features like V1 B-trees, chunking, filters):
+When facing complex issues, invest in debugging infrastructure before attempting fixes. This saves 10-20x debugging time.
 
-1. **File Format Validation First**: Use `JLD2.print_header_messages(f, dataset_name)` to verify the expected header messages are present and correct
-2. **Independent End-to-End Tests**: Create tests that truly exercise the complete file format, not just individual processing functions
-3. **Verify Storage Path**: Confirm the intended storage mechanism was actually used (e.g., DataLayout version 3 for V1 B-tree, not regular storage)
+**Multi-Layer Debugging Architecture:**
 
-**Common Testing Mistake**: Calling feature processing functions but then storing with `f[name] = data`, which bypasses the feature entirely and uses regular JLD2 format instead.
+1. **Raw Byte Analysis** - Hex dumps with structure recognition
+2. **Structure Validation** - Specification compliance checking
+3. **Comparative Analysis** - Reference implementation comparison
 
-**Example - V1 B-tree Testing**:
+### Memory Layout: Julia vs HDF5
+
+**Both use identical memory layout** - only dimension reporting differs:
 
 ```julia
-# ❌ WRONG - This tests chunk processing but stores normally
-write_chunked_dataset_with_v1btree(f, data, odr, filters, session, chunk_dims)
-f["test"] = data  # Uses regular storage, not V1 B-tree format!
+# Julia array: 30×10 (30 fastest, 10 slowest)
+# HDF5 reports: (10, 30) plus element size
+# Memory: IDENTICAL - contiguous elements
 
-# ✅ CORRECT - Test complete V1 B-tree file format
-JLD2.write_chunked_array(f, "test", large_array)  # Triggers natural V1 B-tree path
-JLD2.print_header_messages(f, "test")  # Verify DataLayout v3 present
+hdf5_dims = reverse(julia_dims)  # Only for reporting
+# NEVER use "row-major/column-major" terminology - creates confusion
+
+# Chunk indices in HDF5:
+# Julia chunk (1,1) → HDF5 indices (0, 0, 0)  # 0-based, reversed, +element dimension
 ```
-
-**File Format Debugging Tools**:
-
-- `JLD2.print_header_messages(f, dataset_name)` - Shows all header messages for a dataset
-- `h5debug filename.jld2` - Validates HDF5 format compliance
-- `h5dump -H filename.jld2` - Shows HDF5 structure without data
-
-This validation pattern prevents debugging "phantom bugs" where tests pass on isolated functions but fail on actual file format implementation.
-
-### Complex Data Corruption Debugging Methodology
-
-When implementing complex file format features (like V1 B-trees, chunking, links), data corruption bugs can be particularly challenging to isolate. Use this systematic approach:
-
-**Threshold Analysis**:
-
-- Test incrementally increasing data sizes to find exact corruption boundaries
-- Identify which code paths are triggered at specific thresholds (e.g., 64KB for chunking)
-- Isolate feature activation as the corruption trigger
-
-**Element-Level Analysis**:
-
-- Examine specific array positions (first, second, middle, last elements)
-- Use predictable data like `reshape(1.0:N, dims...)` for easy corruption detection
-- Look for patterns (e.g., first element correct suggests indexing/offset issues)
-
-**Component Isolation**:
-
-- Test core algorithms separately from integration pipelines
-- Verify file format compliance with external tools (h5debug, h5dump)
-- Narrow corruption to specific pipeline stages
-
-**Index/Dimension Issues - Array Indexing in Julia vs HDF5**:
-
-**CRITICAL UNDERSTANDING**: Both Julia and HDF5 store arrays as contiguous blocks of memory with one element after another. The difference is only in how they report dimensions and indices:
 
 - **Julia indexing**: `arr[i,j,k,l]` where `i` is the **fastest-changing** index, then `j`, then `k`, then `l`
 - **HDF5 dimensionality**: Reports the same array as `{l_max, k_max, j_max, i_max, elementsize}` - **reversed order**
 - **HDF5 chunk indices**: Use 0-based indices in HDF5 order: `{l0, k0, j0, i0, 0}`
   - The last (fastest) dimension in HDF5 is always 0 because you must read whole elements at a time
-- **Memory layout is identical** - only the dimension reporting is reversed
 
-**Example**: A Julia array of size `30×10`:
-- Julia sees: 30 rows (fastest) × 10 columns (slowest)
-- HDF5 reports: dimensions `(10, 30)` plus element size dimension
-- First chunk at Julia `(1,1)` → HDF5 indices `(0, 0, 0)` (0-based, reversed, plus element size)
+## Hex Dump Debugging (Critical Tool)
 
-**DO NOT** talk about "row-major" vs "column-major" - this creates confusion. The memory layout is the same; only dimension indexing differs.
-
-- **0-based vs 1-based confusion**: Common at HDF5↔Julia interface boundaries
-- **Dimension ordering**: HDF5 reports dimensions in reversed order from Julia
-- **Chunk indices**: Must be in HDF5 convention (reversed, 0-based)
-- Use `reverse()` operations carefully - track through write→storage→read pipeline
-
-**Memory Safety vs Data Integrity**:
-
-- Memory safety (no segfaults) can be maintained while data integrity fails
-- `unsafe_wrap()` operations are prime suspects for corruption
-- High corruption rates (>90%) indicate systematic bugs, not random corruption
-
-### HDF5 Message Format Implementation
-
-**Critical Implementation Requirements**:
-
-- Conditional fields in `HmLinkMessage` require both `link_info_size` and data blob
-- Bit 3 must be set for `link_type` field: `flags = UInt8(0x10 | 0x08 | size_flag(sizeof(name)))`
-- `write_link_message` and `message_size_for_link` must use identical parameters
-- External link payload requires 0x00 reserved byte at start (HDF5 spec compliance)
-
-**@pseudostruct Usage Patterns**:
-
-- Direct field access works; avoid `isdefined()` checks on message fields
-- Use explicit flag setting for conditional message fields
-- DataLayout version 3 requires specific field requirements and bit flags
-
-**V1 B-tree Specifics**:
-
-- Key ordering rule: Key[i] describes the least chunk in Child[i]
-- Variable-size keys based on dimensionality (D+1 indices per key)
-- Node signature: `htol(0x45455254)` ("TREE")
-- Use `jlsizeof(RelOffset)` for offset sizes (8 bytes in JLD2)
-
-### Module Loading Order Dependencies
-
-External file management and complex features require careful module loading order:
+### Structure-Aware Hex Dumps
 
 ```julia
-# Correct include order for complex features:
-include("types.jl")          # JLDFile type defined first
-include("links.jl")          # Core link hierarchy
-# ... other modules ...
-include("path_resolution.jl") # Path resolution (needs link types)
-include("external_files.jl")  # External file management (needs JLDFile)
-include("groups.jl")           # Group functionality (needs all above)
-```
-
-### Link System and External Files Architecture
-
-**Link Type Hierarchy**:
-
-- `AbstractLink` hierarchy: `HardLink`, `SoftLink`, `ExternalLink`
-- Security validation prevents directory traversal attacks in constructors
-- Use `lookup_offset` for backward compatibility, `lookup_link` for new functionality
-
-**External File Management Patterns**:
-
-- WeakRef-based caching allows garbage collection (max 32 external files with LRU eviction)
-- Task-local reference chain tracking for circular reference detection
-- Exponential backoff retry logic for transient failures (network filesystems)
-- Path validation limits "../" traversal for security
-
-**HDF5 Path Resolution**:
-
-- Absolute paths start with "/", relative paths resolve from current group
-- Context-aware soft link resolution optimized for common cases
-- Complex upward navigation ("../") has limitations for disk-loaded groups
-
-### Common Code Patterns and Gotchas
-
-**Predicate Functions**:
-
-```julia
-# ✅ CORRECT
-count(x -> x == "..", path_components)
-
-# ❌ WRONG
-count("..", split(...))
-```
-
-**Error Context Patterns**:
-
-- Re-attempt path resolution in catch blocks to avoid `UndefVarError` in error messages
-- Maintain original error types (SystemError, KeyError) while adding context
-- Include file paths and object paths in error messages for debugging
-
-**Performance Considerations**:
-
-- Groups don't inherently know their file hierarchy path (architectural limitation)
-- Use space allocation via `f.end_of_data` increment pattern
-- Target 32KB chunks for optimal I/O performance in chunked datasets
-
-### Cross-Platform Considerations
-
-- System error codes vary between platforms
-- Use errno constants where possible, test error messages for robustness
-- Use `normpath()` and `abspath()` for cross-platform compatibility
-- Windows file locking is more aggressive than Unix
-- Path separators handled uniformly by Julia's path functions
-
-## HDF5 Binary Format Debugging Tools
-
-When implementing or debugging HDF5 file format features, use these CLI tools and techniques for deep inspection:
-
-### Essential HDF5 Command-Line Tools
-
-**h5dump** - Primary tool for viewing HDF5 file contents:
-
-```bash
-h5dump -H file.jld2              # Header only (structure without data)
-h5dump -d /dataset file.jld2     # Dump specific dataset with data
-h5dump -p file.jld2              # Show all properties
-h5dump -A file.jld2              # Show attributes only
-```
-
-**h5debug** - Low-level format debugging:
-
-```bash
-h5debug file.jld2                            # Basic file structure
-h5debug file.jld2 <offset>                   # Inspect object at offset
-h5debug file.jld2 <btree_offset> <ndims> <dim1> <dim2> ...  # Debug B-tree node
-```
-
-**Example B-tree debugging**:
-
-```bash
-# For a 2D chunked dataset with chunk dims [3, 2] and element size 8:
-h5debug file.jld2 37496 3 2 3 8   # Inspect B-tree node at offset 37496
-```
-
-### Binary File Inspection with Julia
-
-**Reading raw file structure**:
-
-```julia
-# Read at specific offset (RelOffset is relative to superblock at 512)
+# Read raw bytes at specific offset
 io = open("file.jld2", "r")
-seek(io, 512 + rel_offset)  # Convert RelOffset to absolute position
+seek(io, 512 + rel_offset.offset)  # RelOffset to absolute
+bytes = read(io, 64)
 
-# Read and verify signatures
-sig = read(io, UInt32)
-println("Signature: 0x$(string(sig, base=16))")
-
-# For B-tree nodes, expected: htol(0x45455254) = "TREE"
-# For object headers, expected: 0x5244484f = "OHDR"
-
-# Read node header
-node_type = read(io, UInt8)
-node_level = read(io, UInt8)
-entries_used = read(io, UInt16)
-
-close(io)
-```
-
-**Hex dump analysis**:
-
-```julia
-# Read and display as hex for manual inspection
-io = open("file.jld2", "r")
-seek(io, absolute_offset)
-bytes = read(io, 64)  # Read 64 bytes
+# Display with annotations
+println("Offset $(position(io)):")
+println("  Signature: $(bytes[1:4])  # Expected: TREE/OHDR/FADB")
+println("  Type/Level: $(bytes[5:6])")
+println("  Entries: $(reinterpret(UInt16, bytes[7:8])[1])")
 println("Hex: $(join(string.(bytes, base=16, pad=2), " "))")
-close(io)
 ```
 
-### Debugging Workflow for File Format Issues
-
-1. **Verify structure with h5dump first**:
-
-   - Check that dataset exists and has expected properties
-   - Verify chunking is enabled and chunk dimensions are correct
-   - Confirm DataLayout version (v3 for V1 B-tree)
-
-2. **Inspect B-tree structure with h5debug**:
-
-   - Verify root node offset matches DataLayout message
-   - Check node levels and entry counts
-   - Validate child offsets point to valid nodes
-   - Examine key values for correctness
-
-3. **Binary inspection for detailed debugging**:
-
-   - Read raw bytes at specific offsets to verify what was written
-   - Compare written vs expected values byte-by-byte
-   - Check signature bytes match expected format
-   - Validate offset calculations (RelOffset + 512 = absolute)
-
-4. **Cross-validate with external tools**:
-   - If h5dump shows zeros, chunks aren't being found (B-tree navigation issue)
-   - If h5dump shows correct data, reading logic is the problem
-   - If h5debug reports structure errors, writing logic is the problem
-
-### Common Offset Calculations
-
-**RelOffset to absolute position**:
+### Intelligent Pattern Recognition
 
 ```julia
-fileoffset(f, rel_offset) = rel_offset.offset + f.base_address  # base_address = 512
-absolute_pos = 512 + rel_offset.offset
+# Auto-detect HDF5 signatures in hex dump
+function analyze_hex(bytes)
+    sig = reinterpret(UInt32, bytes[1:4])[1]
+    if sig == htol(0x45455254)
+        println("B-tree node (TREE)")
+    elseif sig == 0x5244484f
+        println("Object header (OHDR)")
+    elseif sig == 0x42444146
+        println("Fixed array data block (FADB)")
+    end
+end
 ```
 
-**B-tree node structure sizes**:
+### Side-by-Side Comparison
+
+Note, this is only useful if you are, for example, comparing object headers where you have already correctly identified the correct offsets within each of the files.
 
 ```julia
-# Node header: 24 bytes
-# - Signature: 4 bytes (UInt32)
-# - Node type: 1 byte (UInt8)
-# - Node level: 1 byte (UInt8)
-# - Entries used: 2 bytes (UInt16)
-# - Left sibling: 8 bytes (RelOffset)
-# - Right sibling: 8 bytes (RelOffset)
+# Compare working (h5py) vs broken (JLD2) files
+function compare_at_offset(file1, file2, offset1, offset2, nbytes=64)
+    io1 = open(file1, "r"); seek(io1, offset1)
+    io2 = open(file2, "r"); seek(io2, offset2)
 
-# Entry (interleaved format):
-# - Key: 4 (chunk_size) + 4 (filter_mask) + 8*N (indices) bytes
-# - Child offset: 8 bytes (RelOffset)
+    bytes1 = read(io1, nbytes)
+    bytes2 = read(io2, nbytes)
 
-# For 2D array (3 indices including element size):
-entry_size = 4 + 4 + 8*3 + 8 = 40 bytes
+    for i in 1:nbytes
+        if bytes1[i] != bytes2[i]
+            println("Diff at +$i: $(bytes1[i]) vs $(bytes2[i])")
+        end
+    end
+end
 ```
 
-### Debugging Data Corruption
+## @pseudostruct Field Patterns
 
-**Systematic approach**:
+The @pseudostruct macro generates four functions for each header message.
 
-1. **Verify chunks are written correctly**:
+- `jlwrite(::IO, ::Val{<message name>}, hflags, hsize, kw)`
+- `jlsizeof(::Val{<message name>}, hflags=0x00, size=0; kwargs...)`
+- `Base.show(io::IO, hm::Hmessage)`
+- `getproperty(::HmWrap{<message name>, IO}, <property name>)`
+
+This code generation is a complex but well tested process.
+Before testing the code generation you should check if it is a usage error or whether the message definition does not adhere to the format specification.
+
+### Field Role Classification
 
 ```julia
-# Check first chunk data at its offset
+# 1. SIZE PARAMETERS (always required)
+data_size::@Int(2)        # Used in increments
+name_len::UInt16          # Determines other field sizes
+
+# 2. CONTENT FIELDS (can skip in compute_size)
+data::@Blob(data_size)    # Pure data storage
+name::@FixedLengthString(name_len)  # Content only
+
+# 3. CONTROL FIELDS (required for conditions)
+layout_class::LayoutClass # Used in if statements
+flags::UInt8              # Determines conditional fields
+
+# 4. FIELDS WITH DEFAULTS (use default if not provided)
+shared_field::RelOffset = UNDEFINED_ADDRESS  # Has fallback
+```
+
+**WARNING**: Cannot use `isdefined()` on @pseudostruct message objects - always returns false. Trust field definitions.
+
+### Conditional Field Patterns
+
+```julia
+# HmLinkMessage requires both size and data for link_type
+if flags & 0x10 != 0  # Bit 3 set
+    link_type::UInt8
+    link_info_size::@Int(2)
+    link_info::@Blob(link_info_size)
+end
+```
+
+## Chunked Data Implementation
+
+### DataLayout Dimensions Critical Rule
+
+For chunked layouts:
+
+- `DataLayout.dimensions` = **chunk dimensions** (NOT array dimensions)
+- Array dimensions go in `HmDataspace` message
+- Common bug: storing array dims causes chunk iteration failure
+
+### Chunk Padding (Mandatory)
+
+```julia
+# All chunks must be same size, even partial edge chunks
+if actual_chunk_size != chunks
+    full_chunk = zeros(T, chunks)
+    ranges = ntuple(i -> 1:actual_chunk_size[i], N)
+    full_chunk[ranges...] = chunk_data_partial
+    chunk_data = full_chunk
+end
+```
+
+### Linear Index Calculation
+
+Must exactly match between read/write:
+
+```julia
+# Precompute for HDF5 ordering
+grid_dims_hdf5 = reverse(grid_dims)
+down_chunks = zeros(Int, ndims_hdf5)
+acc = 1
+for i in ndims_hdf5:-1:1
+    down_chunks[i] = acc
+    acc *= grid_dims_hdf5[i]
+end
+
+# Convert Julia index to HDF5 linear index
+hdf5_coords = reverse(Tuple(julia_idx) .- 1)  # 0-based, reversed
+linear_idx = sum(down_chunks .* hdf5_coords)
+```
+
+## Variable-Size Field Patterns
+
+### Pattern Recognition for Reuse
+
+Many HDF5 structures share variable-size patterns. Check existing code:
+
+```julia
+# Fractal Heap pattern (reusable)
+field_size = cld(Int(max_bits), 8)  # Bits to bytes
+value = if field_size == 1
+    UInt64(jlread(io, UInt8))
+elseif field_size == 2
+    UInt64(jlread(io, UInt16))
+elseif field_size == 4
+    UInt64(jlread(io, UInt32))
+else
+    jlread(io, UInt64)
+end
+```
+
+### Address Type Variations
+
+```julia
+# Different v4 indexing types use different address formats
+# Fixed Array (Type 3): RelOffset
+base_address = fileoffset(f, layout.data_offset)
+
+# Implicit Index (Type 2): Int64
+base_address = Int64(layout.data_offset)
+
+# Single Chunk (Type 1): RelOffset
+chunk_address = fileoffset(f, layout.data_offset)
+```
+
+### Structure Reuse Patterns
+
+Complex HDF5 structures often share patterns that can be reused:
+
+**Identification Strategy:**
+Example:
+
+1. Search codebase for similar field size calculations
+2. Look for `cld(bits, 8)` patterns
+3. Check Fractal Heap implementation for heap structures
+4. Review existing chunk indexing for shared patterns
+
+## Testing Methodology
+
+### Validation Pattern for New Features
+
+**ALWAYS validate file format before testing functionality:**
+
+1. Use debugging tool like `JLD2.print_header_messages(f, dataset_name)` to verify the expected header messages are present and correct
+2. **Independent End-to-End Tests**: Create tests that truly exercise the complete file format, not just individual processing functions
+3. **Verify Storage Path**: Confirm the intended storage mechanism was actually used (e.g., DataLayout version 3 for V1 B-tree, not regular storage)
+
+```julia
+# ✅ CORRECT - Test complete file format
+JLD2.write_chunked_array(f, "test", data)
+JLD2.print_header_messages(f, "test")  # Verify expected messages
+
+# ❌ WRONG - Tests function but uses regular storage
+process_with_feature(data)
+f["test"] = data  # Bypasses feature, uses regular format!
+```
+
+### Progressive Testing Strategy
+
+1. **Start Simple**: Even chunks, basic types
+2. **Add Complexity**: Partial chunks, edge cases
+3. **Threshold Analysis**: Find exact corruption boundaries
+   ```julia
+   # Test incrementally to find feature activation
+   for size in [10, 100, 1000, 10000]
+       test_with_size(size)
+   end
+   ```
+4. **Element-Level Analysis**:
+   ```julia
+   data = reshape(Float32.(1:300), dims...)  # Predictable pattern
+   @test data[1] == 1.0     # First element
+   @test data[end] == 300.0  # Last element
+   ```
+
+### External Validation & Debugging
+
+```bash
+# HDF5 tools
+h5dump -H file.jld2              # Structure without data
+h5ls -r -v --address file.jld2   # Dataset offsets
+h5debug file.jld2 offset          # Inspect specific offset
+h5debug file.jld2 <btree_offset> <ndims> <dim1> <dim2> ...  # Debug B-tree node
+h5ls -r -v --address file.jld2   # Quickly reveal dataset offsets
+
+# h5py cross-validation
+python3 -c "import h5py; f=h5py.File('test.h5'); print(f['dataset'][:].sum())"
+```
+
+```python
+# h5py validation script
+import h5py
+f = h5py.File('test.h5', 'r')
+print('Shape:', f['dataset'].shape)
+print('Sum:', f['dataset'][:].sum())
+```
+
+### Test File Creation for Specific Features
+
+```python
+import h5py
+# Implicit Index - requires early allocation
+dcpl = h5py.h5p.create(h5py.h5p.DATASET_CREATE)
+dcpl.set_alloc_time(h5py.h5d.ALLOC_TIME_EARLY)
+
+# Extensible Array - requires maxshape
+f.create_dataset('data', shape=(10,10), maxshape=(None,None))
+```
+
+### Adding test files to the test suite to protect against regressions
+
+## Testing Patterns
+
+- Each test file focuses on a specific aspect (groups, compression, etc.)
+- `test/runtests.jl` orchestrates all tests and handles filter package setup
+- Uses `@testitem` macros for package-level testing with TestItemRunner
+- Tests include compatibility with external HDF5 tools and legacy formats
+- New test files intended to representatively test newly implemented features must be added to the runtests.jl files
+
+## Debugging Patterns
+
+### Strategic Debug Output
+
+```julia
+# GOOD: Key decision points only
+if chunk_idx == CartesianIndex(1, 1)
+    println("DEBUG first chunk:")
+    println("  address: $chunk_address (expected: 2048)")
+    println("  key: $key_values")
+end
+# Remove before commit
+```
+
+### Common Bug Patterns
+
+**Index Offset Confusion:**
+
+```julia
+# BUG: Mixing 1-based and 0-based
+chunk_root = CartesianIndex(indices .* dims .+ 1)  # Julia 1-based
+vidxs = chunk_ids .+ chunk_root  # Double offset!
+
+# FIX: Zero-based offset for chunks
+chunk_root = CartesianIndex(indices .* dims)  # 0-based offset
+vidxs = chunk_ids .+ chunk_root
+```
+
+**Dimension Ordering:**
+
+- Symptom: Data appears scrambled/transposed
+
+```julia
+# BUG: Forgot to reverse for HDF5
+dimensions = size(data)  # Wrong order
+
+# FIX: Always reverse for HDF5
+dimensions = reverse(size(data))
+```
+
+Also: HDF5 often-times interprets the element size as an extra (fastest-changing) dimension
+
+### Binary File Inspection
+
+```julia
+# Verify signatures
 io = open("file.jld2", "r")
+seek(io, 512 + rel_offset.offset)
+sig = read(io, UInt32)
+
+# Expected signatures:
+# B-tree: htol(0x45455254) = "TREE"
+# Object: 0x5244484f = "OHDR"
+# Fixed Array Header: 0x44484146 = "FAHD"
+# Fixed Array Data: 0x42444146 = "FADB"
+
+# Verify data at chunk offset
 seek(io, 512 + chunk_offset)
-chunk_data = read(io, chunk_size)
-# Convert to expected type and verify values
+chunk_bytes = read(io, chunk_size_bytes)
+chunk_data = reinterpret(Float32, chunk_bytes)
+println("First values: ", chunk_data[1:min(5, end)])
 ```
 
-2. **Verify B-tree keys are correct**:
+## V1 B-tree Specifics
+
+### Key Format Rules
+
+- Keys are **0-based element positions**, NOT chunk numbers
+- Format: `(element_indices..., 0)` where last is always 0
+- Example for 30×80 array with 3×2 chunks:
+  - Chunk at Julia (1,1) → key (0, 0, 0)
+  - Chunk at Julia (1,3) → key (4, 0, 0) # Element position!
+- Boundary key = array dimensions (one past last valid)
+
+## Error Handling Best Practices
+
+- **Avoid try-catch**: Indicates poor design. Return well-defined values
+- Include context: file paths, operation type, offsets
+- Use specific error types: `InvalidDataException`, `UnsupportedFeatureException`
+- Test with `@test_throws Union{ErrorType1, ErrorType2}` for platform differences
+- Preserve original error types while adding context
+
+## Code Organization
+
+### Multi-Structure Features
+
+```
+src/feature_name.jl
+  - read_feature()        # Entry point
+  - read_structure_a()    # Structure-specific
+  - read_structure_b()    # Structure-specific
+  - shared_utilities()    # Reusable helpers
+```
+
+**Benefits:**
+
+- Clear navigation following structure hierarchy
+- Easy independent testing
+- Minimal coupling between features
+- Functions map to specification sections
+
+### Type Flexibility
 
 ```julia
-# Keys should have 0-based element indices (not chunk counts!)
-# For 30×80 array with 3×2 chunks:
-# Chunk at Julia (1,1) → key indices (0, 0, 0) in HDF5 order
-# Chunk at Julia (1,3) → key indices (2, 0, 0) in HDF5 order
-# Boundary key should be (80, 30, 0) - one past array dims
+# GOOD: Flexible type signatures
+f(xs::AbstractVector{<:Integer}) = ...
+
+# BAD: Overly strict
+f(xs::Vector{Int64}) = ...
 ```
 
-3. **Verify internal node keys**:
+### Remark: Difference between good library code and good development code
 
-```julia
-# Internal nodes: Key[i] describes minimum key in Child[i]
-# Must read actual keys from child nodes, not use dummy values
-# Boundary key is from last key of last child node
-```
+- Good library code uses multiple dispatch to use meaningful function names for all implementations that serve a similar purpose.
+- Good library code is structured into separate modules encapsulating specific features and all associated helper functions and only exposing relevant API functions to the top-level package.
+- Good development code on the other hand must reduce risk unnecessary errors:
+  - Use unique function and descriptive names for every new function to easily detect code paths while debugging
+  - Do not use separate modules and name spaces to avoid scope issues while focusing on the actual features.
 
-### V1 B-tree Specific Debugging
+## Performance & Development Speed
 
-**Key format validation**:
+- Target 32KB chunks for optimal I/O
+- Use `julia -O1 <args>` during development (faster precompilation)
+- Use `-O2` only for benchmarks
+- Memory-mapped I/O default, buffered fallback
+- Groups use OrderedDict (maintain insertion order)
+- WeakRef caching for external files (max 32, LRU eviction)
 
-- Chunk indices are **0-based element positions** of first element in chunk
-- NOT chunk numbers (0, 1, 2, ...) but actual array element indices
-- Example: 5×3 tiling has indices like (0,0,0), (0,5,0), (3,0,0), (3,5,0)
-- Last index (datatype offset) must always be 0
-- Boundary key = array dimensions in 0-based (one past last valid index)
+## Link System & Security
 
-**Node traversal validation**:
+- AbstractLink hierarchy: HardLink, SoftLink, ExternalLink
+- Security: Validate paths, limit "../" traversal
+- Task-local reference chain tracking for circular detection
+- Exponential backoff for transient failures
+- Use `lookup_link` for new code, `lookup_offset` for compatibility
 
-- Internal nodes have level > 0, children point to other B-tree nodes
-- Leaf nodes have level = 0, children point to chunk data
-- Each node must have valid TREE signature at its offset
-- Child offsets must be valid RelOffset values, not confused with chunk_size
+## Development Workflow
 
-**Common bugs**:
+1. **Phase-based approach**: Isolate functionality
+2. **Minimal reproductions**:
+   ```julia
+   # test_edge_case.jl
+   data = CustomType(1, 2.0)  # Trigger specific path
+   jldopen("minimal.jld2", "w") do f
+       f["test"] = data
+   end
+   ```
+3. **External validation**: Always compare with h5py
+4. **New feature testing**: Add concise and meaningful test to the test suite. Test them individually first
+5. **Full test suite**: Run at the end of a developent effort to ensure everything still works
+6. **Documentation**: End each phase with continuation prompt referencing DEVELOPMENT_INSIGHTS.md
 
-- Reading `dimensionality + 1` indices when DataLayout dimensionality already includes element size
-- Using chunk counts instead of element indices for keys
-- Using dummy keys in internal nodes instead of reading from children
-- Confusing chunk_size field with child offset during reading (check interleaved format)
-- Running the full JLD2 test suite takes somewhere between 5 to 7 minutes.
-- You CANNOT call `isdefined` on a header message object. This will always return false. Stop trying it. Trust the definitions in headermessages.jl.
-- Use `h5ls -r -v --address <filename>` to very quickly access offsets of datasets or dataset chunks within hdf5 or jld2 files
-- When developing JLD2, you will often find yourself waiting for JLD2 to precompile. If you are not concerned with runtime performance, use the `-O1` or possibly even `-O0` flag as in `julia -O1` to reduce the optimization and level and hopefully reducing turnaround time.
-- When you write new functions: Do not make the type signatures more strict than needed for correctness. This leads to many bugs while developing. Example: `f(xs::Vector{Int64}) = ...` could likely also be written as `f(xs:AbstractVector{<:Integer})` if it only needs to be indexable and have some kind of interger as values.
+## Critical Gotchas
+
+- `count(x -> x == "..", components)` NOT `count("..", split(...))`
+- RelOffset + 512 = absolute file position (superblock at 512)
+- Chunk dimensions ≠ array dimensions in DataLayout
+- Test suite auto-handles filter packages
+- OrderedCollections import through JLD2 module
+- Groups don't know their file path (architectural limitation)
+- `jlsizeof(RelOffset)` = 8 bytes in JLD2
+
+## When Debugging Complex Issues
+
+1. **Systematic Approach**:
+
+   - Check format with `h5dump -H`
+   - Verify with `JLD2.print_header_messages()`
+   - Compare hex dumps with working h5py files
+   - Read raw bytes at suspicious offsets
+
+2. **Data Corruption Pattern**:
+
+   - Find location where chunk was supposed to be written and verify by accessing bytes directly
+   - Check first/middle/last elements
+   - Loading successful (no error) but data is partially wrong? Check index calculation
+   - Use sequential test data
+   - Isolate to specific pipeline stage
+
+3. **Format Compliance**:
+   - Remember: Functional correctness ≠ format compliance
+   - Data can round-trip in JLD2 while failing h5dump
+   - Always validate against external tools
+
+**Key Insight**: Complex HDF5 structures often share patterns. Search existing code (Fractal Heaps, chunking) before implementing from scratch.
+
+### Format Compliance vs Functional Correctness
+
+**Key Insight:** Data can round-trip correctly within JLD2 while failing external tool compatibility.
+
+**Common Compliance Issues:**
+
+- Byte ordering and padding requirements
+- Message header format with conditional fields
+- Chunk addressing format matching specification
+- Checksum calculations
+
+**Testing Both Aspects:**
+
+1. Functional: Verify data round-trips correctly
+2. Compliance: Verify external tools can read files
+3. Reference: Compare against known-good implementations
+
+## Notes to interact with user:
+
+- When you finish a step of phase of a larger development plan you should ALWAYS end with writing a prompt for a different claude instance to continue the work with concise but well-written instructions. It should reference the development best practices in DEVELOPMENT_INSIGHTS.md.
