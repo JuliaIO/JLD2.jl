@@ -10,6 +10,7 @@ export jldopen, @load, @save, save_object, load_object, jldsave
 export Shuffle, Deflate, ZstdFilter
 export create_external_link!, create_soft_link!, lookup_link
 export AbstractLink, HardLink, SoftLink, ExternalLink
+export WriteChunkedArray, write_chunked
 
 include("types.jl")
 include("links.jl")
@@ -529,6 +530,7 @@ include("implicit_index.jl")
 include("fixed_array.jl")
 include("extensible_array.jl")
 include("v2btree_chunking.jl")
+include("chunked_writing_api.jl")
 include("datasets.jl")
 include("global_heaps.jl")
 include("fractal_heaps.jl")
