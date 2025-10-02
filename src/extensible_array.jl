@@ -1,6 +1,11 @@
 # Extensible Array Index (v4 chunk indexing type 4)
 # Used for datasets with ONE unlimited dimension
 
+# Signature constants
+const EXTENSIBLE_ARRAY_HEADER_SIGNATURE = htol(0x44484145)  # "EAHD"
+const EXTENSIBLE_ARRAY_INDEX_BLOCK_SIGNATURE = htol(0x42494145)  # "EAIB"
+const EXTENSIBLE_ARRAY_DATA_BLOCK_SIGNATURE = htol(0x42444145)  # "EADB"
+
 """
     read_extensible_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
 
@@ -297,7 +302,7 @@ function read_chunk_into_array!(f::JLDFile, v::Array, chunk_addr::RelOffset,
         read_array!(chunk_buffer, f, rr)
     else
         # Filtered: use filter pipeline
-        read_chunk_with_filters!(chunk_buffer, f, rr, Int(chunk_size), filters, filter_mask)
+        read_chunk_with_filters!(chunk_buffer, f, rr, Int(chunk_size), filters, Int64(filter_mask))
     end
 
     # Copy buffer to array slice

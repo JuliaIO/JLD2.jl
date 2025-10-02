@@ -212,9 +212,16 @@ function read_v2btree_leaf_node(f::JLDFile, node_addr::UInt64, record_size::UInt
     type_byte = jlread(f.io, UInt8)
 
     # Calculate number of chunk index fields
-    # record_size = 8 (address) + 8*N (chunk indices)
-    # For 2D: record_size = 24 = 8 + 8*2
-    num_index_dims = (record_size - 8) ÷ 8
+    # Unfiltered: record_size = 8 (address) + 8*N (chunk indices)
+    # Filtered: record_size = 8 (address) + 4 (size) + 4 (filter_mask) + 8*N (chunk indices)
+    # For 2D unfiltered: record_size = 24 = 8 + 8*2
+    # For 2D filtered: record_size = 32 = 8 + 4 + 4 + 8*2
+    header_bytes = if !isempty(filters.filters)
+        16  # address + size + filter_mask
+    else
+        8   # address only
+    end
+    num_index_dims = (record_size - header_bytes) ÷ 8
 
     # Read all records
     chunks = Vector{V2BTreeChunkRecord}()
@@ -224,19 +231,18 @@ function read_v2btree_leaf_node(f::JLDFile, node_addr::UInt64, record_size::UInt
         chunk_addr_value = jlread(f.io, UInt64)
         chunk_addr = RelOffset(chunk_addr_value)
 
-        # Read chunk indices (in HDF5 order, 0-based)
-        chunk_indices_hdf5_0based = UInt64[jlread(f.io, UInt64) for _ in 1:num_index_dims]
+        # Read chunk size and filter mask if filters are present
+        chunk_size = chunk_size_bytes
+        filter_mask = UInt32(0)
 
-        # For filtered chunks, size would be stored in additional record fields
-        # Current implementation assumes no filters (standard for v2 B-tree type 10)
-        chunk_size = if isempty(filters.filters)
-            chunk_size_bytes
-        else
-            # TODO: Read size from record if filters are present
-            chunk_size_bytes
+        if !isempty(filters.filters)
+            # Filtered record format: address, size, filter_mask, indices
+            chunk_size = Int(jlread(f.io, UInt32))
+            filter_mask = jlread(f.io, UInt32)
         end
 
-        filter_mask = UInt32(0)
+        # Read chunk indices (in HDF5 order, 0-based)
+        chunk_indices_hdf5_0based = UInt64[jlread(f.io, UInt64) for _ in 1:num_index_dims]
 
         # Convert chunk indices to Julia order and 1-based
         # V2 B-tree stores in HDF5 order (slowest to fastest varying)

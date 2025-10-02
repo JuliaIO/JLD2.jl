@@ -12,6 +12,9 @@ julia -e 'using Pkg; Pkg.test("JLD2")'  # Full suite: 5-7 minutes
 # Fast development iteration (reduce compilation)
 julia -O1 --project test_script.jl  # Reduces precompilation time
 
+# ❌ WRONG - There is no way to select specific tests to run in this way! This runs the full tests!
+julia --project -e 'using Pkg; Pkg.test("JLD2"; test_args=["<some testset>"])
+
 # Build docs
 julia --project=docs docs/make.jl
 ```
@@ -567,4 +570,4 @@ f(xs::Vector{Int64}) = ...
 
 ## Notes to interact with user:
 
-- When you finish a step of phase of a larger development plan you should ALWAYS end with writing a prompt for a different claude instance to continue the work with concise but well-written instructions. It should reference the development best practices in DEVELOPMENT_INSIGHTS.md.
+- When you finish a step of phase of a larger development plan you should ALWAYS end with writing a prompt for a different claude instance to continue the work with concise but well-written instructions and referencing further markdown files that can provide additional information.

@@ -302,7 +302,7 @@ end
 
 """
     read_chunk_with_filters!(vchunk::Array, f::JLDFile, rr, chunk_size::Int,
-                            filters::FilterPipeline, filter_mask::Int)
+                            filters::FilterPipeline, filter_mask::UInt32)
 
 Read chunk data from the current position in `f`, applying decompression based on
 `filters` and `filter_mask`. The `filter_mask` indicates which filters were skipped
@@ -314,8 +314,9 @@ function read_chunk_with_filters!(
     rr,
     chunk_size::Int,
     filters::FilterPipeline,
-    filter_mask::Int
+    filter_mask
 )
+    filter_mask = UInt32(filter_mask)
     if iscompressed(filters)
         if filter_mask == 0
             read_compressed_array!(vchunk, f, rr, chunk_size, filters)

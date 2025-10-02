@@ -101,10 +101,9 @@ function compute_chunk_index(chunk_indices::Tuple, nchunks::Tuple)
 end
 
 """
-    lookup_chunk_address_fixed_array(f::JLDFile, layout::DataLayout,
-                                     chunk_indices::Tuple, array_dims::Tuple) -> Union{RelOffset, Nothing}
+    lookup_chunk_address_fixed_array(f::JLDFile, layout::DataLayout, chunk_indices::Tuple, array_dims::Tuple)
 
-Look up the file address of a chunk using the Fixed Array index.
+Look up the file address and size of a chunk using the Fixed Array index.
 
 # Arguments
 - `f`: JLD2 file
@@ -113,7 +112,9 @@ Look up the file address of a chunk using the Fixed Array index.
 - `array_dims`: Array dimensions in HDF5 order (fastest to slowest)
 
 # Returns
-RelOffset of the chunk data, or nothing if chunk is not allocated.
+(chunk_address, chunk_size) tuple where:
+- chunk_address is RelOffset to chunk data (or nothing if not allocated)
+- chunk_size is compressed size in bytes (or nothing if no compression or not allocated)
 """
 function lookup_chunk_address_fixed_array(f::JLDFile, layout::DataLayout,
                                          chunk_indices::Tuple, array_dims::Tuple)
@@ -221,10 +222,17 @@ function lookup_chunk_address_fixed_array(f::JLDFile, layout::DataLayout,
 
         # UNDEFINED_ADDRESS means chunk not allocated
         if chunk_address == UNDEFINED_ADDRESS
-            return nothing
+            return (nothing, nothing)
         end
 
-        return chunk_address
+        # If filtered (client_id == 1), read chunk size too
+        chunk_size = if header.client_id == 1
+            jlread(io, UInt32)
+        else
+            nothing
+        end
+
+        return (chunk_address, chunk_size)
     else
         # Direct element storage (no paging)
         # Seek to the correct entry in the elements array
@@ -237,10 +245,17 @@ function lookup_chunk_address_fixed_array(f::JLDFile, layout::DataLayout,
 
         # UNDEFINED_ADDRESS means chunk not allocated
         if chunk_address == UNDEFINED_ADDRESS
-            return nothing
+            return (nothing, nothing)
         end
 
-        return chunk_address
+        # If filtered (client_id == 1), read chunk size too
+        chunk_size = if header.client_id == 1
+            jlread(io, UInt32)
+        else
+            nothing
+        end
+
+        return (chunk_address, chunk_size)
     end
 end
 
@@ -288,8 +303,8 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
         # Add element size dimension (always 0)
         chunk_indices_with_elemsize = tuple(hdf5_element_indices_0based..., 0)
 
-        # Look up chunk address
-        chunk_address = lookup_chunk_address_fixed_array(f, layout,
+        # Look up chunk address and size
+        chunk_address, compressed_size = lookup_chunk_address_fixed_array(f, layout,
                                                          chunk_indices_with_elemsize,
                                                          array_dims_hdf5)
 
@@ -306,9 +321,13 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
         # Create temporary array for this chunk
         vchunk = Array{T, ndims}(undef, chunk_dims_julia...)
 
-        # Determine actual chunk size in bytes
-        # For non-filtered chunks, size = prod(chunk_dims) * sizeof(T)
-        chunk_size_bytes = Int(prod(chunk_dims_julia) * sizeof(T))
+        # Determine chunk size in bytes
+        # If compressed, use the stored compressed size; otherwise use uncompressed size
+        chunk_size_bytes = if !isnothing(compressed_size)
+            Int(compressed_size)
+        else
+            Int(prod(chunk_dims_julia) * sizeof(T))
+        end
 
         # Read chunk data with filter support
         filter_mask = 0  # Fixed Array header.client_id tells us if filtered, but individual chunks have no filter mask

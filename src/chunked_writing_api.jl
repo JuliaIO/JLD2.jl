@@ -2,6 +2,13 @@
 # This module provides high-level API for writing chunked datasets with automatic
 # chunk index type selection matching h5py semantics.
 
+#=============================================================================
+# Constants
+=============================================================================#
+
+# HDF5 constant for unlimited dimension size
+const H5S_UNLIMITED = 0xFFFFFFFFFFFFFFFF
+
 """
     WriteChunkedArray{T,N,A<:AbstractArray{T,N}} <: AbstractArray{T,N}
 
@@ -162,6 +169,33 @@ function validate_maxshape(maxshape::NTuple{M,Union{Int,Nothing}}, data_size::NT
         "maxshape dimensions ($M) must match data dimensions ($N). " *
         "Got maxshape=$maxshape for data of size $data_size"
     ))
+end
+
+"""
+    convert_maxshape_to_hdf5(maxshape::NTuple{N,Union{Int,Nothing}})
+
+Convert Julia maxshape format to HDF5 max dimension format.
+
+In Julia (column-major):
+- `nothing` means unlimited dimension
+- Dimensions are in Julia order (fastest-varying first)
+
+In HDF5:
+- `H5S_UNLIMITED` (0xFFFFFFFFFFFFFFFF) means unlimited dimension
+- Dimensions are reversed (slowest-varying first)
+
+# Example
+```julia
+convert_maxshape_to_hdf5((nothing, 100))  # Returns (100, H5S_UNLIMITED)
+convert_maxshape_to_hdf5((10, nothing))   # Returns (H5S_UNLIMITED, 10)
+```
+"""
+function convert_maxshape_to_hdf5(maxshape::NTuple{N,Union{Int,Nothing}}) where N
+    hdf5_max = map(maxshape) do dim
+        # H5S_UNLIMITED is 0xFFFFFFFFFFFFFFFF, which is -1 when reinterpreted as Int64
+        isnothing(dim) ? reinterpret(Int64, UInt64(H5S_UNLIMITED)) : Int64(dim)
+    end
+    return reverse(hdf5_max)  # Reverse for HDF5 dimension ordering
 end
 
 """
@@ -841,22 +875,13 @@ function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
     @assert f.writable "File must be writable"
     @assert all(chunks .<= size(data)) "Chunk dimensions must be <= data dimensions"
 
-    # TODO: Compression support for Fixed Array chunks needs investigation
-    # The current reading code may not handle compressed Fixed Array chunks correctly
-    if !isnothing(filters)
-        throw(UnsupportedFeatureException(
-            "Compression/filters are not yet supported for Fixed Array (Type 3) chunk indexing. " *
-            "Use single chunk indexing for compressed datasets, or disable filters for Fixed Array."
-        ))
-    end
-
     # Get datatype and object data representation
     odr = objodr(data)
     datatype = h5type(f, data)
     dataspace = WriteDataspace(f, data, odr)
 
-    # Normalize filters
-    normalized_filters = nothing  # Disabled for now
+    # Normalize filters (convert symbols like :gzip to FilterPipeline)
+    normalized_filters = isnothing(filters) ? nothing : Filters.normalize_filters(filters)
 
     # Calculate chunk grid dimensions
     grid_dims = cld.(size(data), chunks)
@@ -871,8 +896,9 @@ function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
         end)
     end
 
-    # Write all chunks and collect their addresses
+    # Write all chunks and collect their addresses and sizes
     chunk_addresses = Array{RelOffset,N}(undef, grid_dims...)
+    chunk_sizes = isnothing(filter_pipeline) ? nothing : Array{UInt32,N}(undef, grid_dims...)
     wsession = JLDWriteSession()
 
     for chunk_idx in CartesianIndices(grid_dims)
@@ -916,18 +942,22 @@ function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
         write(f.io, chunk_bytes)
         f.end_of_data = chunk_offset + sizeof(chunk_bytes)
 
-        # Store chunk address
+        # Store chunk address and size
         chunk_addresses[chunk_idx] = h5offset(f, chunk_offset)
+        if !isnothing(filter_pipeline)
+            chunk_sizes[chunk_idx] = UInt32(sizeof(chunk_bytes))
+        end
     end
 
     # Write Fixed Array data block
     # Calculate data block size
-    entry_size = UInt8(jlsizeof(RelOffset))  # 8 bytes per chunk address
+    # Entry size: 8 bytes (address) for unfiltered, 12 bytes (address + size) for filtered
+    entry_size = isnothing(filter_pipeline) ? UInt8(8) : UInt8(12)
     db_size = 4 +  # signature
               1 +  # version
               1 +  # client_id
               8 +  # header address (will be filled later)
-              n_chunks * entry_size +  # chunk addresses
+              n_chunks * entry_size +  # chunk addresses (and sizes if filtered)
               4    # checksum
 
     data_block_offset = f.end_of_data
@@ -971,6 +1001,9 @@ function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
         acc *= grid_dims_hdf5[i]
     end
 
+    # Also create linear array for sizes if filtered
+    chunk_sizes_linear = isnothing(filter_pipeline) ? nothing : Vector{UInt32}(undef, n_chunks)
+
     for julia_idx in CartesianIndices(grid_dims)
         # Convert Julia chunk coordinates to HDF5 coordinates (0-based, reversed)
         hdf5_coords = reverse(Tuple(julia_idx) .- 1)
@@ -982,11 +1015,17 @@ function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
         end
 
         chunk_addresses_linear[linear_idx + 1] = chunk_addresses[julia_idx]
+        if !isnothing(filter_pipeline)
+            chunk_sizes_linear[linear_idx + 1] = chunk_sizes[julia_idx]
+        end
     end
 
-    # Write in linear order
-    for addr in chunk_addresses_linear
-        jlwrite(db_cio, addr)
+    # Write addresses and sizes in linear order
+    for i in 1:n_chunks
+        jlwrite(db_cio, chunk_addresses_linear[i])
+        if !isnothing(filter_pipeline)
+            jlwrite(db_cio, chunk_sizes_linear[i])
+        end
     end
 
     # Write checksum
@@ -1122,16 +1161,795 @@ function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
     return dataset_offset
 end
 
-function _write_extensible_array(f, name, data, chunks, maxshape, filters)
-    throw(UnsupportedFeatureException(
-        "Extensible array writing (Type 4) not yet implemented. " *
-        "This will be available in Phase 4."
-    ))
+"""
+    _write_extensible_array(f::JLDFile, name::String, data::AbstractArray, chunks, maxshape, filters)
+
+Write a dataset using Extensible Array indexing (Type 4).
+
+Extensible Array is used for datasets with exactly one unlimited dimension.
+It uses a multi-level index structure (Header → Index Block → Data Blocks) that can
+grow dynamically as the dataset is extended.
+
+For initial implementation, we support cases where all chunks fit in the index block directly
+(no data blocks needed).
+
+# Arguments
+- `f::JLDFile` - File handle (must be writable)
+- `name::String` - Dataset name
+- `data::AbstractArray` - Data to write
+- `chunks` - Chunk dimensions
+- `maxshape` - Maximum shape (must have exactly 1 unlimited dimension)
+- `filters` - Optional compression filters (not yet supported)
+"""
+function _write_extensible_array(f::JLDFile, name::String, data::AbstractArray{T,N},
+                                  chunks, maxshape, filters) where {T,N}
+    # Validate inputs
+    @assert f.writable "File must be writable"
+    @assert all(chunks .<= size(data)) "Chunk dimensions must be <= data dimensions"
+
+    # Extensible array requires exactly 1 unlimited dimension
+    if isnothing(maxshape)
+        throw(ArgumentError(
+            "Extensible array (Type 4) requires at least one unlimited dimension. " *
+            "Provide maxshape with at least one nothing element (e.g., maxshape=(nothing, 100))."
+        ))
+    end
+
+    n_unlimited = count(isnothing, maxshape)
+    if n_unlimited == 0
+        throw(ArgumentError(
+            "Extensible array (Type 4) requires at least one unlimited dimension. " *
+            "Use Fixed Array (Type 3) for fixed-size datasets."
+        ))
+    end
+
+    # Get datatype and object data representation
+    odr = objodr(data)
+    datatype = h5type(f, data)
+    dataspace = WriteDataspace(f, data, odr)
+
+    # Normalize filters (convert symbols like :gzip to FilterPipeline)
+    normalized_filters = isnothing(filters) ? nothing : Filters.normalize_filters(filters)
+
+    # Prepare filter pipeline for chunk compression
+    filter_pipeline = if isnothing(normalized_filters)
+        nothing
+    else
+        FilterPipeline(map(normalized_filters) do filter
+            Filters.set_local(filter, odr, dataspace, ())
+        end)
+    end
+
+    # Calculate chunk grid dimensions
+    grid_dims = cld.(size(data), chunks)
+    n_chunks = prod(grid_dims)
+
+    # Calculate chunk size in bytes
+    chunk_size_bytes = prod(chunks) * odr_sizeof(odr)
+
+    # Extensible Array parameters (matching h5py choices)
+    # These determine the index structure size and growth behavior
+    max_nelmts_bits = UInt8(32)  # Support up to 2^32 chunks
+    index_blk_elmts = UInt8(min(n_chunks, 64))  # Direct elements in index block
+    data_blk_min_elmts = UInt8(16)  # Minimum elements per data block
+    secondary_blk_min_data_ptrs = UInt8(4)  # Minimum pointers per secondary block
+    max_dblk_page_nelmts_bits = UInt8(10)  # Page size bits
+
+    # For initial implementation, ensure all chunks fit in index block
+    if n_chunks > Int(index_blk_elmts)
+        # Could implement data blocks here in future
+        # For now, increase index_blk_elmts to fit all chunks
+        index_blk_elmts = UInt8(min(n_chunks, 255))  # Max UInt8
+        if n_chunks > 255
+            throw(UnsupportedFeatureException(
+                "Extensible arrays with >255 chunks require data block support, " *
+                "which is not yet implemented. Current chunk count: $n_chunks"
+            ))
+        end
+    end
+
+    # Current state (all chunks allocated)
+    nelmts = UInt64(n_chunks)
+    max_index_set = UInt64(n_chunks - 1)  # 0-based
+    num_data_blks = UInt64(0)  # No data blocks in simple case
+    num_secondary_blks = UInt64(0)  # No secondary blocks
+    data_blk_size = UInt64(0)
+    secondary_blk_size = UInt64(0)
+
+    # Element size for index: 8 bytes (address) for unfiltered,
+    # 20 bytes (address 8 + size 8 + filter_mask 4) for filtered
+    element_size = isnothing(filter_pipeline) ? UInt8(8) : UInt8(20)
+
+    # Client ID: 0 for non-filtered chunks, 1 for filtered
+    client_id = isnothing(filter_pipeline) ? UInt8(0) : UInt8(1)
+
+    # Convert maxshape to HDF5 format (needed before psz calculation)
+    hdf5_maxshape = convert_maxshape_to_hdf5(maxshape)
+
+    # Write session for tracking
+    wsession = JLDWriteSession()
+
+    # Step 1: Write all chunks and collect addresses and sizes
+    # Similar to Fixed Array, but we'll store in linear order
+    chunk_addresses = Vector{RelOffset}(undef, n_chunks)
+    chunk_sizes = isnothing(filter_pipeline) ? nothing : Vector{UInt32}(undef, n_chunks)
+
+    # Calculate grid dims in HDF5 order for linear indexing
+    grid_dims_hdf5 = reverse(grid_dims)
+    ndims_hdf5 = length(grid_dims_hdf5)
+
+    # Precompute down_chunks for HDF5 ordering
+    down_chunks = zeros(Int, ndims_hdf5)
+    acc = 1
+    for i in ndims_hdf5:-1:1
+        down_chunks[i] = acc
+        acc *= grid_dims_hdf5[i]
+    end
+
+    # Write chunks in Julia order, but calculate HDF5 linear index
+    for julia_chunk_idx in CartesianIndices(grid_dims)
+        # Calculate data range for this chunk
+        chunk_coords = Tuple(julia_chunk_idx)
+        start_idx = (chunk_coords .- 1) .* chunks .+ 1
+        end_idx = min.(start_idx .+ chunks .- 1, size(data))
+
+        # Extract chunk data
+        chunk_data_partial = data[map(:, start_idx, end_idx)...]
+
+        # For extensible arrays, chunks are stored unpadded (actual size)
+        # The reading code expects this and sizes buffers accordingly
+        chunk_data = chunk_data_partial
+
+        # Prepare chunk bytes (with optional compression)
+        chunk_bytes = if isnothing(filter_pipeline)
+            # No compression - serialize directly
+            io_buf = IOBuffer()
+            write_data(io_buf, f, chunk_data, odr, datamode(odr), wsession)
+            take!(io_buf)
+        else
+            # Apply compression
+            compressed, _ = Filters.compress(filter_pipeline, chunk_data, odr, f, wsession)
+            compressed
+        end
+
+        # Write chunk to file
+        chunk_offset = f.end_of_data
+        seek(f.io, chunk_offset)
+        write(f.io, chunk_bytes)
+        f.end_of_data = chunk_offset + sizeof(chunk_bytes)
+
+        # Calculate HDF5 linear index for this chunk
+        hdf5_coords = reverse(Tuple(julia_chunk_idx) .- 1)  # 0-based, reversed
+        linear_idx = 0
+        for i in 1:ndims_hdf5
+            linear_idx += down_chunks[i] * hdf5_coords[i]
+        end
+
+        # Store chunk address and size at linear index position
+        chunk_addresses[linear_idx + 1] = h5offset(f, chunk_offset)
+        if !isnothing(filter_pipeline)
+            chunk_sizes[linear_idx + 1] = UInt32(sizeof(chunk_bytes))  # Store as UInt32, write as UInt64
+        end
+    end
+
+    # Step 2: Write Index Block
+    # Calculate index block size
+    index_block_size = 4 +  # signature
+                       1 +  # version
+                       1 +  # client_id
+                       8 +  # header address (back-reference)
+                       Int(index_blk_elmts) * Int(element_size) +  # direct elements (with sizes if filtered)
+                       Int(num_data_blks) * jlsizeof(RelOffset) +  # data block addresses
+                       4    # checksum
+
+    index_block_offset = f.end_of_data
+    seek(f.io, index_block_offset)
+    f.end_of_data = index_block_offset + index_block_size
+
+    # Write index block (will update header address later)
+    ib_cio = begin_checksum_write(f.io, index_block_size - 4)
+
+    # Signature
+    jlwrite(ib_cio, EXTENSIBLE_ARRAY_INDEX_BLOCK_SIGNATURE)
+
+    # Version
+    jlwrite(ib_cio, UInt8(0))
+
+    # Client ID
+    jlwrite(ib_cio, client_id)
+
+    # Header address (placeholder, will be updated)
+    header_addr_pos = position(f.io)
+    jlwrite(ib_cio, RelOffset(0))
+
+    # Write direct chunk addresses (and sizes + filter_mask if filtered) in linear order
+    for i in 1:Int(index_blk_elmts)
+        if i <= n_chunks
+            jlwrite(ib_cio, chunk_addresses[i])
+            if !isnothing(filter_pipeline)
+                jlwrite(ib_cio, UInt64(chunk_sizes[i]))  # Write size as UInt64
+                jlwrite(ib_cio, UInt32(0))  # filter_mask (0 = all filters applied)
+            end
+        else
+            # Undefined chunks (shouldn't happen with our current logic)
+            jlwrite(ib_cio, RelOffset(typemax(UInt64)))
+            if !isnothing(filter_pipeline)
+                jlwrite(ib_cio, UInt64(0))  # size
+                jlwrite(ib_cio, UInt32(0))  # filter_mask
+            end
+        end
+    end
+
+    # Write data block addresses (none in simple case)
+    for i in 1:Int(num_data_blks)
+        jlwrite(ib_cio, RelOffset(typemax(UInt64)))
+    end
+
+    # Write checksum
+    jlwrite(f.io, end_checksum(ib_cio))
+
+    # Step 3: Write Extensible Array Header
+    header_size = 4 +  # signature
+                  1 +  # version
+                  1 +  # client_id
+                  1 +  # element_size
+                  1 +  # max_nelmts_bits
+                  1 +  # index_blk_elmts
+                  1 +  # data_blk_min_elmts
+                  1 +  # secondary_blk_min_data_ptrs
+                  1 +  # max_dblk_page_nelmts_bits
+                  8 +  # num_secondary_blks
+                  8 +  # secondary_blk_size
+                  8 +  # num_data_blks
+                  8 +  # data_blk_size
+                  8 +  # max_index_set
+                  8 +  # nelmts
+                  8 +  # index_blk_addr
+                  4    # checksum
+
+    header_offset = f.end_of_data
+    seek(f.io, header_offset)
+    f.end_of_data = header_offset + header_size
+
+    hdr_cio = begin_checksum_write(f.io, header_size - 4)
+
+    # Signature
+    jlwrite(hdr_cio, EXTENSIBLE_ARRAY_HEADER_SIGNATURE)
+
+    # Version
+    jlwrite(hdr_cio, UInt8(0))
+
+    # Client ID
+    jlwrite(hdr_cio, client_id)
+
+    # Element size
+    jlwrite(hdr_cio, element_size)
+
+    # Max nelmts bits
+    jlwrite(hdr_cio, max_nelmts_bits)
+
+    # Index block elmts
+    jlwrite(hdr_cio, index_blk_elmts)
+
+    # Data block min elmts
+    jlwrite(hdr_cio, data_blk_min_elmts)
+
+    # Secondary block min data ptrs
+    jlwrite(hdr_cio, secondary_blk_min_data_ptrs)
+
+    # Max dblk page nelmts bits
+    jlwrite(hdr_cio, max_dblk_page_nelmts_bits)
+
+    # Num secondary blocks
+    jlwrite(hdr_cio, num_secondary_blks)
+
+    # Secondary block size
+    jlwrite(hdr_cio, secondary_blk_size)
+
+    # Num data blocks
+    jlwrite(hdr_cio, num_data_blks)
+
+    # Data block size
+    jlwrite(hdr_cio, data_blk_size)
+
+    # Max index set
+    jlwrite(hdr_cio, max_index_set)
+
+    # Nelmts (current number of elements)
+    jlwrite(hdr_cio, nelmts)
+
+    # Index block address
+    jlwrite(hdr_cio, h5offset(f, index_block_offset))
+
+    # Write checksum
+    jlwrite(f.io, end_checksum(hdr_cio))
+
+    # Update index block header address (now that we know it)
+    current_pos = position(f.io)
+    seek(f.io, header_addr_pos)
+    jlwrite(f.io, h5offset(f, header_offset))
+    seek(f.io, current_pos)
+
+    # Step 4: Write Object Header with DataLayout message
+    # Calculate payload size for object header
+    # Extensible array requires max dimensions in dataspace (flags bit 0 set)
+    psz = jlsizeof(Val(HmDataspace);
+        dataspace.dataspace_type,
+        dimensions=dataspace.size,
+        flags=0x01,  # Bit 0 indicates max dimensions are present
+        max_dimension_size=hdf5_maxshape)
+    psz += jlsizeof(Val(HmDatatype), 1; dt=datatype)
+
+    # Add filter pipeline message size if present
+    if !isnothing(filter_pipeline)
+        psz += Filters.pipeline_message_size(filter_pipeline)
+    end
+
+    # DataLayout message size (version 4, type 4)
+    # Layout flags - 0x02 indicates filters present
+    layout_flags = isnothing(filter_pipeline) ? UInt8(0x00) : UInt8(0x02)
+    dimensionality = UInt8(N + 1)  # +1 for element size dimension
+
+    psz += jlsizeof(Val(HmDataLayout);
+        version = 4,
+        layout_class = LcChunked,
+        flags = layout_flags,
+        dimensionality = dimensionality,
+        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
+        chunk_indexing_type = 4,
+        maxbits = max_nelmts_bits,
+        index_elements = index_blk_elmts,
+        minpointers = secondary_blk_min_data_ptrs,
+        minelements = data_blk_min_elmts,
+        page_bits = max_dblk_page_nelmts_bits,
+        data_address = h5offset(f, header_offset)
+    )
+
+    # Add continuation message size
+    psz += CONTINUATION_MSG_SIZE
+
+    # Calculate full object size
+    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
+
+    # Allocate space for object header and write it
+    obj_header_offset = f.end_of_data
+    seek(f.io, obj_header_offset)
+    f.end_of_data = obj_header_offset + fullsz
+
+    # Write object header
+    cio = begin_checksum_write(f.io, fullsz - 4)
+    jlwrite(cio, ObjectStart(size_flag(psz)))
+    write_size(cio, psz)
+
+    # Write header messages
+    # Extensible array requires max dimensions in dataspace
+    write_header_message(cio, Val(HmDataspace);
+        dataspace.dataspace_type,
+        dimensions=dataspace.size,
+        flags=0x01,  # Bit 0 indicates max dimensions are present
+        max_dimension_size=hdf5_maxshape)
+
+    write_header_message(cio, Val(HmDatatype), 1; dt=datatype)
+
+    # Write filter pipeline message if present
+    if !isnothing(filter_pipeline)
+        Filters.write_filter_pipeline_message(cio, filter_pipeline)
+    end
+
+    # Write DataLayout message (version 4, type 4)
+    write_header_message(cio, Val(HmDataLayout);
+        version = 4,
+        layout_class = LcChunked,
+        flags = layout_flags,
+        dimensionality = dimensionality,
+        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
+        chunk_indexing_type = 4,
+        maxbits = max_nelmts_bits,
+        index_elements = index_blk_elmts,
+        minpointers = secondary_blk_min_data_ptrs,
+        minelements = data_blk_min_elmts,
+        page_bits = max_dblk_page_nelmts_bits,
+        data_address = h5offset(f, header_offset)
+    )
+
+    # Write continuation placeholder and checksum
+    write_continuation_placeholder(cio)
+    jlwrite(f.io, end_checksum(cio))
+
+    # Link dataset to file hierarchy
+    parent_group = f.root_group
+    dataset_offset = h5offset(f, obj_header_offset)
+
+    # Add link to parent group
+    if haskey(parent_group, name)
+        @warn "Overwriting existing dataset" name
+    end
+    parent_group.unwritten_links[name] = HardLink(dataset_offset)
+
+    return dataset_offset
 end
 
-function _write_v2btree(f, name, data, chunks, maxshape, filters)
-    throw(UnsupportedFeatureException(
-        "V2 B-tree writing (Type 5) not yet implemented. " *
-        "This will be available in Phase 5."
-    ))
+"""
+    _write_v2btree(f::JLDFile, name::String, data::AbstractArray, chunks, maxshape, filters)
+
+Write a chunked array with V2 B-tree indexing (Type 5).
+
+V2 B-tree indexing is used for:
+- Datasets with 2 or more unlimited dimensions
+- Very large datasets with >64K chunks
+
+# Implementation Notes
+
+Simplified implementation with depth=0 (single leaf node):
+- All chunk records stored in root leaf node
+- Node size: 2048 bytes (matching h5py)
+- Record size: 8 + 8*ndims (address + chunk indices)
+- Split/merge percentages: 100/40 (matching h5py)
+
+Structure written:
+1. Chunks (unpadded, like Extensible Array)
+2. Leaf node with chunk records
+3. B-tree header
+4. Object header with DataLayout message (version 4, type 5)
+
+# Chunk Record Format
+
+Each record contains:
+- chunk_address (UInt64) - file offset
+- chunk_index_dim_N (UInt64) for each dimension - in HDF5 order, 0-based
+
+For a 2D dataset, record_size = 24 bytes:
+- chunk_address (8 bytes)
+- chunk_index_row (8 bytes) - in HDF5 order
+- chunk_index_col (8 bytes)
+"""
+function _write_v2btree(f::JLDFile, name::String, data::AbstractArray{T,N},
+                        chunks, maxshape, filters) where {T,N}
+    # Validate inputs
+    @assert f.writable "File must be writable"
+    # Note: chunks can be larger than data dimensions (partial chunks allowed)
+
+    # V2 B-tree typically used for 2+ unlimited dimensions
+    if isnothing(maxshape)
+        throw(ArgumentError(
+            "V2 B-tree (Type 5) is typically used for datasets with multiple unlimited dimensions. " *
+            "Provide maxshape with at least two nothing elements (e.g., maxshape=(nothing, nothing))."
+        ))
+    end
+
+    n_unlimited = count(isnothing, maxshape)
+    if n_unlimited == 0
+        throw(ArgumentError(
+            "V2 B-tree (Type 5) requires at least one unlimited dimension. " *
+            "Use Fixed Array (Type 3) for fixed-size datasets."
+        ))
+    end
+
+    # Normalize filters (convert symbols like :gzip to FilterPipeline)
+    normalized_filters = isnothing(filters) ? nothing : Filters.normalize_filters(filters)
+
+    # Get datatype and object data representation
+    odr = objodr(data)
+    datatype = h5type(f, data)
+    dataspace = WriteDataspace(f, data, odr)
+
+    # Prepare filter pipeline for chunk compression
+    filter_pipeline = if isnothing(normalized_filters)
+        nothing
+    else
+        FilterPipeline(map(normalized_filters) do filter
+            Filters.set_local(filter, odr, dataspace, ())
+        end)
+    end
+
+    # Calculate chunk grid dimensions
+    grid_dims = cld.(size(data), chunks)
+    n_chunks = prod(grid_dims)
+
+    # Calculate chunk size in bytes
+    chunk_size_bytes = prod(chunks) * odr_sizeof(odr)
+
+    # V2 B-tree parameters (matching h5py)
+    node_size = UInt32(2048)  # h5py uses 2048 bytes
+    split_percent = UInt8(100)
+    merge_percent = UInt8(40)
+    type_byte = UInt8(10)  # Type 10 for chunked dataset storage
+
+    # Record size calculation
+    # Unfiltered: 8 (address) + 8*N (chunk indices)
+    # Filtered: 8 (address) + 4 (size) + 4 (filter_mask) + 8*N (chunk indices)
+    record_size = if !isnothing(filter_pipeline)
+        UInt16(8 + 4 + 4 + 8 * N)
+    else
+        UInt16(8 + 8 * N)
+    end
+
+    # For simplified implementation: depth=0 (single leaf node)
+    depth = UInt16(0)
+
+    # Calculate max records that fit in leaf node
+    # node_size = 4 (sig) + 1 (ver) + 1 (type) + num_records * record_size + 4 (checksum)
+    max_records_per_node = (node_size - 10) ÷ record_size
+
+    if n_chunks > max_records_per_node
+        throw(UnsupportedFeatureException(
+            "V2 B-tree with >$max_records_per_node chunks requires internal nodes (depth>0), " *
+            "which is not yet implemented. Current chunk count: $n_chunks. " *
+            "Consider using larger chunks to reduce the number of chunks."
+        ))
+    end
+
+    # Convert maxshape to HDF5 format (needed before psz calculation)
+    hdf5_maxshape = convert_maxshape_to_hdf5(maxshape)
+
+    # Write session for tracking
+    wsession = JLDWriteSession()
+
+    # Step 1: Write all chunks and collect addresses
+    # For unfiltered: (chunk_address, chunk_indices_hdf5_0based)
+    # For filtered: (chunk_address, chunk_size, filter_mask, chunk_indices_hdf5_0based)
+    if !isnothing(filter_pipeline)
+        chunk_records = Vector{Tuple{RelOffset, UInt32, UInt32, Vector{UInt64}}}(undef, n_chunks)
+    else
+        chunk_records = Vector{Tuple{RelOffset, Vector{UInt64}}}(undef, n_chunks)
+    end
+
+    # Calculate grid dims in HDF5 order for linear indexing
+    grid_dims_hdf5 = reverse(grid_dims)
+    ndims_hdf5 = length(grid_dims_hdf5)
+
+    # Precompute down_chunks for HDF5 ordering
+    down_chunks = zeros(Int, ndims_hdf5)
+    acc = 1
+    for i in ndims_hdf5:-1:1
+        down_chunks[i] = acc
+        acc *= grid_dims_hdf5[i]
+    end
+
+    # Write chunks in Julia order, calculate HDF5 linear index
+    for julia_chunk_idx in CartesianIndices(grid_dims)
+        # Calculate data range for this chunk
+        chunk_coords = Tuple(julia_chunk_idx)
+        start_idx = (chunk_coords .- 1) .* chunks .+ 1
+        end_idx = min.(start_idx .+ chunks .- 1, size(data))
+
+        # Extract chunk data
+        chunk_data_partial = data[map(:, start_idx, end_idx)...]
+
+        # For V2 B-tree, chunks are stored unpadded (like Extensible Array)
+        chunk_data = chunk_data_partial
+
+        # Apply filters if specified
+        chunk_bytes = if isnothing(filter_pipeline)
+            io_buf = IOBuffer()
+            write_data(io_buf, f, chunk_data, odr, datamode(odr), wsession)
+            take!(io_buf)
+        else
+            compressed, _ = Filters.compress(filter_pipeline, chunk_data, odr, f, wsession)
+            compressed
+        end
+
+        # Write chunk to file
+        chunk_offset = f.end_of_data
+        seek(f.io, chunk_offset)
+        write(f.io, chunk_bytes)
+        f.end_of_data = chunk_offset + sizeof(chunk_bytes)
+
+        # Calculate HDF5 chunk indices (0-based, reversed)
+        hdf5_coords = reverse(Tuple(julia_chunk_idx) .- 1)
+
+        # Calculate HDF5 linear index for sorting
+        linear_idx = 0
+        for i in 1:ndims_hdf5
+            linear_idx += down_chunks[i] * hdf5_coords[i]
+        end
+
+        # Store chunk record at linear index position
+        if !isnothing(filter_pipeline)
+            chunk_size = UInt32(sizeof(chunk_bytes))
+            filter_mask = UInt32(0)  # All filters applied
+            chunk_records[linear_idx + 1] = (h5offset(f, chunk_offset), chunk_size, filter_mask, collect(UInt64.(hdf5_coords)))
+        else
+            chunk_records[linear_idx + 1] = (h5offset(f, chunk_offset), collect(UInt64.(hdf5_coords)))
+        end
+    end
+
+    # Step 2: Write Leaf Node
+    # Calculate leaf node size
+    leaf_node_size = 4 +  # signature
+                     1 +  # version
+                     1 +  # type
+                     n_chunks * Int(record_size) +  # chunk records
+                     4    # checksum
+
+    leaf_node_offset = f.end_of_data
+    seek(f.io, leaf_node_offset)
+    f.end_of_data = leaf_node_offset + leaf_node_size
+
+    # Write leaf node
+    leaf_cio = begin_checksum_write(f.io, leaf_node_size - 4)
+
+    # Signature "BTLF" (0x464C5442)
+    jlwrite(leaf_cio, htol(0x464C5442))
+
+    # Version
+    jlwrite(leaf_cio, UInt8(0))
+
+    # Type
+    jlwrite(leaf_cio, type_byte)
+
+    # Write chunk records in sorted order
+    if !isnothing(filter_pipeline)
+        # Filtered format: address, size, filter_mask, indices
+        for record in chunk_records
+            chunk_addr, chunk_size, filter_mask, chunk_indices = record
+            jlwrite(leaf_cio, chunk_addr.offset)  # UInt64
+            jlwrite(leaf_cio, chunk_size)          # UInt32
+            jlwrite(leaf_cio, filter_mask)         # UInt32
+            for idx in chunk_indices
+                jlwrite(leaf_cio, idx)              # UInt64
+            end
+        end
+    else
+        # Unfiltered format: address, indices
+        for record in chunk_records
+            chunk_addr, chunk_indices = record
+            jlwrite(leaf_cio, chunk_addr.offset)  # UInt64
+            for idx in chunk_indices
+                jlwrite(leaf_cio, idx)              # UInt64
+            end
+        end
+    end
+
+    # Write checksum
+    jlwrite(f.io, end_checksum(leaf_cio))
+
+    # Step 3: Write B-tree Header
+    header_size = 4 +  # signature
+                  1 +  # version
+                  1 +  # type
+                  4 +  # node_size
+                  2 +  # record_size
+                  2 +  # depth
+                  1 +  # split_percent
+                  1 +  # merge_percent
+                  8 +  # root_node_address
+                  2 +  # num_records_root
+                  8 +  # total_records
+                  4    # checksum
+
+    header_offset = f.end_of_data
+    seek(f.io, header_offset)
+    f.end_of_data = header_offset + header_size
+
+    hdr_cio = begin_checksum_write(f.io, header_size - 4)
+
+    # Signature "BTHD" (0x44485442)
+    jlwrite(hdr_cio, htol(0x44485442))
+
+    # Version
+    jlwrite(hdr_cio, UInt8(0))
+
+    # Type
+    jlwrite(hdr_cio, type_byte)
+
+    # Node size
+    jlwrite(hdr_cio, node_size)
+
+    # Record size
+    jlwrite(hdr_cio, record_size)
+
+    # Depth
+    jlwrite(hdr_cio, depth)
+
+    # Split percent
+    jlwrite(hdr_cio, split_percent)
+
+    # Merge percent
+    jlwrite(hdr_cio, merge_percent)
+
+    # Root node address (absolute file offset)
+    jlwrite(hdr_cio, UInt64(leaf_node_offset))
+
+    # Num records in root
+    jlwrite(hdr_cio, UInt16(n_chunks))
+
+    # Total records
+    jlwrite(hdr_cio, UInt64(n_chunks))
+
+    # Write checksum
+    jlwrite(f.io, end_checksum(hdr_cio))
+
+    # Step 4: Write Object Header with DataLayout message
+    # Calculate payload size for object header
+    # V2 B-tree requires max dimensions in dataspace (flags bit 0 set)
+    psz = jlsizeof(Val(HmDataspace);
+        dataspace.dataspace_type,
+        dimensions=dataspace.size,
+        flags=0x01,  # Bit 0 indicates max dimensions are present
+        max_dimension_size=hdf5_maxshape)
+    psz += jlsizeof(Val(HmDatatype), 1; dt=datatype)
+
+    # DataLayout message size (version 4, type 5)
+    layout_flags = isnothing(filter_pipeline) ? UInt8(0x00) : UInt8(0x02)  # 0x02 indicates filters
+    dimensionality = UInt8(N + 1)  # +1 for element size dimension
+
+    psz += jlsizeof(Val(HmDataLayout);
+        version = 4,
+        layout_class = LcChunked,
+        flags = layout_flags,
+        dimensionality = dimensionality,
+        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
+        chunk_indexing_type = 5,
+        node_size = node_size,
+        splitpercent = split_percent,
+        mergepercent = merge_percent,
+        data_address = h5offset(f, header_offset)
+    )
+
+    # Add filter pipeline message size if filters are present
+    if !isnothing(filter_pipeline)
+        psz += Filters.pipeline_message_size(filter_pipeline)
+    end
+
+    # Add continuation message size
+    psz += CONTINUATION_MSG_SIZE
+
+    # Calculate full object size
+    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
+
+    # Allocate space for object header and write it
+    obj_header_offset = f.end_of_data
+    seek(f.io, obj_header_offset)
+    f.end_of_data = obj_header_offset + fullsz
+
+    # Write object header
+    cio = begin_checksum_write(f.io, fullsz - 4)
+    jlwrite(cio, ObjectStart(size_flag(psz)))
+    write_size(cio, psz)
+
+    # Write header messages
+    # V2 B-tree requires max dimensions in dataspace
+    write_header_message(cio, Val(HmDataspace);
+        dataspace.dataspace_type,
+        dimensions=dataspace.size,
+        flags=0x01,  # Bit 0 indicates max dimensions are present
+        max_dimension_size=hdf5_maxshape)
+
+    write_header_message(cio, Val(HmDatatype), 1; dt=datatype)
+
+    # Write DataLayout message (version 4, type 5)
+    write_header_message(cio, Val(HmDataLayout);
+        version = 4,
+        layout_class = LcChunked,
+        flags = layout_flags,
+        dimensionality = dimensionality,
+        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
+        chunk_indexing_type = 5,
+        node_size = node_size,
+        splitpercent = split_percent,
+        mergepercent = merge_percent,
+        data_address = h5offset(f, header_offset)
+    )
+
+    # Write filter pipeline message if filters are present
+    if !isnothing(filter_pipeline)
+        Filters.write_filter_pipeline_message(cio, filter_pipeline)
+    end
+
+    # Write continuation placeholder and checksum
+    write_continuation_placeholder(cio)
+    jlwrite(f.io, end_checksum(cio))
+
+    # Link dataset to file hierarchy
+    parent_group = f.root_group
+    dataset_offset = h5offset(f, obj_header_offset)
+
+    # Add link to parent group
+    if haskey(parent_group, name)
+        @warn "Overwriting existing dataset" name
+    end
+    parent_group.unwritten_links[name] = HardLink(dataset_offset)
+
+    return dataset_offset
 end

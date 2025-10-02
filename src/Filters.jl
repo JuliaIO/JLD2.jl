@@ -151,6 +151,10 @@ function normalize_filters(compress)
         return FilterPipeline(())
     elseif compress isa Bool && compress == true
         return FilterPipeline(Deflate())
+    elseif compress == :gzip || compress == :deflate
+        return FilterPipeline(Deflate())
+    elseif compress == :shuffle
+        return FilterPipeline(Shuffle())
     elseif compress isa FilterPipeline
         return compress
     elseif compress isa Filter
