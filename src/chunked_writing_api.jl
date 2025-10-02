@@ -1032,45 +1032,14 @@ function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
     jlwrite(f.io, end_checksum(db_cio))
 
     # Write Fixed Array header
+    page_bits = UInt8(0)  # No paging for simplicity
     header_offset = f.end_of_data
-    header_size = 4 +  # signature
-                  1 +  # version
-                  1 +  # client_id
-                  1 +  # entry_size
-                  1 +  # page_bits
-                  8 +  # max_num_entries (Length type)
-                  8 +  # data_block_address
-                  4    # checksum
-
     seek(f.io, header_offset)
+
+    hdr = FixedArrayHeader(UInt8(0), client_id, entry_size, page_bits,
+                           Int64(n_chunks), h5offset(f, data_block_offset))
+    header_size = write_fixed_array_header(f.io, hdr)
     f.end_of_data = header_offset + header_size
-
-    hdr_cio = begin_checksum_write(f.io, header_size - 4)
-
-    # Signature
-    jlwrite(hdr_cio, FIXED_ARRAY_HEADER_SIGNATURE)
-
-    # Version
-    jlwrite(hdr_cio, UInt8(0))
-
-    # Client ID
-    jlwrite(hdr_cio, client_id)
-
-    # Entry size (8 bytes for RelOffset)
-    jlwrite(hdr_cio, entry_size)
-
-    # Page bits (0 = no paging for simplicity)
-    page_bits = UInt8(0)
-    jlwrite(hdr_cio, page_bits)
-
-    # Max num entries (total number of chunks)
-    jlwrite(hdr_cio, Length(n_chunks))
-
-    # Data block address
-    jlwrite(hdr_cio, h5offset(f, data_block_offset))
-
-    # Write checksum
-    jlwrite(f.io, end_checksum(hdr_cio))
 
     # Update data block header address (now that we know it)
     current_pos = position(f.io)
@@ -1389,80 +1358,16 @@ function _write_extensible_array(f::JLDFile, name::String, data::AbstractArray{T
     jlwrite(f.io, end_checksum(ib_cio))
 
     # Step 3: Write Extensible Array Header
-    header_size = 4 +  # signature
-                  1 +  # version
-                  1 +  # client_id
-                  1 +  # element_size
-                  1 +  # max_nelmts_bits
-                  1 +  # index_blk_elmts
-                  1 +  # data_blk_min_elmts
-                  1 +  # secondary_blk_min_data_ptrs
-                  1 +  # max_dblk_page_nelmts_bits
-                  8 +  # num_secondary_blks
-                  8 +  # secondary_blk_size
-                  8 +  # num_data_blks
-                  8 +  # data_blk_size
-                  8 +  # max_index_set
-                  8 +  # nelmts
-                  8 +  # index_blk_addr
-                  4    # checksum
-
     header_offset = f.end_of_data
     seek(f.io, header_offset)
+
+    hdr = ExtensibleArrayHeader(UInt8(0), client_id, element_size, max_nelmts_bits,
+                                index_blk_elmts, data_blk_min_elmts, secondary_blk_min_data_ptrs,
+                                max_dblk_page_nelmts_bits, num_secondary_blks, secondary_blk_size,
+                                num_data_blks, data_blk_size, max_index_set, nelmts,
+                                h5offset(f, index_block_offset))
+    header_size = write_extensible_array_header(f.io, hdr)
     f.end_of_data = header_offset + header_size
-
-    hdr_cio = begin_checksum_write(f.io, header_size - 4)
-
-    # Signature
-    jlwrite(hdr_cio, EXTENSIBLE_ARRAY_HEADER_SIGNATURE)
-
-    # Version
-    jlwrite(hdr_cio, UInt8(0))
-
-    # Client ID
-    jlwrite(hdr_cio, client_id)
-
-    # Element size
-    jlwrite(hdr_cio, element_size)
-
-    # Max nelmts bits
-    jlwrite(hdr_cio, max_nelmts_bits)
-
-    # Index block elmts
-    jlwrite(hdr_cio, index_blk_elmts)
-
-    # Data block min elmts
-    jlwrite(hdr_cio, data_blk_min_elmts)
-
-    # Secondary block min data ptrs
-    jlwrite(hdr_cio, secondary_blk_min_data_ptrs)
-
-    # Max dblk page nelmts bits
-    jlwrite(hdr_cio, max_dblk_page_nelmts_bits)
-
-    # Num secondary blocks
-    jlwrite(hdr_cio, num_secondary_blks)
-
-    # Secondary block size
-    jlwrite(hdr_cio, secondary_blk_size)
-
-    # Num data blocks
-    jlwrite(hdr_cio, num_data_blks)
-
-    # Data block size
-    jlwrite(hdr_cio, data_blk_size)
-
-    # Max index set
-    jlwrite(hdr_cio, max_index_set)
-
-    # Nelmts (current number of elements)
-    jlwrite(hdr_cio, nelmts)
-
-    # Index block address
-    jlwrite(hdr_cio, h5offset(f, index_block_offset))
-
-    # Write checksum
-    jlwrite(f.io, end_checksum(hdr_cio))
 
     # Update index block header address (now that we know it)
     current_pos = position(f.io)
@@ -1805,60 +1710,21 @@ function _write_v2btree(f::JLDFile, name::String, data::AbstractArray{T,N},
     jlwrite(f.io, end_checksum(leaf_cio))
 
     # Step 3: Write B-tree Header
-    header_size = 4 +  # signature
-                  1 +  # version
-                  1 +  # type
-                  4 +  # node_size
-                  2 +  # record_size
-                  2 +  # depth
-                  1 +  # split_percent
-                  1 +  # merge_percent
-                  8 +  # root_node_address
-                  2 +  # num_records_root
-                  8 +  # total_records
-                  4    # checksum
+    hdr = V2BTreeHeader(type_byten, ode_size, record_size,
+        depth, split_percent, merge_percent,
+        leaf_node_offset, n_chunks,
+        n_chunks
+    )
 
     header_offset = f.end_of_data
     seek(f.io, header_offset)
-    f.end_of_data = header_offset + header_size
-
-    hdr_cio = begin_checksum_write(f.io, header_size - 4)
-
-    # Signature "BTHD" (0x44485442)
-    jlwrite(hdr_cio, htol(0x44485442))
-
-    # Version
-    jlwrite(hdr_cio, UInt8(0))
-
-    # Type
-    jlwrite(hdr_cio, type_byte)
-
-    # Node size
-    jlwrite(hdr_cio, node_size)
-
-    # Record size
-    jlwrite(hdr_cio, record_size)
-
-    # Depth
-    jlwrite(hdr_cio, depth)
-
-    # Split percent
-    jlwrite(hdr_cio, split_percent)
-
-    # Merge percent
-    jlwrite(hdr_cio, merge_percent)
-
-    # Root node address (absolute file offset)
-    jlwrite(hdr_cio, UInt64(leaf_node_offset))
-
-    # Num records in root
-    jlwrite(hdr_cio, UInt16(n_chunks))
-
-    # Total records
-    jlwrite(hdr_cio, UInt64(n_chunks))
-
+    header_size = jlsizeof(V2BTreeHeader)
+    cio = begin_checksum_write(io, header_size - 4)
+    jlwrite(cio, hdr)
     # Write checksum
-    jlwrite(f.io, end_checksum(hdr_cio))
+    jlwrite(io, end_checksum(cio))
+
+    f.end_of_data = header_offset + header_size
 
     # Step 4: Write Object Header with DataLayout message
     # Calculate payload size for object header

@@ -7,6 +7,45 @@ const EXTENSIBLE_ARRAY_INDEX_BLOCK_SIGNATURE = htol(0x42494145)  # "EAIB"
 const EXTENSIBLE_ARRAY_DATA_BLOCK_SIGNATURE = htol(0x42444145)  # "EADB"
 
 """
+    ExtensibleArrayHeader
+
+Header structure for HDF5 Extensible Array index (for writing).
+Fields match HDF5 specification Section VII.D.
+"""
+struct ExtensibleArrayHeader
+    version::UInt8
+    client_id::UInt8
+    element_size::UInt8
+    max_nelmts_bits::UInt8
+    index_blk_elmts::UInt8
+    data_blk_min_elmts::UInt8
+    secondary_blk_min_data_ptrs::UInt8
+    max_dblk_page_nelmts_bits::UInt8
+    num_secondary_blks::UInt64
+    secondary_blk_size::UInt64
+    num_data_blks::UInt64
+    data_blk_size::UInt64
+    max_index_set::UInt64
+    nelmts::UInt64
+    index_blk_addr::RelOffset
+end
+define_packed(ExtensibleArrayHeader)
+
+"""
+    write_extensible_array_header(io, hdr::ExtensibleArrayHeader) -> Int
+
+Write Extensible Array header with signature and checksum. Returns bytes written.
+"""
+function write_extensible_array_header(io, hdr::ExtensibleArrayHeader)
+    header_size = 4 + jlsizeof(ExtensibleArrayHeader) + 4  # signature + header + checksum
+    cio = begin_checksum_write(io, header_size - 4)
+    jlwrite(cio, EXTENSIBLE_ARRAY_HEADER_SIGNATURE)
+    jlwrite(cio, hdr)
+    jlwrite(io, end_checksum(cio))
+    return header_size
+end
+
+"""
     read_extensible_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
 
 Read chunks indexed by HDF5 v4 Extensible Array (type 4).

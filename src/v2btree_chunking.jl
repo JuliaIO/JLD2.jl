@@ -113,6 +113,13 @@ struct V2BTreeHeader
     total_records::UInt64
     checksum::UInt32
 end
+define_packed(V2BTreeHeader)
+
+V2BTreeHeader(type::UInt8, args...) = V2BTreeHeader(
+    V2BTREE_HEADER_SIGNATURE, 0x0, type, args...)
+
+# Signature constant for v2 B-tree header
+const V2BTREE_HEADER_SIGNATURE = htol(0x44485442)  # "BTHD"
 
 """
     V2BTreeChunkRecord
@@ -144,30 +151,16 @@ function read_v2btree_chunk_index_header(f::JLDFile, header_addr)
     offset = header_addr isa RelOffset ? fileoffset(f, header_addr) : header_addr
     seek(f.io, offset)
 
-    # Read signature
-    sig = jlread(f.io, UInt32)
-    sig == htol(0x44485442) || throw(InvalidDataException("Invalid V2 B-tree header signature: expected BTHD, got 0x$(string(sig, base=16))"))
+    # Read entire header using define_packed
+    hdr = jlread(f.io, V2BTreeHeader)
 
-    # Read header fields
-    version = jlread(f.io, UInt8)
-    version == 0 || throw(UnsupportedVersionException("Unsupported V2 B-tree version $version"))
+    # Validate signature and version
+    hdr.signature == V2BTREE_HEADER_SIGNATURE ||
+        throw(InvalidDataException("Invalid V2 B-tree header signature: expected BTHD, got 0x$(string(hdr.signature, base=16))"))
+    hdr.version == 0 ||
+        throw(UnsupportedVersionException("Unsupported V2 B-tree version $(hdr.version)"))
 
-    type_byte = jlread(f.io, UInt8)
-    node_size = jlread(f.io, UInt32)
-    record_size = jlread(f.io, UInt16)
-    depth = jlread(f.io, UInt16)
-    split_percent = jlread(f.io, UInt8)
-    merge_percent = jlread(f.io, UInt8)
-    root_node_address = jlread(f.io, UInt64)
-    num_records_root = jlread(f.io, UInt16)
-    total_records = jlread(f.io, UInt64)
-    checksum = jlread(f.io, UInt32)
-
-    return V2BTreeHeader(
-        sig, version, type_byte, node_size, record_size, depth,
-        split_percent, merge_percent, root_node_address,
-        num_records_root, total_records, checksum
-    )
+    return hdr
 end
 
 """

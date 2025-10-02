@@ -29,6 +29,21 @@ struct FixedArrayHeader
     max_num_entries::Int64
     data_block_address::RelOffset
 end
+define_packed(FixedArrayHeader)
+
+"""
+    write_fixed_array_header(io, hdr::FixedArrayHeader) -> Int
+
+Write Fixed Array header with signature and checksum, return total bytes written.
+"""
+function write_fixed_array_header(io, hdr::FixedArrayHeader)
+    header_size = 4 + jlsizeof(FixedArrayHeader) + 4  # signature + header + checksum
+    cio = begin_checksum_write(io, header_size - 4)
+    jlwrite(cio, FIXED_ARRAY_HEADER_SIGNATURE)
+    jlwrite(cio, hdr)
+    jlwrite(io, end_checksum(cio))
+    return header_size
+end
 
 """
     read_fixed_array_header(f::JLDFile, header_address::Int64) -> FixedArrayHeader
