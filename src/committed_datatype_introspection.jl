@@ -2,26 +2,6 @@
 # of committed julia data types in JLD2 files without
 # needing the types to exist in the current session.
 
-# Safe introspection function that only reads string representations
-# without triggering type reconstruction
-function safe_introspect_datatype(f::JLDFile, dt::H5Datatype; showfields=false)
-    # For committed datatypes, use enhanced safe introspection
-    if dt isa SharedDatatype && haskey(f.datatype_locations, dt.header_offset)
-        julia_type_str, written_type_str, field_strs = safe_introspect_committed_datatype(f, f.datatype_locations[dt.header_offset]; showfields=showfields)
-
-        if showfields && !isempty(field_strs)
-            # Show detailed field information for structs
-            return "$julia_type_str{$(join(field_strs, ", "))}"
-        else
-            # Just return the type name (including parameters if present)
-            return julia_type_str
-        end
-    else
-        # For non-committed datatypes, try safe reconstruction for basic types
-        return safe_reconstruct_basic_type(f, dt)
-    end
-end
-
 function read_string_from_attribute(f::JLDFile, attr)
     attr.dataspace.dataspace_type != DS_SCALAR && return "unsupported_dataspace"
 
@@ -56,8 +36,7 @@ function read_shared_datatype_attribute(f::JLDFile, attr)
     !isa(actual_dt, CompoundDatatype) && return "non_compound_shared"
 
     seek(f.io, attr.data_offset)
-    compound_data = Vector{UInt8}(undef, actual_dt.size)
-    unsafe_read(f.io, pointer(compound_data), actual_dt.size)
+    compound_data = read(f.io, UInt8, actual_dt.size)
 
     @GC.preserve compound_data begin
         ptr = pointer(compound_data)
@@ -101,166 +80,12 @@ function apply_namedtuple_conversion(type_str::AbstractString)
     startswith(type_str, "NamedTuple{") ? convert_namedtuple_to_macro_syntax(type_str) : type_str
 end
 
-# Safe description of basic datatypes with reconstruction for fundamental types
-function safe_describe_datatype(f::JLDFile, dt::H5Datatype)
-    if dt isa BasicDatatype
-        # Analyze the basic datatype properties
-        class = dt.class
-        if class >> 4 == 1  # String types
-            return "String"
-        elseif class >> 4 == 0  # Numeric types
-            if class & 0x0f == 0  # Integer
-                return dt.size == 8 ? "Int64" : dt.size == 4 ? "Int32" : "Int$(dt.size*8)"
-            elseif class & 0x0f == 1  # Float
-                return dt.size == 8 ? "Float64" : dt.size == 4 ? "Float32" : "Float$(dt.size*8)"
-            end
-        end
-        return "BasicDatatype"
-    elseif dt isa CompoundDatatype
-        # For compound types, show field structure with types
-        field_strs = String[]
-        for (i, name) in enumerate(dt.names)
-            if i <= length(dt.members)
-                # Try safe reconstruction first for better type names
-                field_type = safe_reconstruct_basic_type(f, dt.members[i])
-                push!(field_strs, "$name::$field_type")
-            else
-                push!(field_strs, "$name::Unknown")
-            end
-        end
-        # Return both header and field list for proper multi-line formatting
-        if isempty(field_strs)
-            return "compound struct (empty)"
-        else
-            # Return a special format that the show function can detect and format properly
-            return "COMPOUND_STRUCT:" * join(field_strs, "|")
-        end
-    elseif dt isa ArrayDatatype
-        return "Array"
-    elseif dt isa VariableLengthDatatype
-        # Check if it's a variable-length string
-        if dt.type isa BasicDatatype && dt.type.class >> 4 == 0 && dt.type.class & 0x0f == 0  # Integer base type
-            return "String"  # Variable-length string
-        else
-            return "VariableLength"
-        end
-    else
-        return string(typeof(dt))
-    end
-end
-
-# Safe types that can be reconstructed without warnings
-const SAFE_BASIC_TYPES = Set(["Int8", "Int16", "Int32", "Int64", "Int128",
-                             "UInt8", "UInt16", "UInt32", "UInt64", "UInt128",
-                             "Float16", "Float32", "Float64", "Bool", "Char",
-                             "String", "Symbol", "Nothing", "Missing"])
-
-function safe_reconstruct_basic_type(f::JLDFile, dt::H5Datatype)
-    dt isa BasicDatatype && dt.class == 0x37 && return describe_reference_datatype(f, dt)
-
-    try
-        rr = jltype(f, dt)
-        type_str = string(julia_repr(rr))
-
-        type_str ∈ SAFE_BASIC_TYPES && return type_str
-
-        # Handle basic composite types
-        any(prefix -> startswith(type_str, prefix), ["Tuple{", "Pair{", "Complex{", "Rational{"]) && return type_str
-
-        # Handle NamedTuple with macro syntax conversion
-        startswith(type_str, "NamedTuple{") && return convert_namedtuple_to_macro_syntax(type_str)
-
-        return safe_describe_datatype(f, dt)
-    catch
-        return safe_describe_datatype(f, dt)
-    end
-end
-
-# Describe reference datatypes with useful information
-function describe_reference_datatype(f::JLDFile, dt::BasicDatatype)
-    try
-        # For reference datatypes, we can safely load the RelOffset value
-        # to show exactly where the referenced object is stored
-        rr = jltype(f, dt)
-        jtype = julia_repr(rr)
-        type_str = string(jtype)
-
-        # Get the actual RelOffset value for debugging/investigation
-        rel_offset_info = try
-            # We need to find where this reference is stored in the data
-            # This requires context from the dataset, but we can provide a generic approach
-            "RelOffset(...)"
-        catch
-            "offset unknown"
-        end
-
-        # If we get "Any", this means it's a generic reference
-        if type_str == "Any"
-            return "Object reference -> $rel_offset_info"
-        end
-
-        # Allow reconstruction for basic reference types like arrays and known composites
-        if startswith(type_str, "Array{") || startswith(type_str, "Vector{") ||
-           startswith(type_str, "Matrix{") || startswith(type_str, "AbstractArray{") ||
-           startswith(type_str, "Union{") || startswith(type_str, "Tuple{") ||
-           startswith(type_str, "NamedTuple{")
-
-            # Apply NamedTuple conversion if needed
-            result_type = if startswith(type_str, "NamedTuple{")
-                convert_namedtuple_to_macro_syntax(type_str)
-            else
-                type_str
-            end
-            return "$result_type -> $rel_offset_info"
-        end
-
-        # For unknown reference types, return a descriptive message with offset
-        return "Reference{$type_str} -> $rel_offset_info"
-    catch
-        # If reconstruction fails completely, return a generic reference description
-        return "Reference{unknown}"
-    end
-end
-
 # Enhanced describe function that can read the actual RelOffset from dataset context
 function describe_reference_datatype_with_offset(f::JLDFile, dt::BasicDatatype, data_offset::Int64)
-    try
-        # Read the actual RelOffset value from the data
-        seek(f.io, data_offset)
-        offset_value = jlread(f.io, UInt64)
-        rel_offset = RelOffset(offset_value)
-
-        # Get type information
-        rr = jltype(f, dt)
-        jtype = julia_repr(rr)
-        type_str = string(jtype)
-
-        # If we get "Any", this means it's a generic reference
-        if type_str == "Any"
-            return "Object reference -> $rel_offset"
-        end
-
-        # Allow reconstruction for basic reference types like arrays and known composites
-        if startswith(type_str, "Array{") || startswith(type_str, "Vector{") ||
-           startswith(type_str, "Matrix{") || startswith(type_str, "AbstractArray{") ||
-           startswith(type_str, "Union{") || startswith(type_str, "Tuple{") ||
-           startswith(type_str, "NamedTuple{")
-
-            # Apply NamedTuple conversion if needed
-            result_type = if startswith(type_str, "NamedTuple{")
-                convert_namedtuple_to_macro_syntax(type_str)
-            else
-                type_str
-            end
-            return "$result_type -> $rel_offset"
-        end
-
-        # For unknown reference types, return a descriptive message with offset
-        return "Reference{$type_str} -> $rel_offset"
-    catch e
-        # If reading fails, fall back to generic description
-        return "Reference{unknown} -> offset unreadable"
-    end
+    # Read the actual RelOffset value from the data
+    seek(f.io, data_offset)
+    offset_value = jlread(f.io, RelOffset)
+    return "Object reference -> $rel_offset"
 end
 
 # Convert NamedTuple{(:a, :b), Tuple{Int,Int}} to @NamedTuple{a::Int, b::Int}
@@ -366,119 +191,13 @@ function convert_namedtuple_to_macro_syntax(type_str::String)
     end
 end
 
-# Enhanced safe introspection for custom and parametric structs
-function safe_introspect_committed_datatype(f::JLDFile, cdt; showfields=false)
-    dt, attrs = read_shared_datatype(f, cdt)
-    written_type_str = ""
-    julia_type_str = ""
-
-    # Read type strings from attributes safely
-    for attr in attrs
-        if !(attr.name == :julia_type || attr.name == :written_type)
-            continue
-        end
-
-        # Read the string safely without type reconstruction
-        str = read_string_from_attribute(f, attr)
-
-        if attr.name == :written_type
-            written_type_str = str
-        elseif attr.name == :julia_type
-            julia_type_str = str
-        end
-    end
-
-    if !showfields ||
-       dt isa BasicDatatype ||
-       dt isa VariableLengthDatatype ||
-       startswith(julia_type_str, r"Tuple|Union") ||
-       julia_type_str == "DataType"
-        return julia_type_str, written_type_str, String[]
-    end
-
-    # For compound types, safely inspect field types recursively
-    field_strs = String[]
-    if dt isa CompoundDatatype
-        field_datatypes = safe_read_field_datatypes(f, dt, attrs)
-
-        for (i, key) in enumerate(keys(field_datatypes))
-            # Find the corresponding index in dt.names
-            name_index = findfirst(name -> string(name) == string(key), dt.names)
-            if name_index === nothing
-                continue  # Skip if name not found
-            end
-
-            if (ref = field_datatypes[string(key)]) != NULL_REFERENCE
-                # Recursively introspect field type safely
-                fieldtype = safe_introspect_committed_datatype(f, f.datatype_locations[ref])[1]
-            else
-                # Handle basic field types safely - use safe reconstruction for basic types
-                if name_index <= length(dt.members)
-                    fieldtype = safe_reconstruct_basic_type(f, dt.members[name_index])
-                    # Clean up any compound struct formatting in nested fields
-                    if startswith(fieldtype, "COMPOUND_STRUCT:")
-                        field_data = fieldtype[17:end]
-                        nested_fields = split(field_data, "|")
-                        if length(nested_fields) <= 2
-                            fieldtype = "struct{$(join(nested_fields, ", "))}"
-                        else
-                            fieldtype = "struct{$(length(nested_fields)) fields}"
-                        end
-                    end
-                else
-                    fieldtype = "Unknown"
-                end
-            end
-            push!(field_strs, "$(dt.names[name_index])::$(fieldtype)")
-        end
-    end
-
-    return julia_type_str, written_type_str, field_strs
-end
-
-# Safe reading of field datatypes without reconstruction
-function safe_read_field_datatypes(f::JLDFile, dt::CompoundDatatype, attrs)
-    field_datatypes = Dict{String, RelOffset}()
-
-    for attr in attrs
-        if attr.name == :field_datatypes
-            # This attribute contains references to field datatypes
-            # Read them safely without triggering reconstruction
-            try
-                seek(f.io, attr.data_offset)
-                # The field_datatypes attribute contains an array of references
-                # We need to read this safely without jlconvert
-
-                # For now, initialize all fields to NULL_REFERENCE
-                # This will fall back to safe_describe_datatype for basic types
-                for name in dt.names
-                    field_datatypes[string(name)] = NULL_REFERENCE
-                end
-
-                # TODO: Implement safe reading of the actual references
-                # This would require understanding the exact layout of the field_datatypes attribute
-            catch e
-                # Fallback: assume all fields are basic types
-                for name in dt.names
-                    field_datatypes[string(name)] = NULL_REFERENCE
-                end
-            end
-            break
-        end
-    end
-
-    # If no field_datatypes attribute found, assume basic types
-    if isempty(field_datatypes)
-        for name in dt.names
-            field_datatypes[string(name)] = NULL_REFERENCE
-        end
-    end
-
-    return field_datatypes
-end
-function stringify_committed_datatype(f, cdt; showfields=false)
+function stringify_h5datatype(f, dt; showfields=false)
     io = f.io
-    dt, attrs = read_shared_datatype(f, cdt)
+    attrs = ReadAttribute[]
+    if isshared(dt)
+        dt, attrs = read_shared_datatype(f, dt)
+    end
+
     written_type_str = ""
     julia_type_str = ""
     for attr in attrs
@@ -498,8 +217,14 @@ function stringify_committed_datatype(f, cdt; showfields=false)
         end
     end
 
+    if !(dt isa CompoundDatatype)
+        type = jltype(f, dt)
+        julia_type_str = string(julia_repr(type))
+        #written_type_str = string(file_repr(type))
+    end
+
     if !showfields ||
-        dt isa BasicDatatype ||
+        !isa(dt, CompoundDatatype)
         dt isa VariableLengthDatatype ||
         startswith(julia_type_str, r"Tuple|Union") ||
         julia_type_str == "DataType"
@@ -508,7 +233,7 @@ function stringify_committed_datatype(f, cdt; showfields=false)
 
     field_datatypes = read_field_datatypes(f, dt, attrs)
     field_strs = String[]
-    do_report = false
+    #do_report = false
     for (i, key) in enumerate(keys(field_datatypes))
         # Find the corresponding index in dt.names
         name_index = findfirst(name -> string(name) == string(key), dt.names)
@@ -517,21 +242,21 @@ function stringify_committed_datatype(f, cdt; showfields=false)
         end
 
         if (ref = field_datatypes[string(key)]) != NULL_REFERENCE
-            fieldtype = stringify_committed_datatype(f, f.datatype_locations[ref])[1]
-            do_report = true
+            fieldtype = stringify_h5datatype(f, f.datatype_locations[ref])[1]
+            fieldtype *= " (committed at $(ref))"
         else
             # These are normal julia types
             if name_index <= length(dt.members)
                 dtrr = jltype(f, dt.members[name_index])
                 fieldtype = string(julia_repr(dtrr))
+                if fieldtype == "Any"
+                    fieldtype = "Any (untyped reference)"
+                end
             else
-                fieldtype = "Unknown"
+                fieldtype = "unknown"
             end
         end
         push!(field_strs, "$(dt.names[name_index])::$(fieldtype)")
-    end
-    if do_report == false
-        empty!(field_strs)
     end
     return julia_type_str, written_type_str, field_strs
 end
@@ -589,7 +314,7 @@ function typestring_from_refs(f::JLDFile, ptr::Ptr)
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
             res = if cdt !== nulldt
-                stringify_committed_datatype(f, cdt)[1]
+                stringify_h5datatype(f, cdt)[1]
             else
                 stringify_object(f, ref)
             end
@@ -666,7 +391,7 @@ function safe_read_attribute_info(f::JLDFile, attr::ReadAttribute)
             elseif attr.datatype isa BasicDatatype
                 # Check for reference types in attributes
                 class = attr.datatype.class
-                if class == 0x37  # DT_REFERENCE
+                if class%16 == DT_REFERENCE
                     # This attribute contains a reference to another object
                     try
                         seek(f.io, attr.data_offset)

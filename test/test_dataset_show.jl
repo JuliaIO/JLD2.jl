@@ -40,7 +40,7 @@ end
 function test_dataset_written_info(dset, output)
     if JLD2.iswritten(dset)
         @test contains(output, "datatype:")
-        @test contains(output, "written structure:")
+        @test contains(output, "type name:")
         !isnothing(dset.dataspace) && @test contains(output, "dataspace:")
         !isnothing(dset.layout) && @test contains(output, "layout:")
     else

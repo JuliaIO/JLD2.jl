@@ -189,43 +189,25 @@ function print_datatype_info(io::IO, dset::Dataset, prefix::String)
 
     dt = dset.datatype
     f = dset.parent.f
-    iscommitted = dt isa SharedDatatype && haskey(f.datatype_locations, dt.header_offset)
-
-    println(io, prefix, "datatype: ", typeof(dt), iscommitted ? " (committed)" : "")
-    iscommitted && println(io, prefix, "\tcommitted at: ", dt.header_offset)
-
-    print_datatype_structure(io, dset, dt, f, iscommitted, prefix)
-end
-
-function print_datatype_structure(io::IO, dset::Dataset, dt::H5Datatype, f::JLDFile, iscommitted::Bool, prefix::String)
-    if dt isa BasicDatatype && dt.class == 0x37  # DT_REFERENCE
-        layout = DataLayout(f, dset.layout)
-        type_info = describe_reference_datatype_with_offset(f, dt, layout.data_offset)
-        println(io, prefix, "\twritten structure: ", type_info)
-    elseif iscommitted
-        print_committed_datatype_structure(io, dt, f, prefix)
+    iscommitted = isshared(dt)
+    tpstr = replace(string(typeof(dt)), "JLD2."=>"")
+    print(io, prefix, "datatype: ", tpstr)
+    if iscommitted
+        print(io, " (committed at ", dt.header_offset, ")\n")
     else
-        print_basic_datatype_structure(io, dt, f, prefix)
+        print(io, "\n")
     end
-end
+    # print_datatype_structure
+    if dt isa BasicDatatype && dt.class%16 == DT_REFERENCE
+        println(io, prefix, "\ttype name: RelOffset")
+        return
+    end
+    julia_type_str, _, field_strs = stringify_h5datatype(f, dt, showfields=true)
 
-function print_committed_datatype_structure(io::IO, dt::SharedDatatype, f::JLDFile, prefix::String)
-    julia_type_str, _, field_strs = safe_introspect_committed_datatype(f, f.datatype_locations[dt.header_offset], showfields=true)
-
-    println(io, prefix, "\twritten structure: ", julia_type_str)
-    !isempty(field_strs) && foreach(field_str -> println(io, prefix, "\t\t", field_str), field_strs)
     println(io, prefix, "\ttype name: ", julia_type_str)
-end
-
-function print_basic_datatype_structure(io::IO, dt::H5Datatype, f::JLDFile, prefix::String)
-    type_info = safe_introspect_datatype(f, dt)
-
-    if startswith(type_info, "COMPOUND_STRUCT:")
-        field_strs = split(type_info[17:end], "|")
-        println(io, prefix, "\twritten structure: compound struct")
+    if !isempty(field_strs)
+        println(io, prefix, "\tstored fields:")
         foreach(field_str -> println(io, prefix, "\t\t", field_str), field_strs)
-    else
-        println(io, prefix, "\twritten structure: ", type_info)
     end
 end
 

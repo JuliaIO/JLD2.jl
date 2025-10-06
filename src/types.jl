@@ -222,6 +222,9 @@ struct SharedDatatype <: H5Datatype
 end
 define_packed(SharedDatatype)
 
+isshared(_) = false
+isshared(::SharedDatatype) = true
+
 """
     CommittedDatatype <: H5Datatype
 
@@ -235,6 +238,8 @@ end
 
 # Allow dropping the index field
 SharedDatatype(dt::CommittedDatatype) = SharedDatatype(dt.header_offset)
+
+isshared(::CommittedDatatype) = true
 
 
 """
