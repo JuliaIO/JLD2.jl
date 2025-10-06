@@ -65,22 +65,9 @@ The `Dataset` type allows low-level access to dataset metadata and provides fine
 control over how data is stored, including compression, chunking, and layout options.
 This is useful for advanced use cases where you need more control than the standard
 `jldsave`/`load` interface provides.
-
-# Fields
-- `parent::Group`: The containing group or file
-- `name::String`: Dataset name within the parent group
-- `offset::RelOffset`: File offset where dataset header is stored (UNDEFINED_ADDRESS if unwritten)
-- `datatype`: HDF5 datatype specification for the dataset
-- `dataspace`: Dataspace describing the dataset dimensions
-- `layout`: Data layout specification (contiguous, compact, or chunked)
-- `attributes::OrderedDict{String, Any}`: Dataset attributes as key-value pairs
-- `chunk`: Chunking specification (for chunked layouts)
-- `filters`: Filter pipeline for compression/transformation
-- `header_chunk_info`: Internal metadata for header management
-
 # Usage
 
-Datasets are typically created using [`create_dataset`](@ref), written with [`write_dataset`](@ref),
+Datasets are created using [`create_dataset`](@ref), written with [`write_dataset`](@ref),
 and read with [`read_dataset`](@ref) or retrieved with [`get_dataset`](@ref).
 
 # Example
@@ -130,59 +117,32 @@ metadata before writing.
 - `datatype`: HDF5 datatype specification. If `nothing`, will be inferred from data during writing
 - `dataspace`: Dataspace describing dimensions. If `nothing`, will be inferred from data during writing
 
-# Keyword Arguments
-- `layout`: Data layout specification (`LcContiguous`, `LcCompact`, or `LcChunked`)
-- `chunk`: Chunking specification for chunked layouts
-- `filters::FilterPipeline`: Compression/transformation pipeline (default: no compression)
-
-# Returns
+## Returns
 - `Dataset`: A mutable dataset object ready for configuration and writing
 
-# Examples
-
-## Basic Usage
-```julia
-jldopen("data.jld2", "w") do f
-    dset = JLD2.create_dataset(f, "my_data")
-    JLD2.write_dataset(dset, [1, 2, 3, 4, 5])
-end
-```
-
-## With Compression
-```julia
-jldopen("data.jld2", "w") do f
-    dset = JLD2.create_dataset(f, "compressed_array")
-    dset.filters = Deflate()  # Add gzip compression
-    JLD2.write_dataset(dset, rand(10000))
-end
-```
-
-## With Attributes
-```julia
-jldopen("data.jld2", "w") do f
-    dset = JLD2.create_dataset(f, "experiment_results")
-    JLD2.add_attribute(dset, "experiment_id", "exp_001")
-    JLD2.add_attribute(dset, "date", "2024-01-15")
-    JLD2.add_attribute(dset, "temperature", 23.5)
-    JLD2.write_dataset(dset, measurement_data)
-end
-```
-
-## Unnamed Dataset
-```julia
-jldopen("data.jld2", "w") do f
-    dset = JLD2.create_dataset(f, nothing)  # unnamed
-    JLD2.write_dataset(dset, temporary_data)
-end
-```
-
-# Notes
+## Notes
 - The dataset is not written to the file until [`write_dataset`](@ref) is called
 - Datatype and dataspace are usually inferred automatically from the data
 - Compression filters can be added after creation but before writing
 - Attributes can be added before or after writing (see [`add_attribute`](@ref))
 
 See also: [`write_dataset`](@ref), [`Dataset`](@ref), [`add_attribute`](@ref), [`Deflate`](@ref)
+
+## Usage Example
+
+```julia
+jldopen("data.jld2", "w") do f
+    dset = JLD2.create_dataset(f, "my_data")
+    JLD2.write_dataset(dset, [1, 2, 3, 4, 5])
+end
+
+jldopen("data.jld2", "w") do f
+    dset = JLD2.create_dataset(f, "compressed_array")
+    dset.filters = Deflate()  # Add gzip compression
+    JLD2.add_attribute(dset, "experiment_id", "exp_001")
+    JLD2.write_dataset(dset, rand(10000))
+end
+```
 """
 create_dataset(f::JLDFile, args...; kwargs...) = create_dataset(f.root_group, args...; kwargs...)
 function create_dataset(
@@ -314,7 +274,7 @@ function print_attributes_info(io::IO, dset::Dataset, prefix::String)
 end
 
 """
-    write_dataset(dataset::Dataset, data, wsession::JLDWriteSession=JLDWriteSession())
+    write_dataset(dataset::Dataset, data, wsession=JLDWriteSession())
 
 Write data to file using the metadata and configuration stored in the [`Dataset`](@ref) object.
 
@@ -323,63 +283,13 @@ with [`create_dataset`](@ref). The dataset must not have been written before (ea
 can only be written once). The data type and dataspace will be automatically inferred
 from the provided data if they weren't specified during dataset creation.
 
-# Arguments
+## Arguments
 - `dataset::Dataset`: The dataset object created with [`create_dataset`](@ref)
 - `data`: The data to write. Can be any Julia object that JLD2 can serialize
 - `wsession::JLDWriteSession`: Optional write session for advanced usage (default: new session)
 
-# Returns
+## Returns
 - `RelOffset`: The file offset where the dataset was written
-
-# Throws
-- `ArgumentError`: If the dataset has already been written to file
-
-# Examples
-
-## Basic Usage
-```julia
-jldopen("output.jld2", "w") do f
-    dset = JLD2.create_dataset(f, "my_array")
-    JLD2.write_dataset(dset, [1, 2, 3, 4, 5])
-end
-```
-
-## With Compression
-```julia
-jldopen("output.jld2", "w") do f
-    dset = JLD2.create_dataset(f, "large_data")
-    dset.filters = Deflate()  # Add gzip compression
-
-    large_array = rand(Float64, 10000, 10000)
-    JLD2.write_dataset(dset, large_array)
-
-    println("Compressed data written successfully")
-end
-```
-
-## With Attributes and Multiple Datasets
-```julia
-jldopen("experiment.jld2", "w") do f
-    # Dataset 1: Results with metadata
-    results_dset = JLD2.create_dataset(f, "results")
-    JLD2.add_attribute(results_dset, "experiment", "trial_001")
-    JLD2.add_attribute(results_dset, "date", "2024-01-15")
-    JLD2.write_dataset(results_dset, experimental_results)
-
-    # Dataset 2: Parameters
-    params_dset = JLD2.create_dataset(f, "parameters")
-    JLD2.write_dataset(params_dset, Dict("learning_rate" => 0.01, "epochs" => 100))
-end
-```
-
-# Notes
-- Each dataset can only be written once. Attempting to write again will throw an error
-- Data type and dataspace are automatically inferred if not provided during creation
-- Compression filters must be set before writing
-- Attributes can be added before or after writing
-- The write operation is atomic - either the entire dataset is written or an error is thrown
-
-See also: [`create_dataset`](@ref), [`Dataset`](@ref), [`read_dataset`](@ref), [`add_attribute`](@ref)
 """
 function write_dataset(dataset::Dataset, data, wsession::JLDWriteSession=JLDWriteSession())
     f = dataset.parent.f
@@ -417,22 +327,14 @@ end
 """
     read_dataset(dset::Dataset)
 
-Read and return the data stored in a [`Dataset`](@ref).
-
-This function reads the complete dataset from the file and reconstructs the original
+Read and return the complete dataset from the file and reconstructs the original
 Julia object. The dataset must have been previously written to the file using
-[`write_dataset`](@ref). For large arrays, consider using [`readmmap`](@ref) for
-memory-mapped access if supported.
+[`write_dataset`](@ref).
 
-# Arguments
+## Arguments
 - `dset::Dataset`: The dataset object, typically obtained from [`get_dataset`](@ref)
 
-# Returns
-- The reconstructed Julia object that was originally stored in the dataset
-
-# Examples
-
-## Basic Reading
+## Usage Example:
 ```julia
 jldopen("data.jld2", "r") do f
     dset = JLD2.get_dataset(f, "my_data")
@@ -441,38 +343,7 @@ jldopen("data.jld2", "r") do f
 end
 ```
 
-## Reading with Type Information
-```julia
-jldopen("data.jld2", "r") do f
-    dset = JLD2.get_dataset(f, "matrix_data")
-
-    # Inspect the dataset before reading
-    println("Dataset info:")
-    display(dset)  # Shows detailed dataset metadata
-
-    # Read the actual data
-    matrix = JLD2.read_dataset(dset)
-    println("Matrix size: ", size(matrix))
-end
-```
-
-## Reading Multiple Datasets
-```julia
-jldopen("experiment.jld2", "r") do f
-    # Read experiment results
-    results_dset = JLD2.get_dataset(f, "results")
-    results = JLD2.read_dataset(results_dset)
-
-    # Read parameters
-    params_dset = JLD2.get_dataset(f, "parameters")
-    params = JLD2.read_dataset(params_dset)
-
-    println("Results: ", results)
-    println("Parameters: ", params)
-end
-```
-
-## Alternative: Direct Array Access
+### Alternative: Direct Array Access
 ```julia
 jldopen("data.jld2", "r") do f
     dset = JLD2.get_dataset(f, "large_array")
@@ -483,14 +354,6 @@ jldopen("data.jld2", "r") do f
     full_array = dset[]              # Read entire array (same as read_dataset)
 end
 ```
-
-# Notes
-- The dataset must have been written to the file before it can be read
-- All data is loaded into memory; for large arrays consider [`readmmap`](@ref)
-- Compressed datasets are automatically decompressed during reading
-- Custom Julia types are automatically reconstructed if the type definitions are available
-
-See also: [`get_dataset`](@ref), [`readmmap`](@ref), [`Dataset`](@ref), [`write_dataset`](@ref)
 """
 function read_dataset(dset::Dataset)
     f = dset.parent.f
@@ -507,123 +370,13 @@ end
     get_dataset(parent::Union{JLDFile, Group}, name::String)
 
 Retrieve a [`Dataset`](@ref) object from a file without reading the actual data.
-
-This function loads the dataset metadata (datatype, dataspace, attributes, etc.)
-but does not read the actual data values. This is useful for inspecting dataset
-properties, accessing attributes, or preparing for selective data reading.
+This is useful for inspecting dataset properties, accessing attributes, or preparing for selective data reading.
 The returned `Dataset` object can be used with [`read_dataset`](@ref), [`readmmap`](@ref),
 or array indexing operations.
 
-# Arguments
-- `parent::Union{JLDFile, Group}`: The file or group containing the dataset
+## Arguments
+- `parent`: The file or group containing the dataset
 - `name::String`: Name or path of the dataset relative to the parent
-
-# Returns
-- `Dataset`: A dataset object containing metadata and providing access to the data
-
-# Throws
-- `KeyError`: If no dataset with the specified name exists
-
-# Examples
-
-## Basic Usage
-```julia
-jldopen("data.jld2", "r") do f
-    dset = JLD2.get_dataset(f, "my_array")
-
-    # Inspect the dataset without reading data
-    println("Dataset: ", dset.name)
-    println("Datatype: ", typeof(dset.datatype))
-
-    # Read the actual data
-    data = JLD2.read_dataset(dset)
-end
-```
-
-## Inspecting Dataset Metadata
-```julia
-jldopen("experiment.jld2", "r") do f
-    dset = JLD2.get_dataset(f, "results")
-
-    # Display comprehensive dataset information
-    display(dset)  # Shows datatype, dataspace, layout, attributes, etc.
-
-    # Access specific metadata
-    attrs = JLD2.attributes(dset)
-    println("Attributes: ", attrs)
-
-    # Check if dataset supports memory mapping
-    if JLD2.ismmappable(dset)
-        println("Dataset can be memory-mapped")
-        mmap_data = JLD2.readmmap(dset)
-    else
-        println("Dataset requires full loading")
-        data = JLD2.read_dataset(dset)
-    end
-end
-```
-
-## Working with Nested Groups
-```julia
-jldopen("structured_data.jld2", "r") do f
-    # Access dataset in nested group
-    dset = JLD2.get_dataset(f, "experiments/trial_001/results")
-
-    # Or navigate step by step
-    exp_group = f["experiments"]
-    trial_group = exp_group["trial_001"]
-    dset = JLD2.get_dataset(trial_group, "results")
-end
-```
-
-## Array Access Patterns
-```julia
-jldopen("large_array.jld2", "r") do f
-    dset = JLD2.get_dataset(f, "big_matrix")
-
-    # Different ways to access the data
-    full_data = dset[]                    # Read all data
-    single_value = dset[1, 1]            # Read single element
-    row = dset[1, :]                     # Read first row
-    submatrix = dset[1:10, 1:10]        # Read submatrix
-
-    # Equivalent to read_dataset for full data
-    same_data = JLD2.read_dataset(dset)
-    @assert full_data == same_data
-end
-```
-
-## Inspecting File Contents
-```julia
-function explore_datasets(filename)
-    jldopen(filename, "r") do f
-        for dataset_name in keys(f)
-            try
-                dset = JLD2.get_dataset(f, dataset_name)
-                println("Dataset: ", dataset_name)
-                println("  Type: ", typeof(dset.datatype))
-
-                attrs = JLD2.attributes(dset)
-                if !isempty(attrs)
-                    println("  Attributes: ", keys(attrs))
-                end
-                println()
-            catch e
-                println(dataset_name, ": Not a dataset or error: ", e)
-            end
-        end
-    end
-end
-```
-
-# Notes
-- This function only loads metadata, not the actual data values
-- Use [`read_dataset`](@ref) or array indexing to access the data
-- The `Dataset` object provides detailed information when displayed
-- Supports both absolute and relative paths within the file hierarchy
-- Memory-mapped access may be available for suitable datasets (see [`ismmappable`](@ref))
-
-See also: [`read_dataset`](@ref), [`Dataset`](@ref), [`attributes`](@ref), [`readmmap`](@ref), [`ismmappable`](@ref)
 """
 get_dataset(f::JLDFile, args...; kwargs...) =
     get_dataset(f.root_group, args...; kwargs...)
@@ -796,98 +549,12 @@ additional information about the data such as units, descriptions, creation date
 or any other relevant metadata. Attributes can be added before or after the dataset
 has been written to the file.
 
-# Arguments
+## Arguments
 - `dset::Dataset`: The dataset to add the attribute to
 - `name::String`: The attribute name (must be unique within the dataset)
 - `data`: The attribute value (can be any JLD2-serializable Julia object)
 - `wsession::JLDWriteSession`: Optional write session for advanced usage (default: new session)
 
-# Throws
-- `ArgumentError`: If an attribute with the same name already exists
-
-# Examples
-
-## Basic Attribute Usage
-```julia
-jldopen("data.jld2", "w") do f
-    dset = JLD2.create_dataset(f, "experiment_data")
-
-    # Add various types of attributes
-    JLD2.add_attribute(dset, "description", "Temperature measurements")
-    JLD2.add_attribute(dset, "units", "°C")
-    JLD2.add_attribute(dset, "measurement_date", "2024-01-15")
-    JLD2.add_attribute(dset, "sensor_id", 42)
-    JLD2.add_attribute(dset, "calibrated", true)
-
-    # Write the actual data
-    JLD2.write_dataset(dset, temperature_readings)
-end
-```
-
-## Complex Attribute Data
-```julia
-jldopen("analysis.jld2", "w") do f
-    dset = JLD2.create_dataset(f, "results")
-
-    # Attributes can store complex data
-    JLD2.add_attribute(dset, "parameters", Dict(
-        "learning_rate" => 0.01,
-        "batch_size" => 32,
-        "epochs" => 100
-    ))
-
-    JLD2.add_attribute(dset, "processing_steps", [
-        "normalization",
-        "feature_extraction",
-        "model_training"
-    ])
-
-    JLD2.write_dataset(dset, model_results)
-end
-```
-
-## Reading Attributes
-```julia
-jldopen("data.jld2", "r") do f
-    dset = JLD2.get_dataset(f, "experiment_data")
-
-    # Get all attributes
-    attrs = JLD2.attributes(dset)
-    for (attr_name, value) in attrs
-        println(attr_name, ": ", value)
-    end
-
-    # Access specific attributes
-    description = attrs["description"]
-    units = attrs["units"]
-    println("Data: ", description, " (", units, ")")
-end
-```
-
-## Adding Attributes to Written Datasets
-```julia
-# First session: create and write dataset
-jldopen("data.jld2", "w") do f
-    dset = JLD2.create_dataset(f, "measurements")
-    JLD2.write_dataset(dset, sensor_data)
-end
-
-# Second session: add attributes to existing dataset
-jldopen("data.jld2", "a") do f  # append mode
-    dset = JLD2.get_dataset(f, "measurements")
-    JLD2.add_attribute(dset, "analysis_date", string(today()))
-    JLD2.add_attribute(dset, "processed_by", "analysis_v2.1")
-end
-```
-
-# Notes
-- Attribute names must be unique within each dataset
-- Attributes can be added before or after writing the dataset data
-- Attribute data can be any Julia object that JLD2 can serialize
-- Use [`attributes`](@ref) to retrieve all attributes from a dataset
-- Existing attributes cannot be modified; the dataset must be recreated to change them
-
-See also: [`attributes`](@ref), [`Dataset`](@ref), [`create_dataset`](@ref)
 """
 function add_attribute(dset::Dataset, name::String, data, wsession=JLDWriteSession())
     f = dset.parent.f
