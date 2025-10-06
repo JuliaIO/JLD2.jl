@@ -58,7 +58,7 @@ function pathize(g::Group, name::AbstractString, create::Bool)
             else
                 # Use lookup_link directly for consistency
                 link = lookup_link(g, dir)
-                if link === nothing
+                if isnothing(link)
                     if create
                         # No group exists, so create a new group
                         newg = G(f)
@@ -105,17 +105,17 @@ function Base.getindex(g::Group, name::AbstractString)
 
     # Use lookup_link directly instead of lookup_offset → lookup_link pattern
     link = lookup_link(g, name)
-    if link === nothing
-        throw(KeyError(name))
-    elseif isa(link, HardLink)
+    isnothing(link) && throw(KeyError(name))
+
+    if isa(link, HardLink)
         # Hard link - proceed with normal dataset/group loading
         return Base.inferencebarrier(load_dataset(f, link.target))
     elseif isa(link, ExternalLink)
-        # Resolve external link - resolve_external_link handles errors appropriately
-        return resolve_external_link(g.f, link)
+        return load_external_dataset(g.f, link)
     elseif isa(link, SoftLink)
-        # Resolve soft link within the same file
-        return resolve_soft_link(g, link.path)
+        path = link.path
+        !haskey(g, path) && throw(ArgumentError("No dataset exists at linked path: $path"))
+        return g[path]
     else
         throw(ArgumentError("Unknown link type: $(typeof(link))"))
     end
@@ -200,8 +200,7 @@ end
 Note: External file paths are validated to prevent directory traversal attacks.
 """
 function create_external_link!(group::Group, link_name::String, file_path::String, object_path::String)
-    external_link = ExternalLink(file_path, object_path)
-    group[link_name] = external_link
+    group[link_name] = ExternalLink(file_path, object_path)
     return group
 end
 
@@ -225,11 +224,8 @@ jldopen("test.jld2", "w") do file
 end
 ```
 """
-function create_soft_link!(group::Group, link_name::String, target_path::String)
-    soft_link = SoftLink(target_path)
-    group[link_name] = soft_link
-    return group
-end
+create_soft_link!(group::Group, link_name::String, target_path::String) =
+    group[link_name] = SoftLink(target_path)
 
 function Base.haskey(g::Group, name::AbstractString)
     G = typeof(g)
@@ -333,92 +329,6 @@ function parse_link_message(wmsg::HmWrap{HmLinkMessage})::AbstractLink
         # According to the HDF5 spec, target field is present when (!isset(flags, 3) || link_type==0)
         return HardLink(wmsg.target)
     end
-end
-
-"""
-    group_path(g::Group) -> String
-
-Get the absolute path of a group within its file.
-
-# Returns
-The absolute path of the group within the HDF5 file (e.g., "/data/measurements").
-For the root group, returns "/".
-
-# Algorithm
-- If this is the root group, returns "/"
-- Otherwise, searches through unwritten_child_groups only (performance optimization)
-- For groups loaded from disk, falls back to "/" (limitation of current implementation)
-
-# Performance Note
-This implementation prioritizes performance over complete accuracy. It only searches
-through in-memory group hierarchies (unwritten_child_groups) to avoid expensive disk I/O.
-For complex hierarchies with groups loaded from disk, relative soft links may not
-resolve perfectly, but absolute soft links will always work.
-"""
-function group_path(g::Group)
-    # Check if this is the root group
-    if g === g.f.root_group
-        return "/"
-    end
-
-    # Search through the file's in-memory group hierarchy
-    return find_group_path_simple(g.f.root_group, g, "/")
-end
-
-"""
-    find_group_path_simple(root::Group, target::Group, current_path::String) -> String
-
-Find the path to a target group using recursion through both unwritten and written groups.
-This version searches both in-memory and disk-based groups to find the target.
-"""
-function find_group_path_simple(root::Group, target::Group, current_path::String)
-    # Check direct children in unwritten_child_groups (in-memory groups)
-    for (name, child_group) in root.unwritten_child_groups
-        child_path = current_path == "/" ? "/$name" : "$current_path/$name"
-
-        if child_group === target
-            return child_path
-        end
-
-        # Recursively search child groups
-        result = find_group_path_simple(child_group, target, child_path)
-        if result != "/"
-            return result
-        end
-    end
-
-    # Check written_links for groups (groups that have been written to disk)
-    for (name, link) in root.written_links
-        if isa(link, HardLink)
-            child_path = current_path == "/" ? "/$name" : "$current_path/$name"
-
-            # Try to load the group at this offset and check if it's our target
-            try
-                # Load the group to see if it matches our target
-                # We use === for object identity comparison
-                # This is expensive but necessary for groups loaded from disk
-                loaded_group_offset = link.target
-
-                # Check if target group has the same file and offset
-                # This is a heuristic to avoid loading every group
-                if target.f === root.f && hasfield(typeof(target), :last_chunk_start_offset)
-                    if target.last_chunk_start_offset == loaded_group_offset
-                        return child_path
-                    end
-                end
-
-                # As a fallback, we could load and compare, but that's expensive
-                # For now, we'll skip recursive searching of loaded groups
-                # This means some complex hierarchies might not resolve perfectly
-            catch
-                # If loading fails, skip this entry
-                continue
-            end
-        end
-    end
-
-    # Not found in this branch
-    return "/"
 end
 
 function load_group(f::JLDFile, offset::RelOffset)

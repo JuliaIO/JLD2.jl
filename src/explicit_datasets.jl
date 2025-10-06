@@ -208,11 +208,8 @@ function get_dataset(g::Group, name::String)
             "Use f[\"", name, "\"] to access the external data directly."
         )))
     elseif isa(link, SoftLink)
-        # For soft links, check if they point to a regular dataset within the same file
-        resolved_path = resolve_soft_link_path(group_path(g), link.path)
-        # Use lookup_link for the resolved path as well to be consistent
-        target_link = lookup_link(f.root_group, resolved_path[2:end])  # Remove leading '/'
-        if target_link !== nothing && isa(target_link, HardLink)
+        target_link = lookup_link(g, link.path)
+        if isa(target_link, HardLink)
             # This is a soft link to a regular dataset within the same file - allow it
             return get_dataset(f, target_link.target, g, name)
         else
@@ -280,23 +277,21 @@ write_header_message(io, f, msg::Pair{String, AbstractLink}, _=nothing) =
 
 Calculate the size of a link message for the given link type.
 """
-function message_size_for_link(name::String, link::AbstractLink)
-    if isa(link, HardLink)
-        return jlsizeof(Val(HmLinkMessage); link_name=name)
-    elseif isa(link, SoftLink)
-        soft_link_data = Vector{UInt8}(link.path)
-        flags = UInt8(0x10 | 0x08 | size_flag(sizeof(name)))  # 0x08 = bit 3 set
-        return jlsizeof(Val(HmLinkMessage); link_name=name, flags=flags,
-                       link_type=UInt8(1), link_info_size=UInt16(length(soft_link_data)),
-                       soft_link=soft_link_data)
+function message_size_for_link(link_name::String, link::AbstractLink)
+    isa(link, HardLink) && return jlsizeof(Val(HmLinkMessage); link_name)
+
+    flags = UInt8(0x10 | 0x08 | size_flag(sizeof(link_name)))
+    if isa(link, SoftLink)
+        return jlsizeof(Val(HmLinkMessage); link_name, flags,
+                       link_type=UInt8(1),
+                       link_info_size=sizeof(link.path),
+                       soft_link=UInt8[])
     elseif isa(link, ExternalLink)
         # External link data: two null-terminated strings
-        external_data = vcat(0x00, Vector{UInt8}(link.file_path), 0x00,
-                            Vector{UInt8}(link.object_path), 0x00)
-        flags = UInt8(0x10 | 0x08 | size_flag(sizeof(name)))  # 0x08 = bit 3 set
-        return jlsizeof(Val(HmLinkMessage); link_name=name, flags=flags,
-                       link_type=UInt8(64), link_info_size=UInt16(length(external_data)),
-                       external_link=external_data)
+        return jlsizeof(Val(HmLinkMessage); link_name, flags,
+                       link_type=UInt8(64),
+                       link_info_size=3+sizeof(link.file_path)+sizeof(link.object_path),
+                       external_link=UInt8[])
     else
         throw(UnsupportedFeatureException("Unsupported link type: $(typeof(link))"))
     end
@@ -307,27 +302,20 @@ end
 
 Write a link message for the given link type to the I/O stream.
 """
-function write_link_message(io, name::String, link::AbstractLink)
+function write_link_message(io, link_name::String, link::AbstractLink)
     if isa(link, HardLink)
-        write_header_message(io, Val(HmLinkMessage); link_name=name, target=link.target)
-    elseif isa(link, SoftLink)
-        soft_link_data = Vector{UInt8}(link.path)
-        # Set flags with bit 3 to indicate link_type is present
-        flags = UInt8(0x10 | 0x08 | size_flag(sizeof(name)))  # 0x08 = bit 3 set
-        write_header_message(io, Val(HmLinkMessage); link_name=name, flags=flags,
-                           link_type=UInt8(1), link_info_size=UInt16(length(soft_link_data)),
-                           soft_link=soft_link_data)
+        return write_header_message(io, Val(HmLinkMessage); link_name, link.target)
+    end
+    flags = UInt8(0x10 | 0x08 | size_flag(sizeof(link_name)))
+    if isa(link, SoftLink)
+        soft_link = Vector{UInt8}(link.path)
+        write_header_message(io, Val(HmLinkMessage); link_name, flags, link_type=1, soft_link)
     elseif isa(link, ExternalLink)
         # External link data: two null-terminated strings
-        external_data = vcat(0x00, Vector{UInt8}(link.file_path), 0x00,
+        external_link = vcat(0x00, Vector{UInt8}(link.file_path), 0x00,
                             Vector{UInt8}(link.object_path), 0x00)
-        # Set flags with bit 3 to indicate link_type is present
-        flags = UInt8(0x10 | 0x08 | size_flag(sizeof(name)))  # 0x08 = bit 3 set
-        write_header_message(io, Val(HmLinkMessage); link_name=name, flags=flags,
-                           link_type=UInt8(64), link_info_size=UInt16(length(external_data)),
-                           external_link=external_data)
-    else
-        throw(UnsupportedFeatureException("Unsupported link type: $(typeof(link))"))
+        write_header_message(io, Val(HmLinkMessage); link_name, flags, link_type=64,
+                           external_link)
     end
 end
 
