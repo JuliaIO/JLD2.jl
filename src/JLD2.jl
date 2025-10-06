@@ -184,7 +184,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool,
     parallel_read::Bool=false,
     plain::Bool=false
 ) where T<:Union{Type{IOStream},Type{MmapIO}}
-  
+
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog = 1
     filters = Filters.normalize_filters(compress)
 
@@ -510,7 +510,6 @@ end
 
 include("object_headers.jl")
 include("headermessages.jl")
-include("path_resolution.jl")
 include("external_files.jl")
 include("groups.jl")
 include("dataspaces.jl")

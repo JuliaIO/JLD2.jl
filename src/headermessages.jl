@@ -70,11 +70,11 @@ end
     link_name::@FixedLengthString(link_name_len) # non-null-terminated
     (!isset(flags, 3) || link_type==0) && (target::RelOffset = UNDEFINED_ADDRESS)
     if isset(flags, 3) && link_type == 1
-        link_info_size::UInt16
+        link_info_size::UInt16 = length(kw.soft_link)
         soft_link::@Blob(link_info_size) # non-null terminated string
     end
     if isset(flags, 3) && link_type == 64
-        link_info_size::UInt16
+        link_info_size::UInt16 = length(kw.external_link)
         external_link::@Blob(link_info_size) # two null-terminated strings
     end
 end
