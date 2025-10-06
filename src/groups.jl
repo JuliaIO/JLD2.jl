@@ -115,19 +115,7 @@ function Base.getindex(g::Group, name::AbstractString)
         return resolve_external_link(g.f, link)
     elseif isa(link, SoftLink)
         # Resolve soft link within the same file
-        # For relative paths, resolve from the current group
-        # For absolute paths, resolve from root
-        if startswith(link.path, '/')
-            # Absolute path - resolve from root
-            resolved_path = JLD2.normalize_hdf5_path(link.path)
-            # Attempt to resolve, let the file's getindex handle KeyError if target doesn't exist
-            # This approach provides better error messages automatically
-            return g.f[resolved_path]
-        else
-            # Relative path - resolve from current group
-            # resolve_relative_soft_link handles error cases appropriately
-            return resolve_relative_soft_link(g, link.path)
-        end
+        return resolve_soft_link(g, link.path)
     else
         throw(ArgumentError("Unknown link type: $(typeof(link))"))
     end
@@ -331,7 +319,7 @@ function parse_link_message(wmsg::HmWrap{HmLinkMessage})::AbstractLink
             # External link - two null-terminated strings in external_link blob
             blob = wmsg.external_link
             # Parse two null-terminated strings but skip the first byte which is reserved
-            strings = split_null_terminated_strings(blob, 2)
+            strings = split(String(blob), '\0', keepempty=false)
             if length(strings) != 2
                 throw(InvalidDataException("External link must contain exactly two null-terminated strings"))
             end
@@ -345,32 +333,6 @@ function parse_link_message(wmsg::HmWrap{HmLinkMessage})::AbstractLink
         # According to the HDF5 spec, target field is present when (!isset(flags, 3) || link_type==0)
         return HardLink(wmsg.target)
     end
-end
-
-"""
-    split_null_terminated_strings(blob::Vector{UInt8}) -> Vector{String}
-
-Split a byte blob containing null-terminated strings into separate string components.
-Used for parsing external link information.
-"""
-function split_null_terminated_strings(blob::Vector{UInt8}, start_idx=1)::Vector{String}
-    strings = String[]
-
-    for (i, byte) in enumerate(blob)
-        if byte == 0x00  # null terminator
-            if i > start_idx  # Don't create empty strings from consecutive nulls
-                push!(strings, String(blob[start_idx:i-1]))
-            end
-            start_idx = i + 1
-        end
-    end
-
-    # Handle case where last string is not null-terminated
-    if start_idx <= length(blob)
-        push!(strings, String(blob[start_idx:end]))
-    end
-
-    return strings
 end
 
 """
@@ -457,54 +419,6 @@ function find_group_path_simple(root::Group, target::Group, current_path::String
 
     # Not found in this branch
     return "/"
-end
-
-"""
-    resolve_relative_soft_link(g::Group, relative_path::String)
-
-Resolve a relative soft link path from the current group.
-
-# Supported Relative Paths
-- Simple relative paths without ".." (e.g., "temp", "subgroup/data")
-- Paths with ".." components have limited support when groups are loaded from disk
-
-# Algorithm
-For simple paths, navigates directly from the current group.
-For complex paths with "..", attempts to use group hierarchy but may fall back to error.
-"""
-function resolve_relative_soft_link(g::Group, relative_path::String)
-    # Parse the relative path components
-    path_components = split(relative_path, '/', keepempty=false)
-    current_group = g
-
-    # Check if this path contains ".." components
-    has_upward_navigation = any(c -> c == "..", path_components)
-
-    if has_upward_navigation
-        # Complex relative path with upward navigation
-        # This requires knowing the current group's path in the hierarchy
-        # For groups loaded from disk, this may not work perfectly
-        try
-            # Try to use the original path resolution approach
-            current_path = group_path(current_group)
-            resolved_path = resolve_soft_link_path(current_path, relative_path)
-            return current_group.f[resolved_path]
-        catch
-            # Fallback error message
-            throw(KeyError("Relative soft link with '..' components cannot be resolved for groups loaded from disk: $relative_path"))
-        end
-    else
-        # Simple relative path - navigate directly from current group
-        for component in path_components
-            if component != "." && !isempty(component)
-                # Navigate to child - this should work with normal getindex
-                current_group = current_group[component]
-            end
-            # Ignore "." and empty components
-        end
-
-        return current_group
-    end
 end
 
 function load_group(f::JLDFile, offset::RelOffset)

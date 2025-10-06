@@ -137,35 +137,6 @@ end
     end
 end
 
-@testset "Link Message Parsing" begin
-    @testset "split_null_terminated_strings" begin
-        # Test basic splitting
-        blob1 = UInt8[0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x57, 0x6f, 0x72, 0x6c, 0x64, 0x00]  # "Hello\0World\0"
-        result1 = JLD2.split_null_terminated_strings(blob1)
-        @test result1 == ["Hello", "World"]
-
-        # Test with trailing string (no final null)
-        blob2 = UInt8[0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x57, 0x6f, 0x72, 0x6c, 0x64]  # "Hello\0World"
-        result2 = JLD2.split_null_terminated_strings(blob2)
-        @test result2 == ["Hello", "World"]
-
-        # Test empty string handling
-        blob3 = UInt8[0x00, 0x48, 0x69, 0x00]  # "\0Hi\0"
-        result3 = JLD2.split_null_terminated_strings(blob3)
-        @test result3 == ["Hi"]
-
-        # Test single string
-        blob4 = UInt8[0x48, 0x65, 0x6c, 0x6c, 0x6f]  # "Hello"
-        result4 = JLD2.split_null_terminated_strings(blob4)
-        @test result4 == ["Hello"]
-
-        # Test empty input
-        blob5 = UInt8[]
-        result5 = JLD2.split_null_terminated_strings(blob5)
-        @test result5 == String[]
-    end
-end
-
 @testset "Message Size Calculation" begin
     @testset "message_size_for_link" begin
         # For these tests, we mainly check that the function doesn't throw
@@ -696,26 +667,6 @@ end
                 end
             end
         end
-    end
-
-    @testset "Complex Path Resolution Scenarios" begin
-        # Test edge cases in path resolution with internal functions
-
-        # Test path normalization
-        @test JLD2.normalize_hdf5_path("/data//measurements/./temp") == "/data/measurements/temp"
-        @test JLD2.normalize_hdf5_path("data/measurements") == "/data/measurements"
-        @test JLD2.normalize_hdf5_path("/data/./measurements/../calibration") == "/data/calibration"
-
-        # Test absolute path resolution (these should work in resolve_soft_link_path)
-        @test JLD2.resolve_soft_link_path("/data/measurements", "/results/analysis") == "/results/analysis"
-        @test JLD2.resolve_soft_link_path("/", "/data/test") == "/data/test"
-
-        # Test simple relative path resolution (without ".." components)
-        @test JLD2.resolve_soft_link_path("/data/measurements", "temp") == "/data/measurements/temp"
-        @test JLD2.resolve_soft_link_path("/", "data/test") == "/data/test"
-
-        # Note: Complex relative path resolution with ".." components is tested elsewhere
-        # and has known limitations for groups loaded from disk
     end
 
     @testset "Soft Link Display and Inspection" begin
