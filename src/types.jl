@@ -128,6 +128,14 @@ UnsupportedFeatureException() = UnsupportedFeatureException("")
 InvalidDataException() = InvalidDataException("")
 InternalError() = InternalError("")
 
+Base.showerror(io::IO, ex::UnsupportedVersionException) =
+    print(io, "UnsupportedVersionException: ", ex.msg)
+Base.showerror(io::IO, ex::UnsupportedFeatureException) =
+    print(io, "UnsupportedFeatureException: ", ex.msg)
+Base.showerror(io::IO, ex::InvalidDataException) =
+    print(io, "InvalidDataException: ", ex.msg)
+Base.showerror(io::IO, ex::InternalError) =
+    print(io, "InternalError: ", ex.msg)
 
 ## Internal types
 
