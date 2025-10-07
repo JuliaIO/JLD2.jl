@@ -1,61 +1,3 @@
-#=
-# Explicit Dataset API
-
-This module provides low-level, explicit control over JLD2 dataset creation, configuration,
-and access. Unlike the high-level `jldsave`/`load` interface, the explicit dataset API
-allows fine-grained control over compression, chunking, attributes, and other HDF5 features.
-
-## Key Concepts
-
-**Dataset**: A container for data with associated metadata including datatype, dataspace,
-layout, attributes, and compression filters. Datasets are the primary storage units in JLD2 files.
-
-**Two-Phase Writing**: Datasets are created first with `create_dataset`, configured with
-desired options, then written with `write_dataset`. This allows setting compression and
-attributes before data is written.
-
-**Metadata Access**: Use `get_dataset` to access dataset metadata without reading data.
-This is efficient for inspecting file contents, attributes, or dataset properties.
-
-## Main Functions
-
-- [`create_dataset`](@ref): Create a new dataset specification
-- [`write_dataset`](@ref): Write data using the dataset specification
-- [`read_dataset`](@ref): Read data from a written dataset
-- [`get_dataset`](@ref): Retrieve dataset metadata without reading data
-- [`add_attribute`](@ref): Add metadata attributes to datasets
-- [`attributes`](@ref): Retrieve all attributes from a dataset
-
-## Advanced Features
-
-- **Memory Mapping**: Use [`ismmappable`](@ref) and [`readmmap`](@ref) for efficient access to large arrays
-- **Array Indexing**: Datasets supporting arrays can be indexed like regular Julia arrays
-- **Compression**: Configure compression with the `filters` field before writing
-- **Attributes**: Add arbitrary metadata as key-value pairs
-
-## Examples
-
-See individual function documentation for detailed examples.
-
-**Quick Start**:
-```julia
-jldopen("data.jld2", "w") do f
-    # Create dataset with compression
-    dset = JLD2.create_dataset(f, "my_data")
-    dset.filters = Deflate()
-    JLD2.add_attribute(dset, "description", "Compressed array data")
-    JLD2.write_dataset(dset, large_array)
-end
-
-# Read back with metadata inspection
-jldopen("data.jld2", "r") do f
-    dset = JLD2.get_dataset(f, "my_data")
-    display(dset)  # Show comprehensive metadata
-    data = JLD2.read_dataset(dset)
-end
-```
-=#
-
 """
     Dataset
 
@@ -86,7 +28,7 @@ end
 See also: [`create_dataset`](@ref), [`write_dataset`](@ref), [`read_dataset`](@ref), [`get_dataset`](@ref)
 """
 mutable struct Dataset
-    parent::Group #param..
+    parent::Group..
     name::String
     offset::RelOffset
     datatype
@@ -94,8 +36,7 @@ mutable struct Dataset
     layout
     attributes::OrderedDict{String, Any}
     chunk
-    filters#::Vector{Filter}
-    #external
+    filters
     header_chunk_info # chunk_start, chunk_end, next_msg_offset
 end
 
@@ -310,32 +251,7 @@ end
     read_dataset(dset::Dataset)
 
 Read and return the complete dataset from the file and reconstructs the original
-Julia object. The dataset must have been previously written to the file using
-[`write_dataset`](@ref).
-
-## Arguments
-- `dset::Dataset`: The dataset object, typically obtained from [`get_dataset`](@ref)
-
-## Usage Example:
-```julia
-jldopen("data.jld2", "r") do f
-    dset = JLD2.get_dataset(f, "my_data")
-    data = JLD2.read_dataset(dset)
-    println("Read data: ", data)
-end
-```
-
-### Alternative: Direct Array Access
-```julia
-jldopen("data.jld2", "r") do f
-    dset = JLD2.get_dataset(f, "large_array")
-
-    # For arrays, you can also use indexing
-    first_element = dset[1]           # Read single element
-    subarray = dset[1:10, 1:5]      # Read subarray
-    full_array = dset[]              # Read entire array (same as read_dataset)
-end
-```
+Julia object.
 """
 function read_dataset(dset::Dataset)
     f = dset.parent.f
