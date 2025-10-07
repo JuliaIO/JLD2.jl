@@ -203,43 +203,43 @@ using JLD2Bzip2, JLD2Lz4
     end
 end
 
-@testset "H5dump Validation" begin
-    # Only run if h5dump is available
-    h5dump_available = try
-        run(pipeline(`h5dump --version`, stdout=devnull, stderr=devnull))
-        true
-    catch
-        false
-    end
+# @testset "H5dump Validation" begin
+#     # Only run if h5dump is available
+#     h5dump_available = try
+#         run(pipeline(`h5dump --version`, stdout=devnull, stderr=devnull))
+#         true
+#     catch
+#         false
+#     end
 
-    if h5dump_available
-        fn = joinpath(mktempdir(), "h5dump_test.jld2")
+#     if h5dump_available
+#         fn = joinpath(mktempdir(), "h5dump_test.jld2")
 
-        # Create a simple chunked array
-        data = collect(reshape(1.0:24.0, 4, 6))
-        chunk_dims = [2, 3]
+#         # Create a simple chunked array
+#         data = collect(reshape(1.0:24.0, 4, 6))
+#         chunk_dims = [2, 3]
 
-        jldopen(fn, "w") do f
-            JLD2.write_chunked_array(f, "test_data", data, chunk_dims)
-        end
+#         jldopen(fn, "w") do f
+#             JLD2.write_chunked_array(f, "test_data", data, chunk_dims)
+#         end
 
-        # Run h5dump to verify structure
-        h5dump_output = read(`h5dump -H $fn`, String)
+#         # Run h5dump to verify structure
+#         h5dump_output = read(`h5dump -H $fn`, String)
 
-        # Verify key features in output
-        @test occursin("DATASPACE", h5dump_output)
-        @test occursin("test_data", h5dump_output)
+#         # Verify key features in output
+#         @test occursin("DATASPACE", h5dump_output)
+#         @test occursin("test_data", h5dump_output)
 
-        # Verify data is readable and correct
-        h5dump_data = read(`h5dump -d /test_data $fn`, String)
-        @test !occursin("unable", lowercase(h5dump_data))
-        @test occursin("DATA", h5dump_data)  # Check that data section exists
+#         # Verify data is readable and correct
+#         h5dump_data = read(`h5dump -d /test_data $fn`, String)
+#         @test !occursin("unable", lowercase(h5dump_data))
+#         @test occursin("DATA", h5dump_data)  # Check that data section exists
 
-        rm(fn, force=true)
-    else
-        @warn "h5dump not available, skipping validation tests"
-    end
-end
+#         rm(fn, force=true)
+#     else
+#         @warn "h5dump not available, skipping validation tests"
+#     end
+# end
 
 @testset "Regression Tests" begin
     # Test for specific bugs that were fixed

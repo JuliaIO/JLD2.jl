@@ -143,7 +143,7 @@ function get_chunked_array(f::JLDFile, name::String)
     # Parse the B-tree to get all chunk metadata
     chunks = if layout.version == 3
         # Use existing function to read all chunks from V1 B-tree
-        raw_chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)
+        raw_chunks = read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)
         # Convert to ChunkInfo objects
         ChunkInfo[ChunkInfo(c.offset, c.chunk_size, c.filter_mask, c.idx) for c in raw_chunks]
     else
@@ -308,7 +308,7 @@ function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
     if layout.version == 3
         # version 1 B-tree
         # This version appears to be padding incomplete chunks
-        chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)
+        chunks = read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)
         # array cartesian indices
         ids = CartesianIndices(v)
         # chunk dimensions in same order as data dims

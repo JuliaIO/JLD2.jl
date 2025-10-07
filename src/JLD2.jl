@@ -521,8 +521,10 @@ include("Filters.jl")
 using .Filters: WrittenFilterPipeline, FilterPipeline, iscompressed
 using .Filters: Shuffle, Deflate, ZstdFilter
 
-include("v1btree.jl")
-include("v1btree_debug.jl")
+include("btrees/BTrees.jl")
+using .BTrees: write_chunked_dataset_with_v1btree,
+    read_v1btree, read_symbol_table_node,
+    read_v2btree_header, read_records_in_node
 include("chunked_array.jl")
 include("datasets.jl")
 include("global_heaps.jl")
@@ -548,8 +550,8 @@ include("committed_datatype_introspection.jl")
 # Export the new chunking API
 export write_chunked_array
 
-# if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
-#     include("precompile.jl")
-# end
+if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
+    include("precompile.jl")
+end
 
 end

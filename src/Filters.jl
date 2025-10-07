@@ -99,7 +99,8 @@ function compress(fp::FilterPipeline, data::Array{T}, odr::Type, f::JLDFile, wse
     end
     ref = Ref(buf)
     retcodes = map(fil -> apply_filter!(fil, ref), fp)
-    ref[], retcodes
+    filter_mask = UInt32(sum(2^(i-1)*c for (i,c) in enumerate(retcodes); init=0))
+    ref[], filter_mask
 end
 
 # Special case of `samelayout` data: Use unsafe_wrap to avoid copying
@@ -112,9 +113,10 @@ function compress(fp::FilterPipeline, data::Array{T}, odr::Type{T}, f::JLDFile, 
         )
         ref = Ref(buf)
         retcodes = map(fil -> apply_filter!(fil, ref), fp)
+        filter_mask = UInt32(sum(2^(i-1)*c for (i,c) in enumerate(retcodes); init=0))
         # Do a copy if all compression failed to not return the original unsafe_wrap
         ref[] === buf && (ref[] = copy(buf))
-        ref[], retcodes
+        ref[], filter_mask
     end
 end
 

@@ -136,68 +136,8 @@ function print_v1btree(f::JLDFile, offset::RelOffset, dimensionality::UInt8)
         println("❌ Error reading keys/children: $e")
         println("Current file position: $(position(io))")
         println("Raw bytes at current position:")
-        print_raw_bytes_at_position(f, position(io), 64)
+        print_raw_bytes_at_position(f, h5offset(f, position(io)), 64)
     end
-end
-
-"""
-    read_v1btree_node_debug(f::JLDFile, offset::RelOffset, dimensionality::UInt8)
-
-Read a V1 B-tree node with detailed error handling for debugging.
-"""
-function read_v1btree_node_debug(f::JLDFile, offset::RelOffset, dimensionality::UInt8)
-    io = f.io
-    seek(io, fileoffset(f, offset))
-
-    # Read signature
-    signature = jlread(io, UInt32)
-    if signature != htol(0x45455254)  # "TREE"
-        throw(InvalidDataException("Invalid V1 B-tree signature: 0x$(string(signature, base=16))"))
-    end
-
-    # Read header
-    node_type = jlread(io, UInt8)
-    node_level = jlread(io, UInt8)
-    entries_used = jlread(io, UInt16)
-    left_sibling = jlread(io, RelOffset)
-    right_sibling = jlread(io, RelOffset)
-
-    # Read keys and children
-    keys = Vector{V1ChunkKey}()
-    children = Vector{RelOffset}()
-
-    # Read interleaved keys and children
-    for i in 1:entries_used
-        key = read_chunk_key_debug(io, dimensionality)
-        push!(keys, key)
-
-        child = jlread(io, RelOffset)
-        push!(children, child)
-    end
-
-    # Read final key
-    final_key = read_chunk_key_debug(io, dimensionality)
-    push!(keys, final_key)
-
-    return V1BTreeNode(node_type, node_level, entries_used, left_sibling, right_sibling, keys, children)
-end
-
-"""
-    read_chunk_key_debug(io::IO, dimensionality::UInt8)
-
-Read a chunk key with debug information.
-"""
-function read_chunk_key_debug(io::IO, dimensionality::UInt8)
-    chunk_size = jlread(io, UInt32)
-    filter_mask = jlread(io, UInt32)
-
-    indices = Vector{UInt64}()
-    for i in 1:(dimensionality + 1)
-        index = jlread(io, UInt64)
-        push!(indices, index)
-    end
-
-    return V1ChunkKey(chunk_size, filter_mask, indices)
 end
 
 """
@@ -270,32 +210,6 @@ function print_raw_bytes(f::JLDFile, offset::RelOffset, count::Int)
 end
 
 """
-    print_raw_bytes_at_position(f::JLDFile, pos::Int, count::Int)
-
-Print raw bytes at the current file position for debugging.
-"""
-function print_raw_bytes_at_position(f::JLDFile, pos::Int, count::Int)
-    io = f.io
-    current_pos = position(io)
-    seek(io, pos)
-
-    bytes = read(io, count)
-    println("Raw bytes at position $pos (hex):")
-    for i in 1:min(count, length(bytes))
-        if (i-1) % 16 == 0
-            print("$(lpad(string(i-1, base=16), 4, '0')): ")
-        end
-        print("$(lpad(string(bytes[i], base=16), 2, '0')) ")
-        if i % 16 == 0 || i == length(bytes)
-            println()
-        end
-    end
-
-    # Restore original position
-    seek(io, current_pos)
-end
-
-"""
     calculate_max_entries_theoretical(dimensionality::UInt8, node_size::Int = 4096)
 
 Calculate theoretical maximum entries for comparison with h5debug output.
@@ -326,7 +240,7 @@ function debug_v1btree_file(filename::String, dataset_name::String)
     jldopen(filename, "r") do f
         # Get the dataset's header messages
         println("📋 Dataset header messages:")
-        JLD2.print_header_messages(f, dataset_name)
+        print_header_messages(f, dataset_name)
 
         # Find the DataLayout message
         dataset_link = f.root_group.written_links[dataset_name]
@@ -337,11 +251,11 @@ function debug_v1btree_file(filename::String, dataset_name::String)
         end
 
         data_layout = nothing
-        hmitr = JLD2.HeaderMessageIterator(f, dataset_offset)
+        hmitr = HeaderMessageIterator(f, dataset_offset)
         for msg in hmitr
-            if msg.type == JLD2.HmDataLayout
+            if msg.type == HmDataLayout
                 layout = DataLayout(f, msg)
-                if layout.storage_type == JLD2.LcChunked
+                if layout.storage_type == LcChunked
                     data_layout = layout
                     break
                 end

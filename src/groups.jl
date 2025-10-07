@@ -413,7 +413,7 @@ function load_group(f::JLDFile, offset::RelOffset)
     end
 
     if fractal_heap_address != UNDEFINED_ADDRESS
-        records = read_btree(f, fractal_heap_address, name_index_btree)::Vector{Tuple{String, RelOffset}}
+        records = read_fractal_heap_group(f, fractal_heap_address, name_index_btree)::Vector{Tuple{String, RelOffset}}
         for r in records
             links[r[1]] = HardLink(r[2])
         end
