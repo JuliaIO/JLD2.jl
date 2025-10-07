@@ -163,17 +163,6 @@ function read_data(f::JLDFile,
     end
 end
 
-function find_dimensions_attr(attributes::Vector{ReadAttribute})
-    dimensions_attr_index = 0
-    for i = 1:length(attributes)
-        x = attributes[i]
-        if x.name == :dimensions
-            dimensions_attr_index = i
-        end
-    end
-    dimensions_attr_index
-end
-
 function read_empty(f::JLDFile, rr::ReadRepresentation{T}, dataspace, attributes, header_offset::RelOffset) where T
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
     seek(f.io, offset)
@@ -240,6 +229,7 @@ end
     end
 
     if !ischunked(layout) || (layout.chunk_indexing_type == 1)
+        # Contiguous or compact storage - read directly
         n = length(v)
         seek(io, layout.data_offset)
         if iscompressed(filters)
@@ -250,47 +240,8 @@ end
         track_weakref!(f, header_offset, v)
         v
     else
-        if layout.version == 3
-            # version 1 B-tree
-            # This version appears to be padding incomplete chunks
-            chunks = read_v1btree_dataset_chunks(f, h5offset(f, layout.data_offset), layout.dimensionality)
-            vchunk = Array{T, Int(ndims)}(undef, reverse(layout.chunk_dimensions)...)
-            for chunk in chunks
-                cidx = chunk.idx::NTuple{Int(ndims+1), Int}
-                idx = reverse(cidx[1:end-1])
-                seek(io, fileoffset(f, chunk.offset))
-                indexview =  (:).(idx .+1, min.(idx .+ reverse(layout.chunk_dimensions), size(v)))
-                indexview2 = (:).(1, length.(indexview))
-
-                if iscompressed(filters)
-                    if chunk.filter_mask == 0
-                        read_compressed_array!(vchunk, f, rr, chunk.chunk_size, filters)
-                        v[indexview...] = @view vchunk[indexview2...]
-                    else
-                        if length(filters.filters) == 1
-                            read_array!(vchunk, f, rr)
-                            v[indexview...] = @view vchunk[indexview2...]
-                        else
-                            mask = Bool[chunk.filter_mask & 2^(n-1) == 0 for n=eachindex(filters.filters)]
-                            if any(mask)
-                                rf = FilterPipeline(filters.filters[mask])
-                                read_compressed_array!(vchunk, f, rr, chunk.chunk_size, rf)
-                                v[indexview...] = @view vchunk[indexview2...]
-                            else
-                                read_array!(vchunk, f, rr)
-                                v[indexview...] = @view vchunk[indexview2...]
-                            end
-
-                        end
-                    end
-                else
-                    read_array!(vchunk, f, rr)
-                    v[indexview...] = @view vchunk[indexview2...]
-                end
-            end
-            return v
-        end
-        throw(UnsupportedVersionException("Encountered a chunked array ($layout) that is not implemented."))
+        # Chunked storage - dispatch to specialized handler
+        read_chunked_array(f, v, dataspace, rr, layout, filters, header_offset, Int(ndims))
     end
 end
 
@@ -323,13 +274,12 @@ end
     if datasz == 0 || (!(data isa ArrayMemory) && datasz < 8192)
         layout_class = LcCompact
         psz += jlsizeof(Val(HmDataLayout); layout_class, data_size=datasz)
-    elseif data isa ArrayMemory && iscompressed(local_filters) && isconcretetype(eltype(data)) && isbitstype(eltype(data))
+    elseif data isa ArrayMemory && isconcretetype(eltype(data)) && isbitstype(eltype(data)) &&
+           iscompressed(local_filters)
         layout_class = LcChunked
         psz += jlsizeof(Val(HmDataLayout);
             layout_class,
-            dimensions = UInt64.((reverse(size(data))..., odr_sizeof(odr))),
-            # Dummy values for message size computation
-            data_size = 0, data_address = 0,
+            dimensions = ones(Int, ndims(data) + 1),
         )
         psz += Filters.pipeline_message_size(local_filters)
     else
@@ -363,6 +313,7 @@ end
         write_continuation_placeholder(cio)
         jlwrite(io, end_checksum(cio))
     elseif layout_class == LcChunked
+        # Fall back to current simple compression approach
         compressed, retcodes = Filters.compress(local_filters, data, odr, f, wsession)
         Filters.write_filter_pipeline_message(cio, local_filters)
 
