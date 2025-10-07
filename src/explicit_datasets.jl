@@ -28,7 +28,7 @@ end
 See also: [`create_dataset`](@ref), [`write_dataset`](@ref), [`read_dataset`](@ref), [`get_dataset`](@ref)
 """
 mutable struct Dataset
-    parent::Group..
+    parent::Group
     name::String
     offset::RelOffset
     datatype
