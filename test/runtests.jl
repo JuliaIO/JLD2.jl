@@ -43,6 +43,8 @@ include("dataset_api.jl")
 include("test_dataset_show.jl")
 include("mmap_test.jl")
 include("generic_io_tests.jl")  # Unified tests for all IO types
+include("wrapped_io.jl")
+include("virtual_datasets.jl")
 
 using TestItemRunner
 
