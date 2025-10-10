@@ -50,7 +50,7 @@ function read_v2btree_chunks(f::JLDFile, v::Array, dataspace, rr,
                               header_offset, ndims::Int)
 
     # Parse v2 B-tree chunk index header
-    header = read_v2btree_chunk_index_header(f, h5offset(f, layout.data_offset))
+    header = JLD2.BTrees.read_v2btree_header(f, h5offset(f, layout.data_offset))
 
     # Get array and chunk dimensions
     array_dims_julia = size(v)
@@ -117,18 +117,6 @@ end
 
 struct AA; ver::Float64; end
 required_value(::Type{AA}, s::Symbol) = s==:ver ? 42.0 : 0
-"""
-    read_v2btree_chunk_index_header(f, offset)
-
-Parse v2 B-tree chunk index header at given address.
-Delegates to the generic read_v2btree_header function.
-
-Returns JLD2.BTrees.V2BTreeHeader struct with all header fields.
-"""
-function read_v2btree_chunk_index_header(f::JLDFile, offset::RelOffset)
-    # Use the generic header reader
-    return read_v2btree_header(f, offset)
-end
 
 """
     read_v2btree_leaf_node(f, node_addr, record_size, num_records, ndims, chunk_size_bytes, filters)
@@ -158,10 +146,10 @@ Example for 2D array:
 
 Returns Vector{V2BTreeChunkRecord} with all chunks from this node.
 """
-function read_v2btree_leaf_node(f::JLDFile, node_addr::UInt64, record_size::UInt16,
+function read_v2btree_leaf_node(f::JLDFile, node_addr::RelOffset, record_size::UInt16,
                                  num_records::UInt16, ndims::Int, chunk_size_bytes::UInt64,
                                  filters)
-    seek(f.io, node_addr)
+    seek(f.io, fileoffset(f, node_addr))
 
     # Read and verify node signature
     sig = jlread(f.io, UInt32)
@@ -173,11 +161,11 @@ function read_v2btree_leaf_node(f::JLDFile, node_addr::UInt64, record_size::UInt
 
     # Calculate number of chunk index fields
     # Unfiltered: record_size = 8 (address) + 8*N (chunk indices)
-    # Filtered: record_size = 8 (address) + 4 (size) + 4 (filter_mask) + 8*N (chunk indices)
+    # Filtered: record_size = 8 (address) + 8 (size) + 4 (filter_mask) + 8*N (chunk indices)
     # For 2D unfiltered: record_size = 24 = 8 + 8*2
-    # For 2D filtered: record_size = 32 = 8 + 4 + 4 + 8*2
+    # For 2D filtered: record_size = 32 = 8 + 8 + 4 + 8*2
     header_bytes = if !isempty(filters.filters)
-        16  # address + size + filter_mask
+        20  # address + size + filter_mask
     else
         8   # address only
     end
@@ -188,8 +176,7 @@ function read_v2btree_leaf_node(f::JLDFile, node_addr::UInt64, record_size::UInt
 
     for i in 1:num_records
         # Read chunk address
-        chunk_addr_value = jlread(f.io, UInt64)
-        chunk_addr = RelOffset(chunk_addr_value)
+        chunk_addr = jlread(f.io, RelOffset)
 
         # Read chunk size and filter mask if filters are present
         chunk_size = chunk_size_bytes
@@ -197,7 +184,7 @@ function read_v2btree_leaf_node(f::JLDFile, node_addr::UInt64, record_size::UInt
 
         if !isempty(filters.filters)
             # Filtered record format: address, size, filter_mask, indices
-            chunk_size = Int(jlread(f.io, UInt32))
+            chunk_size = Int(jlread(f.io, UInt64))
             filter_mask = jlread(f.io, UInt32)
         end
 

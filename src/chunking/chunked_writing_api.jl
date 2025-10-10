@@ -445,9 +445,6 @@ function write_chunked(f::JLDFile, name::String, data::AbstractArray{T,N};
         select_chunk_index_type(size(data), chunk_dims, maxshape, fill_value)
     end
 
-    # Log selection for debugging (will be removed in production)
-    @info "write_chunked: $(name)" size=size(data) chunks=chunk_dims index_type filters
-
     # Dispatch to appropriate writer
     _write_chunked_dispatch(f, name, data, chunk_dims, maxshape, fill_value,
                            index_type, filters)
@@ -493,207 +490,94 @@ function _write_chunked_dispatch(f, name, data, chunks, maxshape, fill_value, in
 end
 
 #-------------------------------------------------------------------------------
-# Stub Implementations (to be filled in later phases)
+# Refactored Architecture: Chunk Index Writers (Layer 1)
+#-------------------------------------------------------------------------------
+# These functions write chunks + index structures and return metadata for
+# the object header writer. They don't write object headers themselves.
+
+"""
+    ChunkIndexMetadata
+
+Metadata returned by chunk index writers for use by the unified header writer.
+
+# Fields
+- `data_address::RelOffset` - Address of chunk index structure
+- `layout_version::UInt8` - DataLayout message version (3 or 4)
+- `chunk_indexing_type::Union{UInt8,Nothing}` - Type code (1-5, or nothing for v3)
+- `layout_params::NamedTuple` - Index-specific DataLayout parameters
+- `requires_maxshape::Bool` - Whether dataspace needs max dimensions
+- `requires_fill_value::Bool` - Whether fill value message is needed
+- `fill_value_params::Union{NamedTuple,Nothing}` - Fill value message parameters
+"""
+struct ChunkIndexMetadata
+    data_address::RelOffset
+    layout_version::UInt8
+    chunk_indexing_type::Union{UInt8,Nothing}
+    layout_params::NamedTuple
+    requires_maxshape::Bool
+    requires_fill_value::Bool
+    fill_value_params::Union{NamedTuple,Nothing}
+end
+
+#-------------------------------------------------------------------------------
+# Layer 1: Chunk Index Writers (Return Metadata Only)
 #-------------------------------------------------------------------------------
 
 """
-    _write_single_chunk(f::JLDFile, name::String, data::AbstractArray, chunks, filters)
+    write_single_chunk_index(f::JLDFile, data::AbstractArray{T,N}, chunks, odr, filter_pipeline, wsession) where {T,N}
 
-Write a dataset using Single Chunk indexing (Type 1).
+Write chunks using Single Chunk indexing and return metadata.
 
-Single Chunk is used when the chunk dimensions equal the dataset dimensions,
-storing the entire dataset as a single contiguous block.
-
-# Implementation Notes
-
-Creates an HDF5 v4 DataLayout message with:
-- Layout Class: Chunked (2)
-- Version: 4
-- Chunk Index Type: 1 (Single Chunk)
-- Flags: 0x02 if filtered, 0x00 otherwise
-- Chunk address and size directly in layout message
-
-# Arguments
-- `f::JLDFile` - File handle (must be writable)
-- `name::String` - Dataset name
-- `data::AbstractArray` - Data to write
-- `chunks` - Chunk dimensions (must equal size(data))
-- `filters` - Optional compression filters
+Returns `ChunkIndexMetadata` for use by `write_chunked_dataset_object`.
 """
-function _write_single_chunk(f::JLDFile, name::String, data::AbstractArray{T,N},
-                             chunks, filters) where {T,N}
-    # Validate inputs
+function write_single_chunk_index(f::JLDFile, data::AbstractArray{T,N}, chunks, odr, filter_pipeline, wsession) where {T,N}
     @assert chunks == size(data) "Single chunk requires chunks == size(data)"
-    @assert f.writable "File must be writable"
-
-    # Get datatype and object data representation
-    odr = JLD2.objodr(data)
-    datatype = JLD2.h5type(f, data)
-    dataspace = JLD2.WriteDataspace(f, data, odr)
-
-    # Prepare filter pipeline
-    filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
 
     # Prepare chunk data (apply filters if specified)
     chunk_data, chunk_size = if !iscompressed(filter_pipeline)
-        # No compression - write data directly
         io_buf = IOBuffer()
-        write_data(io_buf, f, data, odr, datamode(odr), JLDWriteSession())
+        write_data(io_buf, f, data, odr, datamode(odr), wsession)
         raw_data = take!(io_buf)
         (raw_data, sizeof(raw_data))
     else
-        # Apply compression filters
-        compressed, retcodes = Filters.compress(filter_pipeline, data, odr, f, JLDWriteSession())
+        compressed, retcodes = Filters.compress(filter_pipeline, data, odr, f, wsession)
         (compressed, sizeof(compressed))
     end
 
-    # Allocate space for chunk data and write it
+    # Write chunk data
     chunk_offset = f.end_of_data
     seek(f.io, chunk_offset)
     write(f.io, chunk_data)
     f.end_of_data = chunk_offset + chunk_size
 
-    # Calculate payload size for object header
-    psz = jlsizeof(Val(HmDataspace); dataspace.dataspace_type, dimensions=dataspace.size)
-    psz += jlsizeof(Val(HmDatatype), 1; dt=datatype)  # 1 for committed flag check
-
-    # DataLayout message size (version 4, type 1)
-    layout_flags = iscompressed(filter_pipeline) ? UInt8(0x02) : UInt8(0x00)  # 0x02 = has filters
-    dimensionality = UInt8(N + 1)  # +1 for element size dimension
-
-    psz += jlsizeof(Val(HmDataLayout);
-        version = 4,
-        layout_class = LcChunked,
-        flags = layout_flags,
-        dimensionality = dimensionality,
-        dimensions = UInt64.((reverse(size(data))..., odr_sizeof(odr))),
-        chunk_indexing_type = 1,
-        data_address = h5offset(f, chunk_offset),
-        data_size = chunk_size,
-        filters = UInt32(0)  # Filter mask (0 = no disabled filters)
-    )
-
-    # Add filter pipeline message size if present
-    if iscompressed(filter_pipeline)
-        psz += Filters.pipeline_message_size(filter_pipeline)
-    end
-
-    # Add continuation message size
-    psz += JLD2.CONTINUATION_MSG_SIZE
-
-    # Calculate full object size
-    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
-
-    # Allocate space for object header and write it
-    header_offset = f.end_of_data
-    seek(f.io, header_offset)
-    f.end_of_data = header_offset + fullsz
-
-    # Write object header
-    cio = begin_checksum_write(f.io, fullsz - 4)
-    jlwrite(cio, ObjectStart(size_flag(psz)))
-    write_size(cio, psz)
-
-    # Write header messages
-    write_header_message(cio, Val(HmDataspace);
-        dataspace.dataspace_type,
-        dimensions=dataspace.size)
-
-    write_header_message(cio, Val(HmDatatype), 1; dt=datatype)
-
-    # Write filter pipeline message if present
-    if iscompressed(filter_pipeline)
-        Filters.write_filter_pipeline_message(cio, filter_pipeline)
-    end
-
-    # Write DataLayout message (version 4, type 1)
-    write_header_message(cio, Val(HmDataLayout);
-        version = 4,
-        layout_class = LcChunked,
-        flags = layout_flags,
-        dimensionality = dimensionality,
-        dimensions = UInt64.((reverse(size(data))..., odr_sizeof(odr))),
-        chunk_indexing_type = 1,
-        data_address = h5offset(f, chunk_offset),
+    # Return metadata for DataLayout message
+    layout_params = (
+        flags = iscompressed(filter_pipeline) ? UInt8(0x02) : UInt8(0x00),
         data_size = chunk_size,
         filters = UInt32(0)
     )
 
-    # Write continuation placeholder and checksum
-    write_continuation_placeholder(cio)
-    jlwrite(f.io, end_checksum(cio))
-
-    # Link dataset to file hierarchy
-    # Get or create parent group
-    parent_group = f.root_group
-    dataset_offset = h5offset(f, header_offset)
-
-    # Add link to parent group (must be wrapped in HardLink)
-    # Use unwritten_links which gets persisted on file close
-    if haskey(parent_group, name)
-        @warn "Overwriting existing dataset" name
-    end
-    parent_group.unwritten_links[name] = HardLink(dataset_offset)
-
-    return dataset_offset
+    return ChunkIndexMetadata(
+        h5offset(f, chunk_offset),
+        UInt8(4),  # version 4
+        UInt8(1),  # type 1
+        layout_params,
+        false,     # no maxshape needed
+        false,     # no fill value needed
+        nothing
+    )
 end
 
 """
-    _write_implicit_index(f::JLDFile, name::String, data::AbstractArray, chunks, maxshape, fill_value, filters)
+    write_implicit_index(f::JLDFile, data::AbstractArray{T,N}, chunks, fill_value, odr, filter_pipeline, wsession) where {T,N}
 
-Write a dataset using Implicit Index indexing (Type 2).
+Write chunks using Implicit Index and return metadata.
 
-Implicit Index stores chunks contiguously in the file starting at a base address.
-No explicit index structure is needed - chunk addresses are calculated as:
-    chunk_address = base_address + (chunk_index × chunk_size_bytes)
-
-This is the simplest chunk indexing type and is most memory-efficient for sparse datasets
-where a fill value is used for unallocated chunks.
-
-# Arguments
-- `f::JLDFile` - File handle (must be writable)
-- `name::String` - Dataset name
-- `data::AbstractArray` - Data to write
-- `chunks` - Chunk dimensions
-- `maxshape` - Maximum shape (must match data size for Type 2)
-- `fill_value` - Fill value for unallocated regions (required for Type 2)
-- `filters` - Optional compression filters (not supported for Type 2)
+Returns `ChunkIndexMetadata` for use by `write_chunked_dataset_object`.
 """
-function _write_implicit_index(f::JLDFile, name::String, data::AbstractArray{T,N},
-                                chunks, maxshape, fill_value, filters) where {T,N}
-    # Validate inputs
-    @assert f.writable "File must be writable"
-    @assert all(chunks .<= size(data)) "Chunk dimensions must be <= data dimensions"
-
-    # Implicit index requires fill_value
-    if isnothing(fill_value)
-        throw(ArgumentError(
-            "Implicit index (Type 2) requires a fill_value. " *
-            "Please specify fill_value in WriteChunkedArray constructor."
-        ))
-    end
-
-    # Implicit index doesn't support extensible dimensions
-    if !isnothing(maxshape) && maxshape != size(data)
-        throw(ArgumentError(
-            "Implicit index (Type 2) does not support extensible dimensions. " *
-            "For extensible datasets, use Extensible Array (Type 4) or V2 B-tree (Type 5)."
-        ))
-    end
-
-    # Filters not supported for implicit index (HDF5 spec requirement)
-    filter_pipeline = Filters.normalize_filters(filters)
-    if iscompressed(filter_pipeline)
-        throw(UnsupportedFeatureException(
-            "Compression/filters are not supported for Implicit Index (Type 2) chunk indexing. " *
-            "This is an HDF5 format requirement. Use Fixed Array (Type 3) for filtered chunks."
-        ))
-    end
-
-    # Get datatype and object data representation
-    odr = JLD2.objodr(data)
-    datatype = JLD2.h5type(f, data)
-    dataspace = JLD2.WriteDataspace(f, data, odr)
+function write_implicit_index(f::JLDFile, data::AbstractArray{T,N}, chunks, fill_value, odr, filter_pipeline, wsession) where {T,N}
+    @assert !isnothing(fill_value) "Implicit index requires fill_value"
+    @assert !iscompressed(filter_pipeline) "Implicit index doesn't support filters"
 
     # Calculate chunk grid and allocate contiguous space
     grid_dims = cld.(size(data), chunks)
@@ -703,10 +587,8 @@ function _write_implicit_index(f::JLDFile, name::String, data::AbstractArray{T,N
     chunks_start_offset = f.end_of_data
     f.end_of_data = chunks_start_offset + n_chunks * chunk_size_bytes
 
-    # Write chunks in linear order to pre-allocated space
-    wsession = JLDWriteSession()
+    # Write chunks in linear order
     indexer = ChunkLinearIndexer(grid_dims)
-
     for julia_chunk_idx in CartesianIndices(grid_dims)
         linear_idx = compute_linear_index(indexer, julia_chunk_idx)
         chunk_offset = chunks_start_offset + linear_idx * chunk_size_bytes
@@ -722,124 +604,39 @@ function _write_implicit_index(f::JLDFile, name::String, data::AbstractArray{T,N
         write(f.io, take!(io_buf))
     end
 
-    # Calculate payload size for object header
-    psz = jlsizeof(Val(HmDataspace); dataspace.dataspace_type, dimensions=dataspace.size)
-    psz += jlsizeof(Val(HmDatatype), 1; dt=datatype)
-
-    # Add fill value message size
-    # Version 3 format with flags 0x20 (bit 5 set = fill value defined)
+    # Prepare fill value message parameters
     fill_value_size = odr_sizeof(odr)
     fill_value_bytes = reinterpret(UInt8, [fill_value])
-    psz += jlsizeof(Val(HmFillValue); version=3, flags=UInt8(0x20),
-                    size=UInt32(fill_value_size), fill_value=fill_value_bytes)
-
-    # DataLayout message size (version 4, type 2)
-    # For Implicit Index, dimensions field contains CHUNK dimensions
-    layout_flags = UInt8(0x00)  # No filters
-    dimensionality = UInt8(N + 1)  # +1 for element size dimension
-
-    psz += jlsizeof(Val(HmDataLayout);
-        version = 4,
-        layout_class = LcChunked,
-        flags = layout_flags,
-        dimensionality = dimensionality,
-        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
-        chunk_indexing_type = 2,
-        data_address = h5offset(f, chunks_start_offset)
+    fill_params = (
+        version = 3,
+        flags = UInt8(0x20),
+        size = UInt32(fill_value_size),
+        fill_value = fill_value_bytes
     )
 
-    # Add continuation message size
-    psz += JLD2.CONTINUATION_MSG_SIZE
+    # Return metadata
+    layout_params = (flags = UInt8(0x00),)
 
-    # Calculate full object size
-    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
-
-    # Allocate space for object header and write it
-    obj_header_offset = f.end_of_data
-    seek(f.io, obj_header_offset)
-    f.end_of_data = obj_header_offset + fullsz
-
-    # Write object header
-    cio = begin_checksum_write(f.io, fullsz - 4)
-    jlwrite(cio, ObjectStart(size_flag(psz)))
-    write_size(cio, psz)
-
-    # Write header messages
-    write_header_message(cio, Val(HmDataspace);
-        dataspace.dataspace_type,
-        dimensions=dataspace.size)
-
-    write_header_message(cio, Val(HmDatatype), 1; dt=datatype)
-
-    # Write fill value message (version 3 format)
-    # Flags: 0x20 = bit 5 set (fill value defined)
-    write_header_message(cio, Val(HmFillValue);
-        version=3,
-        flags=UInt8(0x20),
-        size=UInt32(fill_value_size),
-        fill_value=fill_value_bytes)
-
-    # Write DataLayout message (version 4, type 2)
-    write_header_message(cio, Val(HmDataLayout);
-        version = 4,
-        layout_class = LcChunked,
-        flags = layout_flags,
-        dimensionality = dimensionality,
-        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
-        chunk_indexing_type = 2,
-        data_address = h5offset(f, chunks_start_offset)
+    return ChunkIndexMetadata(
+        h5offset(f, chunks_start_offset),
+        UInt8(4),  # version 4
+        UInt8(2),  # type 2
+        layout_params,
+        false,     # no maxshape needed
+        true,      # fill value needed
+        fill_params
     )
-
-    # Write continuation message
-    write_continuation_placeholder(cio)
-
-    # Write checksum
-    jlwrite(f.io, end_checksum(cio))
-
-    # Commit the dataset to the parent group
-    dataset_offset = h5offset(f, obj_header_offset)
-    parent_group = f.root_group
-
-    # Use unwritten_links which gets persisted on file close
-    if haskey(parent_group, name)
-        @warn "Overwriting existing dataset" name
-    end
-    parent_group.unwritten_links[name] = HardLink(dataset_offset)
-
-    return dataset_offset
 end
 
 """
-    _write_fixed_array(f::JLDFile, name::String, data::AbstractArray, chunks, filters)
+    write_fixed_array_index(f::JLDFile, data::AbstractArray{T,N}, chunks, odr, filter_pipeline, wsession) where {T,N}
 
-Write a dataset using Fixed Array indexing (Type 3).
+Write chunks using Fixed Array indexing and return metadata.
 
-Fixed Array is used for fixed-size chunked datasets where multiple chunks are needed.
-It stores chunk addresses in a pre-allocated index array for direct lookup.
-
-# Arguments
-- `f::JLDFile` - File handle (must be writable)
-- `name::String` - Dataset name
-- `data::AbstractArray` - Data to write
-- `chunks` - Chunk dimensions
-- `filters` - Optional compression filters
+Returns `ChunkIndexMetadata` for use by `write_chunked_dataset_object`.
 """
-function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
-                            chunks, filters) where {T,N}
-    # Validate inputs
-    @assert f.writable "File must be writable"
-    @assert all(chunks .<= size(data)) "Chunk dimensions must be <= data dimensions"
-
-    # Get datatype and object data representation
-    odr = JLD2.objodr(data)
-    datatype = JLD2.h5type(f, data)
-    dataspace = JLD2.WriteDataspace(f, data, odr)
-
-    # Prepare filter pipeline
-    filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
-
+function write_fixed_array_index(f::JLDFile, data::AbstractArray{T,N}, chunks, odr, filter_pipeline, wsession) where {T,N}
     # Write all chunks in linear order
-    wsession = JLDWriteSession()
     chunk_addresses_linear, chunk_sizes_linear, _ = write_all_chunks_linear(
         f, data, chunks, odr, filter_pipeline, wsession; pad_chunks=true, fill_value=zero(T)
     )
@@ -863,7 +660,7 @@ function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
     header_addr_pos = position(f.io)
     jlwrite(db_cio, RelOffset(0))  # placeholder
 
-    # Write chunk entries in linear order
+    # Write chunk entries
     for i in 1:n_chunks
         jlwrite(db_cio, chunk_addresses_linear[i])
         if iscompressed(filter_pipeline)
@@ -872,51 +669,304 @@ function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
         end
     end
 
-    # Write checksum
     jlwrite(f.io, end_checksum(db_cio))
 
     # Write Fixed Array header
-    header_offset = f.end_of_data
-    seek(f.io, header_offset)
+    header_pos = f.end_of_data
+    header_offset = h5offset(f, header_pos)
+    seek(f.io, header_pos)
 
     hdr = FixedArrayHeader(
-        UInt8(0),       # version
-        client_id,
-        entry_size,
-        UInt8(0),       # page_bits (0 = no paging, elements stored directly)
-        Int64(n_chunks),
-        h5offset(f, data_block_offset)
+        UInt8(0), client_id, entry_size, UInt8(0),
+        Int64(n_chunks), h5offset(f, data_block_offset)
     )
     header_size = write_fixed_array_header(f.io, hdr)
-    f.end_of_data = header_offset + header_size
+    f.end_of_data = header_pos + header_size
 
-    # Update data block header address (now that we know it)
+    # Update data block header address
     current_pos = position(f.io)
     seek(f.io, header_addr_pos)
-    jlwrite(f.io, h5offset(f, header_offset))
+    jlwrite(f.io, header_offset)
     seek(f.io, current_pos)
 
+    # Return metadata
+    layout_params = (
+        flags = UInt8(0x00),
+        page_bits = UInt8(0)
+    )
+
+    return ChunkIndexMetadata(
+        header_offset,
+        UInt8(4),  # version 4
+        UInt8(3),  # type 3
+        layout_params,
+        false,     # no maxshape needed
+        false,     # no fill value needed
+        nothing
+    )
+end
+
+"""
+    write_extensible_array_index(f::JLDFile, data::AbstractArray{T,N}, chunks, maxshape, odr, filter_pipeline, wsession) where {T,N}
+
+Write chunks using Extensible Array indexing and return metadata.
+
+Returns `ChunkIndexMetadata` for use by `write_chunked_dataset_object`.
+"""
+function write_extensible_array_index(f::JLDFile, data::AbstractArray{T,N}, chunks, maxshape, odr, filter_pipeline, wsession) where {T,N}
+    @assert !isnothing(maxshape) "Extensible array requires maxshape"
+
+    # Calculate chunk grid
+    grid_dims = cld.(size(data), chunks)
+    n_chunks = prod(grid_dims)
+
+    # Determine index block elements
+    index_blk_elmts = UInt8(min(n_chunks, 64))
+    if n_chunks > Int(index_blk_elmts)
+        index_blk_elmts = UInt8(min(n_chunks, 255))
+        if n_chunks > 255
+            throw(UnsupportedFeatureException(
+                "Extensible arrays with >255 chunks require data block support"
+            ))
+        end
+    end
+
+    element_size = iscompressed(filter_pipeline) ? UInt8(20) : UInt8(8)
+    client_id = iscompressed(filter_pipeline) ? UInt8(1) : UInt8(0)
+    num_data_blks = UInt64(0)
+
+    # Write all chunks
+    chunk_addresses, chunk_sizes, _ = write_all_chunks_linear(
+        f, data, chunks, odr, filter_pipeline, wsession; pad_chunks=false
+    )
+
+    # Write Index Block
+    index_block_size = 4 + 1 + 1 + 8 + Int(index_blk_elmts) * Int(element_size) + 4
+
+    index_block_pos = f.end_of_data
+    seek(f.io, index_block_pos)
+    f.end_of_data = index_block_pos + index_block_size
+
+    header_pos = f.end_of_data
+    header_offset = h5offset(f, header_pos)
+
+    ib_cio = begin_checksum_write(f.io, index_block_size - 4)
+    jlwrite(ib_cio, EXTENSIBLE_ARRAY_INDEX_BLOCK_SIGNATURE)
+    jlwrite(ib_cio, UInt8(0))  # version
+    jlwrite(ib_cio, UInt8(client_id))
+    jlwrite(ib_cio, header_offset)
+
+    # Write chunk addresses
+    for i in 1:Int(index_blk_elmts)
+        if i <= n_chunks
+            jlwrite(ib_cio, chunk_addresses[i])
+            if iscompressed(filter_pipeline)
+                jlwrite(ib_cio, UInt64(chunk_sizes[i]))
+                jlwrite(ib_cio, UInt32(0))  # filter_mask
+            end
+        else
+            jlwrite(ib_cio, RelOffset(typemax(UInt64)))
+            if iscompressed(filter_pipeline)
+                jlwrite(ib_cio, UInt64(0))
+                jlwrite(ib_cio, UInt32(0))
+            end
+        end
+    end
+
+    jlwrite(f.io, end_checksum(ib_cio))
+
+    # Write Extensible Array Header
+    seek(f.io, header_pos)
+
+    hdr = ExtensibleArrayHeader(
+        UInt8(0), client_id, element_size, UInt8(32), index_blk_elmts,
+        UInt8(16), UInt8(4), UInt8(10),
+        UInt64(0), UInt64(0), UInt64(0), UInt64(0),
+        UInt64(n_chunks), UInt64(n_chunks),
+        h5offset(f, index_block_pos)
+    )
+
+    cio = begin_checksum_write(io, 4 + jlsizeof(ExtensibleArrayHeader) )
+    jlwrite(cio, EXTENSIBLE_ARRAY_HEADER_SIGNATURE)
+    jlwrite(cio, hdr)
+    jlwrite(io, end_checksum(cio))
+    f.end_of_data = header_pos + 4 + jlsizeof(ExtensibleArrayHeader) + 4
+
+    # Return metadata
+    layout_params = (
+        flags = iscompressed(filter_pipeline) ? UInt8(0x02) : UInt8(0x00),
+        maxbits = UInt8(32),
+        index_elements = index_blk_elmts,
+        minpointers = UInt8(4),
+        minelements = UInt8(16),
+        page_bits = UInt8(10)
+    )
+
+    return ChunkIndexMetadata(
+        header_offset,
+        UInt8(4),  # version 4
+        UInt8(4),  # type 4
+        layout_params,
+        true,      # requires maxshape
+        false,     # no fill value needed
+        nothing
+    )
+end
+
+"""
+    write_v2btree_index(f::JLDFile, data::AbstractArray{T,N}, chunks, maxshape, odr, filter_pipeline, wsession) where {T,N}
+
+Write chunks using V2 B-tree indexing and return metadata.
+
+Returns `ChunkIndexMetadata` for use by `write_chunked_dataset_object`.
+"""
+function write_v2btree_index(f::JLDFile, data::AbstractArray{T,N}, chunks, maxshape, odr, filter_pipeline, wsession) where {T,N}
+    @assert !isnothing(maxshape) "V2 B-tree requires maxshape"
+
+    # Write all chunks and collect records
+    chunk_records = write_all_chunks_as_records(f, data, chunks, odr, filter_pipeline, wsession)
+
+    # Write V2 B-tree structure
+    header_offset = JLD2.BTrees.write_v2btree_chunked_dataset(
+        f, chunk_records, iscompressed(filter_pipeline)
+    )
+
+    # Return metadata
+    layout_params = (
+        flags = iscompressed(filter_pipeline) ? UInt8(0x02) : UInt8(0x00),
+        node_size = UInt32(2048),
+        splitpercent = UInt8(100),
+        mergepercent = UInt8(40)
+    )
+
+    return ChunkIndexMetadata(
+        header_offset,
+        UInt8(4),  # version 4
+        UInt8(5),  # type 5
+        layout_params,
+        true,      # requires maxshape
+        false,     # no fill value needed
+        nothing
+    )
+end
+
+"""
+    write_v1btree_index(f::JLDFile, data::AbstractArray{T,N}, chunks, odr, datatype, filter_pipeline, wsession) where {T,N}
+
+Write chunks using V1 B-tree indexing and return metadata.
+
+Note: V1 B-tree uses version 3 DataLayout, so this includes writing the object header.
+This is kept for compatibility but doesn't follow the new refactored pattern completely.
+
+Returns `ChunkIndexMetadata` for use by `write_chunked_dataset_object`.
+"""
+function write_v1btree_index(f::JLDFile, data::AbstractArray{T,N}, chunks, odr, filter_pipeline, wsession) where {T,N}
+    # Write chunks using V1 B-tree
+    chunk_iter = ChunkIterator(data, chunks, odr, filter_pipeline, f, wsession)
+
+    btree, total_chunk_size, num_chunks = JLD2.BTrees.write_chunked_dataset_with_v1btree(
+        f, chunk_iter, odr, size(data), chunks
+    )
+
+    # Return metadata
+    layout_params = (address = btree.root,)
+
+    return ChunkIndexMetadata(
+        btree.root,
+        UInt8(3),  # version 3
+        nothing,   # no type field in v3
+        layout_params,
+        false,     # no maxshape needed
+        true,      # fill value needed for v1 btree
+        (flags = UInt8(0x09),)  # fill value flags
+    )
+end
+
+#-------------------------------------------------------------------------------
+# Layer 2: Unified Object Header Writer
+#-------------------------------------------------------------------------------
+
+"""
+    write_chunked_dataset_object(f::JLDFile, name::String, data::AbstractArray{T,N},
+                                  chunks, maxshape, odr, datatype, dataspace,
+                                  filter_pipeline, index_metadata::ChunkIndexMetadata) where {T,N}
+
+Write the object header for a chunked dataset using metadata from a chunk index writer.
+
+This is the unified function that handles all object header writing for chunked datasets,
+eliminating duplication across different indexing types.
+
+# Arguments
+- `f::JLDFile` - File handle
+- `name::String` - Dataset name
+- `data::AbstractArray{T,N}` - Original data
+- `chunks::NTuple{N,Int}` - Chunk dimensions
+- `maxshape` - Maximum shape (or nothing)
+- `odr` - Object data representation
+- `datatype` - HDF5 datatype
+- `dataspace` - Write dataspace
+- `filter_pipeline` - Filter pipeline
+- `index_metadata::ChunkIndexMetadata` - Metadata from chunk index writer
+
+# Returns
+Dataset offset (RelOffset)
+"""
+function write_chunked_dataset_object(f::JLDFile, name::String, data::AbstractArray{T,N},
+                                       chunks, maxshape, odr, datatype, dataspace,
+                                       filter_pipeline, index_metadata::ChunkIndexMetadata) where {T,N}
     # Calculate payload size for object header
-    psz = jlsizeof(Val(HmDataspace); dataspace.dataspace_type, dimensions=dataspace.size)
+    psz = if index_metadata.requires_maxshape
+        # Convert maxshape to HDF5 format
+        hdf5_maxshape = convert_maxshape_to_hdf5(maxshape)
+        jlsizeof(Val(HmDataspace);
+            dataspace.dataspace_type,
+            dimensions=dataspace.size,
+            flags=0x01,
+            max_dimension_size=hdf5_maxshape)
+    else
+        jlsizeof(Val(HmDataspace); dataspace.dataspace_type, dimensions=dataspace.size)
+    end
+
     psz += jlsizeof(Val(HmDatatype), 1; dt=datatype)
+
+    # Add fill value message if needed
+    if index_metadata.requires_fill_value
+        psz += jlsizeof(Val(HmFillValue); index_metadata.fill_value_params...)
+    end
 
     # Add filter pipeline message size if present
     if iscompressed(filter_pipeline)
         psz += Filters.pipeline_message_size(filter_pipeline)
     end
 
-    # DataLayout message size (version 4, type 3)
-    # For Fixed Array, dimensions field contains CHUNK dimensions, not array dimensions
-    psz += jlsizeof(Val(HmDataLayout);
-        version = 4,
-        layout_class = LcChunked,
-        flags = UInt8(0x00),           # no special flags for Fixed Array
-        dimensionality = UInt8(N + 1), # +1 for element size dimension
-        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
-        chunk_indexing_type = 3,
-        page_bits = UInt8(0),          # no paging
-        data_address = h5offset(f, header_offset)
-    )
+    # Add DataLayout message size
+    if index_metadata.layout_version == 4
+        # Version 4 DataLayout
+        dimensionality = UInt8(N + 1)
+        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr)))
+
+        psz += jlsizeof(Val(HmDataLayout);
+            version = 4,
+            layout_class = LcChunked,
+            dimensionality = dimensionality,
+            dimensions = dimensions,
+            chunk_indexing_type = index_metadata.chunk_indexing_type,
+            data_address = index_metadata.data_address,
+            index_metadata.layout_params...
+        )
+    else
+        # Version 3 DataLayout (V1 B-tree)
+        dimensionality = UInt8(N + 1)
+        dl_dims = UInt32.([reverse(chunks)..., odr_sizeof(odr)])
+
+        psz += jlsizeof(Val(HmDataLayout);
+            version = 3,
+            layout_class = LcChunked,
+            dimensionality = dimensionality,
+            dimensions = dl_dims,
+            data_address = index_metadata.layout_params.address
+        )
+    end
 
     # Add continuation message size
     psz += JLD2.CONTINUATION_MSG_SIZE
@@ -924,7 +974,7 @@ function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
     # Calculate full object size
     fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
 
-    # Allocate space for object header and write it
+    # Allocate space for object header
     obj_header_offset = f.end_of_data
     seek(f.io, obj_header_offset)
     f.end_of_data = obj_header_offset + fullsz
@@ -934,30 +984,65 @@ function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
     jlwrite(cio, ObjectStart(size_flag(psz)))
     write_size(cio, psz)
 
-    # Write header messages
-    write_header_message(cio, Val(HmDataspace);
-        dataspace.dataspace_type,
-        dimensions=dataspace.size)
+    # Write fill value message first (if needed, for v1 btree compatibility)
+    if index_metadata.requires_fill_value
+        write_header_message(cio, Val(HmFillValue); index_metadata.fill_value_params...)
+    end
 
-    write_header_message(cio, Val(HmDatatype), 1; dt=datatype)
+    # Write dataspace message
+    if index_metadata.requires_maxshape
+        hdf5_maxshape = convert_maxshape_to_hdf5(maxshape)
+        write_header_message(cio, Val(HmDataspace);
+            dataspace.dataspace_type,
+            dimensions=dataspace.size,
+            flags=0x01,
+            max_dimension_size=hdf5_maxshape)
+    else
+        write_header_message(cio, Val(HmDataspace);
+            dataspace.dataspace_type,
+            dimensions=dataspace.size)
+    end
+
+    # Write dataspace attributes if any
+    for attr in dataspace.attributes
+        write_header_message(cio, f, attr)
+    end
+
+    # Write datatype message
+    write_header_message(cio, Val(HmDatatype), 1 | (2*isa(datatype, CommittedDatatype)); dt=datatype)
 
     # Write filter pipeline message if present
     if iscompressed(filter_pipeline)
         Filters.write_filter_pipeline_message(cio, filter_pipeline)
     end
 
-    # Write DataLayout message (version 4, type 3)
-    # For Fixed Array, dimensions field contains CHUNK dimensions, not array dimensions
-    write_header_message(cio, Val(HmDataLayout);
-        version = 4,
-        layout_class = LcChunked,
-        flags = UInt8(0x00),           # no special flags for Fixed Array
-        dimensionality = UInt8(N + 1), # +1 for element size dimension
-        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
-        chunk_indexing_type = 3,
-        page_bits = UInt8(0),          # no paging
-        data_address = h5offset(f, header_offset)
-    )
+    # Write DataLayout message
+    if index_metadata.layout_version == 4
+        dimensionality = UInt8(N + 1)
+        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr)))
+
+        write_header_message(cio, Val(HmDataLayout);
+            version = 4,
+            layout_class = LcChunked,
+            dimensionality = dimensionality,
+            dimensions = dimensions,
+            chunk_indexing_type = index_metadata.chunk_indexing_type,
+            data_address = index_metadata.data_address,
+            index_metadata.layout_params...
+        )
+    else
+        # Version 3 DataLayout (V1 B-tree)
+        dimensionality = UInt8(N + 1)
+        dl_dims = UInt32.([reverse(chunks)..., odr_sizeof(odr)])
+
+        write_header_message(cio, Val(HmDataLayout);
+            version = 3,
+            layout_class = LcChunked,
+            dimensionality = dimensionality,
+            dimensions = dl_dims,
+            data_address = index_metadata.layout_params.address
+        )
+    end
 
     # Write continuation placeholder and checksum
     write_continuation_placeholder(cio)
@@ -967,7 +1052,6 @@ function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
     parent_group = f.root_group
     dataset_offset = h5offset(f, obj_header_offset)
 
-    # Add link to parent group
     if haskey(parent_group, name)
         @warn "Overwriting existing dataset" name
     end
@@ -976,10 +1060,137 @@ function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
     return dataset_offset
 end
 
+#-------------------------------------------------------------------------------
+# Stub Implementations (to be filled in later phases)
+#-------------------------------------------------------------------------------
+
+"""
+    _write_single_chunk(f::JLDFile, name::String, data::AbstractArray, chunks, filters)
+
+Write a dataset using Single Chunk indexing (Type 1) - refactored version.
+"""
+function _write_single_chunk(f::JLDFile, name::String, data::AbstractArray{T,N},
+                             chunks, filters) where {T,N}
+    @assert chunks == size(data) "Single chunk requires chunks == size(data)"
+    @assert f.writable "File must be writable"
+
+    # Prepare common data structures
+    odr = JLD2.objodr(data)
+    datatype = JLD2.h5type(f, data)
+    dataspace = JLD2.WriteDataspace(f, data, odr)
+    filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
+    wsession = JLDWriteSession()
+
+    # Write chunks and index structure
+    index_metadata = write_single_chunk_index(f, data, chunks, odr, filter_pipeline, wsession)
+
+    # Write object header
+    return write_chunked_dataset_object(f, name, data, chunks, nothing, odr, datatype,
+                                        dataspace, filter_pipeline, index_metadata)
+end
+
+"""
+    _write_implicit_index(f::JLDFile, name::String, data::AbstractArray, chunks, maxshape, fill_value, filters)
+
+Write a dataset using Implicit Index indexing (Type 2) - refactored version.
+
+Implicit Index stores chunks contiguously in the file starting at a base address.
+No explicit index structure is needed - chunk addresses are calculated as:
+    chunk_address = base_address + (chunk_index × chunk_size_bytes)
+
+This is the simplest chunk indexing type and is most memory-efficient for sparse datasets
+where a fill value is used for unallocated chunks.
+
+# Arguments
+- `f::JLDFile` - File handle (must be writable)
+- `name::String` - Dataset name
+- `data::AbstractArray` - Data to write
+- `chunks` - Chunk dimensions
+- `maxshape` - Maximum shape (must match data size for Type 2)
+- `fill_value` - Fill value for unallocated regions (required for Type 2)
+- `filters` - Optional compression filters (not supported for Type 2)
+"""
+function _write_implicit_index(f::JLDFile, name::String, data::AbstractArray{T,N},
+                                chunks, maxshape, fill_value, filters) where {T,N}
+    @assert f.writable "File must be writable"
+
+    # Validate specific requirements for implicit index
+    if isnothing(fill_value)
+        throw(ArgumentError(
+            "Implicit index (Type 2) requires a fill_value. " *
+            "Please specify fill_value in WriteChunkedArray constructor."
+        ))
+    end
+
+    if !isnothing(maxshape) && maxshape != size(data)
+        throw(ArgumentError(
+            "Implicit index (Type 2) does not support extensible dimensions. " *
+            "For extensible datasets, use Extensible Array (Type 4) or V2 B-tree (Type 5)."
+        ))
+    end
+
+    # Prepare common data structures
+    odr = JLD2.objodr(data)
+    datatype = JLD2.h5type(f, data)
+    dataspace = JLD2.WriteDataspace(f, data, odr)
+    filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
+
+    # Validate filters (implicit index doesn't support them)
+    if iscompressed(filter_pipeline)
+        throw(UnsupportedFeatureException(
+            "Compression/filters are not supported for Implicit Index (Type 2) chunk indexing. " *
+            "This is an HDF5 format requirement. Use Fixed Array (Type 3) for filtered chunks."
+        ))
+    end
+
+    wsession = JLDWriteSession()
+
+    # Write chunks and index structure (Layer 1)
+    index_metadata = write_implicit_index(f, data, chunks, fill_value, odr, filter_pipeline, wsession)
+
+    # Write object header (Layer 2)
+    return write_chunked_dataset_object(f, name, data, chunks, maxshape, odr, datatype,
+                                        dataspace, filter_pipeline, index_metadata)
+end
+
+"""
+    _write_fixed_array(f::JLDFile, name::String, data::AbstractArray, chunks, filters)
+
+Write a dataset using Fixed Array indexing (Type 3) - refactored version.
+
+Fixed Array is used for fixed-size chunked datasets where multiple chunks are needed.
+It stores chunk addresses in a pre-allocated index array for direct lookup.
+
+# Arguments
+- `f::JLDFile` - File handle (must be writable)
+- `name::String` - Dataset name
+- `data::AbstractArray` - Data to write
+- `chunks` - Chunk dimensions
+- `filters` - Optional compression filters
+"""
+function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
+                            chunks, filters) where {T,N}
+    @assert f.writable "File must be writable"
+
+    # Prepare common data structures
+    odr = JLD2.objodr(data)
+    datatype = JLD2.h5type(f, data)
+    dataspace = JLD2.WriteDataspace(f, data, odr)
+    filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
+    wsession = JLDWriteSession()
+
+    # Write chunks and index structure (Layer 1)
+    index_metadata = write_fixed_array_index(f, data, chunks, odr, filter_pipeline, wsession)
+
+    # Write object header (Layer 2)
+    return write_chunked_dataset_object(f, name, data, chunks, nothing, odr, datatype,
+                                        dataspace, filter_pipeline, index_metadata)
+end
+
 """
     _write_extensible_array(f::JLDFile, name::String, data::AbstractArray, chunks, maxshape, filters)
 
-Write a dataset using Extensible Array indexing (Type 4).
+Write a dataset using Extensible Array indexing (Type 4) - refactored version.
 
 Extensible Array is used for datasets with exactly one unlimited dimension.
 It uses a multi-level index structure (Header → Index Block → Data Blocks) that can
@@ -994,15 +1205,13 @@ For initial implementation, we support cases where all chunks fit in the index b
 - `data::AbstractArray` - Data to write
 - `chunks` - Chunk dimensions
 - `maxshape` - Maximum shape (must have exactly 1 unlimited dimension)
-- `filters` - Optional compression filters (not yet supported)
+- `filters` - Optional compression filters
 """
 function _write_extensible_array(f::JLDFile, name::String, data::AbstractArray{T,N},
                                   chunks, maxshape, filters) where {T,N}
-    # Validate inputs
     @assert f.writable "File must be writable"
-    @assert all(chunks .<= size(data)) "Chunk dimensions must be <= data dimensions"
 
-    # Extensible array requires exactly 1 unlimited dimension
+    # Validate specific requirements for extensible array
     if isnothing(maxshape)
         throw(ArgumentError(
             "Extensible array (Type 4) requires at least one unlimited dimension. " *
@@ -1018,229 +1227,19 @@ function _write_extensible_array(f::JLDFile, name::String, data::AbstractArray{T
         ))
     end
 
-    # Get datatype and object data representation
+    # Prepare common data structures
     odr = JLD2.objodr(data)
     datatype = JLD2.h5type(f, data)
     dataspace = JLD2.WriteDataspace(f, data, odr)
-
-    # Prepare filter pipeline for chunk compression
     filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
-
-    # Calculate chunk grid dimensions
-    grid_dims = cld.(size(data), chunks)
-    n_chunks = prod(grid_dims)
-
-    # Calculate chunk size in bytes
-    chunk_size_bytes = prod(chunks) * odr_sizeof(odr)
-
-    # Determine index block elements (must fit all chunks in simplified implementation)
-    index_blk_elmts = UInt8(min(n_chunks, 64))
-    if n_chunks > Int(index_blk_elmts)
-        index_blk_elmts = UInt8(min(n_chunks, 255))
-        if n_chunks > 255
-            throw(UnsupportedFeatureException(
-                "Extensible arrays with >255 chunks require data block support, " *
-                "which is not yet implemented. Current chunk count: $n_chunks"
-            ))
-        end
-    end
-
-    # Calculate element size and client ID based on filtering
-    element_size = iscompressed(filter_pipeline) ? UInt8(16) : UInt8(8)
-    client_id = iscompressed(filter_pipeline) ? UInt8(1) : UInt8(0)
-
-    # No data blocks in simplified implementation
-    num_data_blks = UInt64(0)
-
-    # Convert maxshape to HDF5 format (needed before psz calculation)
-    hdf5_maxshape = convert_maxshape_to_hdf5(maxshape)
-
-    # Step 1: Write all chunks in linear order (unpadded for extensible arrays)
     wsession = JLDWriteSession()
-    chunk_addresses, chunk_sizes, _ = write_all_chunks_linear(
-        f, data, chunks, odr, filter_pipeline, wsession; pad_chunks=false
-    )
 
-    # Step 2: Write Index Block
-    index_block_size = 4 +  # signature
-                       1 +  # version
-                       1 +  # client_id
-                       8 +  # header address (back-reference)
-                       Int(index_blk_elmts) * Int(element_size) +  # direct elements
-                       4    # checksum (no data block addresses in simplified implementation)
+    # Write chunks and index structure (Layer 1)
+    index_metadata = write_extensible_array_index(f, data, chunks, maxshape, odr, filter_pipeline, wsession)
 
-    index_block_offset = f.end_of_data
-    seek(f.io, index_block_offset)
-    f.end_of_data = index_block_offset + index_block_size
-
-    # Object header will follow here! (directly after)
-    header_offset = f.end_of_data
-
-    # Write index block
-    ib_cio = begin_checksum_write(f.io, index_block_size - 4)
-
-    # Signature
-    jlwrite(ib_cio, EXTENSIBLE_ARRAY_INDEX_BLOCK_SIGNATURE)
-
-    # Version
-    jlwrite(ib_cio, UInt8(0))
-
-    # Client ID
-    jlwrite(ib_cio, UInt8(client_id))
-
-    # Header address (placeholder, will be updated)
-    jlwrite(ib_cio, h5offset(f, header_offset))
-
-    # Write direct chunk addresses (and sizes + filter_mask if filtered) in linear order
-    for i in 1:Int(index_blk_elmts)
-        if i <= n_chunks
-            jlwrite(ib_cio, chunk_addresses[i])
-            if iscompressed(filter_pipeline)
-                jlwrite(ib_cio, UInt32(chunk_sizes[i]))  # Write size as UInt32
-                jlwrite(ib_cio, UInt32(0))  # filter_mask (0 = all filters applied)
-            end
-        else
-            # Undefined chunks (shouldn't happen with our current logic)
-            jlwrite(ib_cio, RelOffset(typemax(UInt64)))
-            if iscompressed(filter_pipeline)
-                jlwrite(ib_cio, UInt32(0))  # size
-                jlwrite(ib_cio, UInt32(0))  # filter_mask
-            end
-        end
-    end
-
-    # Write data block addresses (none in simple case)
-    for i in 1:Int(num_data_blks)
-        jlwrite(ib_cio, RelOffset(typemax(UInt64)))
-    end
-    @info index_block_size position(ib_cio) index_block_offset
-    # Write checksum
-    jlwrite(f.io, end_checksum(ib_cio))
-
-    # Step 3: Write Extensible Array Header
-    seek(f.io, header_offset)
-
-    hdr = ExtensibleArrayHeader(
-        UInt8(0),           # version
-        client_id,
-        element_size,
-        UInt8(32),          # max_nelmts_bits (support up to 2^32 chunks)
-        index_blk_elmts,
-        UInt8(16),          # data_blk_min_elmts
-        UInt8(4),           # secondary_blk_min_data_ptrs
-        UInt8(10),          # max_dblk_page_nelmts_bits
-        UInt64(0),          # num_secondary_blks (no secondary blocks)
-        UInt64(0),          # secondary_blk_size
-        UInt64(0),          # num_data_blks (no data blocks)
-        UInt64(0),          # data_blk_size
-        UInt64(n_chunks),   # max_index_set
-        UInt64(n_chunks),   # nelmts (all chunks allocated)
-        h5offset(f, index_block_offset)
-    )
-    header_size = write_extensible_array_header(f.io, hdr)
-    f.end_of_data = header_offset + header_size
-
-    # Update index block header address (now that we know it)
-    #current_pos = position(f.io)
-    #seek(f.io, header_addr_pos)
-    #jlwrite(f.io, h5offset(f, header_offset))
-    # Update checksum !!
-    #update_checksum(f.io, index_block_offset, index_block_offset + index_block_size-4)
-    #seek(f.io, current_pos)
-
-    # Step 4: Write Object Header with DataLayout message
-    # Calculate payload size for object header
-    # Extensible array requires max dimensions in dataspace (flags bit 0 set)
-    psz = jlsizeof(Val(HmDataspace);
-        dataspace.dataspace_type,
-        dimensions=dataspace.size,
-        flags=0x01,  # Bit 0 indicates max dimensions are present
-        max_dimension_size=hdf5_maxshape)
-    psz += jlsizeof(Val(HmDatatype), 1; dt=datatype)
-
-    # Add filter pipeline message size if present
-    if iscompressed(filter_pipeline)
-        psz += Filters.pipeline_message_size(filter_pipeline)
-    end
-
-    # DataLayout message size (version 4, type 4)
-    psz += jlsizeof(Val(HmDataLayout);
-        version = 4,
-        layout_class = LcChunked,
-        flags = iscompressed(filter_pipeline) ? UInt8(0x02) : UInt8(0x00),  # 0x02 indicates filters
-        dimensionality = UInt8(N + 1),  # +1 for element size dimension
-        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
-        chunk_indexing_type = 4,
-        maxbits = UInt8(32),           # max_nelmts_bits
-        index_elements = index_blk_elmts,
-        minpointers = UInt8(4),        # secondary_blk_min_data_ptrs
-        minelements = UInt8(16),       # data_blk_min_elmts
-        page_bits = UInt8(10),         # max_dblk_page_nelmts_bits
-        data_address = h5offset(f, header_offset)
-    )
-
-    # Add continuation message size
-    psz += JLD2.CONTINUATION_MSG_SIZE
-
-    # Calculate full object size
-    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
-
-    # Allocate space for object header and write it
-    obj_header_offset = f.end_of_data
-    seek(f.io, obj_header_offset)
-    f.end_of_data = obj_header_offset + fullsz
-
-    # Write object header
-    cio = begin_checksum_write(f.io, fullsz - 4)
-    jlwrite(cio, ObjectStart(size_flag(psz)))
-    write_size(cio, psz)
-
-    # Write header messages
-    # Extensible array requires max dimensions in dataspace
-    write_header_message(cio, Val(HmDataspace);
-        dataspace.dataspace_type,
-        dimensions=dataspace.size,
-        flags=0x01,  # Bit 0 indicates max dimensions are present
-        max_dimension_size=hdf5_maxshape)
-
-    write_header_message(cio, Val(HmDatatype), 1; dt=datatype)
-
-    # Write filter pipeline message if present
-    if iscompressed(filter_pipeline)
-        Filters.write_filter_pipeline_message(cio, filter_pipeline)
-    end
-
-    # Write DataLayout message (version 4, type 4)
-    write_header_message(cio, Val(HmDataLayout);
-        version = 4,
-        layout_class = LcChunked,
-        flags = iscompressed(filter_pipeline) ? UInt8(0x02) : UInt8(0x00),  # 0x02 indicates filters
-        dimensionality = UInt8(N + 1),  # +1 for element size dimension
-        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
-        chunk_indexing_type = 4,
-        maxbits = UInt8(32),           # max_nelmts_bits
-        index_elements = index_blk_elmts,
-        minpointers = UInt8(4),        # secondary_blk_min_data_ptrs
-        minelements = UInt8(16),       # data_blk_min_elmts
-        page_bits = UInt8(10),         # max_dblk_page_nelmts_bits
-        data_address = h5offset(f, header_offset)
-    )
-
-    # Write continuation placeholder and checksum
-    write_continuation_placeholder(cio)
-    jlwrite(f.io, end_checksum(cio))
-
-    # Link dataset to file hierarchy
-    parent_group = f.root_group
-    dataset_offset = h5offset(f, obj_header_offset)
-
-    # Add link to parent group
-    if haskey(parent_group, name)
-        @warn "Overwriting existing dataset" name
-    end
-    parent_group.unwritten_links[name] = HardLink(dataset_offset)
-
-    return dataset_offset
+    # Write object header (Layer 2)
+    return write_chunked_dataset_object(f, name, data, chunks, maxshape, odr, datatype,
+                                        dataspace, filter_pipeline, index_metadata)
 end
 
 """
@@ -1279,11 +1278,9 @@ For a 2D dataset, record_size = 24 bytes:
 """
 function _write_v2btree(f::JLDFile, name::String, data::AbstractArray{T,N},
                         chunks, maxshape, filters) where {T,N}
-    # Validate inputs
     @assert f.writable "File must be writable"
-    # Note: chunks can be larger than data dimensions (partial chunks allowed)
 
-    # V2 B-tree typically used for 2+ unlimited dimensions
+    # Validate specific requirements for V2 B-tree
     if isnothing(maxshape)
         throw(ArgumentError(
             "V2 B-tree (Type 5) is typically used for datasets with multiple unlimited dimensions. " *
@@ -1299,123 +1296,19 @@ function _write_v2btree(f::JLDFile, name::String, data::AbstractArray{T,N},
         ))
     end
 
-
-    # Get datatype and object data representation
+    # Prepare common data structures
     odr = JLD2.objodr(data)
     datatype = JLD2.h5type(f, data)
     dataspace = JLD2.WriteDataspace(f, data, odr)
-
-    # Prepare filter pipeline for chunk compression
     filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
-
-    # Calculate chunk grid dimensions
-    grid_dims = cld.(size(data), chunks)
-    n_chunks = prod(grid_dims)
-
-    # Calculate chunk size in bytes
-    chunk_size_bytes = prod(chunks) * odr_sizeof(odr)
-
-    # Convert maxshape to HDF5 format (needed before psz calculation)
-    hdf5_maxshape = convert_maxshape_to_hdf5(maxshape)
-
-    # Step 1: Write all chunks and collect records
     wsession = JLDWriteSession()
-    chunk_records = write_all_chunks_as_records(f, data, chunks, odr, filter_pipeline, wsession)
 
-    # Step 2: Write V2 B-tree structure using BTrees module
-    header_offset = JLD2.BTrees.write_v2btree_chunked_dataset(
-        f, chunk_records, iscompressed(filter_pipeline)
-    )
+    # Write chunks and index structure (Layer 1)
+    index_metadata = write_v2btree_index(f, data, chunks, maxshape, odr, filter_pipeline, wsession)
 
-    # Step 3: Write Object Header with DataLayout message
-    # Calculate payload size for object header
-    # V2 B-tree requires max dimensions in dataspace (flags bit 0 set)
-    psz = jlsizeof(Val(HmDataspace);
-        dataspace.dataspace_type,
-        dimensions=dataspace.size,
-        flags=0x01,  # Bit 0 indicates max dimensions are present
-        max_dimension_size=hdf5_maxshape)
-    psz += jlsizeof(Val(HmDatatype), 1; dt=datatype)
-
-    # DataLayout message size (version 4, type 5)
-    psz += jlsizeof(Val(HmDataLayout);
-        version = 4,
-        layout_class = LcChunked,
-        flags = iscompressed(filter_pipeline) ? UInt8(0x02) : UInt8(0x00),  # 0x02 indicates filters
-        dimensionality = UInt8(N + 1),  # +1 for element size dimension
-        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
-        chunk_indexing_type = 5,
-        node_size = UInt32(2048),      # matching h5py
-        splitpercent = UInt8(100),     # matching h5py
-        mergepercent = UInt8(40),      # matching h5py
-        data_address = h5offset(f, header_offset)
-    )
-
-    # Add filter pipeline message size if filters are present
-    if iscompressed(filter_pipeline)
-        psz += Filters.pipeline_message_size(filter_pipeline)
-    end
-
-    # Add continuation message size
-    psz += JLD2.CONTINUATION_MSG_SIZE
-
-    # Calculate full object size
-    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
-
-    # Allocate space for object header and write it
-    obj_header_offset = f.end_of_data
-    seek(f.io, obj_header_offset)
-    f.end_of_data = obj_header_offset + fullsz
-
-    # Write object header
-    cio = begin_checksum_write(f.io, fullsz - 4)
-    jlwrite(cio, ObjectStart(size_flag(psz)))
-    write_size(cio, psz)
-
-    # Write header messages
-    # V2 B-tree requires max dimensions in dataspace
-    write_header_message(cio, Val(HmDataspace);
-        dataspace.dataspace_type,
-        dimensions=dataspace.size,
-        flags=0x01,  # Bit 0 indicates max dimensions are present
-        max_dimension_size=hdf5_maxshape)
-
-    write_header_message(cio, Val(HmDatatype), 1; dt=datatype)
-
-    # Write DataLayout message (version 4, type 5)
-    write_header_message(cio, Val(HmDataLayout);
-        version = 4,
-        layout_class = LcChunked,
-        flags = iscompressed(filter_pipeline) ? UInt8(0x02) : UInt8(0x00),  # 0x02 indicates filters
-        dimensionality = UInt8(N + 1),  # +1 for element size dimension
-        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),  # CHUNK dimensions
-        chunk_indexing_type = 5,
-        node_size = UInt32(2048),      # matching h5py
-        splitpercent = UInt8(100),     # matching h5py
-        mergepercent = UInt8(40),      # matching h5py
-        data_address = h5offset(f, header_offset)
-    )
-
-    # Write filter pipeline message if filters are present
-    if iscompressed(filter_pipeline)
-        Filters.write_filter_pipeline_message(cio, filter_pipeline)
-    end
-
-    # Write continuation placeholder and checksum
-    write_continuation_placeholder(cio)
-    jlwrite(f.io, end_checksum(cio))
-
-    # Link dataset to file hierarchy
-    parent_group = f.root_group
-    dataset_offset = h5offset(f, obj_header_offset)
-
-    # Add link to parent group
-    if haskey(parent_group, name)
-        @warn "Overwriting existing dataset" name
-    end
-    parent_group.unwritten_links[name] = HardLink(dataset_offset)
-
-    return dataset_offset
+    # Write object header (Layer 2)
+    return write_chunked_dataset_object(f, name, data, chunks, maxshape, odr, datatype,
+                                        dataspace, filter_pipeline, index_metadata)
 end
 
 """
@@ -1449,121 +1342,19 @@ The V1 B-tree structure maintains:
 """
 function _write_v1btree(f::JLDFile, name::String, data::AbstractArray{T,N},
                         chunks, filters) where {T,N}
-    # Validate inputs
     @assert f.writable "File must be writable"
-    @assert all(chunks .<= size(data)) "Chunk dimensions must be <= data dimensions"
 
-    # Get datatype and object data representation
+    # Prepare common data structures
     odr = JLD2.objodr(data)
     datatype = JLD2.h5type(f, data)
     dataspace = JLD2.WriteDataspace(f, data, odr)
-
-    # Prepare filter pipeline
     filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
-
-    # Calculate payload size for object header
-    psz = jlsizeof(Val(HmDataspace); dataspace.dataspace_type, dimensions=dataspace.size)
-    psz += jlsizeof(Val(HmDatatype), 1; dt=datatype)
-
-    # Add FillValue message (required for proper chunked format)
-    psz += jlsizeof(Val(HmFillValue); flags=0x09)
-
-    # Add filter pipeline message size if present
-    if iscompressed(filter_pipeline)
-        psz += Filters.pipeline_message_size(filter_pipeline)
-    end
-
-    # DataLayout message size (version 3)
-    dl_dims = UInt32.([reverse(chunks)..., odr_sizeof(odr)])
-    psz += jlsizeof(Val(HmDataLayout);
-        version = 3,
-        layout_class = LcChunked,
-        dimensionality = UInt8(N + 1),
-        data_address = 0,  # Placeholder for size computation
-        dimensions = dl_dims
-    )
-
-    # Add continuation message size
-    psz += JLD2.CONTINUATION_MSG_SIZE
-
-    # Calculate full object size
-    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
-
-    # Allocate space for object header
-    header_offset = f.end_of_data
-    seek(f.io, header_offset)
-    f.end_of_data = header_offset + fullsz
-
-    # Write object header (first pass - without B-tree address)
-    cio = begin_checksum_write(f.io, fullsz - 4)
-    jlwrite(cio, ObjectStart(size_flag(psz)))
-    write_size(cio, psz)
-
-    # Write header messages
-    write_header_message(cio, Val(HmFillValue); flags=0x09)
-
-    write_header_message(cio, Val(HmDataspace);
-        dataspace.dataspace_type,
-        dimensions=dataspace.size)
-
-    for attr in dataspace.attributes
-        write_header_message(cio, f, attr)
-    end
-
-    write_header_message(cio, Val(HmDatatype), 1 | (2*isa(datatype, CommittedDatatype)); dt=datatype)
-
-    # Write filter pipeline message if present
-    if iscompressed(filter_pipeline)
-        Filters.write_filter_pipeline_message(cio, filter_pipeline)
-    end
-
-    # Remember position for DataLayout message
-    layout_pos = position(cio)
-
-    # Write placeholder DataLayout message
-    write_header_message(cio, Val(HmDataLayout);
-        version = 3,
-        layout_class = LcChunked,
-        dimensionality = UInt8(N + 1),
-        data_address = 0,  # Placeholder
-        dimensions = dl_dims
-    )
-
-    write_continuation_placeholder(cio)
-    jlwrite(f.io, end_checksum(cio))
-
-    # Now write chunks using V1 B-tree
     wsession = JLDWriteSession()
-    chunk_iter = ChunkIterator(data, chunks, odr, filter_pipeline, f, wsession)
 
-    btree, total_chunk_size, num_chunks = JLD2.BTrees.write_chunked_dataset_with_v1btree(
-        f, chunk_iter, odr, size(data), chunks
-    )
+    # Write chunks and index structure (Layer 1)
+    index_metadata = write_v1btree_index(f, data, chunks, odr, filter_pipeline, wsession)
 
-    # Update DataLayout message with actual B-tree root address
-    current_pos = position(f.io)
-    seek(f.io, layout_pos)
-
-    # Rewrite just the DataLayout message with correct address
-    write_header_message(f.io, Val(HmDataLayout);
-        version = 3,
-        layout_class = LcChunked,
-        dimensionality = UInt8(N + 1),
-        data_address = btree.root,
-        dimensions = dl_dims
-    )
-
-    seek(f.io, current_pos)
-
-    # Link dataset to file hierarchy
-    parent_group = f.root_group
-    dataset_offset = h5offset(f, header_offset)
-
-    # Add link to parent group
-    if haskey(parent_group, name)
-        @warn "Overwriting existing dataset" name
-    end
-    parent_group.unwritten_links[name] = HardLink(dataset_offset)
-
-    return dataset_offset
+    # Write object header (Layer 2)
+    return write_chunked_dataset_object(f, name, data, chunks, nothing, odr, datatype,
+                                        dataspace, filter_pipeline, index_metadata)
 end

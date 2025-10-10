@@ -36,7 +36,7 @@ Record size in bytes
 """
 function calculate_v2btree_record_size(ndims::Int, is_filtered::Bool)
     if is_filtered
-        8 + 4 + 4 + 8 * ndims  # address + size + filter_mask + indices
+        8 + 8 + 4 + 8 * ndims  # address + size + filter_mask + indices
     else
         8 + 8 * ndims  # address + indices
     end
@@ -112,26 +112,6 @@ function write_v2btree_leaf_node(io::IO, chunk_records, is_filtered::Bool)
 end
 
 """
-    write_v2btree_header(io::IO, header::V2BTreeHeader) -> header_size
-
-Write a V2 B-tree header to the given IO stream.
-
-# Returns
-Size of the written header in bytes (including checksum)
-"""
-function write_v2btree_header(io::IO, header::V2BTreeHeader)
-    header_size = jlsizeof(V2BTreeHeader) + 4  # struct + checksum
-
-    cio = begin_checksum_write(io, jlsizeof(V2BTreeHeader))
-    jlwrite(cio, header)
-
-    # Write checksum
-    jlwrite(io, end_checksum(cio))
-
-    return header_size
-end
-
-"""
     write_v2btree_chunked_dataset(f::JLDFile, chunk_records, is_filtered::Bool,
                                   node_size::UInt32=UInt32(2048),
                                   split_percent::UInt8=UInt8(100),
@@ -191,15 +171,18 @@ function write_v2btree_chunked_dataset(f::JLDFile,
         UInt16(0),        # depth (single leaf node)
         split_percent,
         merge_percent,
-        leaf_node_offset,
+        h5offset(f, leaf_node_offset),
         UInt16(n_chunks), # num_records
         UInt64(n_chunks), # total_records
     )
 
-    header_offset = f.end_of_data
-    seek(f.io, header_offset)
-    header_size = write_v2btree_header(f.io, hdr)
-    f.end_of_data = header_offset + header_size
+    header_pos = f.end_of_data
+    seek(f.io, header_pos)
 
-    return header_offset
+    cio = begin_checksum_write(f.io, jlsizeof(V2BTreeHeader))
+    jlwrite(cio, hdr)
+    jlwrite(f.io, end_checksum(cio))
+    f.end_of_data = header_pos + jlsizeof(V2BTreeHeader) + 4
+
+    return h5offset(f, header_pos)
 end

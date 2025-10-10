@@ -32,20 +32,6 @@ end
 define_packed(ExtensibleArrayHeader)
 
 """
-    write_extensible_array_header(io, hdr::ExtensibleArrayHeader) -> Int
-
-Write Extensible Array header with signature and checksum. Returns bytes written.
-"""
-function write_extensible_array_header(io, hdr::ExtensibleArrayHeader)
-    header_size = 4 + jlsizeof(ExtensibleArrayHeader) + 4  # signature + header + checksum
-    cio = begin_checksum_write(io, header_size - 4)
-    jlwrite(cio, EXTENSIBLE_ARRAY_HEADER_SIGNATURE)
-    jlwrite(cio, hdr)
-    jlwrite(io, end_checksum(cio))
-    return header_size
-end
-
-"""
     read_extensible_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
 
 Read chunks indexed by HDF5 v4 Extensible Array (type 4).

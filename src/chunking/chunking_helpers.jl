@@ -140,12 +140,12 @@ function prepare_and_write_chunk(f::JLDFile, chunk_data::Array, odr, filter_pipe
     end
 
     # Write chunk to file
-    chunk_offset = f.end_of_data
-    seek(f.io, chunk_offset)
+    chunk_pos = f.end_of_data
+    seek(f.io, chunk_pos)
     write(f.io, chunk_bytes)
-    f.end_of_data = chunk_offset + sizeof(chunk_bytes)
+    f.end_of_data = chunk_pos + sizeof(chunk_bytes)
 
-    return (chunk_offset, sizeof(chunk_bytes))
+    return (h5offset(f, chunk_pos), sizeof(chunk_bytes))
 end
 
 """
@@ -220,7 +220,7 @@ Write all chunks and return addresses/sizes in linear order.
 - `pad_chunks`: If true, pad partial chunks to full size (for Fixed Array/Implicit Index)
 
 # Returns
-- `(chunk_addresses, chunk_sizes, indexer)` where sizes are nothing if unfiltered
+- `(chunk_offsets, chunk_sizes, indexer)` where sizes are nothing if unfiltered
 """
 function write_all_chunks_linear(f::JLDFile, data::Array{T,N}, chunks::NTuple{N,Int},
                                 odr, filter_pipeline, wsession;
@@ -232,8 +232,8 @@ function write_all_chunks_linear(f::JLDFile, data::Array{T,N}, chunks::NTuple{N,
     indexer = ChunkLinearIndexer(grid_dims)
 
     # Allocate arrays for results
-    chunk_addresses = Vector{RelOffset}(undef, n_chunks)
-    chunk_sizes = iscompressed(filter_pipeline) ? Vector{UInt32}(undef, n_chunks) : nothing
+    chunk_offsets = Vector{RelOffset}(undef, n_chunks)
+    chunk_sizes = Vector{UInt64}(undef, n_chunks)
 
     # Write chunks in Julia order, store at linear index
     for julia_chunk_idx in CartesianIndices(grid_dims)
@@ -252,13 +252,11 @@ function write_all_chunks_linear(f::JLDFile, data::Array{T,N}, chunks::NTuple{N,
 
         # Store at linear index
         linear_idx = compute_linear_index(indexer, julia_chunk_idx)
-        chunk_addresses[linear_idx + 1] = h5offset(f, chunk_offset)
-        if iscompressed(filter_pipeline)
-            chunk_sizes[linear_idx + 1] = UInt32(chunk_size)
-        end
+        chunk_offsets[linear_idx + 1] = chunk_offset
+        chunk_sizes[linear_idx + 1] = chunk_size
     end
 
-    return (chunk_addresses, chunk_sizes, indexer)
+    return (chunk_offsets, chunk_sizes, indexer)
 end
 
 """
@@ -280,7 +278,7 @@ function write_all_chunks_as_records(f::JLDFile, data::Array{T,N}, chunks::NTupl
     if !iscompressed(filter_pipeline)
         chunk_records = Vector{Tuple{RelOffset, Vector{UInt64}}}(undef, n_chunks)
     else
-        chunk_records = Vector{Tuple{RelOffset, UInt32, UInt32, Vector{UInt64}}}(undef, n_chunks)
+        chunk_records = Vector{Tuple{RelOffset, UInt64, UInt32, Vector{UInt64}}}(undef, n_chunks)
     end
 
     # Write chunks and collect records
@@ -297,9 +295,9 @@ function write_all_chunks_as_records(f::JLDFile, data::Array{T,N}, chunks::NTupl
         # Store record at linear index
         linear_idx = compute_linear_index(indexer, julia_chunk_idx)
         if !iscompressed(filter_pipeline)
-            chunk_records[linear_idx + 1] = (h5offset(f, chunk_offset), hdf5_coords)
+            chunk_records[linear_idx + 1] = (chunk_offset, hdf5_coords)
         else
-            chunk_records[linear_idx + 1] = (h5offset(f, chunk_offset), UInt32(chunk_size), UInt32(0), hdf5_coords)
+            chunk_records[linear_idx + 1] = (chunk_offset, chunk_size, UInt32(0), hdf5_coords)
         end
     end
 
