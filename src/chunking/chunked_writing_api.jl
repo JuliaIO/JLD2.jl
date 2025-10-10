@@ -469,24 +469,40 @@ end
 """
     _write_chunked_dispatch(f, name, data, chunks, maxshape, fill_value, index_type, filters)
 
-Internal dispatch function that routes to the appropriate chunk index writer.
+Internal dispatch function that computes common structures, routes to the appropriate
+chunk index writer, and then writes the unified object header.
+
+This centralizes all common computations (datatype, dataspace, filter pipeline, ODR)
+to eliminate code duplication across different indexing types.
 """
-function _write_chunked_dispatch(f, name, data, chunks, maxshape, fill_value, index_type, filters)
-    if index_type == :single_chunk
-        _write_single_chunk(f, name, data, chunks, filters)
+function _write_chunked_dispatch(f, name, data::AbstractArray{T,N}, chunks, maxshape, fill_value, index_type, filters) where {T,N}
+    # Common computations done once upfront
+    odr = JLD2.objodr(data)
+    datatype = JLD2.h5type(f, data)
+    dataspace = JLD2.WriteDataspace(f, data, odr)
+    filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
+    wsession = JLDWriteSession()
+
+    # Dispatch to appropriate chunk index writer (returns metadata only)
+    index_metadata = if index_type == :single_chunk
+        write_single_chunk_index(f, data, chunks, odr, filter_pipeline, wsession)
     elseif index_type == :implicit_index
-        _write_implicit_index(f, name, data, chunks, maxshape, fill_value, filters)
+        write_implicit_index(f, data, chunks, fill_value, odr, filter_pipeline, wsession)
     elseif index_type == :fixed_array
-        _write_fixed_array(f, name, data, chunks, filters)
+        write_fixed_array_index(f, data, chunks, odr, filter_pipeline, wsession)
     elseif index_type == :extensible_array
-        _write_extensible_array(f, name, data, chunks, maxshape, filters)
+        write_extensible_array_index(f, data, chunks, maxshape, odr, filter_pipeline, wsession)
     elseif index_type == :v2btree
-        _write_v2btree(f, name, data, chunks, maxshape, filters)
+        write_v2btree_index(f, data, chunks, maxshape, odr, filter_pipeline, wsession)
     elseif index_type == :v1btree
-        _write_v1btree(f, name, data, chunks, filters)
+        write_v1btree_index(f, data, chunks, odr, filter_pipeline, wsession)
     else
         throw(ArgumentError("Unknown chunk index type: $index_type"))
     end
+
+    # Write unified object header using metadata from index writer
+    return write_chunked_dataset_object(f, name, data, chunks, maxshape, odr, datatype,
+                                        dataspace, filter_pipeline, index_metadata)
 end
 
 #-------------------------------------------------------------------------------
@@ -573,11 +589,34 @@ end
 
 Write chunks using Implicit Index and return metadata.
 
+Implicit Index stores chunks contiguously in the file starting at a base address.
+No explicit index structure is needed - chunk addresses are calculated as:
+    chunk_address = base_address + (chunk_index × chunk_size_bytes)
+
+This is the simplest chunk indexing type and is most memory-efficient for sparse datasets
+where a fill value is used for unallocated chunks.
+
+# Validation
+- Requires fill_value (HDF5 format requirement)
+- Does not support filters/compression (HDF5 format requirement)
+
 Returns `ChunkIndexMetadata` for use by `write_chunked_dataset_object`.
 """
 function write_implicit_index(f::JLDFile, data::AbstractArray{T,N}, chunks, fill_value, odr, filter_pipeline, wsession) where {T,N}
-    @assert !isnothing(fill_value) "Implicit index requires fill_value"
-    @assert !iscompressed(filter_pipeline) "Implicit index doesn't support filters"
+    # Validate specific requirements for implicit index
+    if isnothing(fill_value)
+        throw(ArgumentError(
+            "Implicit index (Type 2) requires a fill_value. " *
+            "Please specify fill_value in WriteChunkedArray constructor."
+        ))
+    end
+
+    if iscompressed(filter_pipeline)
+        throw(UnsupportedFeatureException(
+            "Compression/filters are not supported for Implicit Index (Type 2) chunk indexing. " *
+            "This is an HDF5 format requirement. Use Fixed Array (Type 3) for filtered chunks."
+        ))
+    end
 
     # Calculate chunk grid and allocate contiguous space
     grid_dims = cld.(size(data), chunks)
@@ -711,10 +750,34 @@ end
 
 Write chunks using Extensible Array indexing and return metadata.
 
+Extensible Array is used for datasets with exactly one unlimited dimension.
+It uses a multi-level index structure (Header → Index Block → Data Blocks) that can
+grow dynamically as the dataset is extended.
+
+For initial implementation, we support cases where all chunks fit in the index block directly
+(no data blocks needed).
+
+# Validation
+- Requires maxshape with at least one unlimited dimension
+
 Returns `ChunkIndexMetadata` for use by `write_chunked_dataset_object`.
 """
 function write_extensible_array_index(f::JLDFile, data::AbstractArray{T,N}, chunks, maxshape, odr, filter_pipeline, wsession) where {T,N}
-    @assert !isnothing(maxshape) "Extensible array requires maxshape"
+    # Validate specific requirements for extensible array
+    if isnothing(maxshape)
+        throw(ArgumentError(
+            "Extensible array (Type 4) requires at least one unlimited dimension. " *
+            "Provide maxshape with at least one nothing element (e.g., maxshape=(nothing, 100))."
+        ))
+    end
+
+    n_unlimited = count(isnothing, maxshape)
+    if n_unlimited == 0
+        throw(ArgumentError(
+            "Extensible array (Type 4) requires at least one unlimited dimension. " *
+            "Use Fixed Array (Type 3) for fixed-size datasets."
+        ))
+    end
 
     # Calculate chunk grid
     grid_dims = cld.(size(data), chunks)
@@ -786,10 +849,10 @@ function write_extensible_array_index(f::JLDFile, data::AbstractArray{T,N}, chun
         h5offset(f, index_block_pos)
     )
 
-    cio = begin_checksum_write(io, 4 + jlsizeof(ExtensibleArrayHeader) )
+    cio = begin_checksum_write(f.io, 4 + jlsizeof(ExtensibleArrayHeader) )
     jlwrite(cio, EXTENSIBLE_ARRAY_HEADER_SIGNATURE)
     jlwrite(cio, hdr)
-    jlwrite(io, end_checksum(cio))
+    jlwrite(f.io, end_checksum(cio))
     f.end_of_data = header_pos + 4 + jlsizeof(ExtensibleArrayHeader) + 4
 
     # Return metadata
@@ -818,10 +881,45 @@ end
 
 Write chunks using V2 B-tree indexing and return metadata.
 
+V2 B-tree indexing is used for:
+- Datasets with 2 or more unlimited dimensions
+- Very large datasets with >64K chunks
+
+# Implementation Notes
+
+Simplified implementation with depth=0 (single leaf node):
+- All chunk records stored in root leaf node
+- Node size: 2048 bytes (matching h5py)
+- Record size: 8 + 8*ndims (address + chunk indices)
+- Split/merge percentages: 100/40 (matching h5py)
+
+Structure written:
+1. Chunks (unpadded, like Extensible Array)
+2. Leaf node with chunk records
+3. B-tree header
+4. Object header with DataLayout message (version 4, type 5)
+
+# Validation
+- Requires maxshape with at least one unlimited dimension (typically 2+)
+
 Returns `ChunkIndexMetadata` for use by `write_chunked_dataset_object`.
 """
 function write_v2btree_index(f::JLDFile, data::AbstractArray{T,N}, chunks, maxshape, odr, filter_pipeline, wsession) where {T,N}
-    @assert !isnothing(maxshape) "V2 B-tree requires maxshape"
+    # Validate specific requirements for V2 B-tree
+    if isnothing(maxshape)
+        throw(ArgumentError(
+            "V2 B-tree (Type 5) is typically used for datasets with multiple unlimited dimensions. " *
+            "Provide maxshape with at least two nothing elements (e.g., maxshape=(nothing, nothing))."
+        ))
+    end
+
+    n_unlimited = count(isnothing, maxshape)
+    if n_unlimited == 0
+        throw(ArgumentError(
+            "V2 B-tree (Type 5) requires at least one unlimited dimension. " *
+            "Use Fixed Array (Type 3) for fixed-size datasets."
+        ))
+    end
 
     # Write all chunks and collect records
     chunk_records = write_all_chunks_as_records(f, data, chunks, odr, filter_pipeline, wsession)
@@ -1061,300 +1159,21 @@ function write_chunked_dataset_object(f::JLDFile, name::String, data::AbstractAr
 end
 
 #-------------------------------------------------------------------------------
-# Stub Implementations (to be filled in later phases)
+# Architecture Note:
+#
+# The refactored architecture eliminates the need for separate _write_* wrapper
+# functions. Instead:
+#
+# 1. _write_chunked_dispatch computes all common structures (ODR, datatype,
+#    dataspace, filter pipeline) once upfront
+#
+# 2. It dispatches to the appropriate write_*_index function which writes chunks
+#    and index structures, returning ChunkIndexMetadata
+#
+# 3. _write_chunked_dispatch then calls write_chunked_dataset_object once to
+#    write the unified object header
+#
+# This eliminates ~280 lines of duplicated code across 6 wrapper functions.
+# All validation and special logic for each indexing type is now in the
+# corresponding write_*_index function.
 #-------------------------------------------------------------------------------
-
-"""
-    _write_single_chunk(f::JLDFile, name::String, data::AbstractArray, chunks, filters)
-
-Write a dataset using Single Chunk indexing (Type 1) - refactored version.
-"""
-function _write_single_chunk(f::JLDFile, name::String, data::AbstractArray{T,N},
-                             chunks, filters) where {T,N}
-    @assert chunks == size(data) "Single chunk requires chunks == size(data)"
-    @assert f.writable "File must be writable"
-
-    # Prepare common data structures
-    odr = JLD2.objodr(data)
-    datatype = JLD2.h5type(f, data)
-    dataspace = JLD2.WriteDataspace(f, data, odr)
-    filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
-    wsession = JLDWriteSession()
-
-    # Write chunks and index structure
-    index_metadata = write_single_chunk_index(f, data, chunks, odr, filter_pipeline, wsession)
-
-    # Write object header
-    return write_chunked_dataset_object(f, name, data, chunks, nothing, odr, datatype,
-                                        dataspace, filter_pipeline, index_metadata)
-end
-
-"""
-    _write_implicit_index(f::JLDFile, name::String, data::AbstractArray, chunks, maxshape, fill_value, filters)
-
-Write a dataset using Implicit Index indexing (Type 2) - refactored version.
-
-Implicit Index stores chunks contiguously in the file starting at a base address.
-No explicit index structure is needed - chunk addresses are calculated as:
-    chunk_address = base_address + (chunk_index × chunk_size_bytes)
-
-This is the simplest chunk indexing type and is most memory-efficient for sparse datasets
-where a fill value is used for unallocated chunks.
-
-# Arguments
-- `f::JLDFile` - File handle (must be writable)
-- `name::String` - Dataset name
-- `data::AbstractArray` - Data to write
-- `chunks` - Chunk dimensions
-- `maxshape` - Maximum shape (must match data size for Type 2)
-- `fill_value` - Fill value for unallocated regions (required for Type 2)
-- `filters` - Optional compression filters (not supported for Type 2)
-"""
-function _write_implicit_index(f::JLDFile, name::String, data::AbstractArray{T,N},
-                                chunks, maxshape, fill_value, filters) where {T,N}
-    @assert f.writable "File must be writable"
-
-    # Validate specific requirements for implicit index
-    if isnothing(fill_value)
-        throw(ArgumentError(
-            "Implicit index (Type 2) requires a fill_value. " *
-            "Please specify fill_value in WriteChunkedArray constructor."
-        ))
-    end
-
-    if !isnothing(maxshape) && maxshape != size(data)
-        throw(ArgumentError(
-            "Implicit index (Type 2) does not support extensible dimensions. " *
-            "For extensible datasets, use Extensible Array (Type 4) or V2 B-tree (Type 5)."
-        ))
-    end
-
-    # Prepare common data structures
-    odr = JLD2.objodr(data)
-    datatype = JLD2.h5type(f, data)
-    dataspace = JLD2.WriteDataspace(f, data, odr)
-    filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
-
-    # Validate filters (implicit index doesn't support them)
-    if iscompressed(filter_pipeline)
-        throw(UnsupportedFeatureException(
-            "Compression/filters are not supported for Implicit Index (Type 2) chunk indexing. " *
-            "This is an HDF5 format requirement. Use Fixed Array (Type 3) for filtered chunks."
-        ))
-    end
-
-    wsession = JLDWriteSession()
-
-    # Write chunks and index structure (Layer 1)
-    index_metadata = write_implicit_index(f, data, chunks, fill_value, odr, filter_pipeline, wsession)
-
-    # Write object header (Layer 2)
-    return write_chunked_dataset_object(f, name, data, chunks, maxshape, odr, datatype,
-                                        dataspace, filter_pipeline, index_metadata)
-end
-
-"""
-    _write_fixed_array(f::JLDFile, name::String, data::AbstractArray, chunks, filters)
-
-Write a dataset using Fixed Array indexing (Type 3) - refactored version.
-
-Fixed Array is used for fixed-size chunked datasets where multiple chunks are needed.
-It stores chunk addresses in a pre-allocated index array for direct lookup.
-
-# Arguments
-- `f::JLDFile` - File handle (must be writable)
-- `name::String` - Dataset name
-- `data::AbstractArray` - Data to write
-- `chunks` - Chunk dimensions
-- `filters` - Optional compression filters
-"""
-function _write_fixed_array(f::JLDFile, name::String, data::AbstractArray{T,N},
-                            chunks, filters) where {T,N}
-    @assert f.writable "File must be writable"
-
-    # Prepare common data structures
-    odr = JLD2.objodr(data)
-    datatype = JLD2.h5type(f, data)
-    dataspace = JLD2.WriteDataspace(f, data, odr)
-    filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
-    wsession = JLDWriteSession()
-
-    # Write chunks and index structure (Layer 1)
-    index_metadata = write_fixed_array_index(f, data, chunks, odr, filter_pipeline, wsession)
-
-    # Write object header (Layer 2)
-    return write_chunked_dataset_object(f, name, data, chunks, nothing, odr, datatype,
-                                        dataspace, filter_pipeline, index_metadata)
-end
-
-"""
-    _write_extensible_array(f::JLDFile, name::String, data::AbstractArray, chunks, maxshape, filters)
-
-Write a dataset using Extensible Array indexing (Type 4) - refactored version.
-
-Extensible Array is used for datasets with exactly one unlimited dimension.
-It uses a multi-level index structure (Header → Index Block → Data Blocks) that can
-grow dynamically as the dataset is extended.
-
-For initial implementation, we support cases where all chunks fit in the index block directly
-(no data blocks needed).
-
-# Arguments
-- `f::JLDFile` - File handle (must be writable)
-- `name::String` - Dataset name
-- `data::AbstractArray` - Data to write
-- `chunks` - Chunk dimensions
-- `maxshape` - Maximum shape (must have exactly 1 unlimited dimension)
-- `filters` - Optional compression filters
-"""
-function _write_extensible_array(f::JLDFile, name::String, data::AbstractArray{T,N},
-                                  chunks, maxshape, filters) where {T,N}
-    @assert f.writable "File must be writable"
-
-    # Validate specific requirements for extensible array
-    if isnothing(maxshape)
-        throw(ArgumentError(
-            "Extensible array (Type 4) requires at least one unlimited dimension. " *
-            "Provide maxshape with at least one nothing element (e.g., maxshape=(nothing, 100))."
-        ))
-    end
-
-    n_unlimited = count(isnothing, maxshape)
-    if n_unlimited == 0
-        throw(ArgumentError(
-            "Extensible array (Type 4) requires at least one unlimited dimension. " *
-            "Use Fixed Array (Type 3) for fixed-size datasets."
-        ))
-    end
-
-    # Prepare common data structures
-    odr = JLD2.objodr(data)
-    datatype = JLD2.h5type(f, data)
-    dataspace = JLD2.WriteDataspace(f, data, odr)
-    filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
-    wsession = JLDWriteSession()
-
-    # Write chunks and index structure (Layer 1)
-    index_metadata = write_extensible_array_index(f, data, chunks, maxshape, odr, filter_pipeline, wsession)
-
-    # Write object header (Layer 2)
-    return write_chunked_dataset_object(f, name, data, chunks, maxshape, odr, datatype,
-                                        dataspace, filter_pipeline, index_metadata)
-end
-
-"""
-    _write_v2btree(f::JLDFile, name::String, data::AbstractArray, chunks, maxshape, filters)
-
-Write a chunked array with V2 B-tree indexing (Type 5).
-
-V2 B-tree indexing is used for:
-- Datasets with 2 or more unlimited dimensions
-- Very large datasets with >64K chunks
-
-# Implementation Notes
-
-Simplified implementation with depth=0 (single leaf node):
-- All chunk records stored in root leaf node
-- Node size: 2048 bytes (matching h5py)
-- Record size: 8 + 8*ndims (address + chunk indices)
-- Split/merge percentages: 100/40 (matching h5py)
-
-Structure written:
-1. Chunks (unpadded, like Extensible Array)
-2. Leaf node with chunk records
-3. B-tree header
-4. Object header with DataLayout message (version 4, type 5)
-
-# Chunk Record Format
-
-Each record contains:
-- chunk_address (UInt64) - file offset
-- chunk_index_dim_N (UInt64) for each dimension - in HDF5 order, 0-based
-
-For a 2D dataset, record_size = 24 bytes:
-- chunk_address (8 bytes)
-- chunk_index_row (8 bytes) - in HDF5 order
-- chunk_index_col (8 bytes)
-"""
-function _write_v2btree(f::JLDFile, name::String, data::AbstractArray{T,N},
-                        chunks, maxshape, filters) where {T,N}
-    @assert f.writable "File must be writable"
-
-    # Validate specific requirements for V2 B-tree
-    if isnothing(maxshape)
-        throw(ArgumentError(
-            "V2 B-tree (Type 5) is typically used for datasets with multiple unlimited dimensions. " *
-            "Provide maxshape with at least two nothing elements (e.g., maxshape=(nothing, nothing))."
-        ))
-    end
-
-    n_unlimited = count(isnothing, maxshape)
-    if n_unlimited == 0
-        throw(ArgumentError(
-            "V2 B-tree (Type 5) requires at least one unlimited dimension. " *
-            "Use Fixed Array (Type 3) for fixed-size datasets."
-        ))
-    end
-
-    # Prepare common data structures
-    odr = JLD2.objodr(data)
-    datatype = JLD2.h5type(f, data)
-    dataspace = JLD2.WriteDataspace(f, data, odr)
-    filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
-    wsession = JLDWriteSession()
-
-    # Write chunks and index structure (Layer 1)
-    index_metadata = write_v2btree_index(f, data, chunks, maxshape, odr, filter_pipeline, wsession)
-
-    # Write object header (Layer 2)
-    return write_chunked_dataset_object(f, name, data, chunks, maxshape, odr, datatype,
-                                        dataspace, filter_pipeline, index_metadata)
-end
-
-"""
-    _write_v1btree(f::JLDFile, name::String, data::AbstractArray, chunks, filters)
-
-Write a chunked array with V1 B-tree indexing (Version 3 DataLayout).
-
-V1 B-tree is the original HDF5 chunked indexing format, widely compatible and
-simple to implement. It's suitable for most chunked datasets without extensibility
-requirements.
-
-# Implementation Notes
-
-This function writes a Version 3 DataLayout message (not Version 4) which uses
-V1 B-tree node structures for chunk indexing. The format is:
-- Layout Class: Chunked (2)
-- Version: 3
-- Dimensions: Chunk dimensions in HDF5 order with element size
-
-The V1 B-tree structure maintains:
-- Sorted chunk keys (0-based element indices in HDF5 order)
-- Direct chunk addresses for leaf nodes
-- Multi-level tree structure for large datasets
-
-# Arguments
-- `f::JLDFile` - File handle (must be writable)
-- `name::String` - Dataset name
-- `data::AbstractArray` - Data to write
-- `chunks` - Chunk dimensions
-- `filters` - Optional compression filters
-"""
-function _write_v1btree(f::JLDFile, name::String, data::AbstractArray{T,N},
-                        chunks, filters) where {T,N}
-    @assert f.writable "File must be writable"
-
-    # Prepare common data structures
-    odr = JLD2.objodr(data)
-    datatype = JLD2.h5type(f, data)
-    dataspace = JLD2.WriteDataspace(f, data, odr)
-    filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
-    wsession = JLDWriteSession()
-
-    # Write chunks and index structure (Layer 1)
-    index_metadata = write_v1btree_index(f, data, chunks, odr, filter_pipeline, wsession)
-
-    # Write object header (Layer 2)
-    return write_chunked_dataset_object(f, name, data, chunks, nothing, odr, datatype,
-                                        dataspace, filter_pipeline, index_metadata)
-end

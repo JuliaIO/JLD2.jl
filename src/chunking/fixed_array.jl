@@ -46,14 +46,15 @@ function write_fixed_array_header(io, hdr::FixedArrayHeader)
 end
 
 """
-    read_fixed_array_header(f::JLDFile, header_address::Int64) -> FixedArrayHeader
+    read_fixed_array_header(f::JLDFile, header_pos::Int64) -> FixedArrayHeader
 
 Read the Fixed Array header structure from the file.
 """
-function read_fixed_array_header(f::JLDFile, header_address::Int64)
+function read_fixed_array_header(f::JLDFile, header_pos::Int64)
     io = f.io
-    seek(io, header_address)
+    seek(io, header_pos)
 
+    cio = begin_checksum_read(io)
     # Read and verify signature
     signature = jlread(io, UInt32)
     if signature != FIXED_ARRAY_HEADER_SIGNATURE
@@ -61,23 +62,11 @@ function read_fixed_array_header(f::JLDFile, header_address::Int64)
     end
 
     # Read header fields
-    version = jlread(io, UInt8)
-    client_id = jlread(io, UInt8)
-    entry_size = jlread(io, UInt8)
-    page_bits = jlread(io, UInt8)
-    max_num_entries = Int64(jlread(io, Length))
-    data_block_address = jlread(io, RelOffset)
+    hdr = jlread(cio, FixedArrayHeader)
+    end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException("Invalid Checksum"))
 
-    # Skip checksum (4 bytes)
-    skip(io, 4)
-
-    return FixedArrayHeader(version, client_id, entry_size, page_bits,
-                           max_num_entries, data_block_address)
+    return hdr
 end
-
-# Note: compute_chunk_index has been removed. Use ChunkLinearIndexer directly:
-#   indexer = ChunkLinearIndexer(grid_dims_julia_order)
-#   linear_idx = compute_linear_index(indexer, julia_chunk_idx)
 
 """
     read_chunk_entry_direct(io::IO, header::FixedArrayHeader, chunk_idx::Int) -> Tuple
@@ -90,8 +79,8 @@ function read_chunk_entry_direct(io::IO, header::FixedArrayHeader, chunk_idx::In
     entry_offset = chunk_idx * Int(header.entry_size)
     skip(io, entry_offset)
 
-    chunk_address = jlread(io, RelOffset)
-    if chunk_address == UNDEFINED_ADDRESS
+    chunk_offset = jlread(io, RelOffset)
+    if chunk_offset == UNDEFINED_ADDRESS
         return (nothing, nothing)
     end
 
@@ -101,7 +90,7 @@ function read_chunk_entry_direct(io::IO, header::FixedArrayHeader, chunk_idx::In
         nothing
     end
 
-    return (chunk_address, chunk_size)
+    return (chunk_offset, chunk_size)
 end
 
 """
