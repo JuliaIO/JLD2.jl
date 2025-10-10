@@ -800,7 +800,7 @@ function write_extensible_array_index(f::JLDFile, data::AbstractArray{T,N}, chun
 
     # Write all chunks
     chunk_addresses, chunk_sizes, _ = write_all_chunks_linear(
-        f, data, chunks, odr, filter_pipeline, wsession; pad_chunks=false
+        f, data, chunks, odr, filter_pipeline, wsession; pad_chunks=true
     )
 
     # Write Index Block

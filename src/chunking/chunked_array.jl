@@ -309,7 +309,6 @@ function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
 
     if layout.version == 3
         # version 1 B-tree
-        # This version appears to be padding incomplete chunks
         chunks = JLD2.BTrees.read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)
 
         # chunk dimensions in same order as data dims
@@ -318,25 +317,18 @@ function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
         # For V1 B-tree, layout.chunk_dimensions already excludes element size
         for chunk in chunks
             # Extract element indices from HDF5 format (0-based, reversed, with element dim)
+            # Format: (dim_n, ..., dim_1, dim_0, 0) where last 0 is element size dimension
             cidx = chunk.idx::NTuple{Int(ndims+1), Int}
+            chunk_start_idx = CartesianIndex(reverse(cidx[1:end-1]) .+ 1)
 
-            # V1 B-tree stores ELEMENT indices, not chunk indices!
-            # Convert element indices to chunk grid indices
-            # cidx is in HDF5 order with element dimension at end
-            hdf5_element_indices_0based = cidx[1:end-1]  # Drop element dimension
+            seek(f.io, fileoffset(f, chunk.offset))
+            vchunk = Array{T, ndims}(undef, chunk_dims_julia...)
+            read_chunk_with_filters!(vchunk, f, rr, chunk.chunk_size, filters, chunk.filter_mask)
 
-            # Convert element indices to chunk indices by dividing by chunk size
-            chunk_dims_hdf5 = reverse(chunk_dims_julia)  # HDF5 order
-            hdf5_chunk_indices_0based = ntuple(i -> div(hdf5_element_indices_0based[i], chunk_dims_hdf5[i]), ndims)
-
-            # Convert to Julia order and make 1-based
-            julia_chunk_indices_1based = reverse(hdf5_chunk_indices_0based) .+ 1
-            chunk_grid_idx = CartesianIndex(julia_chunk_indices_1based)
-
-            # Read and assign chunk
-            read_and_assign_chunk!(f, v, chunk_grid_idx, chunk.offset,
-                                  chunk.chunk_size, chunk_dims_julia, rr, filters,
-                                  chunk.filter_mask)
+            # Assign chunk to array starting at calculated position
+            # V1 B-tree pads chunks, so vchunk is always full chunk_dims_julia size
+            ranges = ntuple(i -> chunk_start_idx[i]:min(chunk_start_idx[i] + chunk_dims_julia[i] - 1, size(v, i)), ndims)
+            v[ranges...] = vchunk[ntuple(i -> 1:(ranges[i].stop - ranges[i].start + 1), ndims)...]
         end
         return v
     elseif layout.version == 4 && layout.chunk_indexing_type == 2

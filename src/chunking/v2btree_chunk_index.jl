@@ -55,7 +55,7 @@ function read_v2btree_chunks(f::JLDFile, v::Array, dataspace, rr,
     # Get array and chunk dimensions
     array_dims_julia = size(v)
     chunk_dims_hdf5 = layout.chunk_dimensions[1:ndims]
-    chunk_dims_julia = UInt64.(collect(reverse(chunk_dims_hdf5)))
+    chunk_dims_julia = Int.(reverse(chunk_dims_hdf5))
 
     # Calculate chunk size for unfiltered chunks
     chunk_size_bytes = UInt64(prod(chunk_dims_julia) * sizeof(eltype(v)))
@@ -73,9 +73,12 @@ function read_v2btree_chunks(f::JLDFile, v::Array, dataspace, rr,
 
     # Read each chunk into array
     for chunk in chunks
-        read_chunk_into_array!(f, v, chunk.address, chunk.size,
-                              chunk.coords, chunk_dims_julia,
-                              filters, chunk.filter_mask, rr)
+        # Convert 1-based Julia chunk coordinates to CartesianIndex
+        chunk_grid_idx = CartesianIndex(chunk.coords...)
+
+        # Use the unified chunk reading function
+        read_and_assign_chunk!(f, v, chunk_grid_idx, chunk.address, Int(chunk.size),
+                              Tuple(chunk_dims_julia), rr, filters, chunk.filter_mask)
     end
 
     return v

@@ -80,6 +80,47 @@ function compute_linear_index(indexer::ChunkLinearIndexer, julia_chunk_idx::Cart
 end
 
 """
+    linear_index_to_chunk_coords(linear_idx::Int, grid_dims::NTuple{N,Int}) where N -> CartesianIndex{N}
+
+Convert a 0-based linear chunk index to multi-dimensional chunk coordinates.
+
+# Arguments
+- `linear_idx`: 0-based linear index in HDF5 ordering
+- `grid_dims`: Number of chunks in each dimension (Julia order)
+
+# Returns
+1-based CartesianIndex in Julia order
+
+# Example
+```julia
+grid_dims = (10, 8)  # 10 chunks in first dim, 8 in second
+chunk_idx = linear_index_to_chunk_coords(15, grid_dims)
+# Returns: CartesianIndex(6, 2) - meaning 6th chunk in dim 1, 2nd in dim 2
+```
+"""
+function linear_index_to_chunk_coords(linear_idx::Int, grid_dims::NTuple{N,Int}) where N
+    # The linear index is in HDF5 order where the slowest (leftmost in HDF5) dimension varies first
+    # This corresponds to the LAST dimension in Julia order varying slowest
+    # So we need to convert from HDF5 linear to Julia coordinates
+
+    # Convert grid dimensions to HDF5 order (reversed)
+    grid_dims_hdf5 = reverse(grid_dims)
+
+    # Convert linear index to multi-dimensional coordinates (HDF5 order, 0-based)
+    # In HDF5 order: rightmost (fastest) dimension varies fastest in linear indexing
+    coords_hdf5 = zeros(Int, N)
+    idx = linear_idx
+    for i in N:-1:1  # Process from fastest (rightmost in HDF5) to slowest (leftmost in HDF5)
+        coords_hdf5[i] = idx % grid_dims_hdf5[i]
+        idx = div(idx, grid_dims_hdf5[i])
+    end
+
+    # Reverse to Julia order and convert to 1-based
+    coords_julia = reverse(coords_hdf5) .+ 1
+    return CartesianIndex(Tuple(coords_julia))
+end
+
+"""
     prepare_filter_pipeline(filters, odr, dataspace)
 
 Normalize and localize filter pipeline for chunk compression.
@@ -265,6 +306,11 @@ end
 
 Write all chunks and return records with chunk coordinates for V2 B-tree.
 
+# HDF5 Specification Compliance
+Per HDF5 Format Specification Appendix C:
+- Non-filtered chunks (Client ID = 0) MUST be padded to full chunk dimensions
+- Filtered chunks (Client ID = 1) MAY be unpadded (size explicitly stored)
+
 # Returns
 - Vector of records: either `(address, coords)` or `(address, size, filter_mask, coords)`
 """
@@ -283,11 +329,18 @@ function write_all_chunks_as_records(f::JLDFile, data::Array{T,N}, chunks::NTupl
 
     # Write chunks and collect records
     for julia_chunk_idx in CartesianIndices(grid_dims)
-        # Extract chunk (unpadded for V2 B-tree)
+        # Extract chunk
         chunk_data_partial, _, _ = extract_chunk_region(data, julia_chunk_idx, chunks)
 
+        # HDF5 spec: Non-filtered chunks MUST be padded, filtered chunks MAY be unpadded
+        chunk_data = if !iscompressed(filter_pipeline)
+            pad_chunk_data(chunk_data_partial, chunks, zero(T))
+        else
+            chunk_data_partial  # Filtered chunks can be unpadded (size stored explicitly)
+        end
+
         # Write chunk
-        chunk_offset, chunk_size = prepare_and_write_chunk(f, chunk_data_partial, odr, filter_pipeline, wsession)
+        chunk_offset, chunk_size = prepare_and_write_chunk(f, chunk_data, odr, filter_pipeline, wsession)
 
         # Get HDF5 coordinates (0-based, reversed)
         hdf5_coords = collect(UInt64.(reverse(Tuple(julia_chunk_idx) .- 1)))
@@ -400,23 +453,28 @@ The function uses CartesianIndices intersection to elegantly handle edge cases.
 function assign_chunk_to_array!(v::Array{T,N}, vchunk::Array{T,N},
                                chunk_grid_idx::CartesianIndex{N},
                                chunk_dims::NTuple{N,Int}) where {T,N}
-    # Calculate 0-based offset for this chunk in the array
-    chunk_root = CartesianIndex(Tuple((chunk_grid_idx.I .- 1) .* chunk_dims))
+    # Calculate starting position for this chunk in the array
+    chunk_start = (Tuple(chunk_grid_idx) .- 1) .* chunk_dims .+ 1
 
-    # Create indices for the chunk data (starting at 1)
-    chunk_ids = CartesianIndices(tuple(chunk_dims...))
+    # Calculate ending position (limited by array bounds)
+    chunk_end = min.(chunk_start .+ chunk_dims .- 1, size(v))
 
-    # Get all valid indices in the output array
-    array_ids = CartesianIndices(v)
+    # Determine actual region size in the output array
+    actual_region_size = chunk_end .- chunk_start .+ 1
 
-    # Compute intersection (handles edge chunks automatically)
-    vidxs = intersect(array_ids, chunk_ids .+ chunk_root)
+    # Create ranges for assignment in output array
+    output_ranges = ntuple(i -> chunk_start[i]:chunk_end[i], N)
 
-    # Calculate corresponding indices in the chunk
-    ch_idx = CartesianIndices(size(vidxs))
-
-    # Copy chunk data to output array
-    @views v[vidxs] .= vchunk[ch_idx]
+    # If vchunk is padded (full chunk_dims), extract only the actual data region
+    # If vchunk is already the right size (unpadded), use it as-is
+    if size(vchunk) == chunk_dims
+        # Padded chunk: extract only actual data region
+        chunk_ranges = ntuple(i -> 1:actual_region_size[i], N)
+        v[output_ranges...] = vchunk[chunk_ranges...]
+    else
+        # Unpadded chunk: should match actual region size exactly
+        v[output_ranges...] = vchunk
+    end
 
     return nothing
 end
@@ -451,8 +509,34 @@ function read_and_assign_chunk!(f::JLDFile, v::Array{T}, chunk_grid_idx::Cartesi
     # Seek to chunk data
     seek(f.io, fileoffset(f, chunk_address))
 
-    # Create temporary array for this chunk (always full size)
-    vchunk = Array{T, N}(undef, chunk_dims_julia...)
+    # Determine actual chunk size from grid position and array bounds
+    chunk_start = (Tuple(chunk_grid_idx) .- 1) .* chunk_dims_julia .+ 1
+    chunk_end = min.(chunk_start .+ chunk_dims_julia .- 1, size(v))
+    actual_chunk_size = chunk_end .- chunk_start .+ 1
+
+    # Check if this is an edge chunk
+    is_edge_chunk = actual_chunk_size != chunk_dims_julia
+
+    # Create temporary array for reading chunk data
+    # HDF5 Specification Compliance (Appendix C):
+    # - Non-filtered chunks (Client ID = 0): Always padded to full chunk_dims
+    # - Filtered chunks (Client ID = 1): May be unpadded (size explicitly stored)
+    #
+    # Strategy:
+    # 1. Non-filtered edge chunks: Read full padded size, use only actual_chunk_size
+    # 2. Filtered edge chunks: Check chunk_size_bytes to determine if unpadded
+    # 3. Full chunks: Always read full chunk_dims
+    vchunk = if is_edge_chunk && iscompressed(filters)
+        # Filtered chunks may be unpadded - check size
+        if chunk_size_bytes < prod(chunk_dims_julia) * sizeof(T)
+            Array{T, N}(undef, actual_chunk_size...)
+        else
+            Array{T, N}(undef, chunk_dims_julia...)
+        end
+    else
+        # Non-filtered chunks or full chunks: Always full size
+        Array{T, N}(undef, chunk_dims_julia...)
+    end
 
     # Read chunk data with filter support
     read_chunk_with_filters!(vchunk, f, rr, chunk_size_bytes, filters, filter_mask)

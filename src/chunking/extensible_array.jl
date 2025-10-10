@@ -95,10 +95,12 @@ function read_extensible_array_index_block!(f::JLDFile, v::Array, dataspace, rr,
 
     # Get array dimensions for chunk navigation
     array_dims_julia = size(v)
-    array_dims_hdf5 = UInt64.(collect(reverse(array_dims_julia)))  # Convert to Vector{UInt64}
-
     chunk_dims_hdf5 = layout.chunk_dimensions[1:ndims]
-    chunk_dims_julia = UInt64.(collect(reverse(chunk_dims_hdf5)))  # Convert to Vector{UInt64}
+    chunk_dims_julia = Tuple(Int.(reverse(chunk_dims_hdf5)))
+
+    # Calculate grid dimensions for indexing
+    grid_dims = cld.(array_dims_julia, chunk_dims_julia)
+
     # First, read all chunk addresses/records from direct elements
     chunk_records = Vector{Tuple{RelOffset, UInt64, UInt32}}(undef, num_direct_elements)
     for i in 1:num_direct_elements
@@ -134,12 +136,12 @@ function read_extensible_array_index_block!(f::JLDFile, v::Array, dataspace, rr,
         # Calculate which chunk this is (linear index to multi-dimensional coordinates)
         chunk_idx = i - 1  # 0-based
 
-        # Convert linear chunk index to chunk coordinates
-        chunk_coords = linear_to_chunk_coords(chunk_idx, array_dims_hdf5, chunk_dims_hdf5)
+        # Convert linear chunk index to chunk coordinates (using common function)
+        chunk_grid_idx = linear_index_to_chunk_coords(chunk_idx, grid_dims)
 
-        # Read chunk into array
-        read_chunk_into_array!(f, v, chunk_addr, chunk_size, chunk_coords,
-                               chunk_dims_julia, filters, filter_mask, rr)
+        # Read chunk into array (using common function)
+        read_and_assign_chunk!(f, v, chunk_grid_idx, chunk_addr, Int(chunk_size),
+                              chunk_dims_julia, rr, filters, filter_mask)
     end
 
     # Read chunks from each data block
@@ -148,8 +150,8 @@ function read_extensible_array_index_block!(f::JLDFile, v::Array, dataspace, rr,
         if !isnothing(data_block_addr) && data_block_addr.offset != typemax(UInt64)
             chunk_idx = read_extensible_array_data_block!(f, v, dataspace, rr, layout,
                                                           filters, data_block_addr,
-                                                          chunk_idx, array_dims_hdf5,
-                                                          chunk_dims_hdf5, chunk_dims_julia)
+                                                          chunk_idx, grid_dims,
+                                                          chunk_dims_julia)
         end
     end
 
@@ -159,7 +161,7 @@ end
 """
     read_extensible_array_data_block!(f, v, dataspace, rr, layout, filters,
                                        data_block_addr, chunk_idx_start,
-                                       array_dims_hdf5, chunk_dims_hdf5, chunk_dims_julia)
+                                       grid_dims, chunk_dims_julia)
 
 Read an Extensible Array Data Block and its chunk records.
 Returns the next chunk_idx after reading this block.
@@ -167,9 +169,8 @@ Returns the next chunk_idx after reading this block.
 function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
                                            layout::DataLayout, filters,
                                            data_block_addr::RelOffset, chunk_idx_start::Int,
-                                           array_dims_hdf5::AbstractVector,
-                                           chunk_dims_hdf5::AbstractVector,
-                                           chunk_dims_julia::AbstractVector)
+                                           grid_dims::NTuple{N,Int},
+                                           chunk_dims_julia::NTuple{N,Int}) where N
     seek(f.io, fileoffset(f, data_block_addr))
 
     # Read data block header
@@ -196,7 +197,7 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
         jlread(f.io, UInt64)
     end
     # Calculate total number of chunks needed
-    total_chunks = prod(cld.(array_dims_hdf5, chunk_dims_hdf5))
+    total_chunks = prod(grid_dims)
     remaining_chunks = Int(total_chunks) - chunk_idx_start
 
     # Read all remaining chunks (not limited to min_elements)
@@ -222,15 +223,15 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
                 continue
             end
 
-            # Convert linear chunk index to chunk coordinates
-            chunk_coords = linear_to_chunk_coords(chunk_idx, array_dims_hdf5, chunk_dims_hdf5)
+            # Convert linear chunk index to chunk coordinates (using common function)
+            chunk_grid_idx = linear_index_to_chunk_coords(chunk_idx, grid_dims)
 
             # Save position before reading chunk data
             saved_pos = position(f.io)
 
-            # Read chunk into array
-            read_chunk_into_array!(f, v, chunk_addr, chunk_size, chunk_coords,
-                                   chunk_dims_julia, filters, filter_mask, rr)
+            # Read chunk into array (using common function)
+            read_and_assign_chunk!(f, v, chunk_grid_idx, chunk_addr, Int(chunk_size),
+                                  chunk_dims_julia, rr, filters, filter_mask)
 
             # Restore position to continue reading data block addresses
             seek(f.io, saved_pos)
@@ -245,53 +246,4 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
     end
 
     return chunk_idx_start + elements_read
-end
-
-"""
-    linear_to_chunk_coords(linear_idx, array_dims_hdf5, chunk_dims_hdf5)
-
-Convert a linear chunk index to multi-dimensional chunk coordinates.
-Returns chunk coordinates in Julia order (reversed from HDF5).
-"""
-function linear_to_chunk_coords(linear_idx::Int, array_dims_hdf5::Vector{UInt64},
-                                chunk_dims_hdf5::Vector{UInt64})
-    # Calculate number of chunks in each dimension (HDF5 order)
-    nchunks_hdf5 = [cld(Int(array_dims_hdf5[i]), Int(chunk_dims_hdf5[i]))
-                    for i in 1:length(array_dims_hdf5)]
-
-    # Convert linear index to multi-dimensional coordinates (HDF5 order, 0-based)
-    coords_hdf5 = zeros(Int, length(nchunks_hdf5))
-    idx = linear_idx
-    for i in length(nchunks_hdf5):-1:1
-        coords_hdf5[i] = idx % nchunks_hdf5[i]
-        idx ÷= nchunks_hdf5[i]
-    end
-
-    # Reverse to Julia order and convert to 1-based
-    coords_julia = reverse(coords_hdf5) .+ 1
-    return coords_julia
-end
-
-"""
-    read_chunk_into_array!(f, v, chunk_addr, chunk_size, chunk_coords,
-                           chunk_dims_julia, filters, filter_mask, rr)
-
-Read a single chunk and write it into the appropriate location in the array.
-
-This is a compatibility wrapper around the more general `read_and_assign_chunk!`
-function that accepts chunk coordinates (1-based, Julia order) as a Vector{Int}.
-"""
-function read_chunk_into_array!(f::JLDFile, v::Array, chunk_addr::RelOffset,
-                                chunk_size::UInt64, chunk_coords::Vector{Int},
-                                chunk_dims_julia::Vector{UInt64}, filters,
-                                filter_mask::UInt32, rr)
-    # Convert Vector inputs to tuples for type stability
-    chunk_grid_idx = CartesianIndex(Tuple(chunk_coords))
-    chunk_dims_tuple = Tuple(Int.(chunk_dims_julia))
-
-    # Use the shared implementation
-    read_and_assign_chunk!(f, v, chunk_grid_idx, chunk_addr, Int(chunk_size),
-                          chunk_dims_tuple, rr, filters, filter_mask)
-
-    return nothing
 end
