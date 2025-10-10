@@ -14,7 +14,7 @@ using JLD2Bzip2, JLD2Lz4
         chunk_dims_2d = [10, 2]
 
         jldopen(fn, "w") do f
-            JLD2.write_chunked_array(f, "data_2d", data_2d, chunk_dims_2d)
+            JLD2.Chunking.write_chunked(f, "data_2d", data_2d; chunks=Tuple(chunk_dims_2d), indexing=:v1btree)
         end
 
         # Read back and verify
@@ -40,7 +40,7 @@ using JLD2Bzip2, JLD2Lz4
 
         jldopen(fn, "w") do f
             for (name, data, chunks) in test_cases
-                JLD2.write_chunked_array(f, name, data, chunks)
+                JLD2.Chunking.write_chunked(f, name, data; chunks=Tuple(chunks), indexing=:v1btree)
             end
         end
 
@@ -60,15 +60,15 @@ using JLD2Bzip2, JLD2Lz4
         jldopen(fn, "w") do f
             # Non-evenly divisible dimensions
             data = collect(reshape(1:35, 7, 5))
-            JLD2.write_chunked_array(f, "uneven", data, [3, 2])
+            JLD2.Chunking.write_chunked(f, "uneven", data; chunks=(3, 2), indexing=:v1btree)
 
             # Single element chunks
             data_single = collect(reshape(1:12, 3, 4))
-            JLD2.write_chunked_array(f, "single_elem", data_single, [1, 1])
+            JLD2.Chunking.write_chunked(f, "single_elem", data_single; chunks=(1, 1), indexing=:v1btree)
 
             # Chunk size equals array size
             data_full = collect(reshape(1.0:20.0, 4, 5))
-            JLD2.write_chunked_array(f, "full_chunk", data_full, [4, 5])
+            JLD2.Chunking.write_chunked(f, "full_chunk", data_full; chunks=(4, 5), indexing=:v1btree)
         end
 
         jldopen(fn, "r") do f
@@ -86,17 +86,17 @@ using JLD2Bzip2, JLD2Lz4
         jldopen(fn, "w") do f
             # Integers
             int_data = collect(reshape(Int32(1):Int32(60), 6, 10))
-            JLD2.write_chunked_array(f, "int32", int_data, [2, 5])
+            JLD2.Chunking.write_chunked(f, "int32", int_data; chunks=(2, 5), indexing=:v1btree)
 
             # Floats
             float_data = collect(reshape(1.0:40.0, 8, 5))
-            JLD2.write_chunked_array(f, "float64", float_data, [4, 3])
+            JLD2.Chunking.write_chunked(f, "float64", float_data; chunks=(4, 3), indexing=:v1btree)
 
             # Complex numbers
             complex_real = collect(1.0:30.0)
             complex_imag = collect(31.0:60.0)
             complex_data = collect(reshape(complex.(complex_real, complex_imag), 5, 6))
-            JLD2.write_chunked_array(f, "complex", complex_data, [3, 3])
+            JLD2.Chunking.write_chunked(f, "complex", complex_data; chunks=(3, 3), indexing=:v1btree)
         end
 
         jldopen(fn, "r") do f
@@ -119,8 +119,8 @@ using JLD2Bzip2, JLD2Lz4
         chunk_dims = [10, 10]
 
         # Test with Deflate compression
-        jldopen(fn, "w"; compress=Deflate()) do f
-            JLD2.write_chunked_array(f, "deflate", data, chunk_dims)
+        jldopen(fn, "w") do f
+            JLD2.Chunking.write_chunked(f, "deflate", data; chunks=Tuple(chunk_dims), indexing=:v1btree, filters=Deflate())
         end
 
         result = jldopen(fn, "r") do f
@@ -129,8 +129,8 @@ using JLD2Bzip2, JLD2Lz4
         @test result == data
 
         # Test with Zstd compression
-        jldopen(fn, "w"; compress=ZstdFilter()) do f
-            JLD2.write_chunked_array(f, "zstd", data, chunk_dims)
+        jldopen(fn, "w") do f
+            JLD2.Chunking.write_chunked(f, "zstd", data; chunks=Tuple(chunk_dims), indexing=:v1btree, filters=ZstdFilter())
         end
 
         result = jldopen(fn, "r") do f
@@ -139,8 +139,8 @@ using JLD2Bzip2, JLD2Lz4
         @test result == data
 
         # Test with Shuffle + Deflate
-        jldopen(fn, "w"; compress=[Shuffle(), Deflate()]) do f
-            JLD2.write_chunked_array(f, "shuffle_deflate", data, chunk_dims)
+        jldopen(fn, "w") do f
+            JLD2.Chunking.write_chunked(f, "shuffle_deflate", data; chunks=Tuple(chunk_dims), indexing=:v1btree, filters=[Shuffle(), Deflate()])
         end
 
         result = jldopen(fn, "r") do f
@@ -158,12 +158,12 @@ using JLD2Bzip2, JLD2Lz4
             data = collect(reshape(1:24, 4, 6))
 
             # Wrong number of chunk dimensions
-            @test_throws ArgumentError JLD2.write_chunked_array(f, "wrong_dims", data, [3])
-            @test_throws ArgumentError JLD2.write_chunked_array(f, "wrong_dims", data, [3, 2, 1])
+            @test_throws TypeError JLD2.Chunking.write_chunked(f, "wrong_dims", data; chunks=(3,), indexing=:v1btree)
+            @test_throws TypeError JLD2.Chunking.write_chunked(f, "wrong_dims", data; chunks=(3, 2, 1), indexing=:v1btree)
 
             # Invalid chunk dimensions
-            @test_throws ArgumentError JLD2.write_chunked_array(f, "zero_chunk", data, [0, 2])
-            @test_throws ArgumentError JLD2.write_chunked_array(f, "neg_chunk", data, [3, -1])
+            @test_throws ArgumentError JLD2.Chunking.write_chunked(f, "zero_chunk", data; chunks=(0, 2), indexing=:v1btree)
+            @test_throws ArgumentError JLD2.Chunking.write_chunked(f, "neg_chunk", data; chunks=(3, -1), indexing=:v1btree)
         end
 
         rm(fn, force=true)
@@ -175,7 +175,7 @@ using JLD2Bzip2, JLD2Lz4
         end
 
         jldopen(fn_ro, "r") do f
-            @test_throws ArgumentError JLD2.write_chunked_array(f, "data", reshape(1:12, 3, 4), [2, 2])
+            @test_throws ArgumentError JLD2.Chunking.write_chunked(f, "data", reshape(1:12, 3, 4); chunks=(2, 2), indexing=:v1btree)
         end
 
         rm(fn_ro, force=true)
@@ -190,7 +190,7 @@ using JLD2Bzip2, JLD2Lz4
         chunk_dims = [3, 2]
 
         jldopen(fn, "w") do f
-            JLD2.write_chunked_array(f, "large_data", data, chunk_dims)
+            JLD2.Chunking.write_chunked(f, "large_data", data; chunks=Tuple(chunk_dims), indexing=:v1btree)
         end
 
         result = jldopen(fn, "r") do f
@@ -252,7 +252,7 @@ end
         chunk_dims = [10, 4]
 
         jldopen(fn, "w") do f
-            JLD2.write_chunked_array(f, "boundary", data, chunk_dims)
+            JLD2.Chunking.write_chunked(f, "boundary", data; chunks=Tuple(chunk_dims), indexing=:v1btree)
         end
 
         result = jldopen(fn, "r") do f
@@ -271,7 +271,7 @@ end
         chunk_dims = [3, 3]
 
         jldopen(fn, "w") do f
-            JLD2.write_chunked_array(f, "data", data, chunk_dims)
+            JLD2.Chunking.write_chunked(f, "data", data; chunks=Tuple(chunk_dims), indexing=:v1btree)
         end
 
         result = jldopen(fn, "r") do f
@@ -293,7 +293,7 @@ end
         chunk_dims = [2, 5]
 
         jldopen(fn, "w") do f
-            JLD2.write_chunked_array(f, "ordered", data, chunk_dims)
+            JLD2.Chunking.write_chunked(f, "ordered", data; chunks=Tuple(chunk_dims), indexing=:v1btree)
         end
 
         result = jldopen(fn, "r") do f

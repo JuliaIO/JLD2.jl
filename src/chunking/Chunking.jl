@@ -15,9 +15,8 @@ using ..JLD2: JLDFile, RelOffset, UNDEFINED_ADDRESS, jlwrite, jlread, jlsizeof,
     HmDataspace, HmDatatype, HmFilterPipeline, HmFillValue, write_attribute,
     ObjectStart, size_flag, HmAttribute, write_size, write_header_message,
     write_continuation_placeholder,
-    read_compressed_array!, read_array!, track_weakref!,
-    PlaceholderH5Datatype, LcCompact, ischunked, jltype,
-    julia_repr
+    track_weakref!, PlaceholderH5Datatype, LcCompact, ischunked, jltype,
+    julia_repr, datamode, write_data
 
 # Note: The following are defined later in JLD2 module loading order,
 # so we access them via JLD2. prefix:
@@ -27,6 +26,7 @@ using ..JLD2: JLDFile, RelOffset, UNDEFINED_ADDRESS, jlwrite, jlread, jlsizeof,
 
 # Import Filters submodule
 using ..JLD2.Filters
+using ..JLD2.Filters: iscompressed
 
 # Note: BTrees is loaded before Chunking in JLD2.jl.
 # BTrees functions are accessed via JLD2.BTrees.* prefix.
@@ -50,7 +50,7 @@ export ChunkIterator, ProcessedChunk
 export ChunkLinearIndexer
 
 # Export API functions
-export write_chunked_array, write_chunked
+export write_chunked
 export compute_linear_index
 export get_chunked_array, chunk_dimensions, num_chunks, chunk_grid_size
 

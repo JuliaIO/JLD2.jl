@@ -37,7 +37,7 @@ struct V2BTreeHeader
     depth::UInt16
     split_percent::UInt8
     merge_percent::UInt8
-    root_node_address::UInt64  # Not RelOffset! V2 B-trees use raw UInt64
+    root_node_address::RelOffset  # Offset relative to superblock
     num_records_root::UInt16
     total_records::Length      # Variable-size field
 end

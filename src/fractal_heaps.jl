@@ -189,7 +189,7 @@ function read_fractal_heap_group(f, offset_hh, offset_bh)
     record_reader = (io, type) -> BTrees.read_record_type5(io, type, hh)
 
     # Use the generic B-tree reading function with our specific record reader
-    records = BTrees.read_records_in_node(f, bh.root_node_address, bh.num_records_in_root_node, bh.depth, bh, record_reader)
+    records = BTrees.read_records_in_node(f, bh.root_node_address, bh.num_records_root, bh.depth, bh, record_reader)
 
     if hh.cur_num_rows_in_root_iblock > 0
         indirect_rb = read_indirect_block(f, hh.root_block_address, hh, hh.cur_num_rows_in_root_iblock)

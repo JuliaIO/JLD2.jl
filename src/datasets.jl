@@ -240,6 +240,7 @@ end
         track_weakref!(f, header_offset, v)
         v
     else
+        track_weakref!(f, header_offset, v)
         # Chunked storage - dispatch to specialized handler
         read_chunked_array(f, v, dataspace, rr, layout, filters, header_offset, Int(ndims))
     end

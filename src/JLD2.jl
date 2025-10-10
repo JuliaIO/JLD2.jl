@@ -9,8 +9,9 @@ using PrecompileTools: @setup_workload, @compile_workload
 export jldopen, @load, @save, save_object, load_object, jldsave
 export Shuffle, Deflate, ZstdFilter
 export create_external_link!, create_soft_link!, lookup_link
-export AbstractLink, HardLink, SoftLink, ExternalLink
+export HardLink, SoftLink, ExternalLink
 export WriteChunkedArray, write_chunked
+
 
 include("types.jl")
 include("links.jl")
@@ -526,14 +527,12 @@ using .Filters: Shuffle, Deflate, ZstdFilter
 include("btrees/BTrees.jl")
 using .BTrees: write_chunked_dataset_with_v1btree,
     write_v2btree_chunked_dataset,
-    read_v1btree, read_v2btree_header,
+    read_v1btree, read_v2btree_header
 
 include("chunking/Chunking.jl")
 using .Chunking: WriteChunkedArray,
-    read_chunked_array,
-
-    get_chunked_array, chunk_dimensions, num_chunks, chunk_grid_size,
-    extract_chunk, extract_chunk_region
+    read_chunked_array, get_chunked_array, chunk_dimensions, num_chunks, chunk_grid_size,
+    extract_chunk, extract_chunk_region, write_chunked
 include("datasets.jl")
 include("global_heaps.jl")
 include("fractal_heaps.jl")
@@ -554,9 +553,6 @@ include("inlineunion.jl")
 include("fileio.jl")
 include("explicit_datasets.jl")
 include("committed_datatype_introspection.jl")
-
-# Export the new chunking API
-export write_chunked_array
 
 if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
     include("precompile.jl")

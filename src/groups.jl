@@ -153,9 +153,9 @@ end
             throw(ArgumentError("chunk dimensions ($(length(chunk_dims))) must match array dimensions ($(ndims(obj)))"))
         end
 
-        # Use write_chunked_array helper function
-        filters = isnothing(compress) ? () : Filters.normalize_filters(compress)
-        btree = write_chunked_array(f, name, obj, chunk_dims, filters, wsession)
+        # Use write_chunked helper function
+        filters = isnothing(compress) ? nothing : compress
+        Chunking.write_chunked(f, name, obj; chunks=Tuple(chunk_dims), indexing=:v1btree, filters=filters)
         return nothing
     end
 

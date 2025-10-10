@@ -223,7 +223,7 @@ end
 Validate chunk index type symbol.
 """
 function validate_index_type(index_type::Symbol)
-    valid_types = [:single_chunk, :implicit_index, :fixed_array, :extensible_array, :v2btree]
+    valid_types = [:single_chunk, :implicit_index, :fixed_array, :extensible_array, :v2btree, :v1btree]
     if !(index_type in valid_types)
         throw(ArgumentError(
             "Invalid chunk index type: $index_type. " *
@@ -485,6 +485,8 @@ function _write_chunked_dispatch(f, name, data, chunks, maxshape, fill_value, in
         _write_extensible_array(f, name, data, chunks, maxshape, filters)
     elseif index_type == :v2btree
         _write_v2btree(f, name, data, chunks, maxshape, filters)
+    elseif index_type == :v1btree
+        _write_v1btree(f, name, data, chunks, filters)
     else
         throw(ArgumentError("Unknown chunk index type: $index_type"))
     end
@@ -1406,6 +1408,156 @@ function _write_v2btree(f::JLDFile, name::String, data::AbstractArray{T,N},
     # Link dataset to file hierarchy
     parent_group = f.root_group
     dataset_offset = h5offset(f, obj_header_offset)
+
+    # Add link to parent group
+    if haskey(parent_group, name)
+        @warn "Overwriting existing dataset" name
+    end
+    parent_group.unwritten_links[name] = HardLink(dataset_offset)
+
+    return dataset_offset
+end
+
+"""
+    _write_v1btree(f::JLDFile, name::String, data::AbstractArray, chunks, filters)
+
+Write a chunked array with V1 B-tree indexing (Version 3 DataLayout).
+
+V1 B-tree is the original HDF5 chunked indexing format, widely compatible and
+simple to implement. It's suitable for most chunked datasets without extensibility
+requirements.
+
+# Implementation Notes
+
+This function writes a Version 3 DataLayout message (not Version 4) which uses
+V1 B-tree node structures for chunk indexing. The format is:
+- Layout Class: Chunked (2)
+- Version: 3
+- Dimensions: Chunk dimensions in HDF5 order with element size
+
+The V1 B-tree structure maintains:
+- Sorted chunk keys (0-based element indices in HDF5 order)
+- Direct chunk addresses for leaf nodes
+- Multi-level tree structure for large datasets
+
+# Arguments
+- `f::JLDFile` - File handle (must be writable)
+- `name::String` - Dataset name
+- `data::AbstractArray` - Data to write
+- `chunks` - Chunk dimensions
+- `filters` - Optional compression filters
+"""
+function _write_v1btree(f::JLDFile, name::String, data::AbstractArray{T,N},
+                        chunks, filters) where {T,N}
+    # Validate inputs
+    @assert f.writable "File must be writable"
+    @assert all(chunks .<= size(data)) "Chunk dimensions must be <= data dimensions"
+
+    # Get datatype and object data representation
+    odr = JLD2.objodr(data)
+    datatype = JLD2.h5type(f, data)
+    dataspace = JLD2.WriteDataspace(f, data, odr)
+
+    # Prepare filter pipeline
+    filter_pipeline = prepare_filter_pipeline(filters, odr, dataspace)
+
+    # Calculate payload size for object header
+    psz = jlsizeof(Val(HmDataspace); dataspace.dataspace_type, dimensions=dataspace.size)
+    psz += jlsizeof(Val(HmDatatype), 1; dt=datatype)
+
+    # Add FillValue message (required for proper chunked format)
+    psz += jlsizeof(Val(HmFillValue); flags=0x09)
+
+    # Add filter pipeline message size if present
+    if iscompressed(filter_pipeline)
+        psz += Filters.pipeline_message_size(filter_pipeline)
+    end
+
+    # DataLayout message size (version 3)
+    dl_dims = UInt32.([reverse(chunks)..., odr_sizeof(odr)])
+    psz += jlsizeof(Val(HmDataLayout);
+        version = 3,
+        layout_class = LcChunked,
+        dimensionality = UInt8(N + 1),
+        data_address = 0,  # Placeholder for size computation
+        dimensions = dl_dims
+    )
+
+    # Add continuation message size
+    psz += JLD2.CONTINUATION_MSG_SIZE
+
+    # Calculate full object size
+    fullsz = jlsizeof(ObjectStart) + size_size(psz) + psz + 4
+
+    # Allocate space for object header
+    header_offset = f.end_of_data
+    seek(f.io, header_offset)
+    f.end_of_data = header_offset + fullsz
+
+    # Write object header (first pass - without B-tree address)
+    cio = begin_checksum_write(f.io, fullsz - 4)
+    jlwrite(cio, ObjectStart(size_flag(psz)))
+    write_size(cio, psz)
+
+    # Write header messages
+    write_header_message(cio, Val(HmFillValue); flags=0x09)
+
+    write_header_message(cio, Val(HmDataspace);
+        dataspace.dataspace_type,
+        dimensions=dataspace.size)
+
+    for attr in dataspace.attributes
+        write_header_message(cio, f, attr)
+    end
+
+    write_header_message(cio, Val(HmDatatype), 1 | (2*isa(datatype, CommittedDatatype)); dt=datatype)
+
+    # Write filter pipeline message if present
+    if iscompressed(filter_pipeline)
+        Filters.write_filter_pipeline_message(cio, filter_pipeline)
+    end
+
+    # Remember position for DataLayout message
+    layout_pos = position(cio)
+
+    # Write placeholder DataLayout message
+    write_header_message(cio, Val(HmDataLayout);
+        version = 3,
+        layout_class = LcChunked,
+        dimensionality = UInt8(N + 1),
+        data_address = 0,  # Placeholder
+        dimensions = dl_dims
+    )
+
+    write_continuation_placeholder(cio)
+    jlwrite(f.io, end_checksum(cio))
+
+    # Now write chunks using V1 B-tree
+    wsession = JLDWriteSession()
+    chunk_iter = ChunkIterator(data, chunks, odr, filter_pipeline, f, wsession)
+
+    btree, total_chunk_size, num_chunks = JLD2.BTrees.write_chunked_dataset_with_v1btree(
+        f, chunk_iter, odr, size(data), chunks
+    )
+
+    # Update DataLayout message with actual B-tree root address
+    current_pos = position(f.io)
+    seek(f.io, layout_pos)
+
+    # Rewrite just the DataLayout message with correct address
+    write_header_message(f.io, Val(HmDataLayout);
+        version = 3,
+        layout_class = LcChunked,
+        dimensionality = UInt8(N + 1),
+        data_address = btree.root,
+        dimensions = dl_dims
+    )
+
+    seek(f.io, current_pos)
+
+    # Link dataset to file hierarchy
+    parent_group = f.root_group
+    dataset_offset = h5offset(f, header_offset)
 
     # Add link to parent group
     if haskey(parent_group, name)

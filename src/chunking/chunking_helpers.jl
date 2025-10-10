@@ -326,22 +326,22 @@ function read_chunk_with_filters!(
     filter_mask = UInt32(filter_mask)
     if Filters.iscompressed(filters)
         if filter_mask == 0
-            read_compressed_array!(vchunk, f, rr, chunk_size, filters)
+            JLD2.read_compressed_array!(vchunk, f, rr, chunk_size, filters)
         else
             if length(filters.filters) == 1
-                read_array!(vchunk, f, rr)
+                JLD2.read_array!(vchunk, f, rr)
             else
                 mask = Bool[filter_mask & 2^(n-1) == 0 for n in eachindex(filters.filters)]
                 if any(mask)
                     rf = FilterPipeline(filters.filters[mask])
-                    read_compressed_array!(vchunk, f, rr, chunk_size, rf)
+                    JLD2.read_compressed_array!(vchunk, f, rr, chunk_size, rf)
                 else
-                    read_array!(vchunk, f, rr)
+                    JLD2.read_array!(vchunk, f, rr)
                 end
             end
         end
     else
-        read_array!(vchunk, f, rr)
+        JLD2.read_array!(vchunk, f, rr)
     end
     return vchunk
 end
