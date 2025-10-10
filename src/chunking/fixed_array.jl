@@ -245,22 +245,17 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
 
     # Get chunk dimensions
     chunk_dims_hdf5 = layout.chunk_dimensions[1:ndims]
-    chunk_dims_julia = reverse(chunk_dims_hdf5)
+    chunk_dims_julia = Tuple(Int.(reverse(chunk_dims_hdf5)))
 
     # Calculate number of chunks
     nchunks_julia = cld.(array_dims_julia, chunk_dims_julia)
 
     # Iterate over all chunks
-    chunk_ids = CartesianIndices(tuple(chunk_dims_julia...))
-
     for chunk_grid_idx in CartesianIndices(tuple(nchunks_julia...))
-        # Convert chunk grid index to element index (0-based)
-        julia_coords = Tuple(chunk_grid_idx)
-        julia_element_indices_0based = (julia_coords .- 1) .* chunk_dims_julia
-
-        # Convert to HDF5 order with element size dimension
-        hdf5_element_indices_0based = reverse(julia_element_indices_0based)
-        chunk_indices_with_elemsize = tuple(hdf5_element_indices_0based..., 0)
+        # Convert chunk grid index to HDF5 element indices
+        chunk_indices_with_elemsize = julia_chunk_idx_to_hdf5_element_indices(
+            chunk_grid_idx, chunk_dims_julia
+        )
 
         # Look up chunk address and size
         chunk_address, compressed_size = lookup_chunk_address_fixed_array(f, layout,
@@ -271,12 +266,6 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
             continue  # Chunk not allocated - skip
         end
 
-        # Seek to chunk data
-        seek(io, fileoffset(f, chunk_address))
-
-        # Create temporary array for this chunk
-        vchunk = Array{T, ndims}(undef, chunk_dims_julia...)
-
         # Determine chunk size in bytes
         chunk_size_bytes = if !isnothing(compressed_size)
             Int(compressed_size)
@@ -284,20 +273,10 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
             Int(prod(chunk_dims_julia) * sizeof(T))
         end
 
-        # Read chunk data with filter support
+        # Read and assign chunk
         filter_mask = 0
-        read_chunk_with_filters!(vchunk, f, rr, chunk_size_bytes, filters, filter_mask)
-
-        # Calculate indices in the output array
-        chunk_root = CartesianIndex(Tuple((chunk_grid_idx.I .- 1) .* chunk_dims_julia))
-        array_ids = CartesianIndices(v)
-
-        # Compute intersection (handles edge chunks)
-        vidxs = intersect(array_ids, chunk_ids .+ chunk_root)
-        ch_idx = CartesianIndices(size(vidxs))
-
-        # Copy chunk data to output array
-        @views v[vidxs] .= vchunk[ch_idx]
+        read_and_assign_chunk!(f, v, chunk_grid_idx, chunk_address,
+                              chunk_size_bytes, chunk_dims_julia, rr, filters, filter_mask)
     end
 
     track_weakref!(f, header_offset, v)

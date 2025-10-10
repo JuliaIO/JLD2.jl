@@ -1157,23 +1157,3 @@ function write_chunked_dataset_object(f::JLDFile, name::String, data::AbstractAr
 
     return dataset_offset
 end
-
-#-------------------------------------------------------------------------------
-# Architecture Note:
-#
-# The refactored architecture eliminates the need for separate _write_* wrapper
-# functions. Instead:
-#
-# 1. _write_chunked_dispatch computes all common structures (ODR, datatype,
-#    dataspace, filter pipeline) once upfront
-#
-# 2. It dispatches to the appropriate write_*_index function which writes chunks
-#    and index structures, returning ChunkIndexMetadata
-#
-# 3. _write_chunked_dispatch then calls write_chunked_dataset_object once to
-#    write the unified object header
-#
-# This eliminates ~280 lines of duplicated code across 6 wrapper functions.
-# All validation and special logic for each indexing type is now in the
-# corresponding write_*_index function.
-#-------------------------------------------------------------------------------

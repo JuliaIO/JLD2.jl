@@ -343,3 +343,122 @@ function read_chunk_with_filters!(
     end
     return vchunk
 end
+
+"""
+    julia_chunk_idx_to_hdf5_element_indices(chunk_grid_idx::CartesianIndex{N},
+                                           chunk_dims_julia::NTuple{N,Int}) where N
+
+Convert Julia chunk grid index (1-based) to HDF5 element indices (0-based, reversed).
+
+# Arguments
+- `chunk_grid_idx`: 1-based chunk position in Julia order (e.g., CartesianIndex(2, 3))
+- `chunk_dims_julia`: Chunk dimensions in Julia order (e.g., (10, 20))
+
+# Returns
+Tuple of HDF5 element indices with element size dimension appended (e.g., (40, 10, 0))
+
+# Example
+```julia
+chunk_grid_idx = CartesianIndex(2, 3)  # Second chunk in dim 1, third in dim 2
+chunk_dims = (10, 20)
+indices = julia_chunk_idx_to_hdf5_element_indices(chunk_grid_idx, chunk_dims)
+# Returns: (40, 10, 0) - element positions in HDF5 order + element dimension
+```
+"""
+function julia_chunk_idx_to_hdf5_element_indices(chunk_grid_idx::CartesianIndex{N},
+                                                 chunk_dims_julia::NTuple{N,Int}) where N
+    # Convert 1-based chunk indices to 0-based element indices in Julia order
+    julia_element_indices_0based = (Tuple(chunk_grid_idx) .- 1) .* chunk_dims_julia
+
+    # Reverse to HDF5 order and append element size dimension (always 0)
+    hdf5_element_indices_0based = reverse(julia_element_indices_0based)
+
+    return tuple(hdf5_element_indices_0based..., 0)
+end
+
+"""
+    assign_chunk_to_array!(v::Array{T,N}, vchunk::Array{T,N},
+                          chunk_grid_idx::CartesianIndex{N},
+                          chunk_dims::NTuple{N,Int}) where {T,N}
+
+Assign chunk data to the appropriate region in the output array, handling edge chunks.
+
+# Arguments
+- `v`: Output array to write into
+- `vchunk`: Chunk data to assign (may be full chunk size, even for edge chunks)
+- `chunk_grid_idx`: 1-based chunk grid position in Julia order
+- `chunk_dims`: Chunk dimensions in Julia order
+
+# Details
+This function handles:
+- Edge chunks that don't fill the full chunk_dims
+- Proper indexing for both the output array and chunk data
+- Intersection between chunk region and array bounds
+
+The function uses CartesianIndices intersection to elegantly handle edge cases.
+"""
+function assign_chunk_to_array!(v::Array{T,N}, vchunk::Array{T,N},
+                               chunk_grid_idx::CartesianIndex{N},
+                               chunk_dims::NTuple{N,Int}) where {T,N}
+    # Calculate 0-based offset for this chunk in the array
+    chunk_root = CartesianIndex(Tuple((chunk_grid_idx.I .- 1) .* chunk_dims))
+
+    # Create indices for the chunk data (starting at 1)
+    chunk_ids = CartesianIndices(tuple(chunk_dims...))
+
+    # Get all valid indices in the output array
+    array_ids = CartesianIndices(v)
+
+    # Compute intersection (handles edge chunks automatically)
+    vidxs = intersect(array_ids, chunk_ids .+ chunk_root)
+
+    # Calculate corresponding indices in the chunk
+    ch_idx = CartesianIndices(size(vidxs))
+
+    # Copy chunk data to output array
+    @views v[vidxs] .= vchunk[ch_idx]
+
+    return nothing
+end
+
+"""
+    read_and_assign_chunk!(f::JLDFile, v::Array{T}, chunk_grid_idx::CartesianIndex,
+                          chunk_address::RelOffset, chunk_size_bytes::Int,
+                          chunk_dims_julia::NTuple{N,Int}, rr, filters, filter_mask) where {T,N}
+
+Read a chunk from file and assign it to the output array in one operation.
+
+# Arguments
+- `f`: JLD2 file
+- `v`: Output array
+- `chunk_grid_idx`: 1-based chunk grid position in Julia order
+- `chunk_address`: File offset of chunk data
+- `chunk_size_bytes`: Size of chunk data in bytes (compressed or uncompressed)
+- `chunk_dims_julia`: Chunk dimensions in Julia order
+- `rr`: Read representation
+- `filters`: Filter pipeline for decompression
+- `filter_mask`: Filter mask indicating which filters were applied
+
+# Details
+Combines chunk reading and array assignment to reduce code duplication.
+Automatically handles edge chunks by reading full chunk size and using
+intersection-based assignment.
+"""
+function read_and_assign_chunk!(f::JLDFile, v::Array{T}, chunk_grid_idx::CartesianIndex,
+                               chunk_address::RelOffset, chunk_size_bytes::Int,
+                               chunk_dims_julia::NTuple{N,Int}, rr, filters,
+                               filter_mask) where {T,N}
+    # Seek to chunk data
+    seek(f.io, fileoffset(f, chunk_address))
+
+    # Create temporary array for this chunk (always full size)
+    vchunk = Array{T, N}(undef, chunk_dims_julia...)
+
+    # Read chunk data with filter support
+    read_chunk_with_filters!(vchunk, f, rr, chunk_size_bytes, filters, filter_mask)
+
+    # Assign to output array (handles edge chunks)
+    assign_chunk_to_array!(v, vchunk, chunk_grid_idx, chunk_dims_julia)
+
+    return nothing
+end

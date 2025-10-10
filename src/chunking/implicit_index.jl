@@ -56,9 +56,6 @@ function read_implicit_index_chunks(f::JLDFile, v::Array{T}, dataspace::ReadData
     # Calculate chunk size in bytes
     chunk_size_bytes = Int(prod(chunk_dims_julia) * sizeof(T))
 
-    # Chunk indices for within-chunk addressing (Julia order)
-    chunk_ids = CartesianIndices(tuple(chunk_dims_julia...))
-
     # Create indexer once for all chunks (more efficient)
     indexer = ChunkLinearIndexer(nchunks_julia)
 
@@ -70,28 +67,10 @@ function read_implicit_index_chunks(f::JLDFile, v::Array{T}, dataspace::ReadData
         # Calculate chunk address
         chunk_address = base_address + (chunk_index * chunk_size_bytes)
 
-        # Seek to chunk data
-        seek(io, chunk_address)
-
-        # Create temporary array for this chunk
-        vchunk = Array{T, ndims}(undef, chunk_dims_julia...)
-
-        # Read chunk data (implicit index doesn't use filters by definition)
-        # But we still call read_chunk_with_filters! for consistency
+        # Read and assign chunk (implicit index doesn't use filters by definition)
         filter_mask = 0
-        read_chunk_with_filters!(vchunk, f, rr, chunk_size_bytes, filters, filter_mask)
-
-        # Calculate indices in the output array
-        # chunk_root is 0-based offset to be added to 1-based chunk_ids
-        chunk_root = CartesianIndex(Tuple((chunk_grid_idx.I .- 1) .* chunk_dims_julia))
-        array_ids = CartesianIndices(v)
-
-        # Compute intersection (handles edge chunks)
-        vidxs = intersect(array_ids, chunk_ids .+ chunk_root)
-        ch_idx = CartesianIndices(size(vidxs))
-
-        # Copy chunk data to output array
-        @views v[vidxs] .= vchunk[ch_idx]
+        read_and_assign_chunk!(f, v, chunk_grid_idx, RelOffset(chunk_address),
+                              chunk_size_bytes, chunk_dims_julia, rr, filters, filter_mask)
     end
 
     track_weakref!(f, header_offset, v)

@@ -277,39 +277,21 @@ end
                            chunk_dims_julia, filters, filter_mask, rr)
 
 Read a single chunk and write it into the appropriate location in the array.
+
+This is a compatibility wrapper around the more general `read_and_assign_chunk!`
+function that accepts chunk coordinates (1-based, Julia order) as a Vector{Int}.
 """
 function read_chunk_into_array!(f::JLDFile, v::Array, chunk_addr::RelOffset,
                                 chunk_size::UInt64, chunk_coords::Vector{Int},
                                 chunk_dims_julia::Vector{UInt64}, filters,
                                 filter_mask::UInt32, rr)
+    # Convert Vector inputs to tuples for type stability
+    chunk_grid_idx = CartesianIndex(Tuple(chunk_coords))
+    chunk_dims_tuple = Tuple(Int.(chunk_dims_julia))
 
-    # Calculate array slice for this chunk
-    array_dims = size(v)
-    start_idx = tuple([(chunk_coords[i] - 1) * Int(chunk_dims_julia[i]) + 1
-                       for i in 1:length(chunk_coords)]...)
-    end_idx = tuple([min(chunk_coords[i] * Int(chunk_dims_julia[i]), array_dims[i])
-                     for i in 1:length(chunk_coords)]...)
-
-    # Calculate actual chunk size in elements
-    chunk_elem_dims = tuple([end_idx[i] - start_idx[i] + 1 for i in 1:length(start_idx)]...)
-
-    # Create temporary buffer for chunk data
-    chunk_buffer = Array{eltype(v)}(undef, chunk_elem_dims)
-
-    # Read chunk data into buffer
-    seek(f.io, fileoffset(f, chunk_addr))
-
-    if isempty(filters.filters)
-        # Unfiltered: read directly into buffer
-        read_array!(chunk_buffer, f, rr)
-    else
-        # Filtered: use filter pipeline
-        read_chunk_with_filters!(chunk_buffer, f, rr, Int(chunk_size), filters, Int64(filter_mask))
-    end
-
-    # Copy buffer to array slice
-    ranges = tuple([start_idx[i]:end_idx[i] for i in 1:length(start_idx)]...)
-    v[ranges...] .= chunk_buffer
+    # Use the shared implementation
+    read_and_assign_chunk!(f, v, chunk_grid_idx, chunk_addr, Int(chunk_size),
+                          chunk_dims_tuple, rr, filters, filter_mask)
 
     return nothing
 end

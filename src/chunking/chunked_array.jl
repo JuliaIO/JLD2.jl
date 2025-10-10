@@ -275,10 +275,12 @@ end
     _read_chunk_data(f::JLDFile, chunk_info, T, chunk_dims, rr, filters)
 
 Read and decompress chunk data from file.
+
+This is a lightweight wrapper around read_chunk_with_filters! for the ChunkedArray API.
 """
 function _read_chunk_data(f::JLDFile, chunk_info, ::Type{T}, chunk_dims, rr, filters) where T
-    io = f.io
-    seek(io, fileoffset(f, chunk_info.offset))
+    # Seek to chunk data
+    seek(f.io, fileoffset(f, chunk_info.offset))
 
     # Create array to hold chunk data
     ndims = length(chunk_dims)
@@ -309,28 +311,32 @@ function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
         # version 1 B-tree
         # This version appears to be padding incomplete chunks
         chunks = JLD2.BTrees.read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)
-        # array cartesian indices
-        ids = CartesianIndices(v)
+
         # chunk dimensions in same order as data dims
-        chunk_dims = reverse(layout.chunk_dimensions)[1:ndims]
-        # chunk indices starting at 1,1
-        chunk_ids = CartesianIndices(tuple(chunk_dims...))
+        chunk_dims_julia = Tuple(Int.(reverse(layout.chunk_dimensions)[1:ndims]))
 
         # For V1 B-tree, layout.chunk_dimensions already excludes element size
         for chunk in chunks
-            seek(io, fileoffset(f, chunk.offset))
-
-            vchunk = Array{T, Int(ndims)}(undef, chunk_dims...)
-            read_chunk_with_filters!(vchunk, f, rr, chunk.chunk_size, filters, chunk.filter_mask)
-
+            # Extract element indices from HDF5 format (0-based, reversed, with element dim)
             cidx = chunk.idx::NTuple{Int(ndims+1), Int}
-            chunk_root = CartesianIndex(reverse(cidx[1:end-1]))
-            # Index into v
-            vidxs = intersect(ids, chunk_ids .+ chunk_root)
-            # Index into chunk
-            ch_idx = CartesianIndices(size(vidxs))
 
-            @views v[vidxs] .= vchunk[ch_idx]
+            # V1 B-tree stores ELEMENT indices, not chunk indices!
+            # Convert element indices to chunk grid indices
+            # cidx is in HDF5 order with element dimension at end
+            hdf5_element_indices_0based = cidx[1:end-1]  # Drop element dimension
+
+            # Convert element indices to chunk indices by dividing by chunk size
+            chunk_dims_hdf5 = reverse(chunk_dims_julia)  # HDF5 order
+            hdf5_chunk_indices_0based = ntuple(i -> div(hdf5_element_indices_0based[i], chunk_dims_hdf5[i]), ndims)
+
+            # Convert to Julia order and make 1-based
+            julia_chunk_indices_1based = reverse(hdf5_chunk_indices_0based) .+ 1
+            chunk_grid_idx = CartesianIndex(julia_chunk_indices_1based)
+
+            # Read and assign chunk
+            read_and_assign_chunk!(f, v, chunk_grid_idx, chunk.offset,
+                                  chunk.chunk_size, chunk_dims_julia, rr, filters,
+                                  chunk.filter_mask)
         end
         return v
     elseif layout.version == 4 && layout.chunk_indexing_type == 2
