@@ -69,160 +69,90 @@ function read_fixed_array_header(f::JLDFile, header_pos::Int64)
 end
 
 """
-    read_chunk_entry_direct(io::IO, header::FixedArrayHeader, chunk_idx::Int) -> Tuple
+    read_all_chunk_entries_fixed_array(io::IO, header::FixedArrayHeader, n_chunks::Int) -> Vector{Tuple}
 
-Read chunk entry from direct (non-paged) storage.
+Read all chunk entries from Fixed Array data block in one pass.
 
-Returns (chunk_address, chunk_size) or (nothing, nothing) if unallocated.
+Returns a vector of (chunk_address::Union{RelOffset,Nothing}, chunk_size::Union{Int,Nothing})
+tuples indexed by linear chunk index (0-based).
 """
-function read_chunk_entry_direct(io::IO, header::FixedArrayHeader, chunk_idx::Integer)
-    entry_offset = chunk_idx * Int(header.entry_size)
-    skip(io, entry_offset)
-
-    chunk_offset = jlread(io, RelOffset)
-    if chunk_offset == UNDEFINED_ADDRESS
-        return (nothing, nothing)
-    end
-
-    chunk_size = if header.client_id == 1
-        jlread(io, UInt64)
-    else
-        nothing
-    end
-
-    return (chunk_offset, chunk_size)
-end
-
-"""
-    read_chunk_entry_paged(io::IO, header::FixedArrayHeader, chunk_idx::Int, page_size::Int) -> Tuple
-
-Read chunk entry from paged storage.
-
-Returns (chunk_address, chunk_size) or (nothing, nothing) if unallocated.
-"""
-function read_chunk_entry_paged(io::IO, header::FixedArrayHeader, chunk_idx::Integer, page_size::Int)
-    # Calculate which page contains our chunk
-    page_num = div(chunk_idx, page_size)
-    page_offset_within_page = chunk_idx % page_size
-
-    # Calculate bitmap size (one bit per page)
-    num_pages = cld(header.max_num_entries, page_size)
-    bitmap_bytes = cld(num_pages, 8)
-
-    # Read bitmap to check if page is initialized
-    bitmap = zeros(UInt8, bitmap_bytes)
-    read!(io, bitmap)
-
-    # Check if the page is initialized
-    byte_idx = div(page_num, 8)
-    bit_idx = page_num % 8
-    page_initialized = ((bitmap[byte_idx + 1] >> bit_idx) & 0x01) != 0
-
-    if !page_initialized
-        return (nothing, nothing)
-    end
-
-    # Calculate offset to our page
-    pages_start = position(io)
-    page_data_size = page_size * Int(header.entry_size)
-    page_total_size = page_data_size + 4  # +4 for checksum
-    page_offset = pages_start + (page_num * page_total_size)
-
-    # Seek to entry within page
-    seek(io, page_offset)
-    entry_offset_in_page = page_offset_within_page * Int(header.entry_size)
-    skip(io, entry_offset_in_page)
-
-    # Read chunk entry
-    chunk_address = jlread(io, RelOffset)
-    if chunk_address == UNDEFINED_ADDRESS
-        return (nothing, nothing)
-    end
-
-    chunk_size = if header.client_id == 1
-        jlread(io, UInt64)
-    else
-        nothing
-    end
-
-    return (chunk_address, chunk_size)
-end
-
-"""
-    lookup_chunk_address_fixed_array(f::JLDFile, layout::DataLayout, chunk_indices::Tuple, array_dims::Tuple)
-
-Look up the file address and size of a chunk using the Fixed Array index.
-
-# Arguments
-- `f`: JLD2 file
-- `layout`: DataLayout containing Fixed Array indexing info
-- `chunk_indices`: 0-based chunk coordinates in HDF5 order (including element size dimension)
-- `array_dims`: Array dimensions in HDF5 order (fastest to slowest)
-
-# Returns
-(chunk_address, chunk_size) tuple where:
-- chunk_address is RelOffset to chunk data (or nothing if not allocated)
-- chunk_size is compressed size in bytes (or nothing if no compression or not allocated)
-"""
-function lookup_chunk_address_fixed_array(f::JLDFile, layout::DataLayout,
-                                         chunk_indices::Tuple, array_dims::Tuple)
-    io = f.io
-
-    # Read Fixed Array header
-    header = read_fixed_array_header(f, layout.data_offset)
-
-    # Calculate number of chunks in each dimension
-    chunk_dims_hdf5 = layout.chunk_dimensions[1:end-1]  # exclude element size
-
-    # Compute nchunks for each dimension (in HDF5 order)
-    ndims = length(array_dims)
-    nchunks = ntuple(ndims) do i
-        cld(array_dims[i], chunk_dims_hdf5[i])
-    end
-
-    # Convert element indices to chunk grid indices (0-based HDF5 coordinates)
-    element_indices = chunk_indices[1:ndims]
-    chunk_coords_0based = ntuple(ndims) do i
-        div(element_indices[i], chunk_dims_hdf5[i])
-    end
-
-    # Convert to Julia 1-based CartesianIndex in Julia order (reverse)
-    julia_chunk_idx = CartesianIndex(reverse(chunk_coords_0based) .+ 1)
-
-    # Compute linear chunk index using ChunkLinearIndexer
-    indexer = ChunkLinearIndexer(reverse(nchunks))
-    chunk_idx = compute_linear_index(indexer, julia_chunk_idx)
-
-    # Check bounds (chunk_idx is 0-based)
-    if chunk_idx >= header.max_num_entries
-        throw(InvalidDataException("Chunk index $chunk_idx exceeds maximum entries $(header.max_num_entries)"))
-    end
-
-    # Read data block header
-    data_block_addr = fileoffset(f, header.data_block_address)
-    seek(io, data_block_addr)
-
-    # Verify data block signature
-    db_signature = jlread(io, UInt32)
-    if db_signature != FIXED_ARRAY_DATABLOCK_SIGNATURE
-        throw(InvalidDataException("Invalid Fixed Array data block signature"))
-    end
-
-    # Skip version (1) and client_id (1)
-    skip(io, 2)
-
-    # Skip header address (8 bytes)
-    skip(io, 8)
-
+function read_all_chunk_entries_fixed_array(io::IO, header::FixedArrayHeader, n_chunks::Int)
     # Determine if paging is active
     page_size = header.page_bits > 0 ? (1 << header.page_bits) : typemax(Int)
     is_paged = header.page_bits > 0 && header.max_num_entries > page_size
 
+    chunk_entries = Vector{Tuple{Union{RelOffset,Nothing}, Union{Int,Nothing}}}(undef, n_chunks)
+
     if is_paged
-        return read_chunk_entry_paged(io, header, chunk_idx, page_size)
+        # For paged storage, we need to read each page separately
+        entry_start_pos = position(io)
+        num_pages = cld(header.max_num_entries, page_size)
+        bitmap_bytes = cld(num_pages, 8)
+
+        # Read bitmap
+        bitmap = zeros(UInt8, bitmap_bytes)
+        read!(io, bitmap)
+
+        pages_start = position(io)
+        page_data_size = page_size * Int(header.entry_size)
+        page_total_size = page_data_size + 4  # +4 for checksum
+
+        for chunk_idx in 0:(n_chunks-1)
+            page_num = div(chunk_idx, page_size)
+            page_offset_within_page = chunk_idx % page_size
+
+            # Check if page is initialized
+            byte_idx = div(page_num, 8)
+            bit_idx = page_num % 8
+            page_initialized = ((bitmap[byte_idx + 1] >> bit_idx) & 0x01) != 0
+
+            if !page_initialized
+                chunk_entries[chunk_idx + 1] = (nothing, nothing)
+                continue
+            end
+
+            # Seek to entry within page
+            page_offset = pages_start + (page_num * page_total_size)
+            entry_offset_in_page = page_offset_within_page * Int(header.entry_size)
+            seek(io, page_offset + entry_offset_in_page)
+
+            # Read entry
+            chunk_address = jlread(io, RelOffset)
+            if chunk_address == UNDEFINED_ADDRESS
+                chunk_entries[chunk_idx + 1] = (nothing, nothing)
+            else
+                chunk_size = if header.client_id == 1
+                    Int(jlread(io, UInt64))
+                else
+                    nothing
+                end
+                chunk_entries[chunk_idx + 1] = (chunk_address, chunk_size)
+            end
+        end
     else
-        return read_chunk_entry_direct(io, header, chunk_idx)
+        # Non-paged: read all entries sequentially (most efficient)
+        entry_start_pos = position(io)
+
+        for chunk_idx in 0:(n_chunks-1)
+            chunk_address = jlread(io, RelOffset)
+            if chunk_address == UNDEFINED_ADDRESS
+                chunk_entries[chunk_idx + 1] = (nothing, nothing)
+                # Skip compressed size if present
+                if header.client_id == 1
+                    skip(io, 8)  # skip UInt64 chunk_size
+                end
+            else
+                chunk_size = if header.client_id == 1
+                    Int(jlread(io, UInt64))
+                else
+                    nothing
+                end
+                chunk_entries[chunk_idx + 1] = (chunk_address, chunk_size)
+            end
+        end
     end
+
+    return chunk_entries
 end
 
 """
@@ -239,28 +169,42 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
                                 ndims::Int) where T
     io = f.io
 
-    # Get array dimensions
+    # Get array and chunk dimensions
     array_dims_julia = size(v)
-    array_dims_hdf5 = reverse(array_dims_julia)
-
-    # Get chunk dimensions
     chunk_dims_hdf5 = layout.chunk_dimensions[1:ndims]
     chunk_dims_julia = Tuple(Int.(reverse(chunk_dims_hdf5)))
 
     # Calculate number of chunks
     nchunks_julia = cld.(array_dims_julia, chunk_dims_julia)
+    n_chunks_total = prod(nchunks_julia)
 
-    # Iterate over all chunks
+    # Read Fixed Array header once
+    header = read_fixed_array_header(f, layout.data_offset)
+
+    # Position to start of chunk entries in data block
+    data_block_addr = fileoffset(f, header.data_block_address)
+    seek(io, data_block_addr)
+
+    # Verify data block signature once
+    db_signature = jlread(io, UInt32)
+    if db_signature != FIXED_ARRAY_DATABLOCK_SIGNATURE
+        throw(InvalidDataException("Invalid Fixed Array data block signature"))
+    end
+
+    # Skip version (1) + client_id (1) + header address (8)
+    skip(io, 10)
+
+    # Read all chunk entries in one pass
+    chunk_entries = read_all_chunk_entries_fixed_array(io, header, n_chunks_total)
+
+    # Pre-compute indexer for linear index calculations
+    # ChunkLinearIndexer expects Julia order and reverses internally
+    indexer = ChunkLinearIndexer(nchunks_julia)
+
+    # Now load chunks using the pre-read entries
     for chunk_grid_idx in CartesianIndices(tuple(nchunks_julia...))
-        # Convert chunk grid index to HDF5 element indices
-        chunk_indices_with_elemsize = julia_chunk_idx_to_hdf5_element_indices(
-            chunk_grid_idx, chunk_dims_julia
-        )
-
-        # Look up chunk address and size
-        chunk_address, compressed_size = lookup_chunk_address_fixed_array(f, layout,
-                                                         chunk_indices_with_elemsize,
-                                                         array_dims_hdf5)
+        linear_idx = compute_linear_index(indexer, chunk_grid_idx)
+        chunk_address, compressed_size = chunk_entries[linear_idx + 1]
 
         if isnothing(chunk_address)
             continue  # Chunk not allocated - skip
@@ -268,7 +212,7 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
 
         # Determine chunk size in bytes
         chunk_size_bytes = if !isnothing(compressed_size)
-            Int(compressed_size)
+            compressed_size
         else
             Int(prod(chunk_dims_julia) * sizeof(T))
         end
