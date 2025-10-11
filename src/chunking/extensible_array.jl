@@ -1,17 +1,8 @@
-# Extensible Array Index (v4 chunk indexing type 4)
-# Used for datasets with ONE unlimited dimension
-
-# Signature constants
 const EXTENSIBLE_ARRAY_HEADER_SIGNATURE = htol(0x44484145)  # "EAHD"
 const EXTENSIBLE_ARRAY_INDEX_BLOCK_SIGNATURE = htol(0x42494145)  # "EAIB"
 const EXTENSIBLE_ARRAY_DATA_BLOCK_SIGNATURE = htol(0x42444145)  # "EADB"
 
-"""
-    ExtensibleArrayHeader
-
-Header structure for HDF5 Extensible Array index (for writing).
-Fields match HDF5 specification Section VII.D.
-"""
+"""Extensible Array header for HDF5 chunk indexing (type 4, one unlimited dimension)."""
 struct ExtensibleArrayHeader
     version::UInt8
     client_id::UInt8
@@ -31,33 +22,18 @@ struct ExtensibleArrayHeader
 end
 define_packed(ExtensibleArrayHeader)
 
-"""
-    read_extensible_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
-
-Read chunks indexed by HDF5 v4 Extensible Array (type 4).
-Used when dataset has one unlimited dimension.
-
-Navigation: Header → Index Block → Secondary Blocks → Data Blocks → Chunk Records
-"""
+"""Read chunks using Extensible Array indexing (type 4, one unlimited dimension)."""
 function read_extensible_array_chunks(f::JLDFile, v::Array, dataspace, rr,
                                        layout::DataLayout, filters,
                                        header_offset, ndims::Int)
-
-    # Get header address from layout (already an absolute file offset)
-    header_addr = layout.data_offset
-
-    # Parse header to get index block address
-    seek(f.io, header_addr)
-
-    # Read header
-    sig = jlread(f.io, UInt32)
-    sig == htol(0x44484145) || throw(InvalidDataException("Invalid Extensible Array header signature"))  # "EAHD"
+    seek(f.io, layout.data_offset)
+    jlread(f.io, UInt32) == EXTENSIBLE_ARRAY_HEADER_SIGNATURE ||
+        throw(InvalidDataException("Invalid Extensible Array header signature"))
 
     hdr = jlread(f.io, ExtensibleArrayHeader)
-    hdr.version == 0 || throw(UnsupportedVersionException("Unsupported Extensible Array version $(hdr.version)"))
-
-
+    hdr.version == 0 || throw(UnsupportedVersionException("Unsupported version $(hdr.version)"))
     hdr.index_blk_addr.offset == typemax(UInt64) && return v
+
     read_extensible_array_index_block!(f, v, dataspace, rr, layout, filters,
                                         hdr.index_blk_addr, hdr.element_size,
                                         hdr.index_blk_elmts, hdr.num_data_blks, ndims)
