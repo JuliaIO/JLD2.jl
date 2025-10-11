@@ -48,10 +48,16 @@ using JLD2
         filename = tempname() * ".jld2"
 
         try
-            # 2+ unlimited dimensions requires V2 B-tree (Phase 5)
-            @test_throws JLD2.UnsupportedFeatureException jldopen(filename, "w") do f
+            # 2+ unlimited dimensions uses V2 B-tree
+            jldopen(filename, "w") do f
                 wca = JLD2.WriteChunkedArray(data, chunks=(3, 3), maxshape=(nothing, nothing))
                 JLD2.write_chunked(f, "extensible", wca)
+            end
+
+            jldopen(filename, "r") do f
+                data_read = f["extensible"]
+                @test data_read == data
+                @test size(data_read) == size(data)
             end
         finally
             rm(filename, force=true)
@@ -371,10 +377,16 @@ using JLD2
         filename = tempname() * ".jld2"
 
         try
-            # 2+ unlimited dimensions requires V2 B-tree (Phase 5)
-            @test_throws JLD2.UnsupportedFeatureException jldopen(filename, "w") do f
+            # 2+ unlimited dimensions uses V2 B-tree
+            jldopen(filename, "w") do f
                 wca = JLD2.WriteChunkedArray(data, chunks=(2, 2, 3), maxshape=(nothing, nothing, 10))
                 JLD2.write_chunked(f, "data", wca)
+            end
+
+            jldopen(filename, "r") do f
+                data_read = f["data"]
+                @test data_read == data
+                @test size(data_read) == size(data)
             end
         finally
             rm(filename, force=true)
@@ -386,10 +398,16 @@ using JLD2
         filename = tempname() * ".jld2"
 
         try
-            # 2+ unlimited dimensions requires V2 B-tree (Phase 5)
-            @test_throws JLD2.UnsupportedFeatureException jldopen(filename, "w") do f
+            # 2+ unlimited dimensions uses V2 B-tree
+            jldopen(filename, "w") do f
                 wca = JLD2.WriteChunkedArray(data, chunks=(2, 2, 2), maxshape=(nothing, nothing, nothing))
                 JLD2.write_chunked(f, "data", wca)
+            end
+
+            jldopen(filename, "r") do f
+                data_read = f["data"]
+                @test data_read == data
+                @test size(data_read) == size(data)
             end
         finally
             rm(filename, force=true)
@@ -400,9 +418,9 @@ using JLD2
         data = reshape(Float32.(1:100), 10, 10)
 
         # Test automatic selection logic
-        @test JLD2.select_chunk_index_type((10, 10), (3, 3), (nothing, 10), nothing) == :extensible_array
-        @test JLD2.select_chunk_index_type((10, 10), (3, 3), (nothing, nothing), nothing) == :v2btree  # 2+ unlimited
-        @test JLD2.select_chunk_index_type((10, 10), (3, 3), nothing, nothing) == :fixed_array  # no unlimited
+        @test JLD2.Chunking.select_chunk_index_type((10, 10), (3, 3), (nothing, 10), nothing) == :extensible_array
+        @test JLD2.Chunking.select_chunk_index_type((10, 10), (3, 3), (nothing, nothing), nothing) == :v2btree  # 2+ unlimited
+        @test JLD2.Chunking.select_chunk_index_type((10, 10), (3, 3), nothing, nothing) == :fixed_array  # no unlimited
     end
 
 end

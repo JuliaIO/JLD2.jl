@@ -398,35 +398,61 @@ function read_chunk_with_filters!(
 end
 
 """
-    julia_chunk_idx_to_hdf5_element_indices(chunk_grid_idx::CartesianIndex{N},
-                                           chunk_dims_julia::NTuple{N,Int}) where N
+    hdf5_element_indices_from_linear(linear_idx::Int, grid_dims::NTuple{N,Int},
+                                      chunk_dims::NTuple{N,Int}) where N
 
-Convert Julia chunk grid index (1-based) to HDF5 element indices (0-based, reversed).
+Convert 0-based linear chunk index to HDF5 0-based element indices.
+
+HDF5 always describes chunks by the 0-based index of their root element, not by chunk numbers.
+This function computes those indices directly from the linear chunk index.
 
 # Arguments
-- `chunk_grid_idx`: 1-based chunk position in Julia order (e.g., CartesianIndex(2, 3))
-- `chunk_dims_julia`: Chunk dimensions in Julia order (e.g., (10, 20))
+- `linear_idx`: 0-based linear chunk index in HDF5 ordering
+- `grid_dims`: Number of chunks in each dimension (Julia order)
+- `chunk_dims`: Chunk dimensions (Julia order)
 
 # Returns
-Tuple of HDF5 element indices with element size dimension appended (e.g., (40, 10, 0))
+Tuple of 0-based element indices in HDF5 order (reversed from Julia)
 
 # Example
 ```julia
-chunk_grid_idx = CartesianIndex(2, 3)  # Second chunk in dim 1, third in dim 2
+# For a 30×80 array with 10×20 chunks (3×4 grid):
+linear_idx = 0  # First chunk
+grid_dims = (3, 4)
 chunk_dims = (10, 20)
-indices = julia_chunk_idx_to_hdf5_element_indices(chunk_grid_idx, chunk_dims)
-# Returns: (40, 10, 0) - element positions in HDF5 order + element dimension
+indices = hdf5_element_indices_from_linear(0, grid_dims, chunk_dims)
+# Returns (0, 0) - root element of first chunk in HDF5 order
+
+linear_idx = 5  # Chunk at Julia position (2, 2)
+# Returns (20, 10) - root element in HDF5 order
 ```
 """
-function julia_chunk_idx_to_hdf5_element_indices(chunk_grid_idx::CartesianIndex{N},
-                                                 chunk_dims_julia::NTuple{N,Int}) where N
-    # Convert 1-based chunk indices to 0-based element indices in Julia order
-    julia_element_indices_0based = (Tuple(chunk_grid_idx) .- 1) .* chunk_dims_julia
+function hdf5_element_indices_from_linear(linear_idx::Int, grid_dims::NTuple{N,Int},
+                                          chunk_dims::NTuple{N,Int}) where N
+    # Convert linear index to Julia chunk coordinates (1-based)
+    chunk_coords_julia = linear_index_to_chunk_coords(linear_idx, grid_dims)
 
-    # Reverse to HDF5 order and append element size dimension (always 0)
-    hdf5_element_indices_0based = reverse(julia_element_indices_0based)
+    # Convert to 0-based element indices in Julia order
+    element_indices_julia = (Tuple(chunk_coords_julia) .- 1) .* chunk_dims
 
-    return tuple(hdf5_element_indices_0based..., 0)
+    # Reverse to HDF5 order
+    return reverse(element_indices_julia)
+end
+
+"""
+    chunk_element_start_julia(chunk_coords::CartesianIndex{N}, chunk_dims::NTuple{N,Int}) where N
+
+Compute 1-based element start position from Julia chunk coordinates.
+
+# Arguments
+- `chunk_coords`: 1-based chunk coordinates in Julia order
+- `chunk_dims`: Chunk dimensions (Julia order)
+
+# Returns
+1-based starting element position (Tuple)
+"""
+function chunk_element_start_julia(chunk_coords::CartesianIndex{N}, chunk_dims::NTuple{N,Int}) where N
+    return (Tuple(chunk_coords) .- 1) .* chunk_dims .+ 1
 end
 
 """
