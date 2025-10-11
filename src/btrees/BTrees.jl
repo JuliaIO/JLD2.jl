@@ -28,7 +28,6 @@ export V2BTreeHeader
 export V2_BTREE_HEADER_SIGNATURE
 
 # Functions needed within JLD2
-export write_chunked_dataset_with_v1btree
 export write_v2btree_chunked_dataset
 export read_v1btree
 export read_symbol_table_node

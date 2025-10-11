@@ -73,8 +73,8 @@ function update_sibling_pointer(f::JLDFile, node_offset::RelOffset, side::Symbol
 end
 
 """
-    insert_chunk!(btree::V1BTree, chunk_indices::Vector{Int}, chunk_address::RelOffset,
-                 chunk_size::UInt32, filter_mask::UInt32 = 0x00000000)
+    insert_chunk!(btree::V1BTree, chunk_grid_idx, chunk_address::RelOffset,
+                 chunk_size::UInt32, filter_mask::UInt32, chunk_dims::NTuple{N,Int}) where N
 
 Insert a chunk into the V1 B-tree, handling node splits and tree growth as needed.
 This is the main entry point for adding chunks to the tree.
@@ -82,11 +82,13 @@ This is the main entry point for adding chunks to the tree.
 Chunks are accumulated in the btree's pending_chunks field and written out
 when finalize_btree! is called.
 """
-function insert_chunk!(btree::V1BTree, chunk_indices, chunk_address::RelOffset,
-                      chunk_size::UInt32, filter_mask::UInt32 = 0x00000000)
+function insert_chunk!(btree::V1BTree, chunk_address::RelOffset, chunk_grid_idx, chunk_size::UInt64, filter_mask::UInt32, chunk_dims::NTuple{N,Int}) where N
 
-    indices = UInt64[reverse(chunk_indices .- 1)..., 0]
-    key =  V1ChunkKey(chunk_size, filter_mask, indices)
+    # Convert to tuple if needed
+    grid_idx_tuple = chunk_grid_idx isa CartesianIndex ? Tuple(chunk_grid_idx) : chunk_grid_idx
+    element_pos_julia = (grid_idx_tuple .- 1) .* chunk_dims
+    indices = UInt64[reverse(element_pos_julia)..., 0]
+    key = V1ChunkKey(chunk_size, filter_mask, indices)
     # Store the chunk for later processing when finalize_btree! is called
     push!(btree.pending_chunks, (key, chunk_address))
 end
@@ -180,56 +182,4 @@ function split_into_nodes(file::JLDFile,
     end
     push!(nkeys, keys[end])
     return nkeys, offsets
-end
-
-"""
-    write_chunked_dataset_with_v1btree(f::JLDFile, chunk_iter, odr, data_size, chunk_dims)
-
-Write a chunked dataset using V1 B-tree indexing.
-
-# Arguments
-- `f`: JLDFile handle
-- `chunk_iter`: Iterator yielding ProcessedChunk objects (from ChunkIterator)
-- `odr`: Object data representation
-- `data_size`: Tuple of array dimensions
-- `chunk_dims`: Tuple of chunk dimensions
-
-# Returns
-`(btree, total_chunk_size, num_chunks)` tuple
-
-The chunk iterator handles extraction, filtering, and compression.
-This function only handles B-tree structure and file writing.
-"""
-function write_chunked_dataset_with_v1btree(f::JLDFile, chunk_iter, odr, data_size, chunk_dims)
-    dimensionality = UInt8(length(chunk_dims))
-
-    # Create V1 B-tree for chunk indexing
-    max_entries = calculate_max_entries(f, dimensionality)
-    btree = V1BTree(UNDEFINED_ADDRESS, dimensionality, max_entries, f)
-
-    total_chunk_size = 0
-    num_chunks = 0
-
-    # Process chunks from iterator and populate B-tree
-    for processed_chunk in chunk_iter
-        # Write chunk data to file
-        chunk_address = h5offset(f, f.end_of_data)
-        seek(f.io, f.end_of_data)
-
-        jlwrite(f.io, processed_chunk.chunk_data)
-        f.end_of_data += length(processed_chunk.chunk_data)
-
-        # Insert chunk into B-tree
-        insert_chunk!(btree, processed_chunk.chunk_idx, chunk_address,
-                     UInt32(length(processed_chunk.chunk_data)), processed_chunk.filter_mask)
-
-        total_chunk_size += length(processed_chunk.chunk_data)
-        num_chunks += 1
-    end
-
-    # Calculate boundary index for B-tree finalization
-    boundary_index = data_size .+ chunk_dims .- mod1.(data_size, chunk_dims)
-    finalize_btree!(btree, UInt64[reverse(boundary_index)..., odr_sizeof(odr)])
-
-    return btree, total_chunk_size, num_chunks
 end

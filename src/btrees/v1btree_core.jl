@@ -12,7 +12,7 @@ Algorithm:
 3. Account for extra key at end
 4. Determine max entries that fit in target size
 """
-function calculate_max_entries(f::JLDFile, dimensionality::UInt8, target_node_size::Int = 4096)::UInt16
+function calculate_max_entries(f::JLDFile, dimensionality, target_node_size::Int = 4096)::UInt16
     # Fixed overhead per node
     header_size = 4 + 1 + 1 + 2 + 2*jlsizeof(RelOffset)  # signature + type + level + entries + siblings
 

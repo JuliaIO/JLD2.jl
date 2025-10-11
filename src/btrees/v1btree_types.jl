@@ -21,7 +21,7 @@ struct V1ChunkKey
     indices::Vector{UInt64}    # D+1 dimensional indices (last is always 0)
 
     # Inner constructor for validation
-    function V1ChunkKey(chunk_size::UInt32, filter_mask::UInt32, indices::Vector{UInt64})
+    function V1ChunkKey(chunk_size, filter_mask::UInt32, indices::Vector{UInt64})
         length(indices) >= 2 || throw(ArgumentError("indices must have at least 2 elements (dimensions + datatype offset)"))
         #indices[end] == 0 || throw(ArgumentError("last index (datatype offset) must be 0"))
         new(chunk_size, filter_mask, indices)

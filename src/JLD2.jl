@@ -523,16 +523,34 @@ include("Filters.jl")
 using .Filters: WrittenFilterPipeline, FilterPipeline, iscompressed
 using .Filters: Shuffle, Deflate, ZstdFilter
 
-# Load BTrees before Chunking now that ChunkIterator decouples them
+# Load BTrees before Chunking (BTrees is independent, Chunking calls BTrees)
 include("btrees/BTrees.jl")
-using .BTrees: write_chunked_dataset_with_v1btree,
-    write_v2btree_chunked_dataset,
+using .BTrees: write_v2btree_chunked_dataset,
     read_v1btree, read_v2btree_header
 
 include("chunking/Chunking.jl")
 using .Chunking: WriteChunkedArray,
     read_chunked_array, get_chunked_array, chunk_dimensions, num_chunks, chunk_grid_size,
-    extract_chunk, extract_chunk_region, write_chunked
+    extract_chunk_region, write_chunked
+
+# Specialized method for WriteChunkedArray using multiple dispatch
+function Base.write(
+        g::Group,
+        name::AbstractString,
+        obj::WriteChunkedArray,
+        wsession::JLDWriteSession=JLDWriteSession();
+        compress=nothing,
+        chunk=nothing
+        )
+    f = g.f
+    prewrite(f)
+    (g, name) = pathize(g, name, true)
+
+    # Write chunked array using its own configuration
+    Chunking.write_chunked(f, name, obj)
+    nothing
+end
+
 include("datasets.jl")
 include("global_heaps.jl")
 include("fractal_heaps.jl")

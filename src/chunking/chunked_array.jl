@@ -113,8 +113,8 @@ function _read_chunk(ca::ChunkedArray{T,N}, chunk_idx::CartesianIndex{N}) where 
 
     seek(ca.file.io, fileoffset(ca.file, ca.chunks[chunk_info].offset))
     vchunk = Array{T, N}(undef, actual_chunk_size...)
-    read_chunk_with_filters!(vchunk, ca.file, ca.rr, ca.chunks[chunk_info].chunk_size,
-                            ca.filters, ca.chunks[chunk_info].filter_mask)
+    JLD2.read_compressed_array!(vchunk, ca.file, ca.rr, ca.chunks[chunk_info].chunk_size,
+                                ca.filters, ca.chunks[chunk_info].filter_mask)
 
     return Chunk{T,N}(vchunk, array_indices, chunk_idx,
                       ca.chunks[chunk_info].offset, ca.chunks[chunk_info].chunk_size)
@@ -135,7 +135,7 @@ function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
 
             seek(f.io, fileoffset(f, chunk.offset))
             vchunk = Array{T, ndims}(undef, chunk_dims_julia...)
-            read_chunk_with_filters!(vchunk, f, rr, chunk.chunk_size, filters, chunk.filter_mask)
+            JLD2.read_compressed_array!(vchunk, f, rr, chunk.chunk_size, filters, chunk.filter_mask)
 
             ranges = ntuple(i -> chunk_start_idx[i]:min(chunk_start_idx[i] + chunk_dims_julia[i] - 1, size(v, i)), ndims)
             v[ranges...] = vchunk[ntuple(i -> 1:(ranges[i].stop - ranges[i].start + 1), ndims)...]

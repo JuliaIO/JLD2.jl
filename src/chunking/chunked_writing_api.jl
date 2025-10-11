@@ -445,37 +445,6 @@ function write_chunked(f::JLDFile, name::String, data::AbstractArray{T,N};
         select_chunk_index_type(size(data), chunk_dims, maxshape, fill_value)
     end
 
-    # Dispatch to appropriate writer
-    _write_chunked_dispatch(f, name, data, chunk_dims, maxshape, fill_value,
-                           index_type, filters)
-end
-
-"""
-    write_chunked(f::JLDFile, name::String, wca::WriteChunkedArray)
-
-Convenience method to write a WriteChunkedArray directly.
-
-Extracts the configuration from the WriteChunkedArray and calls the main write_chunked function.
-"""
-function write_chunked(f::JLDFile, name::String, wca::WriteChunkedArray)
-    write_chunked(f, name, wca.data;
-                 chunks=wca.chunks,
-                 maxshape=wca.maxshape,
-                 fill_value=wca.fill_value,
-                 indexing=wca.indexing,
-                 filters=wca.filters)
-end
-
-"""
-    _write_chunked_dispatch(f, name, data, chunks, maxshape, fill_value, index_type, filters)
-
-Internal dispatch function that computes common structures, routes to the appropriate
-chunk index writer, and then writes the unified object header.
-
-This centralizes all common computations (datatype, dataspace, filter pipeline, ODR)
-to eliminate code duplication across different indexing types.
-"""
-function _write_chunked_dispatch(f, name, data::AbstractArray{T,N}, chunks, maxshape, fill_value, index_type, filters) where {T,N}
     # Common computations done once upfront
     odr = JLD2.objodr(data)
     datatype = JLD2.h5type(f, data)
@@ -505,25 +474,26 @@ function _write_chunked_dispatch(f, name, data::AbstractArray{T,N}, chunks, maxs
                                         dataspace, filter_pipeline, index_metadata)
 end
 
-#-------------------------------------------------------------------------------
-# Refactored Architecture: Chunk Index Writers (Layer 1)
-#-------------------------------------------------------------------------------
-# These functions write chunks + index structures and return metadata for
-# the object header writer. They don't write object headers themselves.
+"""
+    write_chunked(f::JLDFile, name::String, wca::WriteChunkedArray)
+
+Convenience method to write a WriteChunkedArray directly.
+
+Extracts the configuration from the WriteChunkedArray and calls the main write_chunked function.
+"""
+function write_chunked(f::JLDFile, name::String, wca::WriteChunkedArray)
+    write_chunked(f, name, wca.data;
+                 chunks=wca.chunks,
+                 maxshape=wca.maxshape,
+                 fill_value=wca.fill_value,
+                 indexing=wca.indexing,
+                 filters=wca.filters)
+end
 
 """
     ChunkIndexMetadata
 
 Metadata returned by chunk index writers for use by the unified header writer.
-
-# Fields
-- `data_address::RelOffset` - Address of chunk index structure
-- `layout_version::UInt8` - DataLayout message version (3 or 4)
-- `chunk_indexing_type::Union{UInt8,Nothing}` - Type code (1-5, or nothing for v3)
-- `layout_params::NamedTuple` - Index-specific DataLayout parameters
-- `requires_maxshape::Bool` - Whether dataspace needs max dimensions
-- `requires_fill_value::Bool` - Whether fill value message is needed
-- `fill_value_params::Union{NamedTuple,Nothing}` - Fill value message parameters
 """
 struct ChunkIndexMetadata
     data_address::RelOffset
@@ -534,10 +504,6 @@ struct ChunkIndexMetadata
     requires_fill_value::Bool
     fill_value_params::Union{NamedTuple,Nothing}
 end
-
-#-------------------------------------------------------------------------------
-# Layer 1: Chunk Index Writers (Return Metadata Only)
-#-------------------------------------------------------------------------------
 
 """
     write_single_chunk_index(f::JLDFile, data::AbstractArray{T,N}, chunks, odr, filter_pipeline, wsession) where {T,N}
@@ -619,7 +585,7 @@ function write_implicit_index(f::JLDFile, data::AbstractArray{T,N}, chunks, fill
     end
 
     # Create unified chunk grid iterator (automatically computes grid dimensions)
-    chunk_grid = ChunkGrid(size(data), chunks)
+    chunk_grid = ChunkIndexIterator(size(data), chunks)
     n_chunks = length(chunk_grid)
     chunk_size_bytes = prod(chunks) * odr_sizeof(odr)
 
@@ -674,10 +640,8 @@ Returns `ChunkIndexMetadata` for use by `write_chunked_dataset_object`.
 """
 function write_fixed_array_index(f::JLDFile, data::AbstractArray{T,N}, chunks, odr, filter_pipeline, wsession) where {T,N}
     # Write all chunks in linear order
-    chunk_addresses_linear, chunk_sizes_linear, _ = write_all_chunks_linear(
-        f, data, chunks, odr, filter_pipeline, wsession; pad_chunks=true, fill_value=zero(T)
-    )
-    n_chunks = length(chunk_addresses_linear)
+    chunk_metadata = write_all_chunks(f, data, chunks, odr, filter_pipeline, wsession)
+    n_chunks = length(chunk_metadata)
 
     # Write Fixed Array data block
     entry_size = iscompressed(filter_pipeline) ? UInt8(20) : UInt8(8)
@@ -698,11 +662,11 @@ function write_fixed_array_index(f::JLDFile, data::AbstractArray{T,N}, chunks, o
     jlwrite(db_cio, RelOffset(0))  # placeholder
 
     # Write chunk entries
-    for i in 1:n_chunks
-        jlwrite(db_cio, chunk_addresses_linear[i])
+    for chunk_meta in chunk_metadata
+        jlwrite(db_cio, chunk_meta.offset)
         if iscompressed(filter_pipeline)
-            jlwrite(db_cio, UInt64(chunk_sizes_linear[i]))
-            jlwrite(db_cio, UInt32(0))  # filter_mask
+            jlwrite(db_cio, chunk_meta.chunk_size)
+            jlwrite(db_cio, chunk_meta.filter_mask)
         end
     end
 
@@ -797,9 +761,7 @@ function write_extensible_array_index(f::JLDFile, data::AbstractArray{T,N}, chun
     num_data_blks = UInt64(0)
 
     # Write all chunks
-    chunk_addresses, chunk_sizes, _ = write_all_chunks_linear(
-        f, data, chunks, odr, filter_pipeline, wsession; pad_chunks=true
-    )
+    chunk_metadata = write_all_chunks(f, data, chunks, odr, filter_pipeline, wsession)
 
     # Write Index Block
     index_block_size = 4 + 1 + 1 + 8 + Int(index_blk_elmts) * Int(element_size) + 4
@@ -820,10 +782,10 @@ function write_extensible_array_index(f::JLDFile, data::AbstractArray{T,N}, chun
     # Write chunk addresses
     for i in 1:Int(index_blk_elmts)
         if i <= n_chunks
-            jlwrite(ib_cio, chunk_addresses[i])
+            jlwrite(ib_cio, chunk_metadata[i].offset)
             if iscompressed(filter_pipeline)
-                jlwrite(ib_cio, UInt64(chunk_sizes[i]))
-                jlwrite(ib_cio, UInt32(0))  # filter_mask
+                jlwrite(ib_cio, chunk_metadata[i].chunk_size)
+                jlwrite(ib_cio, chunk_metadata[i].filter_mask)
             end
         else
             jlwrite(ib_cio, RelOffset(typemax(UInt64)))
@@ -920,12 +882,10 @@ function write_v2btree_index(f::JLDFile, data::AbstractArray{T,N}, chunks, maxsh
     end
 
     # Write all chunks and collect records
-    chunk_records = write_all_chunks_as_records(f, data, chunks, odr, filter_pipeline, wsession)
+    chunk_records = write_all_chunks(f, data, chunks, odr, filter_pipeline, wsession)
 
     # Write V2 B-tree structure
-    header_offset = JLD2.BTrees.write_v2btree_chunked_dataset(
-        f, chunk_records, iscompressed(filter_pipeline)
-    )
+    header_offset = BTrees.write_v2btree_chunked_dataset(f, chunk_records, iscompressed(filter_pipeline))
 
     # Return metadata
     layout_params = (
@@ -947,7 +907,7 @@ function write_v2btree_index(f::JLDFile, data::AbstractArray{T,N}, chunks, maxsh
 end
 
 """
-    write_v1btree_index(f::JLDFile, data::AbstractArray{T,N}, chunks, odr, datatype, filter_pipeline, wsession) where {T,N}
+    write_v1btree_index(f::JLDFile, data::AbstractArray{T,N}, chunks, odr, filter_pipeline, wsession) where {T,N}
 
 Write chunks using V1 B-tree indexing and return metadata.
 
@@ -957,12 +917,17 @@ This is kept for compatibility but doesn't follow the new refactored pattern com
 Returns `ChunkIndexMetadata` for use by `write_chunked_dataset_object`.
 """
 function write_v1btree_index(f::JLDFile, data::AbstractArray{T,N}, chunks, odr, filter_pipeline, wsession) where {T,N}
-    # Write chunks using V1 B-tree
-    chunk_iter = ChunkIterator(data, chunks, odr, filter_pipeline, f, wsession)
 
-    btree, total_chunk_size, num_chunks = JLD2.BTrees.write_chunked_dataset_with_v1btree(
-        f, chunk_iter, odr, size(data), chunks
-    )
+    btree = BTrees.V1BTree(JLD2.UNDEFINED_ADDRESS, UInt8(N),  BTrees.calculate_max_entries(f, N), f)
+
+        # Write all chunks and collect metadata
+    chunk_metadata = write_all_chunks(f, data, chunks, odr, filter_pipeline, wsession)
+    for chunk_meta in chunk_metadata
+        BTrees.insert_chunk!(btree, chunk_meta..., chunks)
+    end
+
+    boundary_index = size(data) .+ chunks .- mod1.(size(data), chunks)
+    BTrees.finalize_btree!(btree, UInt64[reverse(boundary_index)..., odr_sizeof(odr)])
 
     # Return metadata
     layout_params = (address = btree.root,)

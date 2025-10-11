@@ -36,22 +36,24 @@ function read_extensible_array_chunks(f::JLDFile, v::Array, dataspace, rr,
 
     read_extensible_array_index_block!(f, v, dataspace, rr, layout, filters,
                                         hdr.index_blk_addr, hdr.element_size,
-                                        hdr.index_blk_elmts, hdr.num_data_blks, ndims)
+                                        hdr.index_blk_elmts, hdr.data_blk_min_elmts,
+                                        hdr.num_data_blks, ndims)
     return v
 end
 
 """
     read_extensible_array_index_block!(f, v, dataspace, rr, layout, filters,
                                         index_blk_addr, element_size,
-                                        index_blk_elmts, num_data_blks, ndims)
+                                        index_blk_elmts, data_blk_min_elmts,
+                                        num_data_blks, ndims)
 
 Read the Extensible Array Index Block and navigate to chunk records.
 """
 function read_extensible_array_index_block!(f::JLDFile, v::Array, dataspace, rr,
                                              layout::DataLayout, filters,
                                              index_blk_addr::RelOffset, element_size::UInt8,
-                                             index_blk_elmts::UInt8, num_data_blks::UInt64,
-                                             ndims::Int)
+                                             index_blk_elmts::UInt8, data_blk_min_elmts::UInt8,
+                                             num_data_blks::UInt64, ndims::Int)
 
     offset = fileoffset(f, index_blk_addr)
     seek(f.io, offset)
@@ -125,11 +127,12 @@ function read_extensible_array_index_block!(f::JLDFile, v::Array, dataspace, rr,
 
     # Read chunks from each data block
     chunk_idx = num_direct_elements  # Continue from where direct elements left off
-    for data_block_addr in data_block_addrs
+    for (data_blk_idx, data_block_addr) in enumerate(data_block_addrs)
         if !isnothing(data_block_addr) && data_block_addr.offset != typemax(UInt64)
             chunk_idx = read_extensible_array_data_block!(f, v, dataspace, rr, layout,
                                                           filters, data_block_addr,
-                                                          chunk_idx, grid_dims,
+                                                          chunk_idx, data_blk_idx - 1,
+                                                          data_blk_min_elmts, grid_dims,
                                                           chunk_dims_julia)
         end
     end
@@ -140,14 +143,20 @@ end
 """
     read_extensible_array_data_block!(f, v, dataspace, rr, layout, filters,
                                        data_block_addr, chunk_idx_start,
+                                       data_blk_idx, data_blk_min_elmts,
                                        grid_dims, chunk_dims_julia)
 
 Read an Extensible Array Data Block and its chunk records.
+
+The number of elements in each data block follows an exponential growth pattern:
+- Data block k contains: data_blk_min_elmts * 2^k elements
+
 Returns the next chunk_idx after reading this block.
 """
 function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
                                            layout::DataLayout, filters,
                                            data_block_addr::RelOffset, chunk_idx_start::Int,
+                                           data_blk_idx::Int, data_blk_min_elmts::UInt8,
                                            grid_dims::NTuple{N,Int},
                                            chunk_dims_julia::NTuple{N,Int}) where N
     seek(f.io, fileoffset(f, data_block_addr))
@@ -175,57 +184,37 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
     else
         jlread(f.io, UInt64)
     end
-    # Calculate total number of chunks needed
-    total_chunks = prod(grid_dims)
-    remaining_chunks = Int(total_chunks) - chunk_idx_start
 
-    # Read all remaining chunks (not limited to min_elements)
-    max_elements = remaining_chunks
-    # Read chunk records until we hit EOF or max_elements
-    elements_read = 0
-    for i in 1:max_elements
+    # Calculate number of elements in this specific data block using exponential growth pattern
+    # Data block k contains: data_blk_min_elmts * 2^k elements
+    num_elements_in_block = Int(data_blk_min_elmts) * (1 << data_blk_idx)
+
+    # Read and process chunk records from this data block
+    for i in 1:num_elements_in_block
         chunk_idx = chunk_idx_start + i - 1
-        # Try to read chunk record - break on EOF
-        try
-            if isempty(filters.filters)
-                chunk_addr = jlread(f.io, RelOffset)
-                chunk_size = prod(chunk_dims_julia) * sizeof(eltype(v))
-                filter_mask = 0x00000000
-            else
-                chunk_addr = jlread(f.io, RelOffset)
-                chunk_size = jlread(f.io, UInt64)
-                filter_mask = jlread(f.io, UInt32)
-            end
-            # Skip undefined chunks
-            if isnothing(chunk_addr) || chunk_addr.offset == typemax(UInt64)
-                elements_read += 1
-                continue
-            end
 
-            # Convert linear chunk index to chunk coordinates
-            chunk_grid_idx = linear_index_to_chunk_coords(chunk_idx, grid_dims)
-
-            # Compute chunk starting position
-            chunk_start = chunk_start_from_index(chunk_grid_idx, chunk_dims_julia)
-
-            # Save position before reading chunk data
-            saved_pos = position(f.io)
-
-            # Read chunk into array (using common function)
-            read_and_assign_chunk!(f, v, chunk_start, chunk_addr, Int(chunk_size),
-                                  chunk_dims_julia, rr, filters, filter_mask)
-
-            # Restore position to continue reading data block addresses
-            seek(f.io, saved_pos)
-            elements_read += 1
-        catch e
-            if e isa EOFError
-                break
-            else
-                rethrow()
-            end
+        # Read chunk record
+        if isempty(filters.filters)
+            offset = jlread(f.io, RelOffset)
+            size = prod(chunk_dims_julia) * sizeof(eltype(v))
+            filter_mask = 0x00000000
+        else
+            offset = jlread(f.io, RelOffset)
+            size = jlread(f.io, UInt64)
+            filter_mask = jlread(f.io, UInt32)
         end
+
+        # Skip undefined chunks
+        if isnothing(offset) || offset == JLD2.UNDEFINED_ADDRESS
+            continue
+        end
+
+        # Calculate chunk position and read data
+        chunk_grid_idx = linear_index_to_chunk_coords(chunk_idx, grid_dims)
+        chunk_start = chunk_start_from_index(chunk_grid_idx, chunk_dims_julia)
+        read_and_assign_chunk!(f, v, chunk_start, offset, Int(size),
+                                chunk_dims_julia, rr, filters, filter_mask)
     end
 
-    return chunk_idx_start + elements_read
+    return chunk_idx_start + num_elements_in_block
 end

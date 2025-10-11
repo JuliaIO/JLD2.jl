@@ -94,7 +94,7 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
 
     chunk_entries = read_all_chunk_entries_fixed_array(f.io, header, n_chunks_total)
 
-    for (chunk_grid_idx, linear_idx) in ChunkGrid(size(v), chunk_dims_julia)
+    for (chunk_grid_idx, linear_idx) in ChunkIndexIterator(size(v), chunk_dims_julia)
         chunk_address, compressed_size = chunk_entries[linear_idx + 1]
         isnothing(chunk_address) && continue
 
@@ -103,7 +103,5 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
         read_and_assign_chunk!(f, v, chunk_start, chunk_address,
                               chunk_size_bytes, chunk_dims_julia, rr, filters, 0)
     end
-
-    track_weakref!(f, header_offset, v)
     return v
 end

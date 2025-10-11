@@ -83,7 +83,38 @@ end
 FilterPipeline(filters::Array{<:Filter}) = FilterPipeline(filters...)
 FilterPipeline(filters::Tuple) = FilterPipeline(filters...)
 
+"""
+    iscompressed(fp::FilterPipeline, filter_mask::Integer=0)
+
+Check if a filter pipeline will perform compression given a filter mask.
+
+When `filter_mask` is 0 (default), returns true if the pipeline has any filters.
+When `filter_mask` is non-zero, returns true only if there are filters that are NOT masked.
+A bit set in `filter_mask` indicates that the corresponding filter (1-indexed) was skipped.
+"""
 iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
+function iscompressed(fp::FilterPipeline, filter_mask::Integer)
+    filter_mask = UInt32(filter_mask)
+    isempty(fp.filters) && return false
+    filter_mask == 0 && return true
+    # Check if any filters are not masked (bit n set = filter n+1 is masked)
+    any(i -> (filter_mask & 2^(i-1)) == 0, eachindex(fp.filters))
+end
+
+"""
+    apply_filter_mask(fp::FilterPipeline, filter_mask::Integer)
+
+Return a new FilterPipeline containing only the filters that are not masked.
+A bit set in `filter_mask` indicates that the corresponding filter (1-indexed) was skipped.
+Returns the original pipeline if `filter_mask` is 0.
+"""
+function apply_filter_mask(fp::FilterPipeline, filter_mask::Integer)
+    filter_mask = UInt32(filter_mask)
+    filter_mask == 0 && return fp
+    mask = [filter_mask & 2^(i-1) == 0 for i in eachindex(fp.filters)]
+    FilterPipeline(fp.filters[mask])
+end
+
 Base.iterate(fp::FilterPipeline, state=1) = iterate(fp.filters, state)
 Base.length(fp::FilterPipeline) = length(fp.filters)
 
