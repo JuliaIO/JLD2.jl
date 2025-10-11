@@ -120,6 +120,172 @@ function linear_index_to_chunk_coords(linear_idx::Int, grid_dims::NTuple{N,Int})
     return CartesianIndex(Tuple(coords_julia))
 end
 
+#===============================================================================
+# Unified Chunk Grid Iterator
+===============================================================================#
+
+"""
+    ChunkGrid{N}
+
+Unified iterator for chunk grid coordinates that eliminates redundant index computations.
+
+This iterator provides a single, consistent interface for iterating over all chunks
+in a grid, eliminating the need for repeated CartesianIndices loops with manual
+linear index calculations in every chunk reading/writing function.
+
+# Fields
+- `grid_dims::NTuple{N,Int}` - Number of chunks in each dimension (Julia order)
+- `indexer::ChunkLinearIndexer` - Precomputed stride multipliers for linear indexing
+
+# Iteration
+Yields `(julia_chunk_idx::CartesianIndex{N}, linear_idx::Int)` tuples where:
+- `julia_chunk_idx`: 1-based chunk coordinates in Julia order
+- `linear_idx`: 0-based linear index in HDF5 order
+
+# Example
+```julia
+# Create grid for 30×80 array with 10×20 chunks
+# Automatically computes 3×4 grid internally
+array_dims = (30, 80)
+chunk_dims = (10, 20)
+grid = ChunkGrid(array_dims, chunk_dims)
+
+for (chunk_idx, linear_idx) in grid
+    # chunk_idx: CartesianIndex(1,1), CartesianIndex(2,1), ..., CartesianIndex(3,4)
+    # linear_idx: 0, 1, 2, ..., 11 (in HDF5 order)
+
+    # Use chunk_idx for array operations (Julia order)
+    chunk_data = extract_chunk(data, chunk_idx, chunk_dims)
+
+    # Use linear_idx for HDF5 index structures
+    chunk_addresses[linear_idx + 1] = write_chunk(chunk_data)
+end
+```
+
+# Benefits
+- **Single source of truth**: All chunk indexing uses the same iterator
+- **Eliminates duplication**: No need to repeat cld.(array_dims, chunk_dims) + CartesianIndices pattern
+- **Precomputed strides**: Linear index calculation is optimized with precomputed multipliers
+- **Type-stable**: All dimensions known at compile time via N parameter
+- **Consistent ordering**: Always produces chunks in the same order across all implementations
+- **Automatic grid computation**: Computes grid dimensions from array and chunk dimensions
+"""
+struct ChunkGrid{N}
+    grid_dims::NTuple{N,Int}
+    indexer::ChunkLinearIndexer
+end
+
+"""
+    ChunkGrid(array_dims::NTuple{N,Int}, chunk_dims::NTuple{N,Int}) where N
+
+Create a chunk grid iterator from array and chunk dimensions.
+
+Automatically computes the grid dimensions using `cld.(array_dims, chunk_dims)`.
+
+# Arguments
+- `array_dims`: Total array dimensions (Julia order)
+- `chunk_dims`: Chunk dimensions (Julia order)
+
+# Example
+```julia
+# 30×80 array with 10×20 chunks creates a 3×4 grid
+grid = ChunkGrid((30, 80), (10, 20))
+```
+"""
+function ChunkGrid(array_dims::NTuple{N,Int}, chunk_dims::NTuple{N,Int}) where N
+    grid_dims = cld.(array_dims, chunk_dims)
+    indexer = ChunkLinearIndexer(grid_dims)
+    ChunkGrid{N}(grid_dims, indexer)
+end
+
+"""
+    ChunkGrid(grid_dims::NTuple{N,Int}) where N
+
+Create a chunk grid iterator from pre-computed grid dimensions.
+
+This constructor is provided for cases where grid dimensions are already known,
+but the two-argument constructor is preferred for most use cases.
+
+# Arguments
+- `grid_dims`: Number of chunks in each dimension (Julia order)
+
+# Example
+```julia
+grid = ChunkGrid((3, 4))  # 3 chunks in first dim, 4 in second
+```
+"""
+function ChunkGrid(grid_dims::NTuple{N,Int}) where N
+    indexer = ChunkLinearIndexer(grid_dims)
+    ChunkGrid{N}(grid_dims, indexer)
+end
+
+"""
+    Base.iterate(grid::ChunkGrid{N}) -> ((CartesianIndex{N}, Int), state) | nothing
+    Base.iterate(grid::ChunkGrid{N}, state) -> ((CartesianIndex{N}, Int), state) | nothing
+
+Iterate over chunk grid, yielding (julia_chunk_idx, linear_idx) tuples.
+"""
+function Base.iterate(grid::ChunkGrid{N}) where N
+    # Create CartesianIndices iterator
+    cart_iter = CartesianIndices(grid.grid_dims)
+
+    # Get first element
+    result = iterate(cart_iter)
+    result === nothing && return nothing
+
+    julia_chunk_idx, cart_state = result
+    linear_idx = compute_linear_index(grid.indexer, julia_chunk_idx)
+
+    return ((julia_chunk_idx, linear_idx), (cart_iter, cart_state))
+end
+
+function Base.iterate(grid::ChunkGrid{N}, state) where N
+    cart_iter, cart_state = state
+
+    # Get next element from CartesianIndices
+    result = iterate(cart_iter, cart_state)
+    result === nothing && return nothing
+
+    julia_chunk_idx, cart_state = result
+    linear_idx = compute_linear_index(grid.indexer, julia_chunk_idx)
+
+    return ((julia_chunk_idx, linear_idx), (cart_iter, cart_state))
+end
+
+"""
+    Base.length(grid::ChunkGrid) -> Int
+
+Return total number of chunks in the grid.
+"""
+Base.length(grid::ChunkGrid) = prod(grid.grid_dims)
+
+"""
+    Base.eltype(::Type{ChunkGrid{N}}) where N
+
+Return the element type of the iterator.
+"""
+Base.eltype(::Type{ChunkGrid{N}}) where N = Tuple{CartesianIndex{N}, Int}
+
+"""
+    chunk_start_from_index(chunk_idx::CartesianIndex{N}, chunk_dims::NTuple{N,Int}) where N -> NTuple{N,Int}
+
+Compute the 1-based starting position for a chunk from its grid index.
+
+# Arguments
+- `chunk_idx`: 1-based chunk grid position (e.g., CartesianIndex(2, 3))
+- `chunk_dims`: Chunk dimensions
+
+# Returns
+1-based starting position as a tuple
+
+# Example
+```julia
+chunk_start_from_index(CartesianIndex(2, 3), (10, 20))  # Returns (11, 41)
+```
+"""
+@inline chunk_start_from_index(chunk_idx::CartesianIndex{N}, chunk_dims::NTuple{N,Int}) where N =
+    (Tuple(chunk_idx) .- 1) .* chunk_dims .+ 1
+
 """
     prepare_filter_pipeline(filters, odr, dataspace)
 
@@ -266,18 +432,16 @@ Write all chunks and return addresses/sizes in linear order.
 function write_all_chunks_linear(f::JLDFile, data::Array{T,N}, chunks::NTuple{N,Int},
                                 odr, filter_pipeline, wsession;
                                 pad_chunks=true, fill_value=zero(T)) where {T,N}
-    grid_dims = cld.(size(data), chunks)
-    n_chunks = prod(grid_dims)
-
-    # Create indexer for linear ordering
-    indexer = ChunkLinearIndexer(grid_dims)
+    # Create unified chunk grid iterator (automatically computes grid dimensions)
+    chunk_grid = ChunkGrid(size(data), chunks)
+    n_chunks = length(chunk_grid)
 
     # Allocate arrays for results
     chunk_offsets = Vector{RelOffset}(undef, n_chunks)
     chunk_sizes = Vector{UInt64}(undef, n_chunks)
 
     # Write chunks in Julia order, store at linear index
-    for julia_chunk_idx in CartesianIndices(grid_dims)
+    for (julia_chunk_idx, linear_idx) in chunk_grid
         # Extract chunk data
         chunk_data_partial, _, _ = extract_chunk_region(data, julia_chunk_idx, chunks)
 
@@ -292,12 +456,11 @@ function write_all_chunks_linear(f::JLDFile, data::Array{T,N}, chunks::NTuple{N,
         chunk_offset, chunk_size = prepare_and_write_chunk(f, chunk_data, odr, filter_pipeline, wsession)
 
         # Store at linear index
-        linear_idx = compute_linear_index(indexer, julia_chunk_idx)
         chunk_offsets[linear_idx + 1] = chunk_offset
         chunk_sizes[linear_idx + 1] = chunk_size
     end
 
-    return (chunk_offsets, chunk_sizes, indexer)
+    return (chunk_offsets, chunk_sizes, chunk_grid.indexer)
 end
 
 """
@@ -316,9 +479,9 @@ Per HDF5 Format Specification Appendix C:
 """
 function write_all_chunks_as_records(f::JLDFile, data::Array{T,N}, chunks::NTuple{N,Int},
                                     odr, filter_pipeline, wsession) where {T,N}
-    grid_dims = cld.(size(data), chunks)
-    n_chunks = prod(grid_dims)
-    indexer = ChunkLinearIndexer(grid_dims)
+    # Create unified chunk grid iterator (automatically computes grid dimensions)
+    chunk_grid = ChunkGrid(size(data), chunks)
+    n_chunks = length(chunk_grid)
 
     # Allocate record array with appropriate type
     if !iscompressed(filter_pipeline)
@@ -328,7 +491,7 @@ function write_all_chunks_as_records(f::JLDFile, data::Array{T,N}, chunks::NTupl
     end
 
     # Write chunks and collect records
-    for julia_chunk_idx in CartesianIndices(grid_dims)
+    for (julia_chunk_idx, linear_idx) in chunk_grid
         # Extract chunk
         chunk_data_partial, _, _ = extract_chunk_region(data, julia_chunk_idx, chunks)
 
@@ -346,7 +509,6 @@ function write_all_chunks_as_records(f::JLDFile, data::Array{T,N}, chunks::NTupl
         hdf5_coords = collect(UInt64.(reverse(Tuple(julia_chunk_idx) .- 1)))
 
         # Store record at linear index
-        linear_idx = compute_linear_index(indexer, julia_chunk_idx)
         if !iscompressed(filter_pipeline)
             chunk_records[linear_idx + 1] = (chunk_offset, hdf5_coords)
         else
@@ -506,16 +668,20 @@ function assign_chunk_to_array!(v::Array{T,N}, vchunk::Array{T,N},
 end
 
 """
-    read_and_assign_chunk!(f::JLDFile, v::Array{T}, chunk_grid_idx::CartesianIndex,
+    read_and_assign_chunk!(f::JLDFile, v::Array{T}, chunk_start::NTuple{N,Int},
                           chunk_address::RelOffset, chunk_size_bytes::Int,
                           chunk_dims_julia::NTuple{N,Int}, rr, filters, filter_mask) where {T,N}
 
 Read a chunk from file and assign it to the output array in one operation.
 
+This is the most efficient form - accepts the chunk starting position directly
+rather than computing it from chunk grid indices. Most HDF5 chunk indexing types
+store or can directly compute chunk_start positions.
+
 # Arguments
 - `f`: JLD2 file
 - `v`: Output array
-- `chunk_grid_idx`: 1-based chunk grid position in Julia order
+- `chunk_start`: 1-based starting position in Julia order (e.g., (1, 1), (11, 1), (1, 21))
 - `chunk_address`: File offset of chunk data
 - `chunk_size_bytes`: Size of chunk data in bytes (compressed or uncompressed)
 - `chunk_dims_julia`: Chunk dimensions in Julia order
@@ -527,16 +693,22 @@ Read a chunk from file and assign it to the output array in one operation.
 Combines chunk reading and array assignment to reduce code duplication.
 Automatically handles edge chunks by reading full chunk size and using
 intersection-based assignment.
+
+# Example
+```julia
+# For chunk at grid position (2, 3) with chunk dims (10, 20):
+chunk_start = (11, 41)  # (2-1)*10 + 1, (3-1)*20 + 1
+read_and_assign_chunk!(f, v, chunk_start, address, size, (10, 20), rr, filters, mask)
+```
 """
-function read_and_assign_chunk!(f::JLDFile, v::Array{T}, chunk_grid_idx::CartesianIndex,
+function read_and_assign_chunk!(f::JLDFile, v::Array{T}, chunk_start::NTuple{N,Int},
                                chunk_address::RelOffset, chunk_size_bytes::Int,
                                chunk_dims_julia::NTuple{N,Int}, rr, filters,
                                filter_mask) where {T,N}
     # Seek to chunk data
     seek(f.io, fileoffset(f, chunk_address))
 
-    # Determine actual chunk size from grid position and array bounds
-    chunk_start = (Tuple(chunk_grid_idx) .- 1) .* chunk_dims_julia .+ 1
+    # Determine actual chunk size from start position and array bounds
     chunk_end = min.(chunk_start .+ chunk_dims_julia .- 1, size(v))
     actual_chunk_size = chunk_end .- chunk_start .+ 1
 
@@ -568,7 +740,19 @@ function read_and_assign_chunk!(f::JLDFile, v::Array{T}, chunk_grid_idx::Cartesi
     read_chunk_with_filters!(vchunk, f, rr, chunk_size_bytes, filters, filter_mask)
 
     # Assign to output array (handles edge chunks)
-    assign_chunk_to_array!(v, vchunk, chunk_grid_idx, chunk_dims_julia)
+    # Create ranges for assignment
+    output_ranges = ntuple(i -> chunk_start[i]:chunk_end[i], N)
+
+    # If vchunk is padded (full chunk_dims), extract only the actual data region
+    # If vchunk is already the right size (unpadded), use it as-is
+    if size(vchunk) == chunk_dims_julia
+        # Padded chunk: extract only actual data region
+        chunk_ranges = ntuple(i -> 1:actual_chunk_size[i], N)
+        v[output_ranges...] = vchunk[chunk_ranges...]
+    else
+        # Unpadded chunk: should match actual region size exactly
+        v[output_ranges...] = vchunk
+    end
 
     return nothing
 end

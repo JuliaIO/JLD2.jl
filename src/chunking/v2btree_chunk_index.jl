@@ -73,11 +73,12 @@ function read_v2btree_chunks(f::JLDFile, v::Array, dataspace, rr,
 
     # Read each chunk into array
     for chunk in chunks
-        # Convert 1-based Julia chunk coordinates to CartesianIndex
+        # Chunk coords are already 1-based Julia coordinates - compute chunk_start directly
         chunk_grid_idx = CartesianIndex(chunk.coords...)
+        chunk_start = chunk_start_from_index(chunk_grid_idx, Tuple(chunk_dims_julia))
 
         # Use the unified chunk reading function
-        read_and_assign_chunk!(f, v, chunk_grid_idx, chunk.address, Int(chunk.size),
+        read_and_assign_chunk!(f, v, chunk_start, chunk.address, Int(chunk.size),
                               Tuple(chunk_dims_julia), rr, filters, chunk.filter_mask)
     end
 

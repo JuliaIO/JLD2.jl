@@ -33,21 +33,12 @@ function read_implicit_index_chunks(f::JLDFile, v::Array{T}, dataspace::ReadData
     # Get array dimensions from the preallocated array v
     # (construct_array has already reversed the dimensions from the file)
     array_dims_julia = size(v)
-    array_dims_hdf5 = reverse(array_dims_julia)
 
     # Get chunk dimensions from layout
-    # layout.chunk_dimensions are in HDF5 order (matching array_dims_hdf5)
+    # layout.chunk_dimensions are in HDF5 order
     chunk_dims_hdf5 = layout.chunk_dimensions[1:ndims]
     # Convert to Julia order by reversing
     chunk_dims_julia = reverse(chunk_dims_hdf5)
-
-    # Calculate number of chunks in each dimension (HDF5 order)
-    nchunks_hdf5 = ntuple(ndims) do i
-        cld(array_dims_hdf5[i], chunk_dims_hdf5[i])
-    end
-
-    # Calculate number of chunks in Julia order for iteration
-    nchunks_julia = cld.(array_dims_julia, chunk_dims_julia)
 
     # Base address for chunks (stored directly in DataLayout message for implicit index)
     # For implicit index, data_offset is already an absolute file offset
@@ -56,20 +47,20 @@ function read_implicit_index_chunks(f::JLDFile, v::Array{T}, dataspace::ReadData
     # Calculate chunk size in bytes
     chunk_size_bytes = Int(prod(chunk_dims_julia) * sizeof(T))
 
-    # Create indexer once for all chunks (more efficient)
-    indexer = ChunkLinearIndexer(nchunks_julia)
+    # Create unified chunk grid iterator (automatically computes grid dimensions)
+    chunk_grid = ChunkGrid(array_dims_julia, chunk_dims_julia)
 
     # Iterate over all chunks
-    for chunk_grid_idx in CartesianIndices(tuple(nchunks_julia...))
-        # Compute linear chunk index using ChunkLinearIndexer (already in Julia order)
-        chunk_index = compute_linear_index(indexer, chunk_grid_idx)
+    for (chunk_grid_idx, linear_idx) in chunk_grid
+        # Calculate chunk address using linear index
+        chunk_address = base_address + (linear_idx * chunk_size_bytes)
 
-        # Calculate chunk address
-        chunk_address = base_address + (chunk_index * chunk_size_bytes)
+        # Compute chunk starting position (more efficient than computing inside read_and_assign_chunk!)
+        chunk_start = chunk_start_from_index(chunk_grid_idx, chunk_dims_julia)
 
         # Read and assign chunk (implicit index doesn't use filters by definition)
         filter_mask = 0
-        read_and_assign_chunk!(f, v, chunk_grid_idx, RelOffset(chunk_address),
+        read_and_assign_chunk!(f, v, chunk_start, RelOffset(chunk_address),
                               chunk_size_bytes, chunk_dims_julia, rr, filters, filter_mask)
     end
 

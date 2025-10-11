@@ -174,9 +174,8 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
     chunk_dims_hdf5 = layout.chunk_dimensions[1:ndims]
     chunk_dims_julia = Tuple(Int.(reverse(chunk_dims_hdf5)))
 
-    # Calculate number of chunks
-    nchunks_julia = cld.(array_dims_julia, chunk_dims_julia)
-    n_chunks_total = prod(nchunks_julia)
+    # Calculate number of chunks for reading entries
+    n_chunks_total = prod(cld.(array_dims_julia, chunk_dims_julia))
 
     # Read Fixed Array header once
     header = read_fixed_array_header(f, layout.data_offset)
@@ -197,13 +196,11 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
     # Read all chunk entries in one pass
     chunk_entries = read_all_chunk_entries_fixed_array(io, header, n_chunks_total)
 
-    # Pre-compute indexer for linear index calculations
-    # ChunkLinearIndexer expects Julia order and reverses internally
-    indexer = ChunkLinearIndexer(nchunks_julia)
+    # Create unified chunk grid iterator (automatically computes grid dimensions)
+    chunk_grid = ChunkGrid(array_dims_julia, chunk_dims_julia)
 
     # Now load chunks using the pre-read entries
-    for chunk_grid_idx in CartesianIndices(tuple(nchunks_julia...))
-        linear_idx = compute_linear_index(indexer, chunk_grid_idx)
+    for (chunk_grid_idx, linear_idx) in chunk_grid
         chunk_address, compressed_size = chunk_entries[linear_idx + 1]
 
         if isnothing(chunk_address)
@@ -217,9 +214,12 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
             Int(prod(chunk_dims_julia) * sizeof(T))
         end
 
+        # Compute chunk starting position (more efficient than computing inside read_and_assign_chunk!)
+        chunk_start = chunk_start_from_index(chunk_grid_idx, chunk_dims_julia)
+
         # Read and assign chunk
         filter_mask = 0
-        read_and_assign_chunk!(f, v, chunk_grid_idx, chunk_address,
+        read_and_assign_chunk!(f, v, chunk_start, chunk_address,
                               chunk_size_bytes, chunk_dims_julia, rr, filters, filter_mask)
     end
 

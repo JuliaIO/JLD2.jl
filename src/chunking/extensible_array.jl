@@ -136,11 +136,14 @@ function read_extensible_array_index_block!(f::JLDFile, v::Array, dataspace, rr,
         # Calculate which chunk this is (linear index to multi-dimensional coordinates)
         chunk_idx = i - 1  # 0-based
 
-        # Convert linear chunk index to chunk coordinates (using common function)
+        # Convert linear chunk index to chunk coordinates
         chunk_grid_idx = linear_index_to_chunk_coords(chunk_idx, grid_dims)
 
+        # Compute chunk starting position
+        chunk_start = chunk_start_from_index(chunk_grid_idx, chunk_dims_julia)
+
         # Read chunk into array (using common function)
-        read_and_assign_chunk!(f, v, chunk_grid_idx, chunk_addr, Int(chunk_size),
+        read_and_assign_chunk!(f, v, chunk_start, chunk_addr, Int(chunk_size),
                               chunk_dims_julia, rr, filters, filter_mask)
     end
 
@@ -223,14 +226,17 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
                 continue
             end
 
-            # Convert linear chunk index to chunk coordinates (using common function)
+            # Convert linear chunk index to chunk coordinates
             chunk_grid_idx = linear_index_to_chunk_coords(chunk_idx, grid_dims)
+
+            # Compute chunk starting position
+            chunk_start = chunk_start_from_index(chunk_grid_idx, chunk_dims_julia)
 
             # Save position before reading chunk data
             saved_pos = position(f.io)
 
             # Read chunk into array (using common function)
-            read_and_assign_chunk!(f, v, chunk_grid_idx, chunk_addr, Int(chunk_size),
+            read_and_assign_chunk!(f, v, chunk_start, chunk_addr, Int(chunk_size),
                                   chunk_dims_julia, rr, filters, filter_mask)
 
             # Restore position to continue reading data block addresses

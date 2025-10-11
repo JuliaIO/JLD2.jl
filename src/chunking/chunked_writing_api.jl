@@ -618,18 +618,16 @@ function write_implicit_index(f::JLDFile, data::AbstractArray{T,N}, chunks, fill
         ))
     end
 
-    # Calculate chunk grid and allocate contiguous space
-    grid_dims = cld.(size(data), chunks)
-    n_chunks = prod(grid_dims)
+    # Create unified chunk grid iterator (automatically computes grid dimensions)
+    chunk_grid = ChunkGrid(size(data), chunks)
+    n_chunks = length(chunk_grid)
     chunk_size_bytes = prod(chunks) * odr_sizeof(odr)
 
     chunks_start_offset = f.end_of_data
     f.end_of_data = chunks_start_offset + n_chunks * chunk_size_bytes
 
     # Write chunks in linear order
-    indexer = ChunkLinearIndexer(grid_dims)
-    for julia_chunk_idx in CartesianIndices(grid_dims)
-        linear_idx = compute_linear_index(indexer, julia_chunk_idx)
+    for (julia_chunk_idx, linear_idx) in chunk_grid
         chunk_offset = chunks_start_offset + linear_idx * chunk_size_bytes
 
         # Extract and pad chunk
