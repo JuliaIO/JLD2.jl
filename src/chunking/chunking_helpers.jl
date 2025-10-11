@@ -34,9 +34,34 @@ end
 Base.length(cit::ChunkIndexIterator) = length(cit.cidxs)
 Base.eltype(::Type{ChunkIndexIterator{N}}) where N = Tuple{CartesianIndex{N}, Int}
 
+## Weird index computation function that can hopefully be eliminated
+
 """Compute 1-based starting position for a chunk from its grid index."""
 @inline chunk_start_from_index(chunk_idx::CartesianIndex{N}, chunk_dims::NTuple{N,Int}) where N =
     (Tuple(chunk_idx) .- 1) .* chunk_dims .+ 1
+
+"""Convert 0-based linear chunk index (HDF5) to 1-based CartesianIndex (Julia)."""
+function linear_index_to_chunk_coords(linear_idx::Int, grid_dims::NTuple{N,Int}) where N
+    grid_dims_hdf5 = reverse(grid_dims)
+    coords_hdf5 = zeros(Int, N)
+    idx = linear_idx
+    for i in N:-1:1
+        coords_hdf5[i] = idx % grid_dims_hdf5[i]
+        idx = div(idx, grid_dims_hdf5[i])
+    end
+    return CartesianIndex(Tuple(reverse(coords_hdf5) .+ 1))
+end
+
+"""Convert 0-based linear chunk index to HDF5 0-based element indices (reversed)."""
+function hdf5_element_indices_from_linear(linear_idx::Int, grid_dims::NTuple{N,Int},
+                                          chunk_dims::NTuple{N,Int}) where N
+    chunk_coords_julia = linear_index_to_chunk_coords(linear_idx, grid_dims)
+    return reverse((Tuple(chunk_coords_julia) .- 1) .* chunk_dims)
+end
+
+"""Compute 1-based element start position from Julia chunk coordinates."""
+chunk_element_start_julia(chunk_coords::CartesianIndex{N}, chunk_dims::NTuple{N,Int}) where N =
+    (Tuple(chunk_coords) .- 1) .* chunk_dims .+ 1
 
 """Normalize and localize filter pipeline for chunk compression."""
 function prepare_filter_pipeline(filters, odr, dataspace)
@@ -60,7 +85,7 @@ function prepare_and_write_chunk(f::JLDFile, chunk_data::Array, odr, filter_pipe
         Filters.compress(filter_pipeline, chunk_data, odr, f, wsession)
     else
         io_buf = IOBuffer()
-        write_data(io_buf, f, chunk_data, odr, datamode(odr), wsession)
+        JLD2.write_data(io_buf, f, chunk_data, odr, JLD2.datamode(odr), wsession)
         take!(io_buf), UInt32(0)
     end
 
@@ -100,25 +125,13 @@ function write_all_chunks(f::JLDFile,
     return chunk_metadata
 end
 
-
-"""Convert 0-based linear chunk index to HDF5 0-based element indices (reversed)."""
-function hdf5_element_indices_from_linear(linear_idx::Int, grid_dims::NTuple{N,Int},
-                                          chunk_dims::NTuple{N,Int}) where N
-    chunk_coords_julia = linear_index_to_chunk_coords(linear_idx, grid_dims)
-    return reverse((Tuple(chunk_coords_julia) .- 1) .* chunk_dims)
-end
-
-"""Compute 1-based element start position from Julia chunk coordinates."""
-chunk_element_start_julia(chunk_coords::CartesianIndex{N}, chunk_dims::NTuple{N,Int}) where N =
-    (Tuple(chunk_coords) .- 1) .* chunk_dims .+ 1
-
 """Read chunk from file and assign to output array, handling edge chunks and compression."""
-function read_and_assign_chunk!(f::JLDFile, v::Array{T}, chunk_start::NTuple{N,Int},
-                               chunk_address::RelOffset, chunk_size_bytes::Int,
+function read_and_assign_chunk!(f::JLDFile, v::Array{T}, _chunk_start,
+                               chunk_address::RelOffset, chunk_size_bytes,
                                chunk_dims_julia::NTuple{N,Int}, rr, filters,
                                filter_mask) where {T,N}
     seek(f.io, fileoffset(f, chunk_address))
-
+    chunk_start = Tuple(_chunk_start)
     chunk_end = min.(chunk_start .+ chunk_dims_julia .- 1, size(v))
     actual_chunk_size = chunk_end .- chunk_start .+ 1
     is_edge_chunk = actual_chunk_size != chunk_dims_julia
@@ -140,17 +153,4 @@ function read_and_assign_chunk!(f::JLDFile, v::Array{T}, chunk_start::NTuple{N,I
         v[output_ranges...] = vchunk
     end
     return nothing
-end
-
-
-"""Convert 0-based linear chunk index (HDF5) to 1-based CartesianIndex (Julia)."""
-function linear_index_to_chunk_coords(linear_idx::Int, grid_dims::NTuple{N,Int}) where N
-    grid_dims_hdf5 = reverse(grid_dims)
-    coords_hdf5 = zeros(Int, N)
-    idx = linear_idx
-    for i in N:-1:1
-        coords_hdf5[i] = idx % grid_dims_hdf5[i]
-        idx = div(idx, grid_dims_hdf5[i])
-    end
-    return CartesianIndex(Tuple(reverse(coords_hdf5) .+ 1))
 end

@@ -2,33 +2,12 @@
 # Functions for writing V2 B-tree chunk index structures (type 5)
 
 """
-    get_chunk_record_ndims(chunk_records, is_filtered::Bool) -> Int
-
-Extract the number of dimensions from chunk records.
-
-# Arguments
-- `chunk_records` - Vector of chunk records
-- `is_filtered::Bool` - Whether chunks use compression filters
-
-# Returns
-Number of spatial dimensions
-"""
-function get_chunk_record_ndims(chunk_records, is_filtered::Bool)
-    first_record = chunk_records[1]
-    if is_filtered
-        length(first_record[4])  # chunk_indices is 4th element in filtered records
-    else
-        length(first_record[2])  # chunk_indices is 2nd element in unfiltered records
-    end
-end
-
-"""
     write_v2btree_leaf_node(io::IO, chunk_records, is_filtered::Bool) -> leaf_node_size
 
 Write a V2 B-tree leaf node to the given IO stream.
 """
 function write_v2btree_leaf_node(io::IO, chunk_records, is_filtered::Bool)
-    ndims = get_chunk_record_ndims(chunk_records, is_filtered)
+    ndims = length(chunk_records[1].idx)
     record_size = 8 + 8*ndims + 12*is_filtered
 
     leaf_node_size = 4 + 1 + 1 + length(chunk_records) * record_size + 4
@@ -71,7 +50,7 @@ function write_v2btree_chunked_dataset(f::JLDFile,
     n_chunks = length(chunk_records)
 
     # Calculate record size from first record
-    ndims = get_chunk_record_ndims(chunk_records, is_filtered)
+    ndims = length(chunk_records[1].idx)
     record_size = record_size = 8 + 8*ndims + 12*is_filtered
 
     # Validate chunk count fits in single leaf node (simplified implementation, depth=0)

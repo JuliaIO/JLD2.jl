@@ -403,6 +403,7 @@ end
 
 
 function pipeline_message_size(fp::FilterPipeline)
+    iscompressed(fp) || return 0
     sz = 4 + 2
     for filter in fp
         sz += 6 + 4 * length(Filters.client_values(filter))
@@ -417,6 +418,8 @@ function pipeline_message_size(fp::FilterPipeline)
 end
 
 function write_filter_pipeline_message(io, fp::FilterPipeline)
+    # Empty filter pipeline messages are disallowed. Therefore don't write them.
+    iscompressed(fp) || return nothing
     hmsize = pipeline_message_size(fp) - 4
     jlwrite(io, HeaderMessage(HmFilterPipeline, hmsize, 0))
     jlwrite(io, UInt8(2))                   # Version

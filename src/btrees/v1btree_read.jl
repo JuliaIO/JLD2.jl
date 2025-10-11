@@ -40,34 +40,31 @@ function read_v1btree(f::JLDFile, offset::RelOffset; dimensionality = -1)
         end
         return links
     else
-        children = Any[]
+        children = @NamedTuple{offset::RelOffset, size::UInt32, filter_mask::UInt32, idx::CartesianIndex{Int(dimensionality-1)}}[]
         # Read keys and children in the correct V1BTree format (interleaved)
         for entry_idx = 1:entries_used
             # Read key in V1ChunkKey format: chunk_size, filter_mask, then indices
-            chunk_size = Int(jlread(io, UInt32))
+            size = Int(jlread(io, UInt32))
             filter_mask = Int(jlread(io, UInt32))
 
             # Read exactly dimensionality indices (dimensionality includes element size dimension)
-            idx = jlread(io, UInt64, Int(dimensionality)) .% Int |> splat(tuple)
+            h5idx = jlread(io, UInt64, Int(dimensionality)) .% Int |> splat(tuple)
+            idx = CartesianIndex(reverse(h5idx[1:end-1]) .+1)
 
             # Read child offset (comes immediately after the key)
             child_offset = jlread(io, RelOffset)
-            push!(children, (; offset=child_offset, chunk_size, filter_mask, idx))
+            push!(children, (; offset=child_offset, size, filter_mask, idx))
         end
         chunks = Any[]
         for child in children
             if node_level > 0
-                # This is an internal node, so children point to other B-tree nodes
                 append!(chunks, read_v1btree(f, child.offset; dimensionality))
             else
-                # This is a leaf node, so children point to actual chunk data
                 push!(chunks, child)
             end
         end
         return chunks
     end
-
-
 end
 
 # V1 B-tree Functions for Groups

@@ -2,19 +2,6 @@
 # Core data structures for V1 B-trees
 const V1_BTREE_NODE_SIGNATURE = htol(0x45455254)  # "TREE"
 
-
-"""
-    V1ChunkKey
-
-Key structure for chunked datasets in V1 B-trees.
-Each key contains:
-- chunk_size: Size of chunk in bytes (UInt32)
-- filter_mask: Bitmask indicating which filters were applied (UInt32)
-- indices: D+1 dimensional indices where D is dimensionality (Vector{UInt64})
-  The last index is always 0 (datatype offset)
-
-Example: For a 3D chunk at position [5,5,5], indices = [5, 5, 5, 0]
-"""
 struct V1ChunkKey
     chunk_size::UInt32         # Size of chunk in bytes
     filter_mask::UInt32        # Filter bitmask (0 if no filters)
@@ -30,21 +17,6 @@ end
 
 Base.isless(k1,k2) = reverse(k1.indices) < reverse(k2.indices)
 
-"""
-    V1BTreeNode
-
-Core node structure for V1 B-trees.
-- node_type: 1 for chunked datasets, 0 for groups
-- node_level: 0 for leaf, >0 for internal nodes
-- entries_used: Number of valid key/child pairs
-- left_sibling: Left sibling node address (UNDEFINED_ADDRESS if none)
-- right_sibling: Right sibling node address (UNDEFINED_ADDRESS if none)
-- keys: Keys (length = entries_used + 1)
-- children: Child addresses (length = entries_used)
-
-HDF5 ordering rule for chunked datasets (type 1):
-Key[i] describes the least chunk in Child[i]
-"""
 mutable struct V1BTreeNode
     node_type::UInt8           # 1 for chunked datasets, 0 for groups
     node_level::UInt8          # 0 for leaf, >0 for internal
@@ -54,11 +26,7 @@ mutable struct V1BTreeNode
     keys::Vector{V1ChunkKey}   # Keys (length = entries_used + 1)
     children::Vector{RelOffset} # Child addresses (length = entries_used)
 
-    # Inner constructor for validation
-    function V1BTreeNode(node_type::UInt8, node_level::UInt8, entries_used::UInt16,
-                        left_sibling::RelOffset, right_sibling::RelOffset,
-                        keys::Vector{V1ChunkKey}, children::Vector{RelOffset})
-        node_type in (0, 1) || throw(ArgumentError("node_type must be 0 (groups) or 1 (chunks)"))
+    function V1BTreeNode(node_type, node_level, entries_used, left_sibling, right_sibling, keys, children)
         length(keys) == entries_used + 1 ||
             throw(ArgumentError("keys length $(length(keys)) must equal entries_used + 1 ($(entries_used + 1))"))
         length(children) == entries_used ||

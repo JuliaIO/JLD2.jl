@@ -16,17 +16,24 @@ using ..JLD2: JLDFile, RelOffset, UNDEFINED_ADDRESS, jlwrite, jlread, jlsizeof,
     ObjectStart, size_flag, HmAttribute, write_size, write_header_message,
     write_continuation_placeholder,
     PlaceholderH5Datatype, LcCompact, ischunked, jltype,
-    julia_repr, datamode, write_data, BTrees
+    julia_repr, BTrees
 
 # Note: The following are defined later in JLD2 module loading order,
 # so we access them via JLD2. prefix:
 # - WriteDataspace, numel, payload_size_without_storage_message, CONTINUATION_MSG_SIZE (datasets.jl/dataspaces.jl)
 # - objodr, h5type (data/ files)
 # - ArrayMemory (data/specialcased_types.jl)
+# - datamode, write_data (data/writing_datatypes.jl)
 
 # Import Filters submodule
 using ..JLD2.Filters
 using ..JLD2.Filters: iscompressed
+
+const H5S_UNLIMITED = 0xFFFFFFFFFFFFFFFF
+const CHUNK_TARGET_BYTES = 32 * 1024
+const V2_BTREE_NODE_SIZE = UInt32(2048)
+const V2_BTREE_SPLIT_PERCENT = UInt8(100)
+const V2_BTREE_MERGE_PERCENT = UInt8(40)
 
 # Note: BTrees is loaded before Chunking in JLD2.jl.
 # BTrees functions are accessed via JLD2.BTrees.* prefix.
@@ -34,28 +41,17 @@ using ..JLD2.Filters: iscompressed
 # Include chunking implementation files
 include("chunking_helpers.jl")
 include("chunked_array.jl")
-include("implicit_index.jl")
-include("fixed_array.jl")
-include("extensible_array.jl")
-include("v2btree_chunk_index.jl")
-include("chunked_writing_api.jl")
+include("read_index_types.jl")
+include("write_index_types.jl")
+include("write_api.jl")
+include("argument_validation.jl")
 
 # Export types
-export ChunkedArray, Chunk, ChunkInfo
 export WriteChunkedArray
 
 # Export API functions
 export write_chunked
-export get_chunked_array, chunk_dimensions, num_chunks, chunk_grid_size
-
-# Export helper functions for use by BTrees and other modules
-export extract_chunk_region
-
 # Export internal functions needed by datasets.jl and other internal modules
 export read_chunked_array
-export read_implicit_index_chunks
-export read_fixed_array_chunks
-export read_extensible_array_chunks
-export read_v2btree_chunks
 
 end # module Chunking

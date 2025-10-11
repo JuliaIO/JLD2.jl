@@ -3,7 +3,7 @@ struct ChunkInfo
     offset::RelOffset
     chunk_size::Int
     filter_mask::Int
-    idx::Tuple
+    idx::CartesianIndex
 end
 
 """Lazy wrapper around a chunked dataset for chunk-wise iteration without loading entire array."""
@@ -60,7 +60,7 @@ function get_chunked_array(f::JLDFile, name::String)
     T = julia_repr(rr)
 
     chunks = layout.version == 3 ?
-        [ChunkInfo(c.offset, c.chunk_size, c.filter_mask, c.idx) for c in
+        [ChunkInfo(c.offset, c.size, c.filter_mask, c.idx) for c in
          JLD2.BTrees.read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)] :
         ChunkInfo[]
 
@@ -77,6 +77,7 @@ function Base.iterate(ca::ChunkedArray{T,N}) where {T,N}
     state = iterate(indices)
     isnothing(state) && return nothing
     chunk_idx, next_state = state
+    chunk_idx = CartesianIndex((chunk_idx.I .- 1) .* ca.chunk_dims .+ 1)
     return (_read_chunk(ca, chunk_idx), (indices, next_state))
 end
 
@@ -85,6 +86,7 @@ function Base.iterate(ca::ChunkedArray{T,N}, state) where {T,N}
     next = iterate(indices, iter_state)
     isnothing(next) && return nothing
     chunk_idx, next_state = next
+    chunk_idx = CartesianIndex((chunk_idx.I .- 1) .* ca.chunk_dims .+ 1)
     return (_read_chunk(ca, chunk_idx), (indices, next_state))
 end
 
@@ -92,7 +94,7 @@ Base.length(ca::ChunkedArray) = num_chunks(ca)
 Base.eltype(::Type{ChunkedArray{T,N}}) where {T,N} = Chunk{T,N}
 
 function Base.getindex(ca::ChunkedArray{T,N}, I::Vararg{Int,N}) where {T,N}
-    chunk_idx = CartesianIndex(I)
+    chunk_idx = CartesianIndex((I .- 1) .* ca.chunk_dims .+ 1)
     grid_size = chunk_grid_size(ca)
     for (i, (idx, max_idx)) in enumerate(zip(I, grid_size))
         (idx < 1 || idx > max_idx) && throw(BoundsError(ca, I))
@@ -101,16 +103,18 @@ function Base.getindex(ca::ChunkedArray{T,N}, I::Vararg{Int,N}) where {T,N}
 end
 
 function _read_chunk(ca::ChunkedArray{T,N}, chunk_idx::CartesianIndex{N}) where {T,N}
-    array_indices = CartesianIndex((chunk_idx.I .- 1) .* ca.chunk_dims .+ 1)
+    array_indices = chunk_idx#CartesianIndex((chunk_idx.I .- 1) .* ca.chunk_dims .+ 1)
     chunk_end = min.(array_indices.I .+ ca.chunk_dims .- 1, ca.array_size)
     actual_chunk_size = chunk_end .- array_indices.I .+ 1
 
     hdf5_indices_with_elemsize = (reverse(array_indices.I .- 1)..., 0)
 
-    chunk_info = findfirst(c -> c.idx == hdf5_indices_with_elemsize, ca.chunks)
-    isnothing(chunk_info) && throw(InvalidDataException(
+    chunk_info = findfirst(c -> c.idx == array_indices, ca.chunks)
+    if isnothing(chunk_info)
+        @info ca.chunks chunk_idx
+        throw(InvalidDataException(
         "Chunk not found at grid $(chunk_idx.I), array $(array_indices.I), HDF5 $hdf5_indices_with_elemsize"))
-
+    end
     seek(ca.file.io, fileoffset(ca.file, ca.chunks[chunk_info].offset))
     vchunk = Array{T, N}(undef, actual_chunk_size...)
     JLD2.read_compressed_array!(vchunk, ca.file, ca.rr, ca.chunks[chunk_info].chunk_size,
@@ -130,15 +134,7 @@ function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
         chunk_dims_julia = Tuple(Int.(reverse(layout.chunk_dimensions)[1:ndims]))
 
         for chunk in chunks
-            cidx = chunk.idx::NTuple{Int(ndims+1), Int}
-            chunk_start_idx = CartesianIndex(reverse(cidx[1:end-1]) .+ 1)
-
-            seek(f.io, fileoffset(f, chunk.offset))
-            vchunk = Array{T, ndims}(undef, chunk_dims_julia...)
-            JLD2.read_compressed_array!(vchunk, f, rr, chunk.chunk_size, filters, chunk.filter_mask)
-
-            ranges = ntuple(i -> chunk_start_idx[i]:min(chunk_start_idx[i] + chunk_dims_julia[i] - 1, size(v, i)), ndims)
-            v[ranges...] = vchunk[ntuple(i -> 1:(ranges[i].stop - ranges[i].start + 1), ndims)...]
+            read_and_assign_chunk!(f, v, chunk.idx, chunk.offset, chunk.size, chunk_dims_julia, rr, filters, 0)
         end
         return v
     elseif layout.version == 4
@@ -150,5 +146,3 @@ function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
     end
     throw(UnsupportedVersionException("Layout version $(layout.version) not implemented"))
 end
-
-export ChunkedArray, Chunk, get_chunked_array, chunk_dimensions, num_chunks, chunk_grid_size
