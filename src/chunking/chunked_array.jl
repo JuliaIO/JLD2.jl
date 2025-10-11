@@ -1,35 +1,12 @@
-# Chunked Array Reading API
-# Provides ChunkedArray type for iterating over chunks
-
-"""
-    ChunkInfo
-
-Metadata for a single chunk in the B-tree.
-"""
+"""Metadata for a single chunk: offset, size, filter mask, and HDF5 indices."""
 struct ChunkInfo
     offset::RelOffset
     chunk_size::Int
     filter_mask::Int
-    idx::Tuple  # 0-based HDF5 element indices (including element size dimension)
+    idx::Tuple
 end
 
-"""
-    ChunkedArray{T,N}
-
-Lazy wrapper around a chunked dataset that allows iterating over individual chunks
-without loading the entire array into memory.
-
-# Fields
-- `file::JLDFile` - The JLD2 file containing the dataset
-- `dataset_offset::RelOffset` - Offset of the dataset header
-- `array_size::NTuple{N,Int}` - Size of the full array
-- `chunk_dims::NTuple{N,Int}` - Dimensions of each chunk
-- `datatype::H5Datatype` - HDF5 datatype of the array
-- `layout::DataLayout` - Data layout information (must be chunked)
-- `filters::FilterPipeline` - Compression filters applied to chunks
-- `rr::ReadRepresentation{T}` - Read representation for deserialization
-- `chunks::Vector{ChunkInfo}` - Parsed chunk metadata from B-tree
-"""
+"""Lazy wrapper around a chunked dataset for chunk-wise iteration without loading entire array."""
 struct ChunkedArray{T,N}
     file::JLDFile
     dataset_offset::RelOffset
@@ -40,21 +17,10 @@ struct ChunkedArray{T,N}
     filters::FilterPipeline
     rr::ReadRepresentation{T}
     dataspace::ReadDataspace
-    chunks::Vector{ChunkInfo}  # Pre-parsed chunk metadata
+    chunks::Vector{ChunkInfo}
 end
 
-"""
-    Chunk{T,N}
-
-Represents a single chunk of data with its metadata.
-
-# Fields
-- `data::Array{T,N}` - The actual chunk data
-- `indices::CartesianIndex{N}` - Starting index of the chunk in the full array (1-based)
-- `chunk_indices::CartesianIndex{N}` - Chunk grid position (1-based)
-- `offset::RelOffset` - File offset where the chunk data is stored
-- `size::Int` - Size of the chunk data in bytes
-"""
+"""Single chunk with data, position indices, file offset, and size."""
 struct Chunk{T,N}
     data::Array{T,N}
     indices::CartesianIndex{N}
@@ -63,261 +29,107 @@ struct Chunk{T,N}
     size::Int
 end
 
-"""
-    get_chunked_array(f::JLDFile, name::String) -> ChunkedArray
-
-Get a ChunkedArray object for a dataset, allowing iteration over individual chunks.
-
-# Example
-```julia
-jldopen("file.jld2", "r") do f
-    chunked = JLD2.get_chunked_array(f, "my_dataset")
-
-    # Iterate over all chunks
-    for chunk in chunked
-        println("Chunk at ", chunk.indices, ": ", size(chunk.data))
-    end
-
-    # Or access a specific chunk
-    chunk = chunked[2, 3]  # Get chunk at grid position (2,3)
-end
-```
-"""
+"""Get ChunkedArray for dataset, allowing chunk-wise iteration."""
 function get_chunked_array(f::JLDFile, name::String)
-    # Get the RelOffset for this dataset
     link = lookup_link(f.root_group, name)
-    if isnothing(link)
-        throw(KeyError(name))
-    end
+    isnothing(link) && throw(KeyError(name))
 
-    # Extract offset from link
-    offset = if isa(link, HardLink)
-        link.target
-    else
-        throw(ArgumentError("Can only create ChunkedArray from direct datasets, not external links"))
-    end
+    offset = isa(link, HardLink) ? link.target :
+        throw(ArgumentError("Can only create ChunkedArray from direct datasets"))
 
-    # Read dataset header to get chunk information
     dataspace = ReadDataspace()
     dt::H5Datatype = PlaceholderH5Datatype()
-    layout::DataLayout = DataLayout(0,LcCompact,0,-1)
+    layout::DataLayout = DataLayout(0, LcCompact, 0, -1)
     filter_pipeline::FilterPipeline = FilterPipeline()
 
     for msg in HeaderMessageIterator(f, offset)
-        if msg.type == HmDataspace
-            dataspace = ReadDataspace(f, msg)
-        elseif msg.type == HmDatatype
-            dt = HmWrap(HmDatatype, msg).dt::H5Datatype
-        elseif msg.type == HmDataLayout
-            layout = DataLayout(f, msg)
-        elseif msg.type == HmFilterPipeline
-            filter_pipeline = FilterPipeline(msg)
-        end
+        msg.type == HmDataspace && (dataspace = ReadDataspace(f, msg))
+        msg.type == HmDatatype && (dt = HmWrap(HmDatatype, msg).dt::H5Datatype)
+        msg.type == HmDataLayout && (layout = DataLayout(f, msg))
+        msg.type == HmFilterPipeline && (filter_pipeline = FilterPipeline(msg))
     end
 
-    if dt isa PlaceholderH5Datatype
-        throw(InvalidDataException("No datatype message found"))
-    end
+    dt isa PlaceholderH5Datatype && throw(InvalidDataException("No datatype message found"))
+    ischunked(layout) || throw(ArgumentError("Dataset is not chunked"))
 
-    if !ischunked(layout)
-        throw(ArgumentError("Dataset is not chunked"))
-    end
-
-    # Get read representation
     rr = jltype(f, dt)
-
-    # Extract array dimensions by reading from file
     ndims = Int(dataspace.dimensionality)
     seek(f.io, dataspace.dimensions_offset)
     array_size = Tuple(reverse(ntuple(i -> Int(jlread(f.io, Int64)), Val(ndims))))
-    N = ndims
-
-    # Extract chunk dimensions from layout
-    # For V1 B-tree (version 3), layout.chunk_dimensions is in HDF5 order (reversed)
-    # and already excludes element size
-    # We reverse it and take first ndims elements to get Julia order
     chunk_dims = Tuple(reverse(Int.(layout.chunk_dimensions))[1:ndims])
-
     T = julia_repr(rr)
 
-    # Parse the B-tree to get all chunk metadata
-    chunks = if layout.version == 3
-        # Use existing function to read all chunks from V1 B-tree
-        raw_chunks = JLD2.BTrees.read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)
-        # Convert to ChunkInfo objects
-        ChunkInfo[ChunkInfo(c.offset, c.chunk_size, c.filter_mask, c.idx) for c in raw_chunks]
-    else
-        ChunkInfo[]  # Empty for non-V1-btree layouts
-    end
+    chunks = layout.version == 3 ?
+        [ChunkInfo(c.offset, c.chunk_size, c.filter_mask, c.idx) for c in
+         JLD2.BTrees.read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)] :
+        ChunkInfo[]
 
-    return ChunkedArray{T,N}(f, offset, array_size, chunk_dims, dt, layout, filter_pipeline, rr, dataspace, chunks)
+    return ChunkedArray{T,ndims}(f, offset, array_size, chunk_dims, dt, layout,
+                                  filter_pipeline, rr, dataspace, chunks)
 end
 
-"""
-    chunk_dimensions(ca::ChunkedArray) -> NTuple
-
-Get the dimensions of each chunk.
-"""
 chunk_dimensions(ca::ChunkedArray) = ca.chunk_dims
+num_chunks(ca::ChunkedArray) = prod(cld.(ca.array_size, ca.chunk_dims))
+chunk_grid_size(ca::ChunkedArray) = cld.(ca.array_size, ca.chunk_dims)
 
-"""
-    num_chunks(ca::ChunkedArray) -> Int
-
-Get the total number of chunks in the array.
-"""
-function num_chunks(ca::ChunkedArray{T,N}) where {T,N}
-    prod(cld.(ca.array_size, ca.chunk_dims))
-end
-
-"""
-    chunk_grid_size(ca::ChunkedArray) -> NTuple
-
-Get the dimensions of the chunk grid (number of chunks in each dimension).
-"""
-function chunk_grid_size(ca::ChunkedArray{T,N}) where {T,N}
-    Tuple(cld.(ca.array_size, ca.chunk_dims))
-end
-
-# Iteration interface
 function Base.iterate(ca::ChunkedArray{T,N}) where {T,N}
-    grid_size = chunk_grid_size(ca)
-    indices = CartesianIndices(grid_size)
+    indices = CartesianIndices(chunk_grid_size(ca))
     state = iterate(indices)
-    state === nothing && return nothing
-
+    isnothing(state) && return nothing
     chunk_idx, next_state = state
-    chunk = _read_chunk(ca, chunk_idx)
-    return (chunk, (indices, next_state))
+    return (_read_chunk(ca, chunk_idx), (indices, next_state))
 end
 
 function Base.iterate(ca::ChunkedArray{T,N}, state) where {T,N}
     indices, iter_state = state
     next = iterate(indices, iter_state)
-    next === nothing && return nothing
-
+    isnothing(next) && return nothing
     chunk_idx, next_state = next
-    chunk = _read_chunk(ca, chunk_idx)
-    return (chunk, (indices, next_state))
+    return (_read_chunk(ca, chunk_idx), (indices, next_state))
 end
 
 Base.length(ca::ChunkedArray) = num_chunks(ca)
 Base.eltype(::Type{ChunkedArray{T,N}}) where {T,N} = Chunk{T,N}
 
-# Indexing interface
 function Base.getindex(ca::ChunkedArray{T,N}, I::Vararg{Int,N}) where {T,N}
-    # Convert to CartesianIndex and read chunk
     chunk_idx = CartesianIndex(I)
-
-    # Validate indices
     grid_size = chunk_grid_size(ca)
     for (i, (idx, max_idx)) in enumerate(zip(I, grid_size))
-        if idx < 1 || idx > max_idx
-            throw(BoundsError(ca, I))
-        end
+        (idx < 1 || idx > max_idx) && throw(BoundsError(ca, I))
     end
-
     return _read_chunk(ca, chunk_idx)
 end
 
-"""
-    _read_chunk(ca::ChunkedArray, chunk_idx::CartesianIndex)
-
-Internal function to read a specific chunk from the file.
-"""
 function _read_chunk(ca::ChunkedArray{T,N}, chunk_idx::CartesianIndex{N}) where {T,N}
-    # Calculate starting position in the array (1-based)
-    array_indices = CartesianIndex(Tuple((chunk_idx.I .- 1) .* ca.chunk_dims .+ 1))
-
-    # Calculate actual chunk size (may be smaller at edges)
+    array_indices = CartesianIndex((chunk_idx.I .- 1) .* ca.chunk_dims .+ 1)
     chunk_end = min.(array_indices.I .+ ca.chunk_dims .- 1, ca.array_size)
     actual_chunk_size = chunk_end .- array_indices.I .+ 1
 
-    # Convert to 0-based HDF5 indices in reversed order with element size dimension
-    # HDF5 uses element indices (not chunk counts)
-    hdf5_element_indices_0based = reverse(array_indices.I .- 1)
-    hdf5_indices_with_elemsize = tuple(hdf5_element_indices_0based..., 0)
+    hdf5_indices_with_elemsize = (reverse(array_indices.I .- 1)..., 0)
 
-    # Find chunk in pre-parsed list
-    chunk_info = nothing
-    for c in ca.chunks
-        if c.idx == hdf5_indices_with_elemsize
-            chunk_info = c
-            break
-        end
-    end
+    chunk_info = findfirst(c -> c.idx == hdf5_indices_with_elemsize, ca.chunks)
+    isnothing(chunk_info) && throw(InvalidDataException(
+        "Chunk not found at grid $(chunk_idx.I), array $(array_indices.I), HDF5 $hdf5_indices_with_elemsize"))
 
-    if isnothing(chunk_info)
-        throw(InvalidDataException("Chunk not found at grid indices $(chunk_idx.I), " *
-                                 "array indices $(array_indices.I), " *
-                                 "HDF5 indices $hdf5_indices_with_elemsize"))
-    end
+    seek(ca.file.io, fileoffset(ca.file, ca.chunks[chunk_info].offset))
+    vchunk = Array{T, N}(undef, actual_chunk_size...)
+    read_chunk_with_filters!(vchunk, ca.file, ca.rr, ca.chunks[chunk_info].chunk_size,
+                            ca.filters, ca.chunks[chunk_info].filter_mask)
 
-    # Read chunk data directly from file
-    chunk_data = _read_chunk_data(
-        ca.file,
-        chunk_info,
-        T,
-        actual_chunk_size,
-        ca.rr,
-        ca.filters
-    )
-
-    return Chunk{T,N}(
-        chunk_data,
-        array_indices,
-        chunk_idx,
-        chunk_info.offset,
-        chunk_info.chunk_size
-    )
+    return Chunk{T,N}(vchunk, array_indices, chunk_idx,
+                      ca.chunks[chunk_info].offset, ca.chunks[chunk_info].chunk_size)
 end
 
-"""
-    _read_chunk_data(f::JLDFile, chunk_info, T, chunk_dims, rr, filters)
-
-Read and decompress chunk data from file.
-
-This is a lightweight wrapper around read_chunk_with_filters! for the ChunkedArray API.
-"""
-function _read_chunk_data(f::JLDFile, chunk_info, ::Type{T}, chunk_dims, rr, filters) where T
-    # Seek to chunk data
-    seek(f.io, fileoffset(f, chunk_info.offset))
-
-    # Create array to hold chunk data
-    ndims = length(chunk_dims)
-    vchunk = Array{T, ndims}(undef, chunk_dims...)
-
-    # Read chunk with appropriate filter handling
-    read_chunk_with_filters!(vchunk, f, rr, chunk_info.chunk_size, filters, chunk_info.filter_mask)
-
-    return vchunk
-end
-
-"""
-    read_chunked_array(f::JLDFile, v::Array, dataspace::ReadDataspace,
-                      rr::ReadRepresentation, layout::DataLayout,
-                      filters::FilterPipeline, header_offset::RelOffset,
-                      ndims::Int)
-
-Read a chunked dataset from file into the preallocated array `v`.
-Handles V1 B-tree chunked storage with optional compression filters.
-"""
+"""Read chunked dataset into preallocated array, dispatching by layout version and indexing type."""
 function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
                            @nospecialize(rr::ReadRepresentation), layout::DataLayout,
                            filters::FilterPipeline, header_offset::RelOffset,
                            ndims::Int) where T
-    io = f.io
-
     if layout.version == 3
-        # version 1 B-tree
         chunks = JLD2.BTrees.read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)
-
-        # chunk dimensions in same order as data dims
         chunk_dims_julia = Tuple(Int.(reverse(layout.chunk_dimensions)[1:ndims]))
 
-        # For V1 B-tree, layout.chunk_dimensions already excludes element size
         for chunk in chunks
-            # Extract element indices from HDF5 format (0-based, reversed, with element dim)
-            # Format: (dim_n, ..., dim_1, dim_0, 0) where last 0 is element size dimension
             cidx = chunk.idx::NTuple{Int(ndims+1), Int}
             chunk_start_idx = CartesianIndex(reverse(cidx[1:end-1]) .+ 1)
 
@@ -325,27 +137,18 @@ function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
             vchunk = Array{T, ndims}(undef, chunk_dims_julia...)
             read_chunk_with_filters!(vchunk, f, rr, chunk.chunk_size, filters, chunk.filter_mask)
 
-            # Assign chunk to array starting at calculated position
-            # V1 B-tree pads chunks, so vchunk is always full chunk_dims_julia size
             ranges = ntuple(i -> chunk_start_idx[i]:min(chunk_start_idx[i] + chunk_dims_julia[i] - 1, size(v, i)), ndims)
             v[ranges...] = vchunk[ntuple(i -> 1:(ranges[i].stop - ranges[i].start + 1), ndims)...]
         end
         return v
-    elseif layout.version == 4 && layout.chunk_indexing_type == 2
-        # Implicit Index - contiguous chunk storage
-        return read_implicit_index_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
-    elseif layout.version == 4 && layout.chunk_indexing_type == 3
-        # Fixed Array indexing
-        return read_fixed_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
-    elseif layout.version == 4 && layout.chunk_indexing_type == 4
-        # Extensible Array indexing
-        return read_extensible_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
-    elseif layout.version == 4 && layout.chunk_indexing_type == 5
-        # V2 B-tree indexing
-        return read_v2btree_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)
+    elseif layout.version == 4
+        return layout.chunk_indexing_type == 2 ? read_implicit_index_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims) :
+               layout.chunk_indexing_type == 3 ? read_fixed_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims) :
+               layout.chunk_indexing_type == 4 ? read_extensible_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims) :
+               layout.chunk_indexing_type == 5 ? read_v2btree_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims) :
+               throw(UnsupportedVersionException("Chunk indexing type $(layout.chunk_indexing_type) not implemented"))
     end
-    throw(UnsupportedVersionException("Encountered a chunked array ($layout) that is not implemented."))
+    throw(UnsupportedVersionException("Layout version $(layout.version) not implemented"))
 end
 
-# Export public API
 export ChunkedArray, Chunk, get_chunked_array, chunk_dimensions, num_chunks, chunk_grid_size
