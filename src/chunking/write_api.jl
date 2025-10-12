@@ -74,11 +74,12 @@ write_chunked(f::JLDFile, name::String, wca::WriteChunkedArray) =
 
 """
     write_chunked(f::JLDFile, name::String, data; kwargs...)
+    write_chunked(g::Group, name::String, data; kwargs...)
 
 Write a chunked dataset to a JLD2 file.
 
 # Arguments
-- `f::JLDFile` - Open JLD2 file in write mode
+- `f::JLDFile` or `g::Group` - Open JLD2 file/group in write mode
 - `name::String` - Dataset name
 - `data::AbstractArray{T,N}` - Data to write
 
@@ -101,12 +102,15 @@ jldopen("file.jld2", "w") do f
 end
 ```
 """
-function write_chunked(f::JLDFile, name::String, data::AbstractArray{T,N};
+function write_chunked(g::Union{JLDFile,Group}, name::String, data::AbstractArray{T,N};
                       chunk::NTuple{N,Int},
                       maxshape::Union{Nothing, NTuple{N,Union{Int,Nothing}}}=nothing,
                       fill_value::Union{Nothing, T}=nothing,
                       indexing::Union{Symbol, Nothing}=nothing,
                       filters=nothing) where {T,N}
+
+    # Get file from group if necessary
+    f = g isa JLDFile ? g : g.f
 
     !f.writable && throw(ArgumentError("File must be opened in write mode"))
 
@@ -118,7 +122,7 @@ function write_chunked(f::JLDFile, name::String, data::AbstractArray{T,N};
         validate_index_type(indexing)
         indexing
     else
-        v1btree
+        :v1btree
     end
 
     odr = JLD2.objodr(data)
@@ -147,14 +151,14 @@ function write_chunked(f::JLDFile, name::String, data::AbstractArray{T,N};
         dataspace.dataspace_type,
         dimensions=dataspace.size,
         flags=UInt8(index_metadata.requires_maxshape),
-        max_dimensions_size = convert_maxshape_to_hdf5(maxshape)
+        max_dimension_size = convert_maxshape_to_hdf5(maxshape)
         )
 
     layout_params = (;
         version = index_metadata.layout_version,
         layout_class = LcChunked,
         dimensionality = UInt8(N + 1),
-        dimensions = UInt64.((reverse(chunks)..., odr_sizeof(odr))),
+        dimensions = UInt64.((reverse(chunk)..., odr_sizeof(odr))),
         index_metadata.chunk_indexing_type,
         data_address = index_metadata.data_address,
         index_metadata.layout_params...
@@ -190,11 +194,13 @@ function write_chunked(f::JLDFile, name::String, data::AbstractArray{T,N};
     end
     write_header_message(cio, Val(HmDatatype), 1 | (2*isa(datatype, CommittedDatatype)); dt=datatype)
     Filters.write_filter_pipeline_message(cio, filter_pipeline)
-    write_header_message(cio, Val(HmDataLayout); layout_params)
+    write_header_message(cio, Val(HmDataLayout); layout_params...)
     write_continuation_placeholder(cio)
     jlwrite(f.io, end_checksum(cio))
 
     dataset_offset = h5offset(f, obj_header_offset)
-    g[name] = data_offset
+    # Register dataset with the appropriate group
+    target_group = g isa JLDFile ? g.root_group : g
+    target_group[name] = dataset_offset
     return dataset_offset
 end

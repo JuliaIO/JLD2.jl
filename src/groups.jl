@@ -155,7 +155,7 @@ end
 
         # Use write_chunked helper function
         filters = isnothing(compress) ? nothing : compress
-        Chunking.write_chunked(f, name, obj; chunks=Tuple(chunk_dims), indexing=:v1btree, filters=filters)
+        Chunking.write_chunked(g, name, obj; chunk=Tuple(chunk_dims), indexing=:v1btree, filters=filters)
         return nothing
     end
 

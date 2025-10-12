@@ -11,8 +11,8 @@
     (version == 1) && dataspace_type::@computed(DS_V1)
     version == 1 && @skip(5)
     dim_offset::@Offset
-    dimensions::NTuple{Int(dimensionality), Int64}
-    isset(flags,0) && max_dimension_size::NTuple{Int(dimensionality), Int64}
+    dimensions::NTuple{Int(dimensionality), UInt64}
+    isset(flags,0) && max_dimension_size::NTuple{Int(dimensionality), UInt64}
 end
 
 @pseudostruct HmLinkInfo begin

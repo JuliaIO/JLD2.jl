@@ -91,19 +91,19 @@ function write_implicit_index(f::JLDFile, data::AbstractArray{T,N}, chunks, fill
     chunk_size_bytes = prod(chunks) * odr_sizeof(odr)
 
     chunks_start_offset = f.end_of_data
-    f.end_of_data = chunks_start_offset + n_chunks * chunk_size_bytes
+    seek(f.io, chunks_start_offset)
 
+    # Write chunks sequentially in linear index order
     for (julia_chunk_idx, linear_idx) in chunk_grid
-        chunk_offset = chunks_start_offset + linear_idx * chunk_size_bytes
-
         chunk_data_partial, _, _ = extract_chunk_region(data, julia_chunk_idx, chunks)
         chunk_data = pad_chunk_data(chunk_data_partial, chunks, fill_value)
 
-        seek(f.io, chunk_offset)
         io_buf = IOBuffer()
         JLD2.write_data(io_buf, f, chunk_data, odr, JLD2.datamode(odr), wsession)
         write(f.io, take!(io_buf))
     end
+
+    f.end_of_data = chunks_start_offset + n_chunks * chunk_size_bytes
 
     fill_value_size = odr_sizeof(odr)
     fill_value_bytes = reinterpret(UInt8, [fill_value])

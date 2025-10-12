@@ -6,14 +6,14 @@ function read_implicit_index_chunks(f::JLDFile, v::Array{T}, dataspace::ReadData
                                    @nospecialize(rr::ReadRepresentation), layout::DataLayout,
                                    filters::FilterPipeline, header_offset::RelOffset,
                                    ndims::Int) where T
-    chunk_dims_julia = reverse(layout.chunk_dimensions[1:ndims])
-    base_address = Int64(layout.data_offset)
+    base_offset = h5offset(f, layout.data_offset)
+    chunk_dims_julia = Tuple(Int.(reverse(layout.chunk_dimensions[1:ndims])))
     chunk_size_bytes = Int(prod(chunk_dims_julia) * sizeof(T))
 
     for (chunk_grid_idx, linear_idx) in ChunkIndexIterator(size(v), chunk_dims_julia)
-        chunk_address = base_address + (linear_idx * chunk_size_bytes)
+        chunk_offset = base_offset + (linear_idx * chunk_size_bytes)
         chunk_start = chunk_start_from_index(chunk_grid_idx, chunk_dims_julia)
-        read_and_assign_chunk!(f, v, chunk_start, RelOffset(chunk_address),
+        read_and_assign_chunk!(f, v, chunk_start, chunk_offset,
                               chunk_size_bytes, chunk_dims_julia, rr, filters, 0)
     end
     return v
@@ -59,7 +59,9 @@ end
 function read_all_chunk_entries_fixed_array(io::IO, header::FixedArrayHeader, n_chunks::Int)
     page_size = header.page_bits > 0 ? (1 << header.page_bits) : typemax(Int)
     is_paged = header.page_bits > 0 && header.max_num_entries > page_size
-    chunk_entries = Vector{Tuple{Union{RelOffset,Nothing}, Union{Int,Nothing}}}(undef, n_chunks)
+    chunk_entries = Vector{@NamedTuple{offset::RelOffset, size::UInt64, filter_mask::UInt32}}(
+        undef, n_chunks
+    )
 
     if is_paged
         bitmap = zeros(UInt8, cld(cld(header.max_num_entries, page_size), 8))
@@ -73,26 +75,32 @@ function read_all_chunk_entries_fixed_array(io::IO, header::FixedArrayHeader, n_
             page_initialized = ((bitmap[byte_idx + 1] >> bit_idx) & 0x01) != 0
 
             if !page_initialized
-                chunk_entries[chunk_idx + 1] = (nothing, nothing)
+                chunk_entries[chunk_idx + 1] = (RelOffset(-1%UInt64), 0, 0)
             else
                 seek(io, pages_start + page_num * page_total_size +
                          (chunk_idx % page_size) * Int(header.entry_size))
-                chunk_address = jlread(io, RelOffset)
-                chunk_entries[chunk_idx + 1] = chunk_address == UNDEFINED_ADDRESS ?
-                    (nothing, nothing) :
-                    (chunk_address, header.client_id == 1 ? Int(jlread(io, UInt64)) : nothing)
+                offset = jlread(io, RelOffset)
+                if header.client_id #compressed
+                    size = jlread(io, UInt64)
+                    filter_mask = jlread(io, UInt32)
+                else
+                    size = typemax(UInt64)
+                    filter_mask = zero(UInt32)
+                end
+                chunk_entries[chunk_idx + 1] = (; offset, size, filter_mask)
             end
         end
     else
         for chunk_idx in 0:(n_chunks-1)
-            chunk_address = jlread(io, RelOffset)
-            if chunk_address == UNDEFINED_ADDRESS
-                chunk_entries[chunk_idx + 1] = (nothing, nothing)
-                header.client_id == 1 && skip(io, 8)
+            offset = jlread(io, RelOffset)
+            if header.client_id == 1 #compressed
+                size = jlread(io, UInt64)
+                filter_mask = jlread(io, UInt32)
             else
-                chunk_entries[chunk_idx + 1] = (chunk_address,
-                    header.client_id == 1 ? Int(jlread(io, UInt64)) : nothing)
+                size = typemax(UInt64)
+                filter_mask = zero(UInt32)
             end
+            chunk_entries[chunk_idx + 1] = (; offset, size, filter_mask)
         end
     end
 
@@ -114,15 +122,11 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
     skip(f.io, 10)
 
     chunk_entries = read_all_chunk_entries_fixed_array(f.io, header, n_chunks_total)
-
     for (chunk_grid_idx, linear_idx) in ChunkIndexIterator(size(v), chunk_dims_julia)
-        chunk_address, compressed_size = chunk_entries[linear_idx + 1]
-        isnothing(chunk_address) && continue
-
-        chunk_size_bytes = isnothing(compressed_size) ? Int(prod(chunk_dims_julia) * sizeof(T)) : compressed_size
+        (; offset, size, filter_mask) = chunk_entries[linear_idx + 1]
+        size = (size != typemax(UInt64) ? size : Int(prod(chunk_dims_julia) * sizeof(T)))
         chunk_start = chunk_start_from_index(chunk_grid_idx, chunk_dims_julia)
-        read_and_assign_chunk!(f, v, chunk_start, chunk_address,
-                              chunk_size_bytes, chunk_dims_julia, rr, filters, 0)
+        read_and_assign_chunk!(f, v, chunk_start, offset, size, chunk_dims_julia, rr, filters, 0)
     end
     return v
 end
@@ -442,10 +446,10 @@ function read_v2btree_leaf_node(f::JLDFile, node_addr::RelOffset, record_size::U
     type_byte = jlread(f.io, UInt8)
 
     header_bytes = !isempty(filters.filters) ? 20 : 8
-    num_index_dims = (record_size - header_bytes) ÷ 8
+    ndims = (record_size - header_bytes) ÷ 8
 
     # Read all records
-    chunks = @NamedTuple{offset::RelOffset, size::UInt64, filter_mask::UInt32, idx::CartesianIndex{num_index_dims}}[]
+    chunks = @NamedTuple{offset::RelOffset, size::UInt64, filter_mask::UInt32, idx::CartesianIndex{ndims}}[]
 
     for i in 1:num_records
         offset = jlread(f.io, RelOffset)
@@ -458,8 +462,7 @@ function read_v2btree_leaf_node(f::JLDFile, node_addr::RelOffset, record_size::U
             filter_mask = UInt32(0)
         end
         # Read chunk indices (in HDF5 order, 0-based)
-        chunk_indices_hdf5_0based = UInt64[jlread(f.io, UInt64) for _ in 1:num_index_dims]
-        idx = Int.(reverse(chunk_indices_hdf5_0based .+ 1))
+        idx = CartesianIndex(reverse(ntuple(_-> 1+jlread(f.io, UInt64), ndims)))
 
         push!(chunks, (; offset, size, filter_mask, idx))
     end

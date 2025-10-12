@@ -45,6 +45,10 @@ function validate_maxshape(maxshape::NTuple{M,Union{Int,Nothing}}, data_size::NT
     ))
 end
 
+function convert_maxshape_to_hdf5(maxshape::Nothing)
+    return nothing
+end
+
 function convert_maxshape_to_hdf5(maxshape::NTuple{N,Union{Int,Nothing}}) where N
     hdf5_max = map(maxshape) do dim
         isnothing(dim) ? H5S_UNLIMITED : Int64(dim)
