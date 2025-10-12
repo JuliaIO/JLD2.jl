@@ -106,7 +106,7 @@ function write_implicit_index(f::JLDFile, data::AbstractArray{T,N}, chunks, fill
     f.end_of_data = chunks_start_offset + n_chunks * chunk_size_bytes
 
     fill_value_size = odr_sizeof(odr)
-    fill_value_bytes = reinterpret(UInt8, [fill_value])
+    fill_value_bytes = collect(reinterpret(UInt8, [T(fill_value)]))
     fill_params = (
         version = 3,
         flags = UInt8(0x20),
