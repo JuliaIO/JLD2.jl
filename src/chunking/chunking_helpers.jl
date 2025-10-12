@@ -129,16 +129,15 @@ end
 function read_and_assign_chunk!(f::JLDFile, v::Array{T}, _chunk_start,
                                chunk_address::RelOffset, chunk_size_bytes,
                                chunk_dims_julia::NTuple{N,Int}, rr, filters,
-                               filter_mask) where {T,N}
+                               filter_mask,
+                               is_padded = true
+                               ) where {T,N}
     seek(f.io, fileoffset(f, chunk_address))
     chunk_start = Tuple(_chunk_start)
     chunk_end = min.(chunk_start .+ chunk_dims_julia .- 1, size(v))
     actual_chunk_size = chunk_end .- chunk_start .+ 1
-    is_edge_chunk = actual_chunk_size != chunk_dims_julia
 
-    # HDF5 spec: non-filtered chunks always padded, filtered chunks may be unpadded
-    vchunk = if is_edge_chunk && iscompressed(filters) &&
-                chunk_size_bytes < prod(chunk_dims_julia) * sizeof(T)
+    vchunk = if !is_padded
         Array{T, N}(undef, actual_chunk_size...)
     else
         Array{T, N}(undef, chunk_dims_julia...)
