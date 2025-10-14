@@ -122,8 +122,18 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
     skip(f.io, 10)
 
     chunk_entries = read_all_chunk_entries_fixed_array(f.io, header, n_chunks_total)
+
+    # Initialize array to zero for sparse chunks (fill value)
+    fill!(v, zero(T))
+
     for (chunk_grid_idx, linear_idx) in ChunkIndexIterator(size(v), chunk_dims_julia)
         (; offset, size, filter_mask) = chunk_entries[linear_idx + 1]
+
+        # Skip undefined chunks (already filled with zeros)
+        if offset == JLD2.UNDEFINED_ADDRESS
+            continue
+        end
+
         size = (size != typemax(UInt64) ? size : Int(prod(chunk_dims_julia) * sizeof(T)))
         chunk_start = chunk_start_from_index(chunk_grid_idx, chunk_dims_julia)
         read_and_assign_chunk!(f, v, chunk_start, offset, size, chunk_dims_julia, rr, filters, 0)
@@ -157,9 +167,12 @@ end
 define_packed(ExtensibleArrayHeader)
 
 """Read chunks using Extensible Array indexing (type 4, one unlimited dimension)."""
-function read_extensible_array_chunks(f::JLDFile, v::Array, dataspace, rr,
+function read_extensible_array_chunks(f::JLDFile, v::Array{T}, dataspace, rr,
                                        layout::DataLayout, filters,
-                                       header_offset, ndims::Int)
+                                       header_offset, ndims::Int) where T
+    # Initialize array to zero for sparse chunks (fill value)
+    fill!(v, zero(T))
+
     seek(f.io, layout.data_offset)
     jlread(f.io, UInt32) == EXTENSIBLE_ARRAY_HEADER_SIGNATURE ||
         throw(InvalidDataException("Invalid Extensible Array header signature"))
@@ -323,11 +336,12 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
     # Data block k contains: data_blk_min_elmts * 2^k elements
     num_elements_in_block = Int(data_blk_min_elmts) * (1 << data_blk_idx)
 
-    # Read and process chunk records from this data block
-    for i in 1:num_elements_in_block
-        chunk_idx = chunk_idx_start + i - 1
+    # Calculate total chunks needed
+    total_chunks_needed = prod(grid_dims)
 
-        # Read chunk record
+    # First, read ALL chunk records from the data block
+    chunk_records = Vector{Tuple{RelOffset, UInt64, UInt32}}(undef, num_elements_in_block)
+    for i in 1:num_elements_in_block
         if isempty(filters.filters)
             offset = jlread(f.io, RelOffset)
             size = prod(chunk_dims_julia) * sizeof(eltype(v))
@@ -336,6 +350,18 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
             offset = jlread(f.io, RelOffset)
             size = jlread(f.io, UInt64)
             filter_mask = jlread(f.io, UInt32)
+        end
+        chunk_records[i] = (offset, size, filter_mask)
+    end
+
+    # Now, read the actual chunk data
+    for i in 1:num_elements_in_block
+        chunk_idx = chunk_idx_start + i - 1
+        offset, size, filter_mask = chunk_records[i]
+
+        # Skip if chunk index exceeds what we need for the array
+        if chunk_idx >= total_chunks_needed
+            continue
         end
 
         # Skip undefined chunks
@@ -394,9 +420,12 @@ For a 2D Julia array (rows × cols), v2 B-tree stores:
 
 These are chunk indices (not element indices). Multiply by chunk_size to get element offset.
 """
-function read_v2btree_chunks(f::JLDFile, v::Array, dataspace, rr,
+function read_v2btree_chunks(f::JLDFile, v::Array{T}, dataspace, rr,
                               layout::DataLayout, filters,
-                              header_offset, ndims::Int)
+                              header_offset, ndims::Int) where T
+
+    # Initialize array to zero for sparse chunks (fill value)
+    fill!(v, zero(T))
 
     # Parse v2 B-tree chunk index header
     header = JLD2.BTrees.read_v2btree_header(f, h5offset(f, layout.data_offset))
