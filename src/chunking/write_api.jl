@@ -3,21 +3,8 @@
 
 Wrapper type for arrays that should be written with chunking to JLD2 files.
 
-The chunk index type (Single Chunk, Fixed Array, Extensible Array, or V2 B-tree)
-is automatically selected based on the `maxshape` parameter, matching h5py's behavior.
-
-# Fields
-- `data::AbstractArray{T,N}` - The array data to write
-- `chunks::NTuple{N,Int}` - Chunk dimensions (must match array dimensionality)
-- `maxshape::Union{Nothing, NTuple{N,Union{Int,Nothing}}}` - Maximum dimensions
-  - `nothing` for fixed-size dataset
-  - `nothing` in tuple for unlimited dimension (e.g., `(nothing, 100)`)
-- `fill_value::Union{Nothing, T}` - Fill value for unallocated chunks
-- `indexing::Union{Symbol, Nothing}` - Manual chunk index type override
-  - Valid values: `:single_chunk`, `:implicit_index`, `:fixed_array`,
-    `:extensible_array`, `:v2btree`
-  - `nothing` for automatic selection
-- `filters::Union{Nothing, FilterPipeline}` - Compression filters to apply
+The chunk index type (Single Chunk, Fixed Array, Extensible Array, V2 B-tree or V1 B-tree)
+must be manually specified using the `indexing` parameter. If not specified, v1 b-tree is used.
 
 # Examples
 
@@ -29,7 +16,7 @@ data = rand(Float32, 100, 50)
 ca1 = WriteChunkedArray(data, chunks=(10, 10))
 ca2 = WriteChunkedArray(data, chunks=(10, 10), maxshape=(nothing, 50))
 ca3 = WriteChunkedArray(data, chunks=(10, 10), maxshape=(nothing, nothing))
-ca4 = WriteChunkedArray(data, chunks=(10, 10), filters=:gzip)
+ca4 = WriteChunkedArray(data, chunks=(10, 10), filters=Deflate())
 ca5 = WriteChunkedArray(data, chunks=(10, 10), indexing=:v2btree)
 
 jldsave("output.jld2"; data1=ca1, data2=ca2, data3=ca3)
@@ -97,8 +84,7 @@ jldopen("file.jld2", "w") do f
     data = rand(Float32, 1000, 1000)
     write_chunked(f, "data1", data; chunk=(100, 100))
     write_chunked(f, "data2", data; chunk=(100, 100), maxshape=(nothing, 1000))
-    write_chunked(f, "data3", data; chunk=(100, 100), filters=:gzip)
-    write_chunked(f, "data4", data; chunk=:auto)
+    write_chunked(f, "data3", data; chunk=(100, 100), filters=Deflate())
 end
 ```
 """

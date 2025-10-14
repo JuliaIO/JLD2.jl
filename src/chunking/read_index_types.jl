@@ -307,7 +307,7 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
 
     # Block offset (variable size based on max_nelmts_bits)
     # Size in bytes = ceil(max_nelmts_bits / 8)
-    ea_info = layout.chunk_indexing_info::ExtensibleArrayInfo
+    ea_info = layout.chunk_indexing_info#::ExtensibleArrayInfo
     block_offset_size = cld(Int(ea_info.max_bits), 8)
     block_offset = if block_offset_size == 1
         UInt64(jlread(f.io, UInt8))
