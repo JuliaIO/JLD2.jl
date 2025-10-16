@@ -1,3 +1,6 @@
+## 0.4.55
+ - Backport: Remove FileIO precompile workload
+
 ## 0.4.54
 
  - **Deprecation**: Do not rely on JLD2 to load a compression library. This feature will be removed in a future release. Instead explicitly add `using` statements into your scripts.
