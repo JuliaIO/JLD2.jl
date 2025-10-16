@@ -23,9 +23,6 @@
                 end
             end
 
-            load(path)
-            load(path; nested=true)
-
             nothing
         end
     end
