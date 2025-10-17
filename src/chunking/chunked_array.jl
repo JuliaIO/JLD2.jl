@@ -39,7 +39,7 @@ function get_chunked_array(f::JLDFile, name::String)
 
     dataspace = ReadDataspace()
     dt::H5Datatype = PlaceholderH5Datatype()
-    layout::DataLayout = DataLayout(0, LcCompact, 0, -1)
+    layout::DataLayout = DataLayout(0, LcCompact, 0, UNDEFINED_ADDRESS)
     filter_pipeline::FilterPipeline = FilterPipeline()
 
     for msg in HeaderMessageIterator(f, offset)
@@ -61,7 +61,7 @@ function get_chunked_array(f::JLDFile, name::String)
 
     chunks = layout.version == 3 ?
         [ChunkInfo(c.offset, c.size, c.filter_mask, c.idx) for c in
-         JLD2.BTrees.read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)] :
+         JLD2.BTrees.read_v1btree(f, layout.data_offset; layout.dimensionality)] :
         ChunkInfo[]
 
     return ChunkedArray{T,ndims}(f, offset, array_size, chunk_dims, dt, layout,
@@ -130,7 +130,7 @@ function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
                            filters::FilterPipeline, header_offset::RelOffset,
                            ndims::Int) where T
     if layout.version == 3
-        chunks = JLD2.BTrees.read_v1btree(f, h5offset(f, layout.data_offset); layout.dimensionality)
+        chunks = JLD2.BTrees.read_v1btree(f, layout.data_offset; layout.dimensionality)
         chunk_dims_julia = Tuple(Int.(reverse(layout.chunk_dimensions)[1:ndims]))
 
         for chunk in chunks

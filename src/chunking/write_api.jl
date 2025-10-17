@@ -140,11 +140,37 @@ function write_chunked(g::Union{JLDFile,Group}, name::String, data::AbstractArra
         max_dimension_size = convert_maxshape_to_hdf5(maxshape)
         )
 
+    # Compute optimal dim_size for chunk dimensions
+    # Use smallest integer type that can hold all dimension values
+    all_dims = (reverse(chunk)..., odr_sizeof(odr))
+    max_dim = maximum(all_dims)
+    dim_size = if max_dim <= typemax(UInt8)
+        UInt8(1)
+    elseif max_dim <= typemax(UInt16)
+        UInt8(2)
+    elseif max_dim <= typemax(UInt32)
+        UInt8(4)
+    else
+        UInt8(8)
+    end
+
+    # Convert dimensions to appropriate size tuple
+    dim_values = if dim_size == 1
+        Tuple(UInt8.(all_dims))
+    elseif dim_size == 2
+        Tuple(UInt16.(all_dims))
+    elseif dim_size == 4
+        Tuple(UInt32.(all_dims))
+    else
+        Tuple(UInt64.(all_dims))
+    end
+
     layout_params = (;
         version = index_metadata.layout_version,
         layout_class = LcChunked,
         dimensionality = UInt8(N + 1),
-        dimensions = UInt64.((reverse(chunk)..., odr_sizeof(odr))),
+        dim_size = dim_size,
+        dimensions = dim_values,
         index_metadata.chunk_indexing_type,
         data_address = index_metadata.data_address,
         index_metadata.layout_params...

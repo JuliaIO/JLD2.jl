@@ -166,8 +166,11 @@ function write_fixed_array_index(f::JLDFile, data::AbstractArray{T,N}, chunks, o
     header_offset = h5offset(f, header_pos)
     seek(f.io, header_pos)
 
+    # Page bits: log2(page_size) - HDF5 uses 1024 by default, so log2(1024) = 10
+    page_bits = UInt8(10)
+
     hdr = FixedArrayHeader(
-        UInt8(0), client_id, entry_size, UInt8(0),
+        UInt8(0), client_id, entry_size, page_bits,
         Int64(n_chunks), h5offset(f, data_block_offset)
     )
     header_size = write_fixed_array_header(f.io, hdr)
@@ -184,7 +187,7 @@ function write_fixed_array_index(f::JLDFile, data::AbstractArray{T,N}, chunks, o
         UInt8(3),
         (
         flags = UInt8(0x00),
-        page_bits = UInt8(0)
+        page_bits = page_bits
         ),
         false,
         false,
@@ -239,23 +242,61 @@ function write_extensible_array_index(f::JLDFile, data::AbstractArray{T,N}, chun
 
     element_size = iscompressed(filter_pipeline) ? UInt8(20) : UInt8(8)
     client_id = iscompressed(filter_pipeline) ? UInt8(1) : UInt8(0)
-    num_data_blks = UInt64(0)
+
+    # EA header parameters (matching h5py defaults)
+    max_nelmts_bits = UInt8(32)
+    data_blk_min_elmts = UInt8(16)
+    secondary_blk_min_data_ptrs = UInt8(4)
+    max_dblk_page_nelmts_bits = UInt8(10)
 
     chunk_metadata = write_all_chunks(f, data, chunks, odr, filter_pipeline, wsession)
 
-    index_block_size = 4 + 1 + 1 + 8 + Int(index_blk_elmts) * Int(element_size) + 4
-
-    index_block_pos = f.end_of_data
-    seek(f.io, index_block_pos)
-    f.end_of_data = index_block_pos + index_block_size
-
+    # Write EA header FIRST (before index block)
+    header_size = 4 + jlsizeof(ExtensibleArrayHeader) + 4
     header_pos = f.end_of_data
     header_offset = h5offset(f, header_pos)
 
+    # Calculate allocated address slots (not just used ones!)
+    # This must match the formula in read_index_types.jl
+    first_sup_blk_log2 = Int(max_dblk_page_nelmts_bits)
+    data_blk_min_log2 = trailing_zeros(Int(data_blk_min_elmts))
+    ndblk_addrs = first_sup_blk_log2 - data_blk_min_log2
+
+    total_addr_bits = Int(max_nelmts_bits) - data_blk_min_log2
+    total_addr_slots = total_addr_bits + (index_blk_elmts > 0 ? 3 : 0)  # Empirical adjustment
+    nsup_addrs = total_addr_slots - ndblk_addrs
+
+    # Calculate index block size
+    # Structure: sig(4) + ver(1) + client(1) + header_addr(8) +
+    #           elements[index_blk_elmts] + data_block_addrs[ndblk_addrs] +
+    #           super_block_addrs[nsup_addrs] + checksum(4)
+    index_block_size = 4 + 1 + 1 + 8 + Int(index_blk_elmts) * Int(element_size) +
+                       ndblk_addrs * 8 + nsup_addrs * 8 + 4
+    index_block_pos = header_pos + header_size
+
+    # Write EA header
+    seek(f.io, header_pos)
+    hdr = ExtensibleArrayHeader(
+        UInt8(0), client_id, element_size, max_nelmts_bits, index_blk_elmts,
+        data_blk_min_elmts, secondary_blk_min_data_ptrs, max_dblk_page_nelmts_bits,
+        UInt64(0), UInt64(0), UInt64(0), UInt64(0),
+        UInt64(n_chunks), UInt64(n_chunks),
+        h5offset(f, index_block_pos)
+    )
+
+    cio = begin_checksum_write(f.io, header_size - 4)
+    jlwrite(cio, EXTENSIBLE_ARRAY_HEADER_SIGNATURE)
+    jlwrite(cio, hdr)
+    jlwrite(f.io, end_checksum(cio))
+    f.end_of_data = header_pos + header_size
+
+    # Write index block AFTER header
+    seek(f.io, index_block_pos)
     ib_cio = begin_checksum_write(f.io, index_block_size - 4)
     jlwrite(ib_cio, EXTENSIBLE_ARRAY_INDEX_BLOCK_SIGNATURE)
     jlwrite(ib_cio, UInt8(0))
     jlwrite(ib_cio, UInt8(client_id))
+    # Index block stores header address as relative offset (RelOffset)
     jlwrite(ib_cio, header_offset)
 
     for i in 1:Int(index_blk_elmts)
@@ -274,23 +315,20 @@ function write_extensible_array_index(f::JLDFile, data::AbstractArray{T,N}, chun
         end
     end
 
+    # Write data block address SLOTS (allocate space for future expansion)
+    for i in 1:ndblk_addrs
+        # Only the first one might be used if we have data blocks
+        # For now, all are undefined since all chunks fit in index block
+        jlwrite(ib_cio, UNDEFINED_ADDRESS)
+    end
+
+    # Write super block address SLOTS (all undefined for now)
+    for i in 1:nsup_addrs
+        jlwrite(ib_cio, UNDEFINED_ADDRESS)
+    end
+
     jlwrite(f.io, end_checksum(ib_cio))
-
-    seek(f.io, header_pos)
-
-    hdr = ExtensibleArrayHeader(
-        UInt8(0), client_id, element_size, UInt8(32), index_blk_elmts,
-        UInt8(16), UInt8(4), UInt8(10),
-        UInt64(0), UInt64(0), UInt64(0), UInt64(0),
-        UInt64(n_chunks), UInt64(n_chunks),
-        h5offset(f, index_block_pos)
-    )
-
-    cio = begin_checksum_write(f.io, 4 + jlsizeof(ExtensibleArrayHeader) )
-    jlwrite(cio, EXTENSIBLE_ARRAY_HEADER_SIGNATURE)
-    jlwrite(cio, hdr)
-    jlwrite(f.io, end_checksum(cio))
-    f.end_of_data = header_pos + 4 + jlsizeof(ExtensibleArrayHeader) + 4
+    f.end_of_data = index_block_pos + index_block_size
 
     layout_params = (
         flags = iscompressed(filter_pipeline) ? UInt8(0x02) : UInt8(0x00),

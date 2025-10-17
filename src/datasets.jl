@@ -15,7 +15,7 @@ function load_dataset(f::JLDFile{IO}, offset::RelOffset) where IO
     dataspace = ReadDataspace()
     attrs = EMPTY_READ_ATTRIBUTES
     dt::H5Datatype = PlaceholderH5Datatype()
-    layout::DataLayout = DataLayout(0,LcCompact,0,-1)
+    layout::DataLayout = DataLayout(0xff,LcCompact,0,UNDEFINED_ADDRESS)
     filter_pipeline::FilterPipeline = FilterPipeline()
 
     for msg in HeaderMessageIterator(f, offset)
@@ -65,11 +65,11 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
                    header_offset::RelOffset=NULL_REFERENCE,
                    attributes::Union{Vector{ReadAttribute},Nothing}=nothing)
     rr = jltype(f, dt)
-    if layout.data_offset == -1
+    if layout.version == 0xff
         # There was no layout message.
         # That means, this dataset is just a datatype
         return julia_repr(rr)
-    elseif layout.data_offset == typemax(Int64)
+    elseif layout.data_offset == UNDEFINED_ADDRESS
         T = julia_repr(rr)
         if layout.data_length > -1
             # TODO: this could use the fill value message to populate the array
@@ -79,7 +79,7 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
         track_weakref!(f, header_offset, v)
         return v
     end
-    seek(f.io, layout.data_offset)
+    seek(f.io, fileoffset(f, layout.data_offset))
     read_dataspace = (dataspace, header_offset, layout, filters)
     read_data(f, rr, read_dataspace, attributes)
 end
@@ -231,7 +231,7 @@ end
     if !ischunked(layout) || (layout.chunk_indexing_type == 1)
         # Contiguous or compact storage - read directly
         n = length(v)
-        seek(io, layout.data_offset)
+        seek(io, fileoffset(f, layout.data_offset))
         if iscompressed(filters)
             read_compressed_array!(v, f, rr, layout.data_length, filters)
         else

@@ -34,7 +34,7 @@ struct DataLayout
     version::UInt8
     storage_type::LayoutClass
     data_length::Int64
-    data_offset::Int64
+    data_offset::RelOffset
     dimensionality::UInt8
     chunk_indexing_type::UInt8 # only in version 4
     chunk_indexing_info::Union{Nothing, ChunkIndexingInfo} # v4 indexing info
@@ -60,8 +60,7 @@ DataLayout(f::JLD2.JLDFile, msg_::Hmessage) =
 function DataLayout(f::JLD2.JLDFile, msg::HmWrap{HmDataLayout})
     version = msg.version::UInt8
     storage_type = msg.layout_class::LayoutClass
-    rf = msg.data_address::RelOffset
-    data_offset::Int64 = rf != UNDEFINED_ADDRESS ? fileoffset(f, rf) : typemax(Int64)
+    data_offset = msg.data_address::RelOffset
 
     if version == 4 || version == 3
         if storage_type == LcCompact

@@ -60,7 +60,7 @@ function read_array(f::JLDFile, dataspace::ReadDataspace,
     seek(io, offset)
     v = construct_array(io, InlineUnionEl{T1,T2}, Int(ndims))
     n = length(v)
-    seek(io, layout.data_offset)
+    seek(io, fileoffset(f, layout.data_offset))
     if iscompressed(filters)
         read_compressed_array!(v, f, rr, layout.data_length, filters)
     else
