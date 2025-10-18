@@ -36,7 +36,8 @@ const V2_BTREE_SPLIT_PERCENT = UInt8(100)
 const V2_BTREE_MERGE_PERCENT = UInt8(40)
 
 # Note: BTrees is loaded before Chunking in JLD2.jl.
-# BTrees functions are accessed via JLD2.BTrees.* prefix.
+# Import BTrees functions and types needed for chunk indexing
+using ..JLD2.BTrees: read_chunk_record_type10, ChunkRecordV2
 
 # Include chunking implementation files
 include("chunking_helpers.jl")

@@ -26,6 +26,7 @@ include("v2btree_write.jl")
 # Types and constants
 export V2BTreeHeader
 export V2_BTREE_HEADER_SIGNATURE
+export ChunkRecordV2
 
 # Functions needed within JLD2
 export write_v2btree_chunked_dataset
@@ -33,5 +34,6 @@ export read_v1btree
 export read_symbol_table_node
 export read_v2btree_header
 export read_records_in_node
+export read_chunk_record_type10
 
 end # module BTrees

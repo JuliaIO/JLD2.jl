@@ -23,7 +23,7 @@ function read_fill_value(f::JLDFile, msg::Hmessage, dt::H5Datatype)
                 # Read the raw fill value bytes
                 fill_bytes = UInt8[jlread(io, UInt8) for _ in 1:size]
                 # Convert to Julia type based on datatype
-                return bytes_to_fill_value(fill_bytes, dt)
+                return bytes_to_fill_value(f, fill_bytes, dt)
             end
         end
     elseif version == 1 || version == 2
@@ -35,7 +35,7 @@ function read_fill_value(f::JLDFile, msg::Hmessage, dt::H5Datatype)
             size = jlread(io, UInt32)
             if size > 0
                 fill_bytes = UInt8[jlread(io, UInt8) for _ in 1:size]
-                return bytes_to_fill_value(fill_bytes, dt)
+                return bytes_to_fill_value(f, fill_bytes, dt)
             end
         end
     end
@@ -44,68 +44,21 @@ function read_fill_value(f::JLDFile, msg::Hmessage, dt::H5Datatype)
 end
 
 """
-    bytes_to_fill_value(bytes::Vector{UInt8}, dt::H5Datatype)
+    bytes_to_fill_value(f::JLDFile, bytes::Vector{UInt8}, dt::H5Datatype)
 
 Convert raw bytes from HDF5 fill value to Julia value based on datatype.
 """
-function bytes_to_fill_value(bytes::Vector{UInt8}, dt::H5Datatype)
-    if dt isa FixedPointDatatype
-        # Integer types
-        T = jltype_from_datatype(dt)
-        if sizeof(T) == length(bytes)
-            return reinterpret(T, bytes)[1]
-        end
-    elseif dt isa FloatingPointDatatype
-        # Float types
-        T = jltype_from_datatype(dt)
+function bytes_to_fill_value(f::JLDFile, bytes::Vector{UInt8}, dt::H5Datatype)
+    if dt isa FixedPointDatatype || dt isa FloatingPointDatatype
+        # Get Julia type through standard conversion
+        rr = jltype(f, dt)
+        T = julia_repr(rr)
         if sizeof(T) == length(bytes)
             return reinterpret(T, bytes)[1]
         end
     end
     # For other types, return nothing (use default)
     return nothing
-end
-
-"""
-    jltype_from_datatype(dt::H5Datatype)
-
-Get the Julia type corresponding to an H5Datatype.
-"""
-function jltype_from_datatype(dt::FixedPointDatatype)
-    nbytes = dt.size
-    is_signed = Bool(dt.bitfield1 >> 3 & 0b1)
-
-    if is_signed
-        if nbytes == 1
-            return Int8
-        elseif nbytes == 2
-            return Int16
-        elseif nbytes == 4
-            return Int32
-        elseif nbytes == 8
-            return Int64
-        end
-    else
-        if nbytes == 1
-            return UInt8
-        elseif nbytes == 2
-            return UInt16
-        elseif nbytes == 4
-            return UInt32
-        elseif nbytes == 8
-            return UInt64
-        end
-    end
-    return Nothing
-end
-
-function jltype_from_datatype(dt::FloatingPointDatatype)
-    if dt.size == 4
-        return Float32
-    elseif dt.size == 8
-        return Float64
-    end
-    return Nothing
 end
 
 function load_dataset(f::JLDFile{IO}, offset::RelOffset) where IO

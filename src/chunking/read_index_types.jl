@@ -468,41 +468,8 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
     return chunk_idx_start + num_elements_to_read
 end
 
-"""
-    ChunkRecordV2
-
-Represents a chunk record in a V2 B-tree for chunked datasets (type 10).
-Contains chunk offset, size, filter mask, and multi-dimensional index.
-"""
-struct ChunkRecordV2 <: JLD2.BTrees.BTreeRecordV2
-    offset::RelOffset
-    size::UInt64
-    filter_mask::UInt32
-    idx::CartesianIndex
-end
-
-"""
-    read_chunk_record_type10(io, type, ndims, chunk_size_bytes, has_filters)
-
-Read a single chunk record from a V2 B-tree node.
-Used as a callback for generic V2 B-tree traversal.
-"""
-function read_chunk_record_type10(io, type, ndims, chunk_size_bytes, has_filters)
-    offset = jlread(io, RelOffset)
-
-    if has_filters
-        size = jlread(io, UInt64)
-        filter_mask = jlread(io, UInt32)
-    else
-        size = chunk_size_bytes
-        filter_mask = UInt32(0)
-    end
-
-    # Read chunk indices (in HDF5 order, 0-based) and convert to Julia 1-based
-    idx = CartesianIndex(reverse(ntuple(_-> 1 + jlread(io, UInt64), ndims)))
-
-    return ChunkRecordV2(offset, size, filter_mask, idx)
-end
+# ChunkRecordV2 and read_chunk_record_type10 are now defined in src/btrees/v2btree_read.jl
+# and exported from the BTrees module
 
 """
     read_v2btree_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims)

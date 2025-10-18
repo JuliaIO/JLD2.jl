@@ -45,3 +45,16 @@ struct BTreeType5RecordV2 <: BTreeRecordV2
     offset::UInt64
     length::Int
 end
+
+"""
+    ChunkRecordV2
+
+Represents a chunk record in a V2 B-tree for chunked datasets (type 10).
+Contains chunk offset, size, filter mask, and multi-dimensional index.
+"""
+struct ChunkRecordV2 <: BTreeRecordV2
+    offset::RelOffset
+    size::UInt64
+    filter_mask::UInt32
+    idx::CartesianIndex
+end

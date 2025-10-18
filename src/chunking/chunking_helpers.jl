@@ -34,34 +34,36 @@ end
 Base.length(cit::ChunkIndexIterator) = length(cit.cidxs)
 Base.eltype(::Type{ChunkIndexIterator{N}}) where N = Tuple{CartesianIndex{N}, Int}
 
-## Weird index computation function that can hopefully be eliminated
+"""
+    chunk_start_from_index(chunk_idx::CartesianIndex{N}, chunk_dims::NTuple{N,Int}) where N
 
-"""Compute 1-based starting position for a chunk from its grid index."""
+Compute 1-based starting element position for a chunk from its grid index.
+For example, chunk (2,3) with chunk_dims (5,10) starts at element (6,21).
+"""
 @inline chunk_start_from_index(chunk_idx::CartesianIndex{N}, chunk_dims::NTuple{N,Int}) where N =
     (Tuple(chunk_idx) .- 1) .* chunk_dims .+ 1
 
-"""Convert 0-based linear chunk index (HDF5) to 1-based CartesianIndex (Julia)."""
+"""
+    linear_index_to_chunk_coords(linear_idx::Int, grid_dims::NTuple{N,Int}) where N
+
+Convert 0-based linear chunk index (HDF5 ordering) to 1-based CartesianIndex (Julia ordering).
+
+HDF5 uses column-major linear indexing with reversed dimensions. This function:
+1. Converts linear index to HDF5 coordinates (reversed, 0-based)
+2. Reverses back to Julia dimension order
+3. Converts to 1-based indexing
+"""
 function linear_index_to_chunk_coords(linear_idx::Int, grid_dims::NTuple{N,Int}) where N
     grid_dims_hdf5 = reverse(grid_dims)
-    coords_hdf5 = zeros(Int, N)
-    idx = linear_idx
-    for i in N:-1:1
-        coords_hdf5[i] = idx % grid_dims_hdf5[i]
-        idx = div(idx, grid_dims_hdf5[i])
+    coords_hdf5 = ntuple(N) do i
+        idx_i = linear_idx
+        for j in N:-1:i+1
+            idx_i = div(idx_i, grid_dims_hdf5[j])
+        end
+        idx_i % grid_dims_hdf5[i]
     end
-    return CartesianIndex(Tuple(reverse(coords_hdf5) .+ 1))
+    return CartesianIndex(reverse(coords_hdf5) .+ 1)
 end
-
-"""Convert 0-based linear chunk index to HDF5 0-based element indices (reversed)."""
-function hdf5_element_indices_from_linear(linear_idx::Int, grid_dims::NTuple{N,Int},
-                                          chunk_dims::NTuple{N,Int}) where N
-    chunk_coords_julia = linear_index_to_chunk_coords(linear_idx, grid_dims)
-    return reverse((Tuple(chunk_coords_julia) .- 1) .* chunk_dims)
-end
-
-"""Compute 1-based element start position from Julia chunk coordinates."""
-chunk_element_start_julia(chunk_coords::CartesianIndex{N}, chunk_dims::NTuple{N,Int}) where N =
-    (Tuple(chunk_coords) .- 1) .* chunk_dims .+ 1
 
 """Normalize and localize filter pipeline for chunk compression."""
 function prepare_filter_pipeline(filters, odr, dataspace)

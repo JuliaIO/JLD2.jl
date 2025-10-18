@@ -163,3 +163,33 @@ function read_record_type5(io, type, hh)
         throw(error("Not implemented record type"))
     end
 end
+
+"""
+    read_chunk_record_type10(io, type, ndims, chunk_size_bytes, has_filters)
+
+Read a chunk record (type 10) from a V2 B-tree node for chunked datasets.
+Returns a ChunkRecordV2 containing offset, size, filter mask, and chunk index.
+
+# Arguments
+- `io`: IO stream positioned at record location
+- `type`: B-tree type (should be 10 for chunk records)
+- `ndims`: Number of dataset dimensions
+- `chunk_size_bytes`: Size of uncompressed chunk in bytes
+- `has_filters`: Whether the dataset has filters (affects record format)
+"""
+function read_chunk_record_type10(io, type, ndims, chunk_size_bytes, has_filters)
+    offset = jlread(io, RelOffset)
+
+    if has_filters
+        size = jlread(io, UInt64)
+        filter_mask = jlread(io, UInt32)
+    else
+        size = chunk_size_bytes
+        filter_mask = UInt32(0)
+    end
+
+    # Read chunk indices (in HDF5 order, 0-based) and convert to Julia 1-based
+    idx = CartesianIndex(reverse(ntuple(_-> 1 + jlread(io, UInt64), ndims)))
+
+    return ChunkRecordV2(offset, size, filter_mask, idx)
+end
