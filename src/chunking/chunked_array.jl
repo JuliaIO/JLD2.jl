@@ -128,7 +128,7 @@ end
 function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
                            @nospecialize(rr::ReadRepresentation), layout::DataLayout,
                            filters::FilterPipeline, header_offset::RelOffset,
-                           ndims::Int) where T
+                           ndims::Int, fill_value::T=zero(T)) where T
     if layout.version == 3
         chunks = JLD2.BTrees.read_v1btree(f, layout.data_offset; layout.dimensionality)
         chunk_dims_julia = Tuple(Int.(reverse(layout.chunk_dimensions)[1:ndims]))
@@ -138,10 +138,10 @@ function read_chunked_array(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
         end
         return v
     elseif layout.version == 4
-        return layout.chunk_indexing_type == 2 ? read_implicit_index_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims) :
-               layout.chunk_indexing_type == 3 ? read_fixed_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims) :
-               layout.chunk_indexing_type == 4 ? read_extensible_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims) :
-               layout.chunk_indexing_type == 5 ? read_v2btree_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims) :
+        return layout.chunk_indexing_type == 2 ? read_implicit_index_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims, fill_value) :
+               layout.chunk_indexing_type == 3 ? read_fixed_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims, fill_value) :
+               layout.chunk_indexing_type == 4 ? read_extensible_array_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims, fill_value) :
+               layout.chunk_indexing_type == 5 ? read_v2btree_chunks(f, v, dataspace, rr, layout, filters, header_offset, ndims, fill_value) :
                throw(UnsupportedVersionException("Chunk indexing type $(layout.chunk_indexing_type) not implemented"))
     end
     throw(UnsupportedVersionException("Layout version $(layout.version) not implemented"))

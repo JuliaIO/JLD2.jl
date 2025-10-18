@@ -5,7 +5,7 @@ chunk_address = base_address + (chunk_size_bytes × chunk_index)
 function read_implicit_index_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
                                    @nospecialize(rr::ReadRepresentation), layout::DataLayout,
                                    filters::FilterPipeline, header_offset::RelOffset,
-                                   ndims::Int) where T
+                                   ndims::Int, fill_value::T=zero(T)) where T
     base_offset = layout.data_offset
     chunk_dims_julia = Tuple(Int.(reverse(layout.chunk_dimensions[1:ndims])))
     chunk_size_bytes = Int(prod(chunk_dims_julia) * sizeof(T))
@@ -111,7 +111,7 @@ end
 function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspace,
                                 @nospecialize(rr::ReadRepresentation), layout::DataLayout,
                                 filters::FilterPipeline, header_offset::RelOffset,
-                                ndims::Int) where T
+                                ndims::Int, fill_value::T=zero(T)) where T
     chunk_dims_julia = Tuple(Int.(reverse(layout.chunk_dimensions[1:ndims])))
     n_chunks_total = prod(cld.(size(v), chunk_dims_julia))
     header = read_fixed_array_header(f, layout.data_offset)
@@ -123,13 +123,13 @@ function read_fixed_array_chunks(f::JLDFile, v::Array{T}, dataspace::ReadDataspa
 
     chunk_entries = read_all_chunk_entries_fixed_array(f.io, header, n_chunks_total)
 
-    # Initialize array to zero for sparse chunks (fill value)
-    fill!(v, zero(T))
+    # Initialize array with fill value for sparse chunks
+    fill!(v, fill_value)
 
     for (chunk_grid_idx, linear_idx) in ChunkIndexIterator(size(v), chunk_dims_julia)
         (; offset, size, filter_mask) = chunk_entries[linear_idx + 1]
 
-        # Skip undefined chunks (already filled with zeros)
+        # Skip undefined chunks (already filled with fill value)
         if offset == JLD2.UNDEFINED_ADDRESS
             continue
         end
@@ -201,9 +201,9 @@ end
 """Read chunks using Extensible Array indexing (type 4, one unlimited dimension)."""
 function read_extensible_array_chunks(f::JLDFile, v::Array{T}, dataspace, rr,
                                        layout::DataLayout, filters,
-                                       header_offset, ndims::Int) where T
-    # Initialize array to zero for sparse chunks (fill value)
-    fill!(v, zero(T))
+                                       header_offset, ndims::Int, fill_value::T=zero(T)) where T
+    # Initialize array with fill value for sparse chunks
+    fill!(v, fill_value)
 
     seek(f.io, fileoffset(f, layout.data_offset))
     jlread(f.io, UInt32) == EXTENSIBLE_ARRAY_HEADER_SIGNATURE ||
@@ -216,10 +216,11 @@ function read_extensible_array_chunks(f::JLDFile, v::Array{T}, dataspace, rr,
     # Calculate allocated address slots (not just used ones)
     ndblk_addrs, nsup_addrs = calculate_ea_index_block_addr_slots(hdr)
 
+    # Pass max_index_set to limit reading to actual chunks
     read_extensible_array_index_block!(f, v, dataspace, rr, layout, filters,
                                         hdr.index_blk_addr, hdr.element_size,
                                         hdr.index_blk_elmts, hdr.data_blk_min_elmts,
-                                        ndblk_addrs, nsup_addrs, ndims)
+                                        ndblk_addrs, nsup_addrs, ndims, Int(hdr.max_index_set))
     return v
 end
 
@@ -227,19 +228,21 @@ end
     read_extensible_array_index_block!(f, v, dataspace, rr, layout, filters,
                                         index_blk_addr, element_size,
                                         index_blk_elmts, data_blk_min_elmts,
-                                        ndblk_addrs, nsup_addrs, ndims)
+                                        ndblk_addrs, nsup_addrs, ndims, max_index_set)
 
 Read the Extensible Array Index Block and navigate to chunk records.
 
 # Arguments
 - `ndblk_addrs`: Number of data block address SLOTS (not used blocks!)
 - `nsup_addrs`: Number of super block address SLOTS
+- `max_index_set`: Maximum chunk index that has been set (limits reading)
 """
 function read_extensible_array_index_block!(f::JLDFile, v::Array, dataspace, rr,
                                              layout::DataLayout, filters,
                                              index_blk_addr::RelOffset, element_size::UInt8,
                                              index_blk_elmts::UInt8, data_blk_min_elmts::UInt8,
-                                             ndblk_addrs::Int, nsup_addrs::Int, ndims::Int)
+                                             ndblk_addrs::Int, nsup_addrs::Int, ndims::Int,
+                                             max_index_set::Int)
 
     offset = fileoffset(f, index_blk_addr)
     seek(f.io, offset)
@@ -336,11 +339,15 @@ function read_extensible_array_index_block!(f::JLDFile, v::Array, dataspace, rr,
     chunk_idx = num_direct_elements  # Continue from where direct elements left off
     for (data_blk_idx, data_block_addr) in enumerate(data_block_addrs)
         if !isnothing(data_block_addr) && data_block_addr.offset != typemax(UInt64)
+            # Stop if we've reached the maximum index that has been set
+            if chunk_idx >= max_index_set
+                break
+            end
             chunk_idx = read_extensible_array_data_block!(f, v, dataspace, rr, layout,
                                                           filters, data_block_addr,
                                                           chunk_idx, data_blk_idx - 1,
                                                           data_blk_min_elmts, grid_dims,
-                                                          chunk_dims_julia)
+                                                          chunk_dims_julia, max_index_set)
         end
     end
 
@@ -351,7 +358,7 @@ end
     read_extensible_array_data_block!(f, v, dataspace, rr, layout, filters,
                                        data_block_addr, chunk_idx_start,
                                        data_blk_idx, data_blk_min_elmts,
-                                       grid_dims, chunk_dims_julia)
+                                       grid_dims, chunk_dims_julia, max_index_set)
 
 Read an Extensible Array Data Block and its chunk records.
 
@@ -365,7 +372,8 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
                                            data_block_addr::RelOffset, chunk_idx_start::Int,
                                            data_blk_idx::Int, data_blk_min_elmts::UInt8,
                                            grid_dims::NTuple{N,Int},
-                                           chunk_dims_julia::NTuple{N,Int}) where N
+                                           chunk_dims_julia::NTuple{N,Int},
+                                           max_index_set::Int) where N
     seek(f.io, fileoffset(f, data_block_addr))
 
     # Read data block header
@@ -381,6 +389,7 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
     # Block offset (variable size based on max_nelmts_bits)
     # Size in bytes = ceil(max_nelmts_bits / 8)
     ea_info = layout.chunk_indexing_info#::ExtensibleArrayInfo
+
     block_offset_size = cld(Int(ea_info.max_bits), 8)
     block_offset = if block_offset_size == 1
         UInt64(jlread(f.io, UInt8))
@@ -394,14 +403,20 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
 
     # Calculate number of elements in this specific data block using exponential growth pattern
     # Data block k contains: data_blk_min_elmts * 2^k elements
-    num_elements_in_block = Int(data_blk_min_elmts) * (1 << data_blk_idx)
+    num_elements_allocated = Int(data_blk_min_elmts) * (1 << data_blk_idx)
+
+    # Only read up to max_index_set to avoid reading uninitialized slots
+    num_elements_to_read = min(num_elements_allocated, max(0, max_index_set - chunk_idx_start))
 
     # Calculate total chunks needed
     total_chunks_needed = prod(grid_dims)
 
-    # First, read ALL chunk records from the data block
-    chunk_records = Vector{Tuple{RelOffset, UInt64, UInt32}}(undef, num_elements_in_block)
-    for i in 1:num_elements_in_block
+    # Read chunk records from the data block (only up to what's actually set)
+    # Note: HDF5 may store fewer records than allocated if chunks aren't written yet
+    chunk_records = Vector{Tuple{RelOffset, UInt64, UInt32}}()
+    sizehint!(chunk_records, num_elements_to_read)
+
+    for i in 1:num_elements_to_read
         if isempty(filters.filters)
             offset = jlread(f.io, RelOffset)
             size = prod(chunk_dims_julia) * sizeof(eltype(v))
@@ -411,11 +426,24 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
             size = jlread(f.io, UInt64)
             filter_mask = jlread(f.io, UInt32)
         end
-        chunk_records[i] = (offset, size, filter_mask)
+
+        # Check if this looks like valid data (offset within file bounds and not a checksum pattern)
+        # If offset is way beyond file size, we've likely hit the end of actual records
+        if offset.offset != 0 && offset.offset != typemax(UInt64) && offset.offset < filesize(f.path) * 10
+            push!(chunk_records, (offset, size, filter_mask))
+        elseif offset.offset == 0 || offset.offset == typemax(UInt64)
+            # Explicitly undefined chunk - add it
+            push!(chunk_records, (offset, size, filter_mask))
+        else
+            # Invalid offset - stop reading (likely hit checksum or uninitialized data)
+            break
+        end
     end
 
+    num_elements_to_read = length(chunk_records)
+
     # Now, read the actual chunk data
-    for i in 1:num_elements_in_block
+    for i in 1:num_elements_to_read
         chunk_idx = chunk_idx_start + i - 1
         offset, size, filter_mask = chunk_records[i]
 
@@ -432,11 +460,48 @@ function read_extensible_array_data_block!(f::JLDFile, v::Array, dataspace, rr,
         # Calculate chunk position and read data
         chunk_grid_idx = linear_index_to_chunk_coords(chunk_idx, grid_dims)
         chunk_start = chunk_start_from_index(chunk_grid_idx, chunk_dims_julia)
+
         read_and_assign_chunk!(f, v, chunk_start, offset, Int(size),
                                 chunk_dims_julia, rr, filters, filter_mask)
     end
 
-    return chunk_idx_start + num_elements_in_block
+    return chunk_idx_start + num_elements_to_read
+end
+
+"""
+    ChunkRecordV2
+
+Represents a chunk record in a V2 B-tree for chunked datasets (type 10).
+Contains chunk offset, size, filter mask, and multi-dimensional index.
+"""
+struct ChunkRecordV2 <: JLD2.BTrees.BTreeRecordV2
+    offset::RelOffset
+    size::UInt64
+    filter_mask::UInt32
+    idx::CartesianIndex
+end
+
+"""
+    read_chunk_record_type10(io, type, ndims, chunk_size_bytes, has_filters)
+
+Read a single chunk record from a V2 B-tree node.
+Used as a callback for generic V2 B-tree traversal.
+"""
+function read_chunk_record_type10(io, type, ndims, chunk_size_bytes, has_filters)
+    offset = jlread(io, RelOffset)
+
+    if has_filters
+        size = jlread(io, UInt64)
+        filter_mask = jlread(io, UInt32)
+    else
+        size = chunk_size_bytes
+        filter_mask = UInt32(0)
+    end
+
+    # Read chunk indices (in HDF5 order, 0-based) and convert to Julia 1-based
+    idx = CartesianIndex(reverse(ntuple(_-> 1 + jlread(io, UInt64), ndims)))
+
+    return ChunkRecordV2(offset, size, filter_mask, idx)
 end
 
 """
@@ -461,13 +526,13 @@ Used when dataset has multiple unlimited dimensions.
 
 **Internal Node** (signature "BTIN"):
 - Contains child node pointers and separator keys
-- Not needed for small datasets (depth=0)
+- Used when dataset has many chunks (depth > 0)
 
 # Algorithm
 
 1. Parse v2 B-tree header to get root node address and depth
-2. If depth=0, root is leaf node - read all chunk records
-3. If depth>0, traverse internal nodes to find leaf nodes
+2. Create record reader callback for chunk records (type 10)
+3. Use recursive tree traversal to collect all chunk records
 4. Read each chunk into output array using chunk_address and chunk_indices
 
 # Dimension Handling
@@ -482,10 +547,10 @@ These are chunk indices (not element indices). Multiply by chunk_size to get ele
 """
 function read_v2btree_chunks(f::JLDFile, v::Array{T}, dataspace, rr,
                               layout::DataLayout, filters,
-                              header_offset, ndims::Int) where T
+                              header_offset, ndims::Int, fill_value::T=zero(T)) where T
 
-    # Initialize array to zero for sparse chunks (fill value)
-    fill!(v, zero(T))
+    # Initialize array with fill value for sparse chunks
+    fill!(v, fill_value)
 
     # Parse v2 B-tree chunk index header
     header = JLD2.BTrees.read_v2btree_header(f, layout.data_offset)
@@ -497,17 +562,20 @@ function read_v2btree_chunks(f::JLDFile, v::Array{T}, dataspace, rr,
 
     # Calculate chunk size for unfiltered chunks
     chunk_size_bytes = UInt64(prod(chunk_dims_julia) * sizeof(eltype(v)))
+    has_filters = !isempty(filters.filters)
+
+    # Create record reader callback with captured parameters
+    record_reader = (io, type) -> read_chunk_record_type10(io, type, ndims, chunk_size_bytes, has_filters)
 
     # Traverse tree to collect all chunk records
-    chunks = if header.depth == 0
-        # Root is leaf node - read all chunks directly
-        read_v2btree_leaf_node(f, header.root_node_address, header.record_size,
-                               header.num_records_root, ndims, chunk_size_bytes,
-                               filters)
-    else
-        # Need to traverse internal nodes (not implemented yet)
-        throw(UnsupportedFeatureException("V2 B-tree with depth > 0 not yet implemented"))
-    end
+    chunks = JLD2.BTrees.read_records_in_node(
+        f,
+        header.root_node_address,
+        header.num_records_root,
+        header.depth,
+        header,
+        record_reader
+    )
 
     # Read each chunk into array
     for chunk in chunks
@@ -519,42 +587,4 @@ function read_v2btree_chunks(f::JLDFile, v::Array{T}, dataspace, rr,
     end
 
     return v
-end
-
-function read_v2btree_leaf_node(f::JLDFile, node_addr::RelOffset, record_size::UInt16,
-                                 num_records::UInt16, ndims::Int, chunk_size_bytes::UInt64,
-                                 filters)
-    seek(f.io, fileoffset(f, node_addr))
-
-    # Read and verify node signature
-    sig = jlread(f.io, UInt32)
-    sig == htol(0x464C5442) || throw(InvalidDataException("Invalid V2 B-tree leaf node signature: expected BTLF (0x464C5442), got 0x$(string(sig, base=16))"))
-
-    # Read node header
-    version = jlread(f.io, UInt8)
-    type_byte = jlread(f.io, UInt8)
-
-    header_bytes = !isempty(filters.filters) ? 20 : 8
-    ndims = (record_size - header_bytes) ÷ 8
-
-    # Read all records
-    chunks = @NamedTuple{offset::RelOffset, size::UInt64, filter_mask::UInt32, idx::CartesianIndex{ndims}}[]
-
-    for i in 1:num_records
-        offset = jlread(f.io, RelOffset)
-
-        if !isempty(filters.filters)
-            size = Int(jlread(f.io, UInt64))
-            filter_mask = jlread(f.io, UInt32)
-        else
-            size = chunk_size_bytes
-            filter_mask = UInt32(0)
-        end
-        # Read chunk indices (in HDF5 order, 0-based)
-        idx = CartesianIndex(reverse(ntuple(_-> 1+jlread(f.io, UInt64), ndims)))
-
-        push!(chunks, (; offset, size, filter_mask, idx))
-    end
-
-    return chunks
 end
