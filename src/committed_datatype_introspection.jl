@@ -1,9 +1,14 @@
 # This file implements methods to look up the type signatures
 # of committed julia data types in JLD2 files without
 # needing the types to exist in the current session.
-function stringify_committed_datatype(f, cdt; showfields=false)
+
+function stringify_h5datatype(f, dt; showfields=false)
     io = f.io
-    dt, attrs = read_shared_datatype(f, cdt)
+    attrs = ReadAttribute[]
+    if isshared(dt)
+        dt, attrs = read_shared_datatype(f, dt)
+    end
+
     written_type_str = ""
     julia_type_str = ""
     for attr in attrs
@@ -22,9 +27,14 @@ function stringify_committed_datatype(f, cdt; showfields=false)
             julia_type_str = str
         end
     end
-            
+
+    if !(dt isa CompoundDatatype)
+        type = jltype(f, dt)
+        julia_type_str = string(julia_repr(type))
+    end
+
     if !showfields ||
-        dt isa BasicDatatype ||
+        !isa(dt, CompoundDatatype)
         dt isa VariableLengthDatatype ||
         startswith(julia_type_str, r"Tuple|Union") ||
         julia_type_str == "DataType"
@@ -33,21 +43,30 @@ function stringify_committed_datatype(f, cdt; showfields=false)
 
     field_datatypes = read_field_datatypes(f, dt, attrs)
     field_strs = String[]
-    do_report = false
     for (i, key) in enumerate(keys(field_datatypes))
+        # Find the corresponding index in dt.names
+        name_index = findfirst(name -> string(name) == string(key), dt.names)
+        if name_index === nothing
+            continue  # Skip if name not found
+        end
+
         if (ref = field_datatypes[string(key)]) != NULL_REFERENCE
-            fieldtype = stringify_committed_datatype(f, f.datatype_locations[ref])[1]
-            do_report = true
+            fieldtype = stringify_h5datatype(f, f.datatype_locations[ref])[1]
+            fieldtype *= " (committed at $(ref))"
         else
             # These are normal julia types
-            dtrr = jltype(f, dt.members[i])
-            fieldtype = string(julia_type(dtrr))
+            if name_index <= length(dt.members)
+                dtrr = jltype(f, dt.members[name_index])
+                fieldtype = string(julia_repr(dtrr))
+                if fieldtype == "Any"
+                    fieldtype = "Any (untyped reference)"
+                end
+            else
+                fieldtype = "unknown"
+            end
         end
-        push!(field_strs, "$(dt.names[i])::$(fieldtype)")
+        push!(field_strs, "$(dt.names[name_index])::$(fieldtype)")
     end
-    if do_report == false
-        empty!(field_strs)
-    end 
     return julia_type_str, written_type_str, field_strs
 end
 
@@ -87,10 +106,10 @@ function stringify_object(f, offset)
     else
         rr = jltype(f, datatype)
         seek(f.io, layout.data_offset)
-        read_dataspace = (dataspace, NULL_REFERENCE, layout, filter_pipeline)
+        read_dataspace = (dataspace, NULL_REFERENCE, layout, FilterPipeline(filter_pipeline))
         res = read_data(f, rr, read_dataspace, nothing)
         string(res)
-    end    
+    end
 end
 
 function typestring_from_refs(f::JLDFile, ptr::Ptr)
@@ -98,13 +117,12 @@ function typestring_from_refs(f::JLDFile, ptr::Ptr)
     isinit = jlunsafe_load(convert(Ptr{UInt32}, ptr)) != 0
     if isinit
         refs = jlconvert(MappedRepr{RelOffset, Vlen{RelOffset}}(), f, ptr, NULL_REFERENCE)
-        #println("datatypes at refs $(Int.(getproperty.(refs,:offset)))")
         params =  Any[let
             # If the reference is to a committed datatype, read the datatype
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
-            res = if cdt !== nulldt 
-                stringify_committed_datatype(f, cdt)[1]
+            res = if cdt !== nulldt
+                stringify_h5datatype(f, cdt)[1]
             else
                 stringify_object(f, ref)
             end
@@ -135,12 +153,10 @@ function jlconvert_string(::MappedRepr{T,DataTypeODR},
     if startswith(mypath, r"Core|Main")
         mypath = last(split(mypath, "."; limit=2))
     end
-
     if !isempty(params)
-        return mypath*"{"*join(params, ",")*"}"
-    else
-        return mypath
+        mypath *= "{"*join(params, ",")*"}"
     end
+    return mypath
 end
 
 function jlconvert_string(::MappedRepr{Union, UnionTypeODR}, f::JLDFile,
@@ -154,9 +170,26 @@ function jlconvert_string(::MappedRepr{Union, UnionTypeODR}, f::JLDFile,
     "Union{"*join(vcat(datatypes, unionalls), ",")*"}"
 end
 
-function jlconvert_string(rr::ReadRepresentation,
-                        f::JLDFile,
-                        ptr::Ptr)
+function jlconvert_string(rr::ReadRepresentation, f::JLDFile, ptr::Ptr)
     # so apparently this is a custom struct with plain fields that wants to be loaded
     string(jlconvert(rr, f, ptr, UNDEFINED_ADDRESS))
+end
+
+# Safe attribute reading that provides useful info without risking reconstruction errors
+function safe_read_attribute_info(f::JLDFile, attr::ReadAttribute)
+    (; dataspace, datatype) = attr
+    layout =  DataLayout(0,LcCompact,-1,attr.data_offset)
+
+    if isshared(datatype)
+        # Retrieve committed datatype if it is committed
+        dt = get(f.datatype_locations, datatype.header_offset, dt)
+        rr = jltype(f, dt)
+        jlconvert_string_wrap(rr, f, layout.data_offset)
+    else
+        rr = jltype(f, datatype)
+        seek(f.io, layout.data_offset)
+        read_dataspace = (dataspace, NULL_REFERENCE, layout, FilterPipeline())
+        res = read_data(f, rr, read_dataspace, nothing)
+        string(res)
+    end
 end

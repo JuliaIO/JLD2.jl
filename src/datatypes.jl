@@ -328,6 +328,9 @@ struct FixedLengthString{T<:AbstractString}
     length::Int
 end
 
+# Add julia_repr method for FixedLengthString
+julia_repr(::FixedLengthString{T}) where T = T
+
 
 struct ArrayDatatype <: H5Datatype
     class::UInt8
