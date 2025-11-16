@@ -24,7 +24,8 @@ update Artifacts.toml:
         lazy=true)
 update artifact string below to reflect new version number
 =#
-testfiles = artifact"testfiles/JLD2TestFiles-0.1.8/artifacts"
+# NOTE: Keep this artifact version in sync with test_dataset_show.jl
+testfiles = artifact"testfiles/JLD2TestFiles-0.1.9/artifacts"
 
 @testset "HDF5 compat test files" begin
     # These are test files copied from the HDF5.jl test suite

@@ -127,6 +127,7 @@ load("example.jld2", "mygroup/mystuff")
 When loading files with nested groups these will be unrolled into paths by default but
 yield nested dictionaries but with the `nested` keyword argument.
 ```@repl
+using JLD2
 load("example.jld2")
 load("example.jld2"; nested=true)
 ```

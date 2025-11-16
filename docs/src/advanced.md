@@ -49,6 +49,7 @@ struct A_old
 end
 f = jldopen("example.jld2","r"; typemap=Dict("Main.A" => A_old))
 f["a"]
+close(f)
 ```
 
 ## Upgrading old structures on load

@@ -40,6 +40,7 @@ include("compression.jl")
 include("test_files.jl")
 include("unpack_test.jl")
 include("dataset_api.jl")
+include("test_dataset_show.jl")
 include("mmap_test.jl")
 include("wrapped_io.jl")
 

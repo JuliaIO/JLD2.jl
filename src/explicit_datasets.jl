@@ -1,5 +1,34 @@
+"""
+    Dataset
+
+A mutable struct representing an HDF5/JLD2 dataset with explicit control over metadata.
+
+The `Dataset` type allows low-level access to dataset metadata and provides fine-grained
+control over how data is stored, including compression, chunking, and layout options.
+This is useful for advanced use cases where you need more control than the standard
+`jldsave`/`load` interface provides.
+# Usage
+
+Datasets are created using [`create_dataset`](@ref), written with [`write_dataset`](@ref),
+and read with [`read_dataset`](@ref) or retrieved with [`get_dataset`](@ref).
+
+# Example
+```julia
+jldopen("data.jld2", "w") do f
+    # Create a dataset with compression
+    dset = JLD2.create_dataset(f, "compressed_data")
+    dset.filters = Deflate()
+    JLD2.write_dataset(dset, rand(1000, 1000))
+
+    # Add attributes
+    JLD2.add_attribute(dset, "description", "Random data with compression")
+end
+```
+
+See also: [`create_dataset`](@ref), [`write_dataset`](@ref), [`read_dataset`](@ref), [`get_dataset`](@ref)
+"""
 mutable struct Dataset
-    parent::Group #param..
+    parent::Group
     name::String
     offset::RelOffset
     datatype
@@ -7,24 +36,54 @@ mutable struct Dataset
     layout
     attributes::OrderedDict{String, Any}
     chunk
-    filters#::Vector{Filter}
-    #external
+    filters
     header_chunk_info # chunk_start, chunk_end, next_msg_offset
 end
 
 
 """
-    create_dataset(parent, path, datatype, dataspace; kwargs...)
+    create_dataset(parent, path, datatype=nothing, dataspace=nothing; layout=nothing, chunk=nothing, filters=FilterPipeline())
 
-Arguments:
-    - `parent::Union{JLDfile, Group}`: Containing group of new dataset
-    - `path`: Path to new dataset relative to `parent`. If `path` is `nothing`, the dataset is unnamed.
-    - `datatype`: Datatype of new dataset (element type in case of arrays)
-    - `dataspace`: Dimensions or `Dataspace` of new dataset
+Create a new [`Dataset`](@ref) object with specified metadata, ready for writing data.
 
-Keyword arguments:
-    - `layout`: `DataLayout` of new dataset
-    - `filters`: `FilterPipeline` for describing the compression pipeline
+This function creates a dataset specification but does not write any data to the file.
+The dataset must be written using [`write_dataset`](@ref) to actually store data.
+This two-step process allows you to configure compression, attributes, and other
+metadata before writing.
+
+# Arguments
+- `parent::Union{JLDFile, Group}`: The containing file or group for the new dataset
+- `path::Union{String, Nothing}`: Path to the dataset relative to `parent`.
+  If `nothing`, creates an unnamed dataset
+- `datatype`: HDF5 datatype specification. If `nothing`, will be inferred from data during writing
+- `dataspace`: Dataspace describing dimensions. If `nothing`, will be inferred from data during writing
+
+## Returns
+- `Dataset`: A mutable dataset object ready for configuration and writing
+
+## Notes
+- The dataset is not written to the file until [`write_dataset`](@ref) is called
+- Datatype and dataspace are usually inferred automatically from the data
+- Compression filters can be added after creation but before writing
+- Attributes can be added before or after writing (see [`add_attribute`](@ref))
+
+See also: [`write_dataset`](@ref), [`Dataset`](@ref), [`add_attribute`](@ref), [`Deflate`](@ref)
+
+## Usage Example
+
+```julia
+jldopen("data.jld2", "w") do f
+    dset = JLD2.create_dataset(f, "my_data")
+    JLD2.write_dataset(dset, [1, 2, 3, 4, 5])
+end
+
+jldopen("data.jld2", "w") do f
+    dset = JLD2.create_dataset(f, "compressed_array")
+    dset.filters = Deflate()  # Add gzip compression
+    JLD2.add_attribute(dset, "experiment_id", "exp_001")
+    JLD2.write_dataset(dset, rand(10000))
+end
+```
 """
 create_dataset(f::JLDFile, args...; kwargs...) = create_dataset(f.root_group, args...; kwargs...)
 function create_dataset(
@@ -40,7 +99,7 @@ function create_dataset(
         (parent, name) = pathize(g, path, true)
     else
         name = ""
-        parent = g.f
+        parent = g
     end
 
     return Dataset(parent, name, UNDEFINED_ADDRESS, datatype, dataspace,
@@ -50,77 +109,110 @@ end
 iswritten(dset::Dataset) = (dset.offset != UNDEFINED_ADDRESS)
 
 function Base.show(io::IO, ::MIME"text/plain", dset::Dataset)
-    f = dset.parent.f
-    print(io, "┌─ Dataset:")
-    print(io, isempty(dset.name) ? " (unnamed)" : " \"$(dset.name)\"")
-    print(io, iswritten(dset) ? " at $(dset.offset)" : " (unwritten)", "\n")
+    print_dataset_header(io, dset)
     prefix = "│  "
-    #println(io, prefix*"parent: $(dset.parent)")
-    if !isnothing(dset.datatype)
-        dt = dset.datatype
-        iscommitted = dt isa SharedDatatype && haskey(f.datatype_locations, dt.header_offset)
-        print(io, prefix*"datatype: $(typeof(dt))", iscommitted ? " (committed)\n" : "\n")
-        iscommitted && println(io, prefix*"\tcommitted at: $(dt.header_offset)")
-        rr = jltype(dset.parent.f, dt)
-        jt = julia_repr(rr)
-        println(io, prefix*"\twritten structure: $jt")
-        if iscommitted
-            juliatype, writtentype, fields = stringify_committed_datatype(f, f.datatype_locations[dt.header_offset], showfields=true)
-            println(io, prefix*"\ttype name: $(juliatype)")
-            if !isempty(writtentype)
-                println(io, prefix*"\twritten type name: $(writtentype)")
-            end
-            for field in fields
-                println(io, prefix*"\t\t$(field)")
-            end
-        end
-    end
-    if !isnothing(dset.dataspace)
-        ds = dset.dataspace
-        if ds isa HmWrap{HmDataspace}#Hmessage
-            println(io, prefix*"dataspace:")
-            spacetype = Dict(
-                0x00=>"Scalar",
-                0x01=>"Simple",
-                0x02=>"Null",
-                0xff=>"V1")[ds.dataspace_type]
-            println(io, prefix*"\ttype: $(spacetype)")
-            println(io, prefix*"\tdimensions: $(ds.dimensions)")
-        else
-            println(io, prefix*"dataspace: $(dset.dataspace)")
-        end
-    end
-    if !isnothing(dset.layout)
-        layout = dset.layout
-        if layout isa HmWrap{HmDataLayout}
-            println(io, prefix*"layout:")
-            println(io, prefix*"\tclass: $(layout.layout_class)")
-        else
-            println(io, prefix*"layout: $(dset.layout)")
-        end
-    end
-    if !isnothing(dset.filters) && !isempty(dset.filters.filters)
-        println(io, prefix*"filters: $(dset.filters)")
-    end
-    if !isempty(dset.attributes)
-        println(io, prefix*"Attributes:")
-        for (k, attr) in pairs(dset.attributes)
-            if attr isa ReadAttribute
-                data = read_attr_data(dset.parent.f, attr)
-                println(io, prefix*"\t$(attr.name) = ",
-                    data isa String ? "\"$data\"" : data)
-            else
-                println(io, prefix*"\t$(k) = $(attr)")
-            end
-        end
-    end
+    print_datatype_info(io, dset, prefix)
+    print_dataspace_info(io, dset, prefix)
+    print_layout_info(io, dset, prefix)
+    print_filters_info(io, dset, prefix)
+    print_attributes_info(io, dset, prefix)
     println(io, "└─")
 end
 
-"""
-    write_dataset(dataset::Dataset, data)
+function print_dataset_header(io::IO, dset::Dataset)
+    print(io, "┌─ Dataset:")
+    print(io, isempty(dset.name) ? " (unnamed)" : " \"$(dset.name)\"")
+    println(io, iswritten(dset) ? " at $(dset.offset)" : " (unwritten)")
+end
 
-Write data to file using metadata prepared in the `dataset`.
+function print_datatype_info(io::IO, dset::Dataset, prefix::String)
+    isnothing(dset.datatype) && return
+
+    dt = dset.datatype
+    f = dset.parent.f
+    iscommitted = isshared(dt)
+    tpstr = replace(string(typeof(dt)), "JLD2."=>"")
+    print(io, prefix, "datatype: ", tpstr)
+    if iscommitted
+        print(io, " (committed at ", dt.header_offset, ")\n")
+    else
+        print(io, "\n")
+    end
+    # print_datatype_structure
+    if dt isa BasicDatatype && dt.class%16 == DT_REFERENCE
+        println(io, prefix, "\ttype name: RelOffset")
+        return
+    end
+    julia_type_str, _, field_strs = stringify_h5datatype(f, dt, showfields=true)
+
+    println(io, prefix, "\ttype name: ", julia_type_str)
+    if !isempty(field_strs)
+        println(io, prefix, "\tstored fields:")
+        foreach(field_str -> println(io, prefix, "\t\t", field_str), field_strs)
+    end
+end
+
+function print_dataspace_info(io::IO, dset::Dataset, prefix::String)
+    isnothing(dset.dataspace) && return
+
+    ds = dset.dataspace
+    if ds isa HmWrap{HmDataspace}
+        spacetype_map = Dict(0x00=>"Scalar", 0x01=>"Simple", 0x02=>"Null", 0xff=>"V1")
+        println(io, prefix, "dataspace:")
+        println(io, prefix, "\ttype: ", spacetype_map[ds.dataspace_type])
+        println(io, prefix, "\tdimensions: ", ds.dimensions)
+    else
+        println(io, prefix, "dataspace: ", ds)
+    end
+end
+
+function print_layout_info(io::IO, dset::Dataset, prefix::String)
+    isnothing(dset.layout) && return
+
+    layout = dset.layout
+    if layout isa HmWrap{HmDataLayout}
+        println(io, prefix, "layout:")
+        println(io, prefix, "\tclass: ", layout.layout_class)
+    else
+        println(io, prefix, "layout: ", layout)
+    end
+end
+
+function print_filters_info(io::IO, dset::Dataset, prefix::String)
+    (!isnothing(dset.filters) && !isempty(dset.filters.filters)) && println(io, prefix, "filters: ", dset.filters)
+end
+
+function print_attributes_info(io::IO, dset::Dataset, prefix::String)
+    isempty(dset.attributes) && return
+
+    println(io, prefix, "Attributes:")
+    for (k, attr) in pairs(dset.attributes)
+        if attr isa ReadAttribute
+            attr_info = safe_read_attribute_info(dset.parent.f, attr)
+            println(io, prefix, "\t", attr.name, " = ", attr_info)
+        else
+            println(io, prefix, "\t", k, " = ", attr)
+        end
+    end
+end
+
+"""
+    write_dataset(dataset::Dataset, data, wsession=JLDWriteSession())
+
+Write data to file using the metadata and configuration stored in the [`Dataset`](@ref) object.
+
+This function performs the actual data writing operation after a dataset has been created
+with [`create_dataset`](@ref). The dataset must not have been written before (each dataset
+can only be written once). The data type and dataspace will be automatically inferred
+from the provided data if they weren't specified during dataset creation.
+
+## Arguments
+- `dataset::Dataset`: The dataset object created with [`create_dataset`](@ref)
+- `data`: The data to write. Can be any Julia object that JLD2 can serialize
+- `wsession::JLDWriteSession`: Optional write session for advanced usage (default: new session)
+
+## Returns
+- `RelOffset`: The file offset where the dataset was written
 """
 function write_dataset(dataset::Dataset, data, wsession::JLDWriteSession=JLDWriteSession())
     f = dataset.parent.f
@@ -158,7 +250,8 @@ end
 """
     read_dataset(dset::Dataset)
 
-Read the data referenced by a dataset.
+Read and return the complete dataset from the file and reconstructs the original
+Julia object.
 """
 function read_dataset(dset::Dataset)
     f = dset.parent.f
@@ -174,8 +267,14 @@ end
 """
     get_dataset(parent::Union{JLDFile, Group}, name::String)
 
-Get a stored dataset from a file by name or path as a `Dataset` object.
-This may be useful for inspecting the metadata incl. types of a dataset.
+Retrieve a [`Dataset`](@ref) object from a file without reading the actual data.
+This is useful for inspecting dataset properties, accessing attributes, or preparing for selective data reading.
+The returned `Dataset` object can be used with [`read_dataset`](@ref), [`readmmap`](@ref),
+or array indexing operations.
+
+## Arguments
+- `parent`: The file or group containing the dataset
+- `name::String`: Name or path of the dataset relative to the parent
 """
 get_dataset(f::JLDFile, args...; kwargs...) =
     get_dataset(f.root_group, args...; kwargs...)
@@ -338,6 +437,23 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
         position(io)-24)
 end
 
+"""
+    add_attribute(dset::Dataset, name::String, data, wsession=JLDWriteSession())
+
+Add an attribute with the specified name and data to a [`Dataset`](@ref).
+
+Attributes are metadata key-value pairs associated with datasets. They can store
+additional information about the data such as units, descriptions, creation dates,
+or any other relevant metadata. Attributes can be added before or after the dataset
+has been written to the file.
+
+## Arguments
+- `dset::Dataset`: The dataset to add the attribute to
+- `name::String`: The attribute name (must be unique within the dataset)
+- `data`: The attribute value (can be any JLD2-serializable Julia object)
+- `wsession::JLDWriteSession`: Optional write session for advanced usage (default: new session)
+
+"""
 function add_attribute(dset::Dataset, name::String, data, wsession=JLDWriteSession())
     f = dset.parent.f
     prewrite(f) # assert writability
