@@ -22,7 +22,7 @@ function stringify_committed_datatype(f, cdt; showfields=false)
             julia_type_str = str
         end
     end
-            
+
     if !showfields ||
         dt isa BasicDatatype ||
         dt isa VariableLengthDatatype ||
@@ -47,7 +47,7 @@ function stringify_committed_datatype(f, cdt; showfields=false)
     end
     if do_report == false
         empty!(field_strs)
-    end 
+    end
     return julia_type_str, written_type_str, field_strs
 end
 
@@ -56,7 +56,7 @@ function stringify_object(f, offset)
     dataspace = ReadDataspace()
     attrs = EMPTY_READ_ATTRIBUTES
     datatype::H5Datatype = PlaceholderH5Datatype()
-    layout::DataLayout = DataLayout(0,LcCompact,0,-1)
+    layout::DataLayout = DataLayout(0,LcCompact,0,UNDEFINED_ADDRESS)
     filter_pipeline::WrittenFilterPipeline = WrittenFilterPipeline()
     for msg in HeaderMessageIterator(f, offset)
         if msg.type == HmDataspace
@@ -83,14 +83,14 @@ function stringify_object(f, offset)
     if datatype isa SharedDatatype && haskey(f.datatype_locations, datatype.header_offset)
         # Committed datatype
         rr = jltype(f, f.datatype_locations[datatype.header_offset])
-        jlconvert_string_wrap(rr, f, layout.data_offset)
+        jlconvert_string_wrap(rr, f, fileoffset(f, layout.data_offset))
     else
         rr = jltype(f, datatype)
-        seek(f.io, layout.data_offset)
+        seek(f.io, fileoffset(f,layout.data_offset))
         read_dataspace = (dataspace, NULL_REFERENCE, layout, filter_pipeline)
         res = read_data(f, rr, read_dataspace, nothing)
         string(res)
-    end    
+    end
 end
 
 function typestring_from_refs(f::JLDFile, ptr::Ptr)
@@ -103,7 +103,7 @@ function typestring_from_refs(f::JLDFile, ptr::Ptr)
             # If the reference is to a committed datatype, read the datatype
             nulldt = CommittedDatatype(UNDEFINED_ADDRESS, 0)
             cdt = get(f.datatype_locations, ref, nulldt)
-            res = if cdt !== nulldt 
+            res = if cdt !== nulldt
                 stringify_committed_datatype(f, cdt)[1]
             else
                 stringify_object(f, ref)
@@ -119,7 +119,7 @@ function typestring_from_refs(f::JLDFile, ptr::Ptr)
 end
 
 function jlconvert_string_wrap(rr, f, offset)
-    seek(f.io, offset)
+    seek(f.io, fileoffset(f, offset))
     r = Vector{UInt8}(undef, odr_sizeof(rr))
     @GC.preserve r begin
         unsafe_read(f.io, pointer(r), odr_sizeof(rr))

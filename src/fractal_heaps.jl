@@ -18,9 +18,9 @@ end
 
 struct FractalHeapDirectBlock
     offset::RelOffset # position of block in file
-    # block offset in heaps address space 
+    # block offset in heaps address space
     # WARNING: don't use. sometimes wrong in long files
-    block_offset::UInt64 
+    block_offset::UInt64
     size::UInt64
     filtered_size::UInt64 # set to typemax if not filtered
     filter_mask::UInt32  # set to typemax if not filtered
@@ -145,11 +145,11 @@ function read_indirect_block(f, offset, hh, nrows::Int)
     end
 
     # Checksum
-    end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException()) 
-    
+    end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())
+
     iblocks = Vector{FractalHeapIndirectBlock}(undef, N)
     for n=1:N
-        iblock_offset = iblock_addresses[n] 
+        iblock_offset = iblock_addresses[n]
         iblock_offset == UNDEFINED_ADDRESS && break
         # figure out iblock size / nrows
         block_num = K+(n-1)
@@ -161,187 +161,9 @@ function read_indirect_block(f, offset, hh, nrows::Int)
     FractalHeapIndirectBlock(offset, block_offset, dblocks, iblocks)
 end
 
-#####################################################################################################
-## Version 2 B-trees 
-#####################################################################################################
-
-const V2_BTREE_HEADER_SIGNATURE = htol(0x44485442) # UInt8['B','T','H','D']
-const V2_BTREE_INTERNAL_NODE_SIGNATURE = htol(0x4e495442) # UInt8['B', 'T', 'I', 'N']
-const V2_BTREE_LEAF_NODE_SIGNATURE = htol(0x464c5442) # UInt8['B', 'T', 'L', 'F']
-
-struct BTreeHeaderV2
-    offset::RelOffset
-    type::Int
-    node_size::Int
-    record_size::Int
-    depth::Int
-    split_percent::Int
-    merge_percent::Int
-    root_node_address::RelOffset
-    num_records_in_root_node::Int
-    num_records_in_tree::Int
-end
-
-abstract type BTreeNodeV2 end
-abstract type BTreeRecordV2 end
-
-struct BTreeInternalNodeV2 <: BTreeNodeV2
-    offset::RelOffset
-    type::UInt8
-    records::Vector{Any}
-    child_nodes::Vector #abstract to defer loading
-end
-
-struct BTreeLeafNodeV2 <: BTreeNodeV2
-    offset::RelOffset
-    type::UInt8
-    records::Vector{<:BTreeRecordV2}
-end
-
-struct BTreeType5RecordV2 <: BTreeRecordV2
-    hash::UInt32
-    offset::UInt64
-    length::Int
-end
-
-function read_v2btree_header(f, offset)
-    io = f.io
-    seek(io, fileoffset(f, offset))
-    cio = begin_checksum_read(io)
-
-    signature = jlread(cio, UInt32)
-    signature == V2_BTREE_HEADER_SIGNATURE || throw(InvalidDataException("Signature does not match."))
-
-    version = jlread(cio, UInt8)
-    type = jlread(cio, UInt8)
-    node_size = jlread(cio, UInt32)
-    record_size = jlread(cio, UInt16)
-    depth = jlread(cio, UInt16)
-    split_percent = jlread(cio, UInt8)
-    merge_percent = jlread(cio, UInt8)
-    root_node_address = jlread(cio, RelOffset)
-    num_records_in_root_node = jlread(cio, UInt16)
-    num_records_in_tree = jlread(cio, Length)
-
-    end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())    
-    BTreeHeaderV2(  offset,
-                    type,
-                    node_size,
-                    record_size,
-                    depth,
-                    split_percent,
-                    merge_percent,
-                    root_node_address,
-                    num_records_in_root_node,
-                    num_records_in_tree)
-end
 
 
-function read_v2btree_node(f, offset, num_records, depth, bh, hh)
-    if depth == 0
-        return read_v2btree_leaf_node(f, offset, num_records, bh, hh)
-    end
-    io = f.io
-    seek(io, fileoffset(f, offset)) # may need to compute fileoffset
-    cio = begin_checksum_read(io)
-
-    signature = jlread(cio, UInt32)
-    signature == V2_BTREE_INTERNAL_NODE_SIGNATURE || throw(InvalidDataException("Signature does not match."))
-
-    version = jlread(cio, UInt8)
-    type = jlread(cio, UInt8)
-
-    records = map(1:num_records) do n 
-        read_record(cio, type, hh)
-    end
-
-    # determine number of bytes used to encode `num_records`
-    # this has to be done iteratively
-    # leaf node:
-    space = bh.node_size - 4 - 1 - 1 - 4
-    max_records = space ÷ bh.record_size
-    max_records_total = 0
-    numbytes = size_size(max_records)
-    numbytes_total = 0
-
-    for d = 1:depth
-        space = bh.node_size - 4-1-1-4 - sizeof(RelOffset) - (d>1)*numbytes_total
-        max_records = space ÷ (bh.record_size + sizeof(RelOffset) + numbytes+(d>1)*numbytes_total)
-        numbytes = size_size(max_records)
-        max_records_total = max_records + (max_records+1)*max_records_total
-        numbytes_total = size_size(max_records_total)
-    end
-    numbytes_total = size_size2(max_records_total)
-    child_nodes = map(1:num_records+1) do _
-        child_node_pointer = jlread(cio, RelOffset) # offset type
-        num_records = Int(read_nb_uint(cio, numbytes))
-        if depth > 1
-            total_records = Int(read_nb_uint(cio, numbytes_total))
-            return (; child_node_pointer, num_records, total_records)
-        end
-        (; child_node_pointer, num_records)
-    end
-    end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())    
-    
-    BTreeInternalNodeV2(offset, type, records, child_nodes)
-end
-
-
-function read_v2btree_leaf_node(f, offset, num_records, bh, hh)
-    io = f.io
-    seek(io, fileoffset(f, offset)) # may need to compute fileoffset
-    cio = begin_checksum_read(io)
-
-    signature = jlread(cio, UInt32)
-    signature == V2_BTREE_LEAF_NODE_SIGNATURE || throw(InvalidDataException("Signature does not match."))
-    version = jlread(cio, UInt8)
-    type = jlread(cio, UInt8)
-    records = map(1:num_records) do n 
-        read_record(cio, type, hh)
-    end
-  
-    end_checksum(cio) == jlread(io, UInt32) || throw(InvalidDataException())    
-    BTreeLeafNodeV2(offset, type, records)
-end
-
-
-
-function read_record(io, type, hh)
-    if type == 5 # link name for indexed group
-        hash_of_name = jlread(io, UInt32)
-        # read Heap id for managed object
-        version_type = jlread(io, UInt8)
-
-        offbytes = hh.max_heap_size÷8
-        offset =Int(read_nb_uint(io, offbytes))
-        lnbytes = min(hh.max_direct_block_size, hh.max_size_managed_objects) |> size_size2
-        length = Int(read_nb_uint(io, lnbytes))
-        skip(io, 6-offbytes-lnbytes)
-        return BTreeType5RecordV2(hash_of_name, offset, length)
-    else
-        throw(error("Not implemented record type"))
-    end
-end
-
-function read_records_in_node(f, offset, num_records, depth, bh, hh)
-    if depth == 0
-        return read_v2btree_leaf_node(f, offset, num_records, bh, hh).records
-    end
-    
-    node = read_v2btree_node(f, offset, num_records, depth, bh, hh)::BTreeInternalNodeV2
-
-    records = []
-    for n=1:num_records+1
-        child_offset = node.child_nodes[n].child_node_pointer
-        child_records = node.child_nodes[n].num_records
-        records_in_child = read_records_in_node(f, child_offset, child_records, depth-1, bh, hh)
-        append!(records, records_in_child)
-        n<=num_records && (push!(records, node.records[n]))
-    end
-    return records
-end
-
-function get_block_offset(f, iblock, roffset, hh)
+function get_block_offset(f, iblock, roffset, hh::FractalHeapHeader)
     block_num, block_size, block_start = block_num_size_start(roffset, hh)
     K = length(iblock.dblocks)
     if block_num < K
@@ -352,11 +174,23 @@ function get_block_offset(f, iblock, roffset, hh)
     get_block_offset(f, sub_iblock, roffset-block_start, hh)
 end
 
-function read_btree(f, offset_hh, offset_bh)
+
+"""
+    read_btree(f, offset_hh, offset_bh)
+
+Read a complete V2 B-tree for indexed groups with fractal heap storage.
+Returns a vector of tuples: (link_name::String, target::RelOffset)
+"""
+function read_fractal_heap_group(f, offset_hh, offset_bh)
     hh = read_fractal_heap_header(f, offset_hh)
     bh = read_v2btree_header(f, offset_bh)
-    
-    records = read_records_in_node(f, bh.root_node_address, bh.num_records_in_root_node, bh.depth, bh, hh)
+
+    # Create a record reader closure that captures the fractal heap header
+    record_reader = (io, type) -> BTrees.read_record_type5(io, type, hh)
+
+    # Use the generic B-tree reading function with our specific record reader
+    records = BTrees.read_records_in_node(f, bh.root_node_address, bh.num_records_root, bh.depth, bh, record_reader)
+
     if hh.cur_num_rows_in_root_iblock > 0
         indirect_rb = read_indirect_block(f, hh.root_block_address, hh, hh.cur_num_rows_in_root_iblock)
         links = map(records) do r
@@ -373,6 +207,7 @@ function read_btree(f, offset_hh, offset_bh)
     end
     links::Vector{Tuple{String, RelOffset}}
 end
+
 
 ###########################################################################################
 ##                        Old Style Group: V1 B-Tree & Name Index Heap                   ##
@@ -413,101 +248,5 @@ function read_in_local_heap(f, local_heap, pos)
     return read_bytestring(io)
 end
 
-const V1_BTREE_NODE_SIGNATURE = htol(0x45455254) # UInt8['T', 'R', 'E', 'E']
-function read_v1btree(f, offset)
-    io = f.io
-    seek(io, fileoffset(f, offset))
-
-    signature = jlread(io, UInt32)
-    signature == V1_BTREE_NODE_SIGNATURE || throw(InvalidDataException("Signature does not match."))
-
-    # 0 for internal node, 1 for chunked datasets
-    node_type = jlread(io, UInt8)
-    node_type == 0 || throw(InvalidDataException("Expected a v1 btree for group nodes"))
-    # level of node. 0 implies leaf node
-    node_level = jlread(io, UInt8)
-    # how many entries are used
-    entries_used = jlread(io, UInt16)
-    # maximum value appears to be the one from superblock
-    # but this is irrelevant for reading
-    left_sibling = jlread(io, RelOffset)
-    right_sibling = jlread(io, RelOffset)
-    links = []
-    keys = []
-    children = RelOffset[]
-    for _ = 1:entries_used
-        push!(keys, jlread(io, Length))
-        push!(children, jlread(io, RelOffset))
-    end
-    push!(keys, jlread(io, Length))
-
-    for child in children
-        if node_level > 0
-            append!(links, read_v1btree(f, child))
-        else
-            append!(links, read_symbol_table_node(f, child))
-        end
-    end
-    return links
-end
-
-function read_v1btree_dataset_chunks(f, offset, dimensionality)
-    io = f.io
-    seek(io, fileoffset(f, offset))
-
-    signature = jlread(io, UInt32)
-    signature == V1_BTREE_NODE_SIGNATURE || throw(InvalidDataException("Signature does not match."))
-
-    # 0 for internal node, 1 for chunked datasets
-    node_type = jlread(io, UInt8)
-    node_type == 1 || throw(InvalidDataException("Expected a v1 btree for dataset chunks"))
-    # level of node. 0 implies leaf node
-    node_level = jlread(io, UInt8)
-    # how many entries are used
-    entries_used = jlread(io, UInt16)
-    # maximum value appears to be the one from superblock
-    # but this is irrelevant for reading
-    left_sibling = jlread(io, RelOffset)
-    right_sibling = jlread(io, RelOffset)
-    children = Any[]
-    for _ = 1:entries_used
-        chunk_size = Int(jlread(io, UInt32))
-        filter_mask = Int(jlread(io, UInt32))
-        index = jlread(io, UInt64, dimensionality)
-        push!(children, (offset=jlread(io, RelOffset), node_level, chunk_size, filter_mask, idx=tuple(Int.(index)...)))
-    end
-
-    chunks = Any[]
-    for child in children
-        if child.node_level > 0
-            append!(chunks, read_v1btree_dataset_chunks(f, child.offset, dimensionality))
-        else
-            push!(chunks, child)
-        end
-    end
-    return chunks
-end
-
-
-const SYMBOL_TABLE_NODE_SIGNATURE = htol(0x444f4e53) # UInt8['S', 'N', 'O', 'D']
-
-function read_symbol_table_node(f, offset)
-    io = f.io
-    seek(io, fileoffset(f, offset))
-
-    signature = jlread(io, UInt32)
-    signature == SYMBOL_TABLE_NODE_SIGNATURE || throw(InvalidDataException("Signature does not match."))
-
-    version = jlread(io, UInt8)
-    skip(io, 1)
-    num_symbols = jlread(io, UInt16)
-    links = []
-
-    for _=1:num_symbols
-        link_name_offset =  jlread(io, Length) # RelOffset but this is probably wrong
-        obj_header_address = jlread(io, RelOffset)
-        skip(io, 24)
-        push!(links, (; link_name_offset, obj_header_address))
-    end
-    return links
-end
+# V1 B-tree functions for groups moved to BTrees module
+# See src/btrees/v1btree_groups.jl

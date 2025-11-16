@@ -8,8 +8,13 @@ using ScopedValues: ScopedValue, with
 using PrecompileTools: @setup_workload, @compile_workload
 export jldopen, @load, @save, save_object, load_object, jldsave
 export Shuffle, Deflate, ZstdFilter
+export create_external_link!, create_soft_link!, lookup_link
+export HardLink, SoftLink, ExternalLink
+export WriteChunkedArray, write_chunked
+
 
 include("types.jl")
+include("links.jl")
 include("macros_utils.jl")
 include("io/mmapio.jl")
 include("io/bufferedio.jl")
@@ -59,13 +64,14 @@ mutable struct Group{T}
     next_link_offset::Int64
     est_num_entries::Int
     est_link_name_len::Int
-    unwritten_links::OrderedDict{String,RelOffset}
+    unwritten_links::OrderedDict{String,AbstractLink}
     unwritten_child_groups::OrderedDict{String,Group{T}}
-    written_links::OrderedDict{String,RelOffset}
+    written_links::OrderedDict{String,AbstractLink}
 
     Group{T}(f; est_num_entries::Int=4, est_link_name_len::Int=8) where T =
         new(f, -1, -1, -1, -1, est_num_entries, est_link_name_len,
-        OrderedDict{String,RelOffset}(), OrderedDict{String,Group{T}}())
+        OrderedDict{String,AbstractLink}(), OrderedDict{String,Group{T}}(),
+        OrderedDict{String,AbstractLink}())
 
     Group{T}(f, last_chunk_start_offset, continuation_message_goes_here,
              last_chunk_checksum_offset, next_link_offset,
@@ -180,7 +186,7 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool,
     parallel_read::Bool=false,
     plain::Bool=false
 ) where T<:Union{Type{IOStream},Type{MmapIO}}
-  
+
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog = 1
     filters = Filters.normalize_filters(compress)
 
@@ -263,11 +269,19 @@ function initialize_fileobject!(f::JLDFile)
     end
     f.root_group = load_group(f, f.root_group_offset)
 
-    types_offset = get(f.root_group.written_links, "_types", UNDEFINED_ADDRESS)
-    if types_offset != UNDEFINED_ADDRESS
+    # Use lookup_link directly instead of lookup_offset
+    types_link = lookup_link(f.root_group, "_types")
+    if types_link !== nothing && isa(types_link, HardLink)
+        types_offset = types_link.target
         f.types_group = f.loaded_groups[types_offset] = load_group(f, types_offset)
-        for (i, offset::RelOffset) in enumerate(values(f.types_group.written_links))
-            f.datatype_locations[offset] = CommittedDatatype(offset, i)
+        for (i, link) in enumerate(values(f.types_group.written_links))
+            # Types group should only contain hard links
+            if isa(link, HardLink)
+                offset = link.target
+                f.datatype_locations[offset] = CommittedDatatype(offset, i)
+            else
+                @warn "Unexpected link type in _types group: $(typeof(link))"
+            end
         end
         resize!(f.datatypes, length(f.datatype_locations))
     else
@@ -367,12 +381,19 @@ end
 
 Base.read(f::JLDFile, name::AbstractString) = Base.inferencebarrier(f.root_group[name])
 Base.getindex(f::JLDFile, name::AbstractString) = Base.inferencebarrier(f.root_group[name])
-Base.setindex!(f::JLDFile, obj, name::AbstractString) = (f.root_group[name] = obj; f)
+Base.setindex!(f::JLDFile, obj, name::AbstractString; kwargs...) = (setindex!(f.root_group, obj, name; kwargs...); f)
 Base.haskey(f::JLDFile, name::AbstractString) = haskey(f.root_group, name)
 Base.isempty(f::JLDFile) = isempty(f.root_group)
 Base.keys(f::JLDFile) = filter!(x->x != "_types", keys(f.root_group))
 Base.keytype(f::JLDFile) = String
 Base.length(f::Union{JLDFile, Group}) = length(keys(f))
+
+# Convenience methods for link creation at file level (delegate to root group)
+create_external_link!(f::JLDFile, link_name::AbstractString, file_path::AbstractString, object_path::AbstractString) =
+    (create_external_link!(f.root_group, link_name, file_path, object_path); f)
+create_soft_link!(f::JLDFile, link_name::AbstractString, target_path::AbstractString) =
+    (create_soft_link!(f.root_group, link_name, target_path); f)
+lookup_link(f::JLDFile, name::AbstractString) = lookup_link(f.root_group, name)
 
 Base.get(default::Function, f::Union{JLDFile, Group}, name::AbstractString) =
     haskey(f, name) ? f[name] : default()
@@ -491,6 +512,7 @@ end
 
 include("object_headers.jl")
 include("headermessages.jl")
+include("external_files.jl")
 include("groups.jl")
 include("dataspaces.jl")
 include("attributes.jl")
@@ -500,6 +522,34 @@ include("datalayouts.jl")
 include("Filters.jl")
 using .Filters: WrittenFilterPipeline, FilterPipeline, iscompressed
 using .Filters: Shuffle, Deflate, ZstdFilter
+
+# Load BTrees before Chunking (BTrees is independent, Chunking calls BTrees)
+include("btrees/BTrees.jl")
+using .BTrees: write_v2btree_chunked_dataset,
+    read_v1btree, read_v2btree_header
+
+include("chunking/Chunking.jl")
+using .Chunking: WriteChunkedArray,
+    read_chunked_array, get_chunked_array, chunk_dimensions, num_chunks, chunk_grid_size,
+    extract_chunk_region, write_chunked
+
+# Specialized method for WriteChunkedArray using multiple dispatch
+function Base.write(
+        g::Group,
+        name::AbstractString,
+        obj::WriteChunkedArray,
+        wsession::JLDWriteSession=JLDWriteSession();
+        compress=nothing,
+        chunk=nothing
+        )
+    f = g.f
+    prewrite(f)
+    (g, name) = pathize(g, name, true)
+
+    # Write chunked array using its own configuration
+    Chunking.write_chunked(f, name, obj)
+    nothing
+end
 
 include("datasets.jl")
 include("global_heaps.jl")
@@ -521,7 +571,6 @@ include("inlineunion.jl")
 include("fileio.jl")
 include("explicit_datasets.jl")
 include("committed_datatype_introspection.jl")
-
 
 if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
     include("precompile.jl")

@@ -9,6 +9,7 @@ const DATA_START = FILE_HEADER_LENGTH +  (12+8*4+4)
 
 
 function read_superblock(io::IO)
+    actual_base_address = position(io)
     cio = begin_checksum_read(io)
 
     # Signature
@@ -47,9 +48,10 @@ function read_superblock(io::IO)
         # Discard Checksum
         end_checksum(cio)
 
-        (; version, base_address, end_of_file_address, root_group_object_header_address)
+        (; version, base_address = UInt64(actual_base_address),
+            end_of_file_address, root_group_object_header_address)
     elseif version == 2 || version == 3
-        
+
         # Size of offsets and size of lengths
         size_of_offsets = jlread(cio, UInt8)
         size_of_lengths = jlread(cio, UInt8)
@@ -68,7 +70,8 @@ function read_superblock(io::IO)
         cs = end_checksum(cio)
         jlread(io, UInt32) == cs || throw(InvalidDataException())
 
-        (; version, base_address, end_of_file_address, root_group_object_header_address)
+        (; version, base_address = UInt64(actual_base_address),
+            end_of_file_address, root_group_object_header_address)
     else
         throw(UnsupportedVersionException("superblock version $version is not supported."))
     end

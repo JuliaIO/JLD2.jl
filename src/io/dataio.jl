@@ -87,10 +87,14 @@ function read_array! end
 
 
 """
-    read_compressed_array!(v::Array, f::JLDFile, rr, data_length::Int, Val(filter_id))
+    read_compressed_array!(v::Array, f::JLDFile, rr, data_length::Int, filter, filter_mask=0)
 
 Fill the array `v` with the compressed contents of JLDFile `f` at the current position,
 assuming a [`ReadRepresentation`](@ref) `rr` and that the compressed data has length `data_length`.
+
+The optional `filter_mask` parameter indicates which filters were skipped during compression
+(bit n set = filter n was skipped). When `filter_mask` is non-zero, only filters not masked
+will be applied during decompression. A filter_mask of 0 (default) means all filters are applied.
 """
 function read_compressed_array! end
 
@@ -281,21 +285,31 @@ function read_compressed_array!(
     f::JLDFile,
     rr::ReadRepresentation{T,RR},
     data_length::Integer,
-    filter,
+    filters::FilterPipeline,
+    filter_mask::Integer = 0,
 ) where {T,RR}
-    io = f.io
-    data_offset = position(io)
-    element_size = odr_sizeof(RR)
-    data = Filters.decompress(filter, io, data_length)
-    GC.@preserve data begin
-        cp0 = Ptr{Cvoid}(pointer(data))
-        @simd for i = eachindex(v)
-            dataptr = cp0 + element_size * (i - 1)
-            if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
-                v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
+    # Determine which filters to actually apply based on mask
+    if !Filters.iscompressed(filters, filter_mask)
+        # No filters or all filters masked - read uncompressed
+        read_array!(v, f, rr)
+    else
+        # Apply non-masked filters
+        active_filters = Filters.apply_filter_mask(filters, filter_mask)
+        io = f.io
+        data_offset = position(io)
+        element_size = odr_sizeof(RR)
+        data = Filters.decompress(active_filters, io, data_length)
+        GC.@preserve data begin
+            cp0 = Ptr{Cvoid}(pointer(data))
+            @simd for i = eachindex(v)
+                dataptr = cp0 + element_size * (i - 1)
+                if !jlconvert_canbeuninitialized(rr) || jlconvert_isinitialized(rr, dataptr)
+                    v[i] = jlconvert(rr, f, dataptr, NULL_REFERENCE)
+                end
             end
         end
+        seek(io, data_offset + data_length)
     end
-    seek(io, data_offset + data_length)
-    v
+
+    return v
 end

@@ -90,7 +90,7 @@ load_attributes(f::Union{JLDFile, Group}, offset::RelOffset) =
 """
 read_attr_data(f::JLDFile, attr::ReadAttribute) =
     read_data(f, attr.dataspace, attr.datatype,
-              DataLayout(0,LcCompact,-1,attr.data_offset))
+              DataLayout(0,LcCompact,-1,h5offset(f, attr.data_offset)))
 
 """
     read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Datatype,
@@ -105,7 +105,7 @@ function read_attr_data(f::JLDFile, attr::ReadAttribute, expected_datatype::H5Da
                         rr::ReadRepresentation)
     if attr.datatype == expected_datatype
         seek(f.io, attr.data_offset)
-        read_dataspace = (attr.dataspace, NULL_REFERENCE, DataLayout(0,LcCompact,-1,attr.data_offset), FilterPipeline())
+        read_dataspace = (attr.dataspace, NULL_REFERENCE, DataLayout(0,LcCompact,-1,h5offset(f, attr.data_offset)), FilterPipeline(), nothing)
         return read_data(f, rr, read_dataspace)
     end
     throw(UnsupportedFeatureException())

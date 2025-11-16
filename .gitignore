@@ -9,3 +9,5 @@
 docs/build/
 Manifest.toml
 .vscode/
+*hdf5_format
+*hdf5_format_knowledge
