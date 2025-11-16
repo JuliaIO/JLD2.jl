@@ -210,7 +210,7 @@ function jlread(io::IO, ::Type{CompoundDatatype})
         names[i] = Symbol(read_bytestring(io))
         # Byte offset of member
         if version == 2 || version == 1
-            skip(io, 8-mod1(sizeof(names[i]),8)-1)
+            skip(io, 8-mod1(sizeof(names[i])+1,8))
             offsets[i] = jlread(io, UInt32)
         elseif dt.size <= typemax(UInt8)
             offsets[i] = jlread(io, UInt8)
