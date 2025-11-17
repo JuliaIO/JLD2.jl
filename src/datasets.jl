@@ -78,10 +78,65 @@ Otherwise, `datatype_offset` points to the offset of the datatype attribute.
         v = Array{T, 1}()
         track_weakref!(f, header_offset, v)
         return v
+    elseif isvirtual(layout)
+        # Handle virtual dataset
+        return read_virtual_data(f, dataspace, dt, layout, filters, header_offset, attributes)
     end
     seek(f.io, layout.data_offset)
     read_dataspace = (dataspace, header_offset, layout, filters)
     read_data(f, rr, read_dataspace, attributes)
+end
+
+function read_virtual_data(f::JLDFile, dataspace::ReadDataspace,
+                          @nospecialize(dt::H5Datatype),
+                          layout::DataLayout,
+                          filters::FilterPipeline,
+                          header_offset::RelOffset,
+                          attributes::Union{Vector{ReadAttribute},Nothing})
+    # Read virtual dataset layout from global heap
+    hid = GlobalHeapID(h5offset(f, layout.data_offset), UInt32(layout.chunk_indexing_type))
+
+    io = f.io
+    # Find the global heap
+    if haskey(f.global_heaps, hid.heap_offset)
+        gh = f.global_heaps[hid.heap_offset]
+    else
+        seek(io, fileoffset(f, hid.heap_offset))
+        f.global_heaps[hid.heap_offset] = gh = jlread(io, GlobalHeap)
+    end
+
+    # Seek to the heap object
+    seek(io, gh.objects[hid.index] + 8)  # Skip object index, ref count, reserved
+    obj_size = Int(jlread(io, Length))
+
+    # Read the virtual dataset global heap block (Version 0 format)
+    version = jlread(io, UInt8)
+    version != 0 && throw(UnsupportedVersionException(
+        "Only virtual dataset heap block version 0 is currently supported, got version $version"))
+
+    # Read number of entries (8 bytes for "Size of Lengths")
+    num_entries = Int(jlread(io, UInt64))
+
+    # Read each mapping
+    mappings = VirtualMapping[]
+    for i in 1:num_entries
+        # Read source filename (null-terminated string)
+        source_filename = read_bytestring(io)
+
+        # Read source dataset name (null-terminated string)
+        source_dataset = read_bytestring(io)
+
+        # Read source selection
+        src_selection = jlread(io, DataspaceSelection)
+
+        # Read virtual selection
+        vds_selection = jlread(io, DataspaceSelection)
+
+        push!(mappings, VirtualMapping(source_filename, source_dataset, src_selection, vds_selection))
+    end
+
+    # Process the virtual dataset mappings to create the combined dataset
+    return combine_virtual_mappings(f, mappings, dataspace, dt)
 end
 
 # Most types can only be scalars or arrays
