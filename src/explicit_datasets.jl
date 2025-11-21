@@ -284,15 +284,48 @@ function get_dataset(g::Group, name::String)
     f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
 
     (g, name) = pathize(g, name, false)
-    roffset = lookup_offset(g, name)
-    if roffset == UNDEFINED_ADDRESS
-        if isempty(name)
-            # this is a group
-            return get_dataset(f, group_offset(g), g, name)
-        end
-        throw(KeyError(name))
+
+    if isempty(name)
+        # this is a group
+        return get_dataset(f, group_offset(g), g, name)
     end
-    get_dataset(f, roffset, g, name)
+
+    # Use lookup_link directly instead of lookup_offset → lookup_link pattern
+    link = lookup_link(g, name)
+    if link === nothing
+        throw(KeyError(name))
+    elseif isa(link, HardLink)
+        # Hard link - proceed with normal dataset retrieval
+        return get_dataset(f, link.target, g, name)
+    elseif isa(link, ExternalLink)
+        # For external links, provide informative error message instead of resolving
+        throw(ArgumentError(LazyString(
+            "get_dataset cannot be used on external links.\n",
+            "Link \"", name, "\" points to:\n",
+            "  • External file: \"", link.file_path, "\"\n",
+            "  • Object path: \"", link.object_path, "\"\n",
+            "Use f[\"", name, "\"] to access the external data directly."
+        )))
+    elseif isa(link, SoftLink)
+        target_link = lookup_link(g, link.path)
+        if isa(target_link, HardLink)
+            # This is a soft link to a regular dataset within the same file - allow it
+            return get_dataset(f, target_link.target, g, name)
+        else
+            # The target doesn't exist or is itself a link
+            throw(ArgumentError(LazyString(
+                "get_dataset cannot be used on soft links that don't point to regular datasets.\n",
+                "Link \"", name, "\" points to:\n",
+                "  • Soft link path: \"", link.path, "\"\n",
+                "  • Resolved path: \"", resolved_path, "\"\n",
+                "The target is not a regular dataset in this file.\n",
+                "Use f[\"", name, "\"] to access the linked data directly."
+            )))
+        end
+    else
+        # Unknown link type
+        throw(ArgumentError("Unknown link type: $(typeof(link))"))
+    end
 end
 
 function get_dataset(f::JLDFile, offset::RelOffset, g=f.root_group, name="")
@@ -331,8 +364,59 @@ end
 
 # Links
 message_size(msg::Pair{String, RelOffset}) = jlsizeof(Val(HmLinkMessage); link_name=msg.first)
+message_size(msg::Pair{String, AbstractLink}) = message_size_for_link(msg.first, msg.second)
+
 write_header_message(io, f, msg::Pair{String, RelOffset}, _=nothing) =
     write_header_message(io, Val(HmLinkMessage); link_name=msg.first, target=msg.second)
+write_header_message(io, f, msg::Pair{String, AbstractLink}, _=nothing) =
+    write_link_message(io, msg.first, msg.second)
+
+"""
+    message_size_for_link(name::String, link::AbstractLink) -> Int
+
+Calculate the size of a link message for the given link type.
+"""
+function message_size_for_link(link_name::String, link::AbstractLink)
+    isa(link, HardLink) && return jlsizeof(Val(HmLinkMessage); link_name)
+
+    flags = UInt8(0x10 | 0x08 | size_flag(sizeof(link_name)))
+    if isa(link, SoftLink)
+        return jlsizeof(Val(HmLinkMessage); link_name, flags,
+                       link_type=UInt8(1),
+                       link_info_size=sizeof(link.path),
+                       soft_link=UInt8[])
+    elseif isa(link, ExternalLink)
+        # External link data: two null-terminated strings
+        return jlsizeof(Val(HmLinkMessage); link_name, flags,
+                       link_type=UInt8(64),
+                       link_info_size=3+sizeof(link.file_path)+sizeof(link.object_path),
+                       external_link=UInt8[])
+    else
+        throw(UnsupportedFeatureException("Unsupported link type: $(typeof(link))"))
+    end
+end
+
+"""
+    write_link_message(io, name::String, link::AbstractLink)
+
+Write a link message for the given link type to the I/O stream.
+"""
+function write_link_message(io, link_name::String, link::AbstractLink)
+    if isa(link, HardLink)
+        return write_header_message(io, Val(HmLinkMessage); link_name, link.target)
+    end
+    flags = UInt8(0x10 | 0x08 | size_flag(sizeof(link_name)))
+    if isa(link, SoftLink)
+        soft_link = Vector{UInt8}(link.path)
+        write_header_message(io, Val(HmLinkMessage); link_name, flags, link_type=1, soft_link)
+    elseif isa(link, ExternalLink)
+        # External link data: two null-terminated strings
+        external_link = vcat(0x00, Vector{UInt8}(link.file_path), 0x00,
+                            Vector{UInt8}(link.object_path), 0x00)
+        write_header_message(io, Val(HmLinkMessage); link_name, flags, link_type=64,
+                           external_link)
+    end
+end
 
 function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession();
     chunk_start,
