@@ -1,7 +1,7 @@
-## 0.6.4
- - Fix edge case in datatype loading (#692)
+## Unreleased
 
 ## 0.6.3
+ - Fix edge case in datatype loading (#692)
  - Add keyword argument constructors to Filters
  - Allow negative compression levels for the ZstdFilter
 
