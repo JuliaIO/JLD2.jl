@@ -138,6 +138,14 @@ function print_datatype_info(io::IO, dset::Dataset, prefix::String)
     else
         print(io, "\n")
     end
+
+    # Handle unwritten datasets where datatype is still a Julia DataType
+    # (not yet converted to an HDF5 datatype)
+    if dt isa DataType
+        println(io, prefix, "\ttype name: ", dt)
+        return
+    end
+
     # print_datatype_structure
     if dt isa BasicDatatype && dt.class%16 == DT_REFERENCE
         println(io, prefix, "\ttype name: RelOffset")

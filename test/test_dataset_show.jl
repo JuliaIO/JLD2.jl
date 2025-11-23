@@ -270,4 +270,61 @@ end
             end
         end
     end
+
+    @testset "Unwritten Dataset Show - Issue #697" begin
+        # Test that showing an unwritten dataset with a Julia type doesn't throw errors
+        # Regression test for https://github.com/JuliaIO/JLD2.jl/issues/697
+        mktempdir() do dir
+            fn = joinpath(dir, "test_unwritten.jld2")
+
+            # Test with various Julia types
+            test_types = [
+                (Int, (10,)),
+                (Float64, (5, 5)),
+                (String, (3,)),
+                (Bool, (2, 3, 4)),
+                (UInt8, (100,))
+            ]
+
+            for (T, dims) in test_types
+                jldopen(fn, "w") do f
+                    # Create dataset with Julia type (not yet converted to HDF5 type)
+                    dset = JLD2.create_dataset(f, "data", T, dims)
+
+                    # Show should not throw an error
+                    @test_nowarn show(IOBuffer(), MIME("text/plain"), dset)
+
+                    # Verify output contains expected information
+                    io = IOBuffer()
+                    show(io, MIME("text/plain"), dset)
+                    output = String(take!(io))
+
+                    @test contains(output, "Dataset:")
+                    @test contains(output, "\"data\"")
+                    @test contains(output, "(unwritten)")
+                    @test contains(output, "datatype: DataType")
+                    @test contains(output, "type name: $T")
+
+                    # Verify proper formatting
+                    @test startswith(output, "┌─ Dataset:")
+                    @test contains(output, "└─")
+                end
+                rm(fn)
+            end
+
+            # Test with nothing datatype (should skip datatype info)
+            jldopen(fn, "w") do f
+                dset = JLD2.create_dataset(f, "data", nothing, nothing)
+                @test_nowarn show(IOBuffer(), MIME("text/plain"), dset)
+
+                io = IOBuffer()
+                show(io, MIME("text/plain"), dset)
+                output = String(take!(io))
+
+                @test contains(output, "(unwritten)")
+                @test !contains(output, "datatype:")  # Should not show datatype if nothing
+            end
+            rm(fn)
+        end
+    end
 end
