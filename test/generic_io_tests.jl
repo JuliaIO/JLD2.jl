@@ -314,8 +314,47 @@ end
         run_generic_io_tests(ByteVectorHelper())
         run_generic_io_tests(IOBufferHelper())
         run_generic_io_tests(IOStreamHelper())
-        
+
         # Adding a new IO type is easy! Just create a helper and add it here:
         # run_generic_io_tests(MyNewIOHelper())
+    end
+
+    @testset "IO Capability Validation" begin
+        # Test that isreadable and iswritable are properly checked
+        # These tests exercise the _isreadable and _iswritable checks in _wrap_io
+
+        # Create a non-readable IO type by wrapping an IOBuffer
+        struct NonReadableIO <: IO
+            buf::IOBuffer
+        end
+        NonReadableIO() = NonReadableIO(IOBuffer())
+        Base.isreadable(::NonReadableIO) = false
+        Base.iswritable(::NonReadableIO) = true
+        for f in (:position, :seek, :seekend, :seekstart, :write, :read, :eof, :bytesavailable)
+            @eval Base.$f(io::NonReadableIO, args...) = $f(io.buf, args...)
+        end
+
+        # Create a non-writable IO type by wrapping an IOBuffer
+        struct NonWritableIO <: IO
+            buf::IOBuffer
+        end
+        NonWritableIO(data::Vector{UInt8}) = NonWritableIO(IOBuffer(data))
+        Base.isreadable(::NonWritableIO) = true
+        Base.iswritable(::NonWritableIO) = false
+        for f in (:position, :seek, :seekend, :seekstart, :write, :read, :eof, :bytesavailable)
+            @eval Base.$f(io::NonWritableIO, args...) = $f(io.buf, args...)
+        end
+
+        # Test that non-readable IO throws an error
+        @test_throws ArgumentError("IO object is not readable") begin
+            io = NonReadableIO()
+            jldopen(io, "r")
+        end
+
+        # Test that non-writable IO throws an error when opened in writable mode
+        @test_throws ArgumentError("IO object is not writable") begin
+            io = NonWritableIO(UInt8[])
+            jldopen(io, "w")
+        end
     end
 end
