@@ -287,7 +287,8 @@ function read_compressed_array!(
     io = f.io
     data_offset = position(io)
     element_size = odr_sizeof(RR)
-    data = Filters.decompress(filter, io, data_length)
+    uncompressed_size = length(v) * element_size
+    data = Filters.decompress(filter, io, data_length, uncompressed_size)
     GC.@preserve data begin
         cp0 = Ptr{Cvoid}(pointer(data))
         @simd for i = eachindex(v)
