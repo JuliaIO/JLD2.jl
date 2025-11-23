@@ -201,9 +201,19 @@ end
 
 # Read a null-terminated string
 function read_bytestring(io::MmapIO)
-    # TODO do not try to read outside the buffer
-    str = unsafe_string(pconvert(Ptr{UInt8}, io.curptr))
-    io.curptr += jlsizeof(str) + 1
+    # Find the null terminator position without allocating
+    ptr = pconvert(Ptr{UInt8}, io.curptr)
+    len = 0
+    while unsafe_load(ptr, len + 1) != 0x00
+        len += 1
+    end
+
+    # Create String directly from the pointer with exact length
+    # This avoids the double-scan that unsafe_string + jlsizeof does
+    str = len == 0 ? "" : unsafe_string(ptr, len)
+
+    # Advance pointer past the string and null terminator
+    io.curptr += len + 1
     str
 end
 

@@ -59,6 +59,7 @@ ensureroom(io::ReadOnlyBuffer, n::Integer) = resize!(io, bufferpos(io) + n)
 
 # Read a null-terminated string
 function read_bytestring(io::ReadOnlyBuffer)
+    # Find the null terminator position
     nb = 0
     while true
         idx = position(io)+1+nb
@@ -66,10 +67,19 @@ function read_bytestring(io::ReadOnlyBuffer)
         io.data[idx] == 0x00 && break
         nb += 1
     end
+
+    # Create String directly without intermediate array allocation
     pos = position(io)
-    v = io.data[pos+1 : pos+nb]
+    if nb == 0
+        skip(io, 1)  # Skip the null terminator
+        return ""
+    end
+
+    # Use unsafe_string to create String directly from memory
+    # GC.@preserve ensures io.data isn't collected during String creation
+    str = GC.@preserve io.data unsafe_string(pointer(io.data, pos+1), nb)
     skip(io, nb+1)
-    return String(v)
+    return str
 end
 
 function begin_checksum_read(io::ReadOnlyBuffer)

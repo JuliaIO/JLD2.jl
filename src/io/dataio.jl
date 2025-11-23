@@ -252,13 +252,8 @@ end
 
 
 # The delimiter is excluded by default
+# readuntil returns Vector{UInt8}, String() conversion is efficient
 read_bytestring(io::Union{IOStream, IOBuffer}) = String(readuntil(io, 0x00))
-
-# Read a null-terminated string directly as a Symbol (avoiding intermediate String allocation)
-function read_bytestring_as_symbol(io::IO)
-    str = read_bytestring(io)
-    return Symbol(str)
-end
 
 # Late addition for MmapIO that can't be defined in mmapio.jl due to include ordering
 function read_array!(v::ArrayMemory{T}, f::JLDFile{MmapIO}, ::SameRepr{T}) where T
