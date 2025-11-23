@@ -39,6 +39,8 @@ end
 Base.position(io::ReadOnlyBuffer) = Int(io.curptr-io.startptr)
 bufferpos(io::ReadOnlyBuffer) = Int(io.curptr-io.startptr)
 Base.close(::ReadOnlyBuffer) = nothing
+Base.isreadable(::ReadOnlyBuffer) = true
+Base.iswritable(::ReadOnlyBuffer) = false
 
 function Base.resize!(io::ReadOnlyBuffer, newend::Integer)
     newend < io.size && return
@@ -162,3 +164,124 @@ function _write(io::RWBuffer, x)
 end
 
 Base.bytesavailable(io::RWBuffer) = io.size-io.pos
+Base.isreadable(::RWBuffer) = true
+Base.iswritable(::RWBuffer) = true
+
+###########################################################################################
+## ByteVectorIO - Optimized wrapper for Vector{UInt8}
+###########################################################################################
+
+"""
+    ByteVectorIO
+
+High-performance memory-backed IO for reading and writing JLD2 files to/from `Vector{UInt8}`.
+This provides direct memory access similar to `MmapIO` but for in-memory byte vectors.
+
+# Examples
+```julia
+# Writing to a byte vector
+data = UInt8[]
+f = jldopen(data, "w")
+f["mydata"] = [1, 2, 3]
+close(f)
+
+# Reading from a byte vector
+f = jldopen(data, "r")
+recovered = f["mydata"]
+close(f)
+```
+"""
+mutable struct ByteVectorIO <: MemoryBackedIO
+    data::Vector{UInt8}
+    writable::Bool
+    curptr::Ptr{Nothing}
+    startptr::Ptr{Nothing}
+    # For checksum computation
+    checksum_pos::Vector{Int64}
+    nchecksum::Int64
+end
+
+function ByteVectorIO(data::Vector{UInt8}, writable::Bool)
+    startptr = isempty(data) ? Ptr{Nothing}(0) : pointer(data)
+    ByteVectorIO(data, writable, startptr, startptr, Int64[], 0)
+end
+
+Base.show(io::IO, ::ByteVectorIO) = print(io, "ByteVectorIO")
+Base.isreadable(::ByteVectorIO) = true
+Base.iswritable(io::ByteVectorIO) = io.writable
+
+Base.position(io::ByteVectorIO) = Int64(io.curptr - io.startptr)
+bufferpos(io::ByteVectorIO) = Int64(io.curptr - io.startptr)
+
+function Base.seek(io::ByteVectorIO, offset::Integer)
+    offset < 0 && throw(ArgumentError("cannot seek to negative position"))
+    offset > length(io.data) && ensureroom(io, offset - position(io))
+    io.curptr = io.startptr + offset
+    nothing
+end
+
+function Base.resize!(io::ByteVectorIO, newend::Ptr{Nothing})
+    io.writable || throw(EOFError())
+
+    # Calculate new size needed
+    newsz = Int(max(newend - io.startptr, io.curptr - io.startptr))
+    oldlen = length(io.data)
+
+    if newsz > oldlen
+        # Resize the vector
+        resize!(io.data, newsz)
+        # Update pointer (resize! may have moved the data)
+        oldstartptr = io.startptr
+        io.startptr = pointer(io.data)
+        io.curptr = io.curptr - oldstartptr + io.startptr
+    end
+
+    io
+end
+
+function ensureroom(io::ByteVectorIO, n::Integer)
+    ep = io.curptr + n
+    endptr = io.startptr + length(io.data)
+    ep > endptr && resize!(io, ep)
+end
+
+function truncate_and_close(io::ByteVectorIO, endpos::Integer)
+    if io.writable && endpos < length(io.data)
+        resize!(io.data, endpos)
+    end
+    close(io)
+end
+
+Base.close(::ByteVectorIO) = nothing
+
+# Read a null-terminated string
+function read_bytestring(io::ByteVectorIO)
+    pos = position(io)
+    idx = findfirst(==(0x00), view(io.data, pos+1:length(io.data)))
+    idx === nothing && throw(EOFError())
+    str = String(io.data[pos+1:pos+idx-1])
+    io.curptr += idx
+    str
+end
+
+# Checksum support
+function begin_checksum_read(io::ByteVectorIO)
+    idx = io.nchecksum += 1
+    if idx > length(io.checksum_pos)
+        push!(io.checksum_pos, position(io))
+    else
+        @inbounds io.checksum_pos[idx] = position(io)
+    end
+    io
+end
+
+function begin_checksum_write(io::ByteVectorIO, sz::Integer)
+    ensureroom(io, sz)
+    begin_checksum_read(io)
+end
+
+function end_checksum(io::ByteVectorIO)
+    @inbounds v = io.checksum_pos[io.nchecksum]
+    io.nchecksum -= 1
+    Lookup3.hash(Ptr{UInt8}(io.startptr + v), position(io) - v)
+end
