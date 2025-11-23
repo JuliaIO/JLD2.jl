@@ -35,7 +35,7 @@ Filters.filtername(::Type{Bzip2Filter}) = "BZIP2"
 Filters.client_values(filter::Bzip2Filter) = (filter.blocksize100k, )
 Filters.filtertype(::Val{307}) = Bzip2Filter
 
-function Filters.apply_filter!(filter::Bzip2Filter, ref::Ref, forward::Bool=true)
+function Filters.apply_filter!(filter::Bzip2Filter, ref::Ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)
     if forward
         ref[] = encode(
             BZ2EncodeOptions(;
@@ -44,7 +44,11 @@ function Filters.apply_filter!(filter::Bzip2Filter, ref::Ref, forward::Bool=true
             ref[]
         )
     else
-        ref[] = decode(BZ2DecodeOptions(), ref[])
+        if output_size !== nothing
+            ref[] = decode(BZ2DecodeOptions(), ref[]; size_hint=output_size)
+        else
+            ref[] = decode(BZ2DecodeOptions(), ref[])
+        end
     end
     return 0
 end

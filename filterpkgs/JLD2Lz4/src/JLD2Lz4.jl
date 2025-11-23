@@ -35,7 +35,7 @@ Filters.filtername(::Type{Lz4Filter}) = "LZ4H5"
 Filters.client_values(filter::Lz4Filter) = (filter.blocksize, )
 Filters.filtertype(::Val{32004}) = Lz4Filter
 
-function Filters.apply_filter!(filter::Lz4Filter, ref::Ref, forward::Bool=true)
+function Filters.apply_filter!(filter::Lz4Filter, ref::Ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)
     if forward
         buf = ref[]
         # This check is to avoid confusion with LZ4 Frame magic
@@ -64,9 +64,17 @@ function Filters.apply_filter!(filter::Lz4Filter, ref::Ref, forward::Bool=true)
                 buf[2] == 0x22 &&
                 buf[3] == 0x4D &&
                 buf[4] == 0x18
-            ref[] = decode(LZ4FrameDecodeOptions(), ref[])
+            if output_size !== nothing
+                ref[] = decode(LZ4FrameDecodeOptions(), ref[]; size_hint=output_size)
+            else
+                ref[] = decode(LZ4FrameDecodeOptions(), ref[])
+            end
         else
-            ref[] = decode(LZ4HDF5DecodeOptions(), ref[])
+            if output_size !== nothing
+                ref[] = decode(LZ4HDF5DecodeOptions(), ref[]; size_hint=output_size)
+            else
+                ref[] = decode(LZ4HDF5DecodeOptions(), ref[])
+            end
         end
     end
     return 0
