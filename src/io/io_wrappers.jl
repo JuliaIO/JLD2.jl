@@ -77,7 +77,8 @@ function read_bytestring(io::ReadOnlyBuffer)
 
     # Use unsafe_string to create String directly from memory
     # GC.@preserve ensures io.data isn't collected during String creation
-    str = GC.@preserve io.data unsafe_string(pointer(io.data, pos+1), nb)
+    data = io.data
+    str = GC.@preserve data unsafe_string(pointer(data, pos+1), nb)
     skip(io, nb+1)
     return str
 end

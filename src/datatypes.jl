@@ -4,21 +4,7 @@
 
 # Task-local storage for current JLDFile during reading operations
 # This allows us to access the field name cache without threading it through all function signatures
-const CURRENT_JLDFILE = Ref{Union{Nothing, JLDFile}}(nothing)
-
-# Helper function to get a Symbol from a string, using the cache if available
-function cached_symbol(str::String)
-    jldfile = CURRENT_JLDFILE[]
-    if jldfile !== nothing
-        cache = jldfile.field_name_cache
-        return get!(cache, str) do
-            Symbol(str)
-        end
-    else
-        # No cache available, create Symbol directly
-        return Symbol(str)
-    end
-end
+# const CURRENT_JLDFILE = ScopedValue{Union{Nothing, JLDFile}}(nothing)
 
 @enum DatatypeClass::UInt8 begin
     DT_FIXED_POINT = 0x00
@@ -243,7 +229,7 @@ function jlread(io::IO, ::Type{CompoundDatatype})
         for i = 1:nfields
             # Name
             name_str = read_bytestring(io)
-            names[i] = cached_symbol(name_str)
+            names[i] = Symbol(name_str)
             # Byte offset of member (version 1 specific)
             skip(io, 8-mod1(sizeof(name_str)+1,8))
             offsets[i] = jlread(io, UInt32)
@@ -257,7 +243,7 @@ function jlread(io::IO, ::Type{CompoundDatatype})
         # Version 2 similar to version 1 but different layout
         for i = 1:nfields
             name_str = read_bytestring(io)
-            names[i] = cached_symbol(name_str)
+            names[i] = Symbol(name_str)
             skip(io, 8-mod1(sizeof(name_str)+1,8))
             offsets[i] = jlread(io, UInt32)
             members[i] = jlread(io, H5Datatype)
@@ -266,7 +252,7 @@ function jlread(io::IO, ::Type{CompoundDatatype})
         # Version 3 - simplified, most common
         @inbounds for i = 1:nfields
             # Name - use cached_symbol to reduce allocations for repeated field names
-            names[i] = cached_symbol(read_bytestring(io))
+            names[i] = Symbol(read_bytestring(io))
             # Byte offset of member
             offsets[i] = jlread(io, offset_type)
             # Member type message
@@ -346,30 +332,22 @@ end
 
 # Read the actual datatype for a committed datatype
 function read_shared_datatype(f::JLDFile, cdt::Union{SharedDatatype, CommittedDatatype})
-    # Set current JLDFile in task-local storage for caching during datatype reading
-    old_jldfile = CURRENT_JLDFILE[]
-    CURRENT_JLDFILE[] = f
-    try
-        datatype::H5Datatype = PlaceholderH5Datatype()
-        attrs = ReadAttribute[]
+    datatype::H5Datatype = PlaceholderH5Datatype()
+    attrs = ReadAttribute[]
 
-        for msg in HeaderMessageIterator(f, cdt.header_offset)
-            if msg.type == HmDatatype
-                datatype = HmWrap(HmDatatype, msg).dt
-            elseif msg.type == HmAttribute
-                push!(attrs, read_attribute(f, msg))
-            elseif (msg.hflags & 2^3) != 0
-                throw(UnsupportedFeatureException())
-            end
+    for msg in HeaderMessageIterator(f, cdt.header_offset)
+        if msg.type == HmDatatype
+            datatype = HmWrap(HmDatatype, msg).dt
+        elseif msg.type == HmAttribute
+            push!(attrs, read_attribute(f, msg))
+        elseif (msg.hflags & 2^3) != 0
+            throw(UnsupportedFeatureException())
         end
-        if datatype isa PlaceholderH5Datatype
-            throw(InvalidDataException("Did not find datatype message"))
-        end
-        return datatype, attrs
-    finally
-        # Restore old JLDFile context
-        CURRENT_JLDFILE[] = old_jldfile
     end
+    if datatype isa PlaceholderH5Datatype
+        throw(InvalidDataException("Did not find datatype message"))
+    end
+    return datatype, attrs
 end
 
 struct FixedLengthString{T<:AbstractString}

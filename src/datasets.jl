@@ -13,47 +13,40 @@ function load_dataset(f::JLDFile{IO}, offset::RelOffset) where IO
     end
 
     # Set current JLDFile in task-local storage for caching during datatype reading
-    old_jldfile = JLD2.CURRENT_JLDFILE[]
-    JLD2.CURRENT_JLDFILE[] = f
-    try
-        dataspace = ReadDataspace()
-        attrs = EMPTY_READ_ATTRIBUTES
-        dt::H5Datatype = PlaceholderH5Datatype()
-        layout::DataLayout = DataLayout(0,LcCompact,0,-1)
-        filter_pipeline::FilterPipeline = FilterPipeline()
+    dataspace = ReadDataspace()
+    attrs = EMPTY_READ_ATTRIBUTES
+    dt::H5Datatype = PlaceholderH5Datatype()
+    layout::DataLayout = DataLayout(0,LcCompact,0,-1)
+    filter_pipeline::FilterPipeline = FilterPipeline()
 
-        for msg in HeaderMessageIterator(f, offset)
-            if msg.type == HmDataspace
-                dataspace = ReadDataspace(f, msg)
-            elseif msg.type == HmDatatype
-                dt = HmWrap(HmDatatype, msg).dt::H5Datatype
-            elseif msg.type == HmDataLayout
-                layout = DataLayout(f, msg)
-            elseif msg.type == HmFilterPipeline
-                filter_pipeline = FilterPipeline(msg)
-            elseif msg.type == HmAttribute
-                isempty(attrs) && (attrs = ReadAttribute[])
-                push!(attrs, read_attribute(f, msg))
-            elseif (msg.hflags & 2^3) != 0
-                throw(UnsupportedFeatureException())
-            end
+    for msg in HeaderMessageIterator(f, offset)
+        if msg.type == HmDataspace
+            dataspace = ReadDataspace(f, msg)
+        elseif msg.type == HmDatatype
+            dt = HmWrap(HmDatatype, msg).dt::H5Datatype
+        elseif msg.type == HmDataLayout
+            layout = DataLayout(f, msg)
+        elseif msg.type == HmFilterPipeline
+            filter_pipeline = FilterPipeline(msg)
+        elseif msg.type == HmAttribute
+            isempty(attrs) && (attrs = ReadAttribute[])
+            push!(attrs, read_attribute(f, msg))
+        elseif (msg.hflags & 2^3) != 0
+            throw(UnsupportedFeatureException())
         end
-        if dt isa PlaceholderH5Datatype
-            # checking whether something is a group is not cheap.
-            # Do it only when it is not a dataset
-            if isgroup(f, offset)
-                # There is a not-yet loaded group at offset
-                return get!(()->load_group(f, offset), f.loaded_groups, offset)
-            end
-
-            throw(InvalidDataException("No datatype message found"))
-        end
-        iscompressed(filter_pipeline) && !ischunked(layout) && throw(InvalidDataException("Compressed data must be chunked"))
-        Base.inferencebarrier(read_data(f, dataspace, dt, layout, filter_pipeline, offset, attrs))
-    finally
-        # Restore old JLDFile context
-        JLD2.CURRENT_JLDFILE[] = old_jldfile
     end
+    if dt isa PlaceholderH5Datatype
+        # checking whether something is a group is not cheap.
+        # Do it only when it is not a dataset
+        if isgroup(f, offset)
+            # There is a not-yet loaded group at offset
+            return get!(()->load_group(f, offset), f.loaded_groups, offset)
+        end
+
+        throw(InvalidDataException("No datatype message found"))
+    end
+    iscompressed(filter_pipeline) && !ischunked(layout) && throw(InvalidDataException("Compressed data must be chunked"))
+    Base.inferencebarrier(read_data(f, dataspace, dt, layout, filter_pipeline, offset, attrs))
 end
 
 
