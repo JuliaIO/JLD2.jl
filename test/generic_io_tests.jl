@@ -63,12 +63,63 @@ supports_take!(::IOBufferHelper) = true
 io_name(::IOBufferHelper) = "IOBuffer"
 
 """
+Helper for testing IOStream (temporary files)
+"""
+struct IOStreamHelper <: IOTestHelper end
+
+function create_io(::IOStreamHelper)
+    path = tempname()
+    # We open in "w+" mode (read/write/create/truncate)
+    # We need to track the file path to clean it up later, but IOTestHelper 
+    # interface assumes just returning the IO. 
+    # Since these are unit tests, we'll rely on OS/Julia temp cleanup or 
+    # explicitly delete in the test runner if we changed the interface.
+    # For now, let's just return the stream.
+    return open(path, "w+")
+end
+
+function get_bytes(::IOStreamHelper, io)
+    flush(io)
+    path = io.name
+    # Make sure we preserve position
+    pos = position(io)
+    seekstart(io)
+    data = read(io)
+    seek(io, pos)
+    # If file was deleted, this might fail, but tests usually keep it open
+    return data
+end
+
+function reset_for_reading!(::IOStreamHelper, io)
+    seekstart(io)
+end
+
+supports_take!(::IOStreamHelper) = false
+io_name(::IOStreamHelper) = "IOStream"
+
+"""
     run_generic_io_tests(helper::IOTestHelper)
 
-Run a comprehensive suite of tests for an IO type.
+    Run a comprehensive suite of tests for an IO type.
 """
 function run_generic_io_tests(helper::IOTestHelper)
     name = io_name(helper)
+
+    # Helper to cleanup IO if it's an IOStream/file based
+    function cleanup_io(io)
+        if io isa IOStream
+            path = io.name[7:end-1] # format is <file path>
+            close(io)
+            # Try to delete file if it exists
+            try
+                rm(path, force=true)
+            catch
+            end
+        elseif io isa IO
+            close(io)
+        end
+        # Arrays/Vectors don't need closing
+    end
 
     @testset "$name - Basic read/write" begin
         io = create_io(helper)
@@ -87,6 +138,8 @@ function run_generic_io_tests(helper::IOTestHelper)
         @test f["b"] == "hello"
         @test f["c"] == [1.0, 2.0, 3.0]
         close(f)
+        
+        cleanup_io(io)
     end
 
     @testset "$name - Append mode" begin
@@ -110,6 +163,8 @@ function run_generic_io_tests(helper::IOTestHelper)
             @test f["a"] == 1
             @test f["b"] == 2
         end
+        
+        cleanup_io(io)
     end
 
     @testset "$name - Complex types" begin
@@ -127,6 +182,8 @@ function run_generic_io_tests(helper::IOTestHelper)
             loaded = f["custom"]
             @test loaded == original
         end
+        
+        cleanup_io(io)
     end
 
     @testset "$name - Large data" begin
@@ -144,6 +201,8 @@ function run_generic_io_tests(helper::IOTestHelper)
             loaded = f["large"]
             @test loaded == large_array
         end
+        
+        cleanup_io(io)
     end
 
     @testset "$name - Groups" begin
@@ -160,6 +219,8 @@ function run_generic_io_tests(helper::IOTestHelper)
             @test f["mygroup/a"] == 1
             @test f["mygroup/b"] == 2
         end
+        
+        cleanup_io(io)
     end
 
     @testset "$name - Compression" begin
@@ -188,6 +249,9 @@ function run_generic_io_tests(helper::IOTestHelper)
         jldopen(io_compressed, "r") do f
             @test f["data"] == test_data
         end
+        
+        cleanup_io(io_plain)
+        cleanup_io(io_compressed)
     end
 
     @testset "$name - Truncate mode" begin
@@ -210,6 +274,8 @@ function run_generic_io_tests(helper::IOTestHelper)
             @test !haskey(f, "a")
             @test f["b"] == 2
         end
+        
+        cleanup_io(io)
     end
 
     @testset "$name - Compatibility with file-based IO" begin
@@ -237,6 +303,8 @@ function run_generic_io_tests(helper::IOTestHelper)
             disk_data = read(filepath)
             @test disk_data == bytes
         end
+        
+        cleanup_io(io)
     end
 end
 
@@ -245,7 +313,8 @@ end
     @testset "All IO Types" begin
         run_generic_io_tests(ByteVectorHelper())
         run_generic_io_tests(IOBufferHelper())
-
+        run_generic_io_tests(IOStreamHelper())
+        
         # Adding a new IO type is easy! Just create a helper and add it here:
         # run_generic_io_tests(MyNewIOHelper())
     end

@@ -334,7 +334,14 @@ function _wrap_io(io::IO, writable::Bool, truncate::Bool)
     !_isreadable(io) && throw(ArgumentError("IO object is not readable"))
 
     # Check if it's seekable and writable
-    if _isseekable(io) && writable && _iswritable(io)
+    if _isseekable(io)
+        if writable && !_iswritable(io)
+             throw(ArgumentError("IO object is not writable"))
+        end
+        if truncate
+            Base.truncate(io, 0)
+            seekstart(io)
+        end
         # Read/write capable IO (e.g., IOBuffer in r+ mode)
         wrapped = RWBuffer(io)
         created = truncate

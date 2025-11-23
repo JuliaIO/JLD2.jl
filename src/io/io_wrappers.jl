@@ -99,7 +99,7 @@ mutable struct RWBuffer{B <: IO} <: IO
     offset::UInt64 # position of file start in wrapped stream
     pos::UInt64
     size::UInt64
-    RWBuffer(_buf::IO) = new{typeof(_buf)}(_buf, position(_buf), 0, _buf.size)
+    RWBuffer(_buf::IO) = new{typeof(_buf)}(_buf, position(_buf), 0, _getsize(_buf))
 end
 
 Base.position(io::RWBuffer) = Int(io.pos)
@@ -166,6 +166,19 @@ end
 Base.bytesavailable(io::RWBuffer) = io.size-io.pos
 Base.isreadable(::RWBuffer) = true
 Base.iswritable(::RWBuffer) = true
+
+function _getsize(io::IO)
+    try
+        return filesize(io)
+    catch
+        # fallback
+        pos = position(io)
+        seekend(io)
+        sz = position(io)
+        seek(io, pos)
+        return sz
+    end
+end
 
 ###########################################################################################
 ## ByteVectorIO - Optimized wrapper for Vector{UInt8}
