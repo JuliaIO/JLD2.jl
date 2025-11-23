@@ -69,7 +69,7 @@ Setting `forward` to `false` applies the filter in the reverse direction (decomp
 The result is stored back in `ref` and the function returns an integer return code (0 on success).
 `output_size` is a hint for the expected output size, useful for decompression.
 """
-apply_filter!(filter, ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing) = apply_filter!(filter, ref, forward)
+apply_filter!(filter, ref, forward::Bool, output_size) = apply_filter!(filter, ref, forward)
 
 
 """
