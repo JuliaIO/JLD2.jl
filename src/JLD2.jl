@@ -112,6 +112,8 @@ mutable struct JLDFile{T<:IO}
     root_group::Group{JLDFile{T}}
     types_group::Group{JLDFile{T}}
     base_address::UInt64
+    # Cache for field names to reduce Symbol allocations
+    field_name_cache::Dict{String,Symbol}
 
 
     function JLDFile{T}(io::IO, path::AbstractString, writable::Bool, written::Bool,
@@ -123,7 +125,8 @@ mutable struct JLDFile{T<:IO}
             OrderedDict{RelOffset,CommittedDatatype}(), H5Datatype[],
             JLDWriteSession(), typemap, IdDict(), IdDict(), Dict{RelOffset,WeakRef}(),
             DATA_START, Dict{RelOffset,GlobalHeap}(),
-            GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group{JLDFile{T}}}(), UNDEFINED_ADDRESS)
+            GlobalHeap(0, 0, 0, Int64[]), Dict{RelOffset,Group{JLDFile{T}}}(), UNDEFINED_ADDRESS,
+            Dict{String,Symbol}())
         finalizer(jld_finalizer, f)
         f
     end

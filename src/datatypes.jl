@@ -1,6 +1,25 @@
 #
 # Datatypes
 #
+
+# Task-local storage for current JLDFile during reading operations
+# This allows us to access the field name cache without threading it through all function signatures
+const CURRENT_JLDFILE = Ref{Union{Nothing, JLDFile}}(nothing)
+
+# Helper function to get a Symbol from a string, using the cache if available
+function cached_symbol(str::String)
+    jldfile = CURRENT_JLDFILE[]
+    if jldfile !== nothing
+        cache = jldfile.field_name_cache
+        return get!(cache, str) do
+            Symbol(str)
+        end
+    else
+        # No cache available, create Symbol directly
+        return Symbol(str)
+    end
+end
+
 @enum DatatypeClass::UInt8 begin
     DT_FIXED_POINT = 0x00
     DT_FLOATING_POINT = 0x01
@@ -202,36 +221,57 @@ function jlread(io::IO, ::Type{CompoundDatatype})
     nfields = UInt16(dt.bitfield1) | UInt16(dt.bitfield2) << 8
     dt.bitfield3 == 0 || throw(UnsupportedFeatureException())
 
+    # Pre-allocate vectors with exact size needed
     names = Vector{Symbol}(undef, nfields)
     offsets = Vector{Int}(undef, nfields)
     members = Vector{H5Datatype}(undef, nfields)
-    for i = 1:nfields
-        # Name
-        names[i] = Symbol(read_bytestring(io))
-        # Byte offset of member
-        if version == 2 || version == 1
-            skip(io, 8-mod1(sizeof(names[i])+1,8))
-            offsets[i] = jlread(io, UInt32)
-        elseif dt.size <= typemax(UInt8)
-            offsets[i] = jlread(io, UInt8)
-        elseif dt.size <= typemax(UInt16)
-            offsets[i] = jlread(io, UInt16)
-        else
-            offsets[i] = jlread(io, UInt32)
-        end
 
-        if version == 1
-            # supports array members
-            # can encode dimensionality here
+    # Determine offset reading type once outside the loop
+    offset_type = if version == 2 || version == 1
+        UInt32
+    elseif dt.size <= typemax(UInt8)
+        UInt8
+    elseif dt.size <= typemax(UInt16)
+        UInt16
+    else
+        UInt32
+    end
+
+    # Read all fields in a single loop with reduced branching
+    if version == 1
+        # Version 1 has array member support with dimensionality
+        for i = 1:nfields
+            # Name
+            name_str = read_bytestring(io)
+            names[i] = cached_symbol(name_str)
+            # Byte offset of member (version 1 specific)
+            skip(io, 8-mod1(sizeof(name_str)+1,8))
+            offsets[i] = jlread(io, UInt32)
+            # Array member info
             dimensionality = jlread(io, UInt8)
-            skip(io, 3)
-            skip(io, 4) # dimension permutation
-            skip(io, 4)
-            skip(io, 16)
+            skip(io, 27)  # Combined skip: 3 + 4 + 4 + 16 bytes
+            # Member type message
+            members[i] = jlread(io, H5Datatype)
         end
-
-        # Member type message
-        members[i] = jlread(io, H5Datatype)
+    elseif version == 2
+        # Version 2 similar to version 1 but different layout
+        for i = 1:nfields
+            name_str = read_bytestring(io)
+            names[i] = cached_symbol(name_str)
+            skip(io, 8-mod1(sizeof(name_str)+1,8))
+            offsets[i] = jlread(io, UInt32)
+            members[i] = jlread(io, H5Datatype)
+        end
+    else
+        # Version 3 - simplified, most common
+        @inbounds for i = 1:nfields
+            # Name - use cached_symbol to reduce allocations for repeated field names
+            names[i] = cached_symbol(read_bytestring(io))
+            # Byte offset of member
+            offsets[i] = jlread(io, offset_type)
+            # Member type message
+            members[i] = jlread(io, H5Datatype)
+        end
     end
 
     CompoundDatatype(dt.size, names, offsets, members)
@@ -306,22 +346,30 @@ end
 
 # Read the actual datatype for a committed datatype
 function read_shared_datatype(f::JLDFile, cdt::Union{SharedDatatype, CommittedDatatype})
-    datatype::H5Datatype = PlaceholderH5Datatype()
-    attrs = ReadAttribute[]
+    # Set current JLDFile in task-local storage for caching during datatype reading
+    old_jldfile = CURRENT_JLDFILE[]
+    CURRENT_JLDFILE[] = f
+    try
+        datatype::H5Datatype = PlaceholderH5Datatype()
+        attrs = ReadAttribute[]
 
-    for msg in HeaderMessageIterator(f, cdt.header_offset)
-        if msg.type == HmDatatype
-            datatype = HmWrap(HmDatatype, msg).dt
-        elseif msg.type == HmAttribute
-            push!(attrs, read_attribute(f, msg))
-        elseif (msg.hflags & 2^3) != 0
-            throw(UnsupportedFeatureException())
+        for msg in HeaderMessageIterator(f, cdt.header_offset)
+            if msg.type == HmDatatype
+                datatype = HmWrap(HmDatatype, msg).dt
+            elseif msg.type == HmAttribute
+                push!(attrs, read_attribute(f, msg))
+            elseif (msg.hflags & 2^3) != 0
+                throw(UnsupportedFeatureException())
+            end
         end
+        if datatype isa PlaceholderH5Datatype
+            throw(InvalidDataException("Did not find datatype message"))
+        end
+        return datatype, attrs
+    finally
+        # Restore old JLDFile context
+        CURRENT_JLDFILE[] = old_jldfile
     end
-    if datatype isa PlaceholderH5Datatype
-        throw(InvalidDataException("Did not find datatype message"))
-    end
-    return datatype, attrs
 end
 
 struct FixedLengthString{T<:AbstractString}
