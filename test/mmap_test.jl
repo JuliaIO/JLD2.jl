@@ -90,7 +90,7 @@ end
 
     jldopen(fn, "w") do f
         dset = JLD2.create_dataset(f, "data", Float64, (20,20); allocate=true)
-        dset[1:20, 1] = 10.0
+        dset[1:20, 1] .= 10.0
         dset[20,20] = 20.0
     end
     data = load(fn, "data")
