@@ -224,7 +224,7 @@ end
 Base.show(io::IO, ::ByteVectorIO) = print(io, "ByteVectorIO")
 Base.isreadable(::ByteVectorIO) = true
 Base.iswritable(io::ByteVectorIO) = io.writable
-isseekable(io) = true
+isseekable(io::ByteVectorIO) = true
 
 Base.position(io::ByteVectorIO) = Int64(io.curptr - io.startptr)
 bufferpos(io::ByteVectorIO) = Int64(io.curptr - io.startptr)
