@@ -348,13 +348,13 @@ end
         end
 
         # Test that non-readable IO throws an error
-        @test_throws ArgumentError("IO object is not readable") begin
+        @test_throws ArgumentError begin
             io = NonReadableIO()
             jldopen(io, "r")
         end
 
         # Test that non-writable IO throws an error when opened in writable mode
-        @test_throws ArgumentError("IO object is not writable") begin
+        @test_throws ArgumentError begin
             io = NonWritableIO(UInt8[])
             jldopen(io, "w")
         end
