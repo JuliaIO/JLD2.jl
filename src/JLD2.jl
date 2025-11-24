@@ -349,8 +349,7 @@ function jldopen(io::Union{IO,Vector{UInt8}}, mode::AbstractString="r"; kwargs..
     return jldopen(io, wr, create, truncate; kwargs...)
 end
 
-# Legacy compatibility: support the (io, wr, create, truncate) signature
-function jldopen(io::IO, writable::Bool, create::Bool, truncate::Bool;
+function jldopen(io::Union{IO,Vector{UInt8}}, writable::Bool, create::Bool, truncate::Bool;
                 plain::Bool=false,
                 compress=false,
                 typemap=default_typemap)
