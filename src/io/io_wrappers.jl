@@ -41,6 +41,7 @@ bufferpos(io::ReadOnlyBuffer) = Int(io.curptr-io.startptr)
 Base.close(::ReadOnlyBuffer) = nothing
 Base.isreadable(::ReadOnlyBuffer) = true
 Base.iswritable(::ReadOnlyBuffer) = false
+isseekable(::ReadOnlyBuffer) = true
 
 function Base.resize!(io::ReadOnlyBuffer, newend::Integer)
     newend < io.size && return
@@ -166,6 +167,7 @@ end
 Base.bytesavailable(io::RWBuffer) = io.size-io.pos
 Base.isreadable(::RWBuffer) = true
 Base.iswritable(::RWBuffer) = true
+isseekable(::RWBuffer) = true
 
 function _getsize(io::IO)
     try
@@ -222,6 +224,7 @@ end
 Base.show(io::IO, ::ByteVectorIO) = print(io, "ByteVectorIO")
 Base.isreadable(::ByteVectorIO) = true
 Base.iswritable(io::ByteVectorIO) = io.writable
+isseekable(io) = true
 
 Base.position(io::ByteVectorIO) = Int64(io.curptr - io.startptr)
 bufferpos(io::ByteVectorIO) = Int64(io.curptr - io.startptr)

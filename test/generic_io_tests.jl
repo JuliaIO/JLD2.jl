@@ -330,6 +330,7 @@ end
         NonReadableIO() = NonReadableIO(IOBuffer())
         Base.isreadable(::NonReadableIO) = false
         Base.iswritable(::NonReadableIO) = true
+        seekable(::NonReadableIO) = true
         for f in (:position, :seek, :seekend, :seekstart, :write, :read, :eof, :bytesavailable)
             @eval Base.$f(io::NonReadableIO, args...) = $f(io.buf, args...)
         end
@@ -341,6 +342,7 @@ end
         NonWritableIO(data::Vector{UInt8}) = NonWritableIO(IOBuffer(data))
         Base.isreadable(::NonWritableIO) = true
         Base.iswritable(::NonWritableIO) = false
+        isseekable(::NonWritableIO) = true
         for f in (:position, :seek, :seekend, :seekstart, :write, :read, :eof, :bytesavailable)
             @eval Base.$f(io::NonWritableIO, args...) = $f(io.buf, args...)
         end
