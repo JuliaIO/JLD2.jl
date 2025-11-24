@@ -60,6 +60,17 @@ The result is stored back in `ref` and the function returns an integer return co
 """
 function apply_filter! end
 
+"""
+    apply_filter!(filter, ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)
+
+Apply the filter to the `UInt8` vector stored in `ref`.
+By default, the filter is applied in the forward direction (compression).
+Setting `forward` to `false` applies the filter in the reverse direction (decompression).
+The result is stored back in `ref` and the function returns an integer return code (0 on success).
+`output_size` is a hint for the expected output size, useful for decompression.
+"""
+apply_filter!(filter, ref, forward::Bool, output_size) = apply_filter!(filter, ref, forward)
+
 
 """
     set_local(filter, odr, dataspace, datasetcreationprops) -> filter
@@ -118,21 +129,21 @@ function compress(fp::FilterPipeline, data::Array{T}, odr::Type{T}, f::JLDFile, 
     end
 end
 
-function decompress(filter::FilterPipeline, io::IO, data_length)
+function decompress(filter::FilterPipeline, io::IO, data_length, uncompressed_size::Union{Nothing,Integer}=nothing)
     buf = read!(io, Vector{UInt8}(undef, data_length))
-    _decompress(filter, buf)
+    _decompress(filter, buf, uncompressed_size)
 end
 
-function decompress(filter::FilterPipeline, io::MemoryBackedIO, data_length)
+function decompress(filter::FilterPipeline, io::MemoryBackedIO, data_length, uncompressed_size::Union{Nothing,Integer}=nothing)
     ensureroom(io, data_length)
     buf = unsafe_wrap(Array, Ptr{UInt8}(io.curptr), data_length)
-    _decompress(filter, buf)
+    _decompress(filter, buf, uncompressed_size)
 end
 
-function _decompress(fp::FilterPipeline, buf::Vector{UInt8})
+function _decompress(fp::FilterPipeline, buf::Vector{UInt8}, uncompressed_size::Union{Nothing,Integer}=nothing)
     ref = Ref(buf)
     for filter in reverse(fp.filters)
-        apply_filter!(filter, ref, false)
+        apply_filter!(filter, ref, false, uncompressed_size)
     end
     ref[]
 end
@@ -191,7 +202,7 @@ function set_local(fil::Shuffle, odr, dataspace, datasetcreationprops)
     Shuffle(UInt32(odr_sizeof(odr)))
 end
 
-function apply_filter!(fil::Shuffle, ref, forward::Bool=true)
+function apply_filter!(fil::Shuffle, ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)
     buf = ref[]
     (; element_size) = fil
     nbytes = length(buf)
@@ -239,11 +250,15 @@ filterid(::Type{Deflate}) = UInt16(1)
 client_values(filter::Deflate) = (filter.level, )
 filtertype(::Val{1}) = Deflate
 
-function apply_filter!(filter::Deflate, ref, forward::Bool=true)
+function apply_filter!(filter::Deflate, ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)
     if forward
         ref[] = encode(ZlibEncodeOptions(; filter.level), ref[])
     else
-        ref[] = decode(ZlibDecodeOptions(), ref[])
+        if output_size !== nothing
+             ref[] = decode(ZlibDecodeOptions(), ref[]; size_hint=output_size)
+        else
+             ref[] = decode(ZlibDecodeOptions(), ref[])
+        end
     end
     return 0
 end
@@ -287,11 +302,15 @@ filtername(::Type{ZstdFilter}) = "ZSTD"
 client_values(filter::ZstdFilter) = (filter.level % UInt32, )
 filtertype(::Val{32015}) = ZstdFilter
 
-function apply_filter!(filter::ZstdFilter, ref, forward::Bool=true)
+function apply_filter!(filter::ZstdFilter, ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)
     if forward
         ref[] = encode(ZstdEncodeOptions(; filter.level), ref[])
     else
-        ref[] = decode(ZstdDecodeOptions(), ref[])
+        if output_size !== nothing
+             ref[] = decode(ZstdDecodeOptions(), ref[]; size_hint=output_size)
+        else
+             ref[] = decode(ZstdDecodeOptions(), ref[])
+        end
     end
     return 0
 end

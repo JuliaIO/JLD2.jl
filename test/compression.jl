@@ -1,4 +1,4 @@
-using JLD2, Test, FileIO
+using JLD2, Test
 using Pkg: Pkg
 using JLD2Bzip2, JLD2Lz4
 
@@ -99,4 +99,39 @@ end
     # Test Lz4Filter
     @test Lz4Filter(12345).blocksize == 12345
     @test Lz4Filter(blocksize=12345).blocksize == 12345
+end
+
+@testset "Compression Filters Coverage" begin
+    using JLD2.Filters
+
+    # Test data
+    data = UInt8[i % 256 for i in 1:10000]
+
+    pipelines = [
+        # Double compression (unknown intermediate size)
+        Filters.FilterPipeline(Deflate(), ZstdFilter()),
+        # Shuffle + Compression
+        Filters.FilterPipeline(Shuffle(4), Deflate()),
+        Filters.FilterPipeline(Shuffle(4), ZstdFilter()),
+        Filters.FilterPipeline(Shuffle(4), Bzip2Filter()),
+        Filters.FilterPipeline(Shuffle(4), Lz4Filter()),
+    ]
+
+    for pipeline in pipelines
+        # Manually compress
+        buf = copy(data)
+        ref = Ref(buf)
+
+        for filter in pipeline.filters
+             Filters.apply_filter!(filter, ref, true)
+        end
+        compressed_data = ref[]
+
+        # Decompress using Filters.decompress with unknown size (nothing)
+        # This ensures we hit the branch where output_size is nothing in apply_filter!
+        io = IOBuffer(compressed_data)
+        decompressed = Filters.decompress(pipeline, io, length(compressed_data), nothing)
+
+        @test decompressed == data
+    end
 end

@@ -62,6 +62,7 @@ ensureroom(io::ReadOnlyBuffer, n::Integer) = resize!(io, bufferpos(io) + n)
 
 # Read a null-terminated string
 function read_bytestring(io::ReadOnlyBuffer)
+    # Find the null terminator position
     nb = 0
     while true
         idx = position(io)+1+nb
@@ -69,10 +70,12 @@ function read_bytestring(io::ReadOnlyBuffer)
         io.data[idx] == 0x00 && break
         nb += 1
     end
+
     pos = position(io)
-    v = io.data[pos+1 : pos+nb]
+    data = io.data
+    str = GC.@preserve data unsafe_string(pointer(data, pos+1), nb)
     skip(io, nb+1)
-    return String(v)
+    return str
 end
 
 function begin_checksum_read(io::ReadOnlyBuffer)

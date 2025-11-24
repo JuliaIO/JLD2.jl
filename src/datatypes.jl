@@ -1,6 +1,7 @@
 #
 # Datatypes
 #
+
 @enum DatatypeClass::UInt8 begin
     DT_FIXED_POINT = 0x00
     DT_FLOATING_POINT = 0x01
