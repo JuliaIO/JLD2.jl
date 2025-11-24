@@ -1,7 +1,7 @@
 using JLD2, Test
 
 @testset "Mmapped Arrays" begin
-    cd(mktempdir()) do 
+    cd(mktempdir()) do
 
         a = rand(100,100);
         b = rand(ComplexF64, 5,5)
@@ -51,7 +51,7 @@ using JLD2, Test
                 dset = JLD2.get_dataset(f, "d")
                 @test JLD2.ismmappable(dset) == true
             end
-        
+
             jldopen(fn, "r") do f
                 @test f["a"][1,1] == 42.0
                 @test f["b"][1,1] == 4.0 + 2.0im
@@ -61,9 +61,11 @@ using JLD2, Test
     end
 end
 
-if !Sys.iswindows()
-    @testset "Early Allocation" begin
-        # Update this for proper API eventually
+
+@testset "Early Allocation" begin
+    fn = tempname() * ".jld2"
+    # Update this for proper API eventually
+    if !Sys.iswindows()
         jldopen(fn, "w") do f
             dset = JLD2.create_dataset(f, "data")
 
@@ -85,4 +87,13 @@ if !Sys.iswindows()
         @test all(data[2:2:100] .== 0.0)
         @test all(data[1:2:100] .== 1:50)
     end
+
+    jldopen(fn, "w") do f
+        dset = JLD2.create_dataset(f, "data", Float64, (20,20); allocate=true)
+        dset[1:20, 1] = 10.0
+        dset[20,20] = 20.0
+    end
+    data = load(fn, "data")
+    @test all(data[1:20] .== 10.0)
+    @test data[20,20] = 20.0
 end
