@@ -287,40 +287,75 @@ Options for `mode`:
 - `"a"`/`"a+"`: Open for reading and writing, creating a new file if none exists, but
                 preserving the existing file if one is present
 """
-function jldopen(fname::Union{AbstractString, IO}, mode::AbstractString="r"; iotype=default_iotype(), kwargs...)
+function jldopen(fname::AbstractString, mode::AbstractString="r"; iotype=default_iotype(), kwargs...)
     (wr, create, truncate) = mode == "r"  ? (false, false, false) :
                              mode == "r+" ? (true, false, false) :
                              mode == "a" || mode == "a+" ? (true, true, false) :
                              mode == "w" || mode == "w+" ? (true, true, true) :
                              throw(ArgumentError("invalid open mode: $mode"))
-    if fname isa AbstractString
-        jldopen(fname, wr, create, truncate, iotype; kwargs...)
+    jldopen(fname, wr, create, truncate, iotype; kwargs...)
+end
+
+# Base.isseekable does not exist, so we implement a check
+isseekable(io) = false
+isseekable(io::IOStream) = true
+isseekable(io::IOBuffer) = io.seekable
+
+# Internal function that wraps various IO types into a MemoryBackedIO suitable for JLD2.
+# This provides a unified interface for all non-file IO operations.
+function _wrap_io(data::Vector{UInt8}, writable::Bool, truncate::Bool)
+    truncate && empty!(data)
+    io = ByteVectorIO(data, writable)
+    return (io, "ByteVector", isempty(data))
+end
+
+function _wrap_io(io::IO, writable::Bool, truncate::Bool)
+    !isreadable(io) && throw(ArgumentError("IO object is not readable"))
+
+    # Check if it's seekable and writable
+    if isseekable(io)
+        if writable && !iswritable(io)
+             throw(ArgumentError("IO object is not writable"))
+        end
+        if truncate
+            Base.truncate(io, 0)
+            seekstart(io)
+        end
+        # Read/write capable IO (e.g., IOBuffer in r+ mode)
+        wrapped = RWBuffer(io)
+        created = truncate
+        return (wrapped, "RWBuffer", created)
+    elseif !writable
+        # Read-only IO
+        wrapped = ReadOnlyBuffer(io)
+        return (wrapped, "ReadOnlyBuffer", false)
     else
-        jldopen(fname, wr, create, truncate; kwargs...)
+        throw(ArgumentError("IO object does not support the requested access mode"))
     end
 end
 
+"""
+    jldopen(io::Union{IO,Vector{UInt8}}, mode::AbstractString="r"; kwargs...)
 
-function jldopen(io::IO, writable::Bool, create::Bool, truncate::Bool;
+Open a JLD2 file from a non-file IO source (IOBuffer, Vector{UInt8}, or other IO).
+"""
+function jldopen(io::Union{IO,Vector{UInt8}}, mode::AbstractString="r"; kwargs...)
+    # Parse mode string
+    (wr, create, truncate) = mode == "r"  ? (false, false, false) :
+                             mode == "r+" ? (true, false, false) :
+                             mode == "a" || mode == "a+" ? (true, true, false) :
+                             mode == "w" || mode == "w+" ? (true, true, true) :
+                             throw(ArgumentError("invalid open mode: $mode"))
+    return jldopen(io, wr, create, truncate; kwargs...)
+end
+
+function jldopen(io::Union{IO,Vector{UInt8}}, writable::Bool, create::Bool, truncate::Bool;
                 plain::Bool=false,
                 compress=false,
-                typemap=default_typemap,
-                )
+                typemap=default_typemap)
+    wrapped_io, path_name, created = _wrap_io(io, writable, truncate)
     filters = Filters.normalize_filters(compress)
-    # figure out what kind of io object this is
-    # for now assume it is
-    !io.readable && throw("IO object is not readable")
-    if io.seekable && writable && iswritable(io)
-        # Here could have a more lightweight wrapper
-        # that just ensures API is defined
-        created = truncate
-        io = RWBuffer(io)
-        f = JLDFile(io, "RWBuffer", writable, created, plain, filters, false, typemap)
-    elseif (false == writable == create == truncate)
-        # Were trying to read, so let's hope `io` implements `read` and bytesavailable
-        io = ReadOnlyBuffer(io)
-        f = JLDFile(io, "ReadOnlyBuffer", false, false, plain, filters, false, typemap)
-    end
+    f = JLDFile(wrapped_io, path_name, writable, created, plain, filters, false, typemap)
     initialize_fileobject!(f)
     return f
 end
