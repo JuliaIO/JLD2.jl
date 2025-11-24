@@ -207,12 +207,7 @@ function read_bytestring(io::MmapIO)
     while unsafe_load(ptr, len + 1) != 0x00
         len += 1
     end
-
-    # Create String directly from the pointer with exact length
-    # This avoids the double-scan that unsafe_string + jlsizeof does
     str = len == 0 ? "" : unsafe_string(ptr, len)
-
-    # Advance pointer past the string and null terminator
     io.curptr += len + 1
     str
 end

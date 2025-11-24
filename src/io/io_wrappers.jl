@@ -68,15 +68,7 @@ function read_bytestring(io::ReadOnlyBuffer)
         nb += 1
     end
 
-    # Create String directly without intermediate array allocation
     pos = position(io)
-    if nb == 0
-        skip(io, 1)  # Skip the null terminator
-        return ""
-    end
-
-    # Use unsafe_string to create String directly from memory
-    # GC.@preserve ensures io.data isn't collected during String creation
     data = io.data
     str = GC.@preserve data unsafe_string(pointer(data, pos+1), nb)
     skip(io, nb+1)

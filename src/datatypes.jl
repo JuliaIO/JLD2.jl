@@ -2,10 +2,6 @@
 # Datatypes
 #
 
-# Task-local storage for current JLDFile during reading operations
-# This allows us to access the field name cache without threading it through all function signatures
-# const CURRENT_JLDFILE = ScopedValue{Union{Nothing, JLDFile}}(nothing)
-
 @enum DatatypeClass::UInt8 begin
     DT_FIXED_POINT = 0x00
     DT_FLOATING_POINT = 0x01

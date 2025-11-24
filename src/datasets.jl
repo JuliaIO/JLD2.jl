@@ -12,7 +12,6 @@ function load_dataset(f::JLDFile{IO}, offset::RelOffset) where IO
         return f.loaded_groups[offset]
     end
 
-    # Set current JLDFile in task-local storage for caching during datatype reading
     dataspace = ReadDataspace()
     attrs = EMPTY_READ_ATTRIBUTES
     dt::H5Datatype = PlaceholderH5Datatype()
