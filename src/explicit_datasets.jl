@@ -42,7 +42,7 @@ end
 
 
 """
-    create_dataset(parent, path, datatype=nothing, dataspace=nothing; layout=nothing, chunk=nothing, filters=FilterPipeline())
+    create_dataset(parent, path, datatype=nothing, dataspace=nothing; layout=nothing, chunk=nothing, filters=FilterPipeline(), allocate=false)
 
 Create a new [`Dataset`](@ref) object with specified metadata, ready for writing data.
 
@@ -55,14 +55,19 @@ metadata before writing.
 - `parent::Union{JLDFile, Group}`: The containing file or group for the new dataset
 - `path::Union{String, Nothing}`: Path to the dataset relative to `parent`.
   If `nothing`, creates an unnamed dataset
-- `datatype`: HDF5 datatype specification. If `nothing`, will be inferred from data during writing
-- `dataspace`: Dataspace describing dimensions. If `nothing`, will be inferred from data during writing
+- `datatype`: HDF5 datatype specification OR a Julia `Type`.
+  If `nothing`, will be inferred from data during writing.
+- `dataspace`: Dataspace describing dimensions OR a `Tuple`/`Vector` of integers representing dimensions.
+  If `nothing`, will be inferred from data during writing.
+- `allocate::Bool`: (Experimental) If `true`, allocates space for the dataset in the file immediately.
+  Requires `datatype` and `dataspace` to be provided.
+  Returns an `ArrayDataset` wrapper that allows writing to the dataset via array indexing (e.g. `dset[i] = val`).
 
 ## Returns
-- `Dataset`: A mutable dataset object ready for configuration and writing
+- `Dataset` (or `ArrayDataset` if `allocate=true`): A mutable dataset object ready for configuration and writing
 
 ## Notes
-- The dataset is not written to the file until [`write_dataset`](@ref) is called
+- The dataset is not written to the file until [`write_dataset`](@ref) is called (unless `allocate=true`)
 - Datatype and dataspace are usually inferred automatically from the data
 - Compression filters can be added after creation but before writing
 - Attributes can be added before or after writing (see [`add_attribute`](@ref))
@@ -83,6 +88,14 @@ jldopen("data.jld2", "w") do f
     JLD2.add_attribute(dset, "experiment_id", "exp_001")
     JLD2.write_dataset(dset, rand(10000))
 end
+
+# Streaming write (pre-allocate space)
+jldopen("data.jld2", "w") do f
+    dset = JLD2.create_dataset(f, "streamed", Float64, (100,); allocate=true)
+    for i in 1:100
+        dset[i] = rand()
+    end
+end
 ```
 """
 create_dataset(f::JLDFile, args...; kwargs...) = create_dataset(f.root_group, args...; kwargs...)
@@ -94,6 +107,7 @@ function create_dataset(
     layout = nothing,
     chunk=nothing,
     filters=FilterPipeline(),
+    allocate::Bool=false,
 )
     if !isnothing(path)
         (parent, name) = pathize(g, path, true)
@@ -102,8 +116,25 @@ function create_dataset(
         parent = g
     end
 
-    return Dataset(parent, name, UNDEFINED_ADDRESS, datatype, dataspace,
+    T = nothing
+    if datatype isa Type
+        T = datatype
+        datatype = h5fieldtype(g.f, T, T, Val{false})
+    end
+
+    if dataspace isa NTuple{N, Integer} where N || dataspace isa Vector{<:Integer}
+         dataspace = WriteDataspace(DS_SIMPLE, UInt64.(reverse(Tuple(dataspace))), ())
+    end
+
+    dset = Dataset(parent, name, UNDEFINED_ADDRESS, datatype, dataspace,
             layout, OrderedDict{String,Any}(), chunk, filters, nothing)
+
+    if allocate
+        allocate_early(dset, T)
+        return ArrayDataset(dset)
+    end
+
+    return dset
 end
 
 iswritten(dset::Dataset) = (dset.offset != UNDEFINED_ADDRESS)
@@ -557,14 +588,11 @@ function readmmap(dset::Dataset)
     end
 end
 
-@static if !Sys.iswindows()
 """
     allocate_early(dset::Dataset, T::DataType)
 
 Write a dataset to file without any actual data. Reserve space according to element type and dimensions.
-This may be useful in conjunction with [`readmmap`](@ref).
-
-Note: Not available on Windows.
+This may be useful in conjunction with [`readmmap`](@ref) or by explicitly writing elements afterwards using [`ArrayDataset`](@ref).
 """
 function allocate_early(dset::Dataset, T::DataType)
     iswritten(dset) && throw(ArgumentError("Dataset has already been written to file"))
@@ -634,7 +662,6 @@ function allocate_early(dset::Dataset, T::DataType)
         setproperty!(dset, field, getfield(ddset, field))
     end
     return offset
-end
 end
 
 struct ArrayDataset{T, N, RR<:ReadRepresentation{T}, io} <: AbstractArray{T, N}
