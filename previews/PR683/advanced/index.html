@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Advanced Usage · Julia Data Format</title><meta name="title" content="Advanced Usage · Julia Data Format"/><meta property="og:title" content="Advanced Usage · Julia Data Format"/><meta property="twitter:title" content="Advanced Usage · Julia Data Format"/><meta name="description" content="Documentation for Julia Data Format."/><meta property="og:description" content="Documentation for Julia Data Format."/><meta property="twitter:description" content="Documentation for Julia Data Format."/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">Julia Data Format</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../basic_usage/">Basic Usage</a></li><li><a class="tocitem" href="../customserialization/">Custom Serialization</a></li><li><a class="tocitem" href="../compression/">Compression</a></li><li><a class="tocitem" href="../internals/">Internals &amp; Design</a></li><li><a class="tocitem" href="../hdf5compat/">HDF5 Compatibility</a></li><li class="is-active"><a class="tocitem" href>Advanced Usage</a><ul class="internal"><li><a class="tocitem" href="#Loading-plain-types"><span>Loading plain types</span></a></li><li><a class="tocitem" href="#Explicit-Type-Remapping"><span>Explicit Type Remapping</span></a></li><li><a class="tocitem" href="#Upgrading-old-structures-on-load"><span>Upgrading old structures on load</span></a></li><li><a class="tocitem" href="#Full-control-over-type-reconstruction"><span>Full control over type reconstruction</span></a></li><li><a class="tocitem" href="#Groups-Appending-to-files"><span>Groups - Appending to files</span></a></li><li><a class="tocitem" href="#Fallback-Behaviour"><span>Fallback Behaviour</span></a></li><li><a class="tocitem" href="#Virtual-Datasets"><span>Virtual Datasets</span></a></li></ul></li><li><a class="tocitem" href="../legacy/">Legacy</a></li><li><a class="tocitem" href="../troubleshooting/">Troubleshooting</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Advanced Usage</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Advanced Usage</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/JuliaIO/JLD2.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/JuliaIO/JLD2.jl/blob/master/docs/src/advanced.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Advanced-Usage"><a class="docs-heading-anchor" href="#Advanced-Usage">Advanced Usage</a><a id="Advanced-Usage-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-Usage" title="Permalink"></a></h1><h2 id="Loading-plain-types"><a class="docs-heading-anchor" href="#Loading-plain-types">Loading plain types</a><a id="Loading-plain-types-1"></a><a class="docs-heading-anchor-permalink" href="#Loading-plain-types" title="Permalink"></a></h2><pre><code class="language-julia-repl hljs" style="display:block;">julia&gt; jldsave(&quot;test.jld2&quot;; z= 1.0 + im * 2.0)</code><br/><code class="language-julia-repl hljs" style="display:block;">julia&gt; load(&quot;test.jld2&quot;, &quot;z&quot;)</code><code class="nohighlight hljs ansi" style="display:block;">1.0 + 2.0im</code><br/><code class="language-julia-repl hljs" style="display:block;">julia&gt; load(&quot;test.jld2&quot;, &quot;z&quot;; plain=true)</code><code class="nohighlight hljs ansi" style="display:block;">(re = 1.0, im = 2.0)</code><br/><code class="language-julia-repl hljs" style="display:block;">julia&gt; @__MODULE__</code><code class="nohighlight hljs ansi" style="display:block;">Main</code></pre><h2 id="Explicit-Type-Remapping"><a class="docs-heading-anchor" href="#Explicit-Type-Remapping">Explicit Type Remapping</a><a id="Explicit-Type-Remapping-1"></a><a class="docs-heading-anchor-permalink" href="#Explicit-Type-Remapping" title="Permalink"></a></h2><p>Sometimes you store data using <code>struct</code>s that you defined yourself or are shipped with some package and weeks later, when you want to load the data, the structs have changed.</p><pre><code class="language-julia hljs">struct A
+    x::Int
+end
+jldsave(&quot;example.jld2&quot;; a = A(42))</code></pre><p>This results in warnings and sometimes even errors when trying to load the file as demonstrated here.</p><pre><code class="language-julia-repl hljs" style="display:block;">julia&gt; struct A{T}
+           x::T
+       end</code><br/><code class="language-julia-repl hljs" style="display:block;">julia&gt; load(&quot;example.jld2&quot;)</code><code class="nohighlight hljs ansi" style="display:block;">Dict{String, Any} with 1 entry:
+  &quot;a&quot; =&gt; A(42)</code></pre><p>The <code>JLDFile</code> struct contains a <code>typemap</code> field that allows for explicit type remapping. You can define a struct that matches the old definition and load your data.</p><pre><code class="language-julia-repl hljs" style="display:block;">julia&gt; struct A_old
+           x::Int
+       end</code><br/><code class="language-julia-repl hljs" style="display:block;">julia&gt; f = jldopen(&quot;example.jld2&quot;,&quot;r&quot;; typemap=Dict(&quot;Main.A&quot; =&gt; A_old))</code><code class="nohighlight hljs ansi" style="display:block;">JLDFile /home/runner/work/JLD2.jl/JLD2.jl/docs/build/example.jld2 (read-only)
+ └─🔢 a</code><br/><code class="language-julia-repl hljs" style="display:block;">julia&gt; f[&quot;a&quot;]</code><code class="nohighlight hljs ansi" style="display:block;">Main.__atexample__278.A(42)</code><br/><code class="language-julia-repl hljs" style="display:block;">julia&gt; close(f)</code></pre><h2 id="Upgrading-old-structures-on-load"><a class="docs-heading-anchor" href="#Upgrading-old-structures-on-load">Upgrading old structures on load</a><a id="Upgrading-old-structures-on-load-1"></a><a class="docs-heading-anchor-permalink" href="#Upgrading-old-structures-on-load" title="Permalink"></a></h2><p>The section above explains how you can make JLD2 load old structs with a different Datatype name as target. A different method for loading old data is described here:</p><pre><code class="language-julia hljs"># This is the old version of the struct stored in the file
+struct OldStructVersion
+    x::Int
+    y::Float64
+end
+orig = OldStructVersion(1,2.0)
+jldsave(&quot;test.jld2&quot;; data=orig)</code></pre><pre><code class="language-julia hljs">### new session
+
+# This is the new version of your struct
+struct UpdatedStruct
+    x::Float64 # no longer int
+    y::Float64
+    z::Float64 # = x*y
+end
+
+# When upgrading a struct, JLD2 will load the fields of the old struct into a `NamedTuple`
+# and call `rconvert` on it. Here we implement a conversion method that returns an `UpdatedStruct`
+JLD2.rconvert(::Type{UpdatedStruct}, nt::NamedTuple) = UpdatedStruct(Float64(nt.x), nt.y, nt.x*nt.y)
+
+# Here we provide the `typemap` keyword argument. It is a dictionary mapping the stored struct name
+# to an `Upgrade` instance with the new struct.
+load(&quot;test.jld2&quot;, &quot;data&quot;; typemap=Dict(&quot;Main.OldStructVersion&quot; =&gt; JLD2.Upgrade(UpdatedStruct)))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Main.__atexample__281.OldStructVersion(1, 2.0)</code></pre><h2 id="Full-control-over-type-reconstruction"><a class="docs-heading-anchor" href="#Full-control-over-type-reconstruction">Full control over type reconstruction</a><a id="Full-control-over-type-reconstruction-1"></a><a class="docs-heading-anchor-permalink" href="#Full-control-over-type-reconstruction" title="Permalink"></a></h2><p>The recommended and more powerful option is to take full control over type mapping by providing a custom mapping function that gets full access to all stored information including the type parameters. Example like above:</p><pre><code class="language-julia hljs">struct OldStruct{T}
+    x::T
+end
+
+old_int = OldStruct(42)
+old_float = OldStruct(3.14)
+jldsave(&quot;test.jld2&quot;; old_int, old_float, inttype=OldStruct{Int}, floattype=OldStruct{Float64}, )
+
+struct NormalStruct{T}
+    x::T
+end
+
+struct SquaredStruct{T}
+    xsquared::T
+end
+
+JLD2.rconvert(::Type{SquaredStruct{T}}, nt) where T = SquaredStruct{T}(nt.x^2)
+
+typemap = function(f::JLD2.JLDFile, typepath::String, params::Vector)
+    if typepath == &quot;Main.OldStruct&quot;
+        if params[1] == Int
+            @info &quot;Mapping an OldStruct{Int} to SquaredStruct{Int} with conversion&quot;
+            # If the type param is Int, map to squared struct
+            # and wrap in `Upgrade` to trigger custom conversion with `rconvert`
+            return JLD2.Upgrade(SquaredStruct{Int})
+        else
+            @info &quot;Mapping an OldStruct{T} to NormalStruct{T} without conversion&quot;
+            # All other OldStructs just get updated to NormalStruct
+            return NormalStruct{params...}
+        end
+    end
+    # This typemap functino is called for every single type that is decoded.
+    # All types that do not need special handling should be forwarded to the default
+    # implementation.
+    @info &quot;Forwarding $typepath with parameters $params to default type mapping&quot;
+    return JLD2.default_typemap(f, typepath, params)
+end
+
+load(&quot;test.jld2&quot;; typemap)</code></pre><pre><code class="nohighlight hljs">[ Info: Forwarding Core.Int64 with parameters Any[] to default type mapping
+[ Info: Mapping an OldStruct{Int} to SquaredStruct{Int} with conversion
+[ Info: Forwarding Core.Float64 with parameters Any[] to default type mapping
+[ Info: Mapping an OldStruct{T} to NormalStruct{T} without conversion
+[ Info: Forwarding Core.Int64 with parameters Any[] to default type mapping
+[ Info: Mapping an OldStruct{Int} to SquaredStruct{Int} with conversion
+[ Info: Forwarding Core.Float64 with parameters Any[] to default type mapping
+[ Info: Mapping an OldStruct{T} to NormalStruct{T} without conversion
+Dict{String, Any} with 4 entries:
+  &quot;inttype&quot;   =&gt; SquaredStruct{Int64}
+  &quot;old_float&quot; =&gt; NormalStruct{Float64}(3.14)
+  &quot;old_int&quot;   =&gt; SquaredStruct{Int64}(1764)
+  &quot;floattype&quot; =&gt; NormalStruct{Float64}</code></pre><p>Note that the dictionary approach and the mapping function are mutually exclusive.</p><h2 id="Groups-Appending-to-files"><a class="docs-heading-anchor" href="#Groups-Appending-to-files">Groups - Appending to files</a><a id="Groups-Appending-to-files-1"></a><a class="docs-heading-anchor-permalink" href="#Groups-Appending-to-files" title="Permalink"></a></h2><p>Group objects can be constructed with two optional keyword arguments:</p><pre><code class="language-julia hljs">g = Group(file;
+          est_num_entries=4
+          est_link_name_len=8)</code></pre><p>These determine how much (additional) empty space should be allocated for the group description. (list of entries) This can be useful for performance when one expects to append many additional datasets after first writing the file.</p><h2 id="Fallback-Behaviour"><a class="docs-heading-anchor" href="#Fallback-Behaviour">Fallback Behaviour</a><a id="Fallback-Behaviour-1"></a><a class="docs-heading-anchor-permalink" href="#Fallback-Behaviour" title="Permalink"></a></h2><p>By default JLD2 will attempt to open files using the <code>MmapIO</code> backend. If that fails, it retries using <code>IOStream</code>.</p><h2 id="Virtual-Datasets"><a class="docs-heading-anchor" href="#Virtual-Datasets">Virtual Datasets</a><a id="Virtual-Datasets-1"></a><a class="docs-heading-anchor-permalink" href="#Virtual-Datasets" title="Permalink"></a></h2><p>Virtual datasets (VDS) allow you to create datasets that reference data from multiple source files without copying the data. This is useful for combining large distributed datasets efficiently.</p><h3 id="Basic-Usage"><a class="docs-heading-anchor" href="#Basic-Usage">Basic Usage</a><a id="Basic-Usage-1"></a><a class="docs-heading-anchor-permalink" href="#Basic-Usage" title="Permalink"></a></h3><p>Create a virtual dataset mapping entire source files:</p><pre><code class="language-julia hljs">using JLD2
+
+# Create source files
+jldsave(&quot;data1.jld2&quot;; x = fill(1.0, 3))
+jldsave(&quot;data2.jld2&quot;; x = fill(2.0, 3))
+
+# Create virtual dataset
+jldopen(&quot;virtual.jld2&quot;, &quot;w&quot;) do f
+    mappings = [
+        JLD2.VirtualMapping(&quot;./data1.jld2&quot;, &quot;x&quot;),
+        JLD2.VirtualMapping(&quot;./data2.jld2&quot;, &quot;x&quot;)
+    ]
+    JLD2.create_virtual_dataset(f, &quot;combined&quot;, (3, 2), Float64, mappings)
+end
+
+# Read back
+data = jldopen(&quot;virtual.jld2&quot;, &quot;r&quot;) do f
+    f[&quot;combined&quot;]  # Returns [1.0 2.0; 1.0 2.0; 1.0 2.0]
+end</code></pre><h3 id="Selection-Methods"><a class="docs-heading-anchor" href="#Selection-Methods">Selection Methods</a><a id="Selection-Methods-1"></a><a class="docs-heading-anchor-permalink" href="#Selection-Methods" title="Permalink"></a></h3><p>Virtual mappings support three ways to specify regions:</p><p><strong>1. Julia index ranges (recommended)</strong></p><pre><code class="language-julia hljs">mapping = JLD2.VirtualMapping(&quot;./data.jld2&quot;, &quot;measurements&quot;;
+    vds_indices=(1:1, 1:5))  # Place in first row, columns 1-5
+
+mapping = JLD2.VirtualMapping(&quot;./data.jld2&quot;, &quot;measurements&quot;;
+    src_indices=(1:10, 5:15),   # Take rows 1-10, cols 5-15 from source
+    vds_indices=(1:10, 1:11))   # Place at rows 1-10, cols 1-11 in VDS</code></pre><p><strong>2. Root index + shape (most intuitive)</strong></p><pre><code class="language-julia hljs">mapping = JLD2.VirtualMapping(&quot;./data.jld2&quot;, &quot;measurements&quot;;
+    vds_root=(2, 1),      # Start at row 2, column 1
+    vds_shape=(1, 5))     # Block is 1 row × 5 columns
+
+mapping = JLD2.VirtualMapping(&quot;./data.jld2&quot;, &quot;measurements&quot;;
+    src_root=(5, 10), src_shape=(3, 4),  # Take 3×4 block from source
+    vds_root=(1, 1),  vds_shape=(3, 4))  # Place at top-left of VDS</code></pre><p><strong>3. Direct HyperslabSelection (advanced)</strong></p><pre><code class="language-julia hljs">vds_sel = JLD2.HyperslabSelection([0x0, 0x0], [0x1, 0x1], [0x1, 0x1], [0x5, 0x1])
+mapping = JLD2.VirtualMapping(&quot;./data.jld2&quot;, &quot;measurements&quot;; vds_selection=vds_sel)</code></pre><h3 id="Strided-Selections"><a class="docs-heading-anchor" href="#Strided-Selections">Strided Selections</a><a id="Strided-Selections-1"></a><a class="docs-heading-anchor-permalink" href="#Strided-Selections" title="Permalink"></a></h3><p>Select non-contiguous regions using strided ranges:</p><pre><code class="language-julia hljs"># Every other row
+mapping = JLD2.VirtualMapping(&quot;./data.jld2&quot;, &quot;measurements&quot;;
+    vds_indices=(1:2:10, 1:5))  # Rows 1, 3, 5, 7, 9 in VDS</code></pre><h3 id="Automatic-Inference"><a class="docs-heading-anchor" href="#Automatic-Inference">Automatic Inference</a><a id="Automatic-Inference-1"></a><a class="docs-heading-anchor-permalink" href="#Automatic-Inference" title="Permalink"></a></h3><p>Automatically infer dimensions and types from source files:</p><pre><code class="language-julia hljs">jldopen(&quot;virtual.jld2&quot;, &quot;w&quot;) do f
+    source_files = [&quot;./data1.jld2&quot;, &quot;./data2.jld2&quot;, &quot;./data3.jld2&quot;]
+
+    # Automatically determines dimensions and element type
+    JLD2.create_virtual_dataset(f, &quot;combined&quot;, source_files, &quot;measurements&quot;)
+end</code></pre><h3 id="Pattern-based-File-Names"><a class="docs-heading-anchor" href="#Pattern-based-File-Names">Pattern-based File Names</a><a id="Pattern-based-File-Names-1"></a><a class="docs-heading-anchor-permalink" href="#Pattern-based-File-Names" title="Permalink"></a></h3><p>Use <code>%b</code> for sequential file patterns:</p><pre><code class="language-julia hljs"># Expands to sub-0.jld2, sub-1.jld2, etc.
+mapping = JLD2.VirtualMapping(&quot;./sub-%b.jld2&quot;, &quot;dataset&quot;)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../hdf5compat/">« HDF5 Compatibility</a><a class="docs-footer-nextpage" href="../legacy/">Legacy »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Tuesday 25 November 2025 09:45">Tuesday 25 November 2025</span>. Using Julia version 1.12.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
