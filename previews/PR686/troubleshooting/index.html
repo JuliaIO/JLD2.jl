@@ -13,7 +13,113 @@
        )</code><br/><code class="language-julia-repl hljs" style="display:block;">julia&gt; f = jldopen(&quot;test.jld2&quot;)</code><code class="nohighlight hljs ansi" style="display:block;">JLDFile /home/runner/work/JLD2.jl/JLD2.jl/docs/build/test.jld2 (read-only)
  ├─🔢 a
  ├─🔢 b
- └─🔢 c</code><br/><code class="language-julia-repl hljs" style="display:block;">julia&gt; JLD2.print_header_messages(f, &quot;a&quot;)</code><code class="nohighlight hljs ansi" style="display:block;">ERROR: FieldError: type Link has no field `target`, available fields: `offset`, `path`, `external_file`</code></pre><p>Here we see, among other things, a</p><ul><li>dataspace message which states that <code>&quot;a&quot;</code> is a single (scalar) element</li><li>datatype message</li><li>datalayout message of the <em>compact</em> type which means that the data is so small it was</li></ul><p>directly stored as part of the message.</p><pre><code class="language-julia-repl hljs" style="display:block;">julia&gt; JLD2.print_header_messages(f, &quot;b&quot;)</code><code class="nohighlight hljs ansi" style="display:block;">ERROR: FieldError: type Link has no field `target`, available fields: `offset`, `path`, `external_file`</code></pre><p>Important differences to <code>&quot;a&quot;</code> are that the dataspace now reports the dimensions of the array as <code>(5,)</code> and the the data layout has changed to <em>contiguous</em> which means that it is stored as a single block starting at the offset reported in <code>data_address</code>.</p><pre><code class="language-julia-repl hljs" style="display:block;">julia&gt; JLD2.print_header_messages(f, &quot;c&quot;)</code><code class="nohighlight hljs ansi" style="display:block;">ERROR: FieldError: type Link has no field `target`, available fields: `offset`, `path`, `external_file`</code></pre><p>For dataset <code>c</code> we see that the datatype is a <em>shared</em> datatype which is stored elsewhere in the file and is referenced by its offset. This is, of course, also a regular hdf5 object and we can print its header messages by supplying the offset:</p><pre><code class="language-julia-repl hljs" style="display:block;">julia&gt; JLD2.print_header_messages(f, JLD2.RelOffset(4520))</code><code class="nohighlight hljs ansi" style="display:block;">┌─ Header Message: HmDatatype
+ └─🔢 c</code><br/><code class="language-julia-repl hljs" style="display:block;">julia&gt; JLD2.print_header_messages(f, &quot;a&quot;)</code><code class="nohighlight hljs ansi" style="display:block;">┌─ Header Message: HmFillValue
+│ ┌─ offset:	RelOffset(55)
+│ │  size:	2
+│ └─ flags:	0
+│    version:	3
+└─   flags:	9
+┌─ Header Message: HmDataspace
+│ ┌─ offset:	RelOffset(61)
+│ │  size:	4
+│ └─ flags:	0
+│    version:	2
+│    dimensionality:	0
+│    flags:	0
+│    dataspace_type:	0
+│    dim_offset:	RelOffset(69)
+└─   dimensions:	()
+┌─ Header Message: HmDatatype
+│ ┌─ offset:	RelOffset(69)
+│ │  size:	12
+│ └─ flags:	1
+│    datatype_offset:	RelOffset(73)
+└─   dt:	JLD2.FixedPointDatatype(0x30, 0x08, 0x00, 0x00, 0x00000008, 0x0000, 0x0040)
+┌─ Header Message: HmDataLayout
+│ ┌─ offset:	RelOffset(85)
+│ │  size:	12
+│ └─ flags:	0
+│    version:	4
+│    layout_class:	LcCompact
+│    data_size:	8
+│    data_address:	RelOffset(93)
+└─   data:	UInt8[0x2a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+┌─ Header Message: HmNil
+│ ┌─ offset:	RelOffset(101)
+│ │  size:	16
+│ └─ flags:	0
+└─</code></pre><p>Here we see, among other things, a</p><ul><li>dataspace message which states that <code>&quot;a&quot;</code> is a single (scalar) element</li><li>datatype message</li><li>datalayout message of the <em>compact</em> type which means that the data is so small it was</li></ul><p>directly stored as part of the message.</p><pre><code class="language-julia-repl hljs" style="display:block;">julia&gt; JLD2.print_header_messages(f, &quot;b&quot;)</code><code class="nohighlight hljs ansi" style="display:block;">┌─ Header Message: HmFillValue
+│ ┌─ offset:	RelOffset(132)
+│ │  size:	2
+│ └─ flags:	0
+│    version:	3
+└─   flags:	9
+┌─ Header Message: HmDataspace
+│ ┌─ offset:	RelOffset(138)
+│ │  size:	12
+│ └─ flags:	0
+│    version:	2
+│    dimensionality:	1
+│    flags:	0
+│    dataspace_type:	1
+│    dim_offset:	RelOffset(146)
+└─   dimensions:	(5,)
+┌─ Header Message: HmDatatype
+│ ┌─ offset:	RelOffset(154)
+│ │  size:	12
+│ └─ flags:	1
+│    datatype_offset:	RelOffset(158)
+└─   dt:	JLD2.FixedPointDatatype(0x30, 0x08, 0x00, 0x00, 0x00000008, 0x0000, 0x0040)
+┌─ Header Message: HmDataLayout
+│ ┌─ offset:	RelOffset(170)
+│ │  size:	18
+│ └─ flags:	0
+│    version:	4
+│    layout_class:	LcContiguous
+│    data_address:	RelOffset(216)
+└─   data_size:	40
+┌─ Header Message: HmNil
+│ ┌─ offset:	RelOffset(192)
+│ │  size:	16
+│ └─ flags:	0
+└─</code></pre><p>Important differences to <code>&quot;a&quot;</code> are that the dataspace now reports the dimensions of the array as <code>(5,)</code> and the the data layout has changed to <em>contiguous</em> which means that it is stored as a single block starting at the offset reported in <code>data_address</code>.</p><pre><code class="language-julia-repl hljs" style="display:block;">julia&gt; JLD2.print_header_messages(f, &quot;c&quot;)</code><code class="nohighlight hljs ansi" style="display:block;">┌─ Header Message: HmFillValue
+│ ┌─ offset:	RelOffset(4825)
+│ │  size:	2
+│ └─ flags:	0
+│    version:	3
+└─   flags:	9
+┌─ Header Message: HmDataspace
+│ ┌─ offset:	RelOffset(4831)
+│ │  size:	4
+│ └─ flags:	0
+│    version:	2
+│    dimensionality:	0
+│    flags:	0
+│    dataspace_type:	0
+│    dim_offset:	RelOffset(4839)
+└─   dimensions:	()
+┌─ Header Message: HmDatatype
+│ ┌─ offset:	RelOffset(4839)
+│ │  size:	10
+│ └─ flags:	3
+│    version:	3
+│    msgtype:	2
+│    dt:	JLD2.SharedDatatype(RelOffset(4520))
+└─   datatype_offset:	RelOffset(4520)
+┌─ Header Message: HmDataLayout
+│ ┌─ offset:	RelOffset(4853)
+│ │  size:	20
+│ └─ flags:	0
+│    version:	4
+│    layout_class:	LcCompact
+│    data_size:	16
+│    data_address:	RelOffset(4861)
+└─   data:	UInt8[0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+┌─ Header Message: HmNil
+│ ┌─ offset:	RelOffset(4877)
+│ │  size:	16
+│ └─ flags:	0
+└─</code></pre><p>For dataset <code>c</code> we see that the datatype is a <em>shared</em> datatype which is stored elsewhere in the file and is referenced by its offset. This is, of course, also a regular hdf5 object and we can print its header messages by supplying the offset:</p><pre><code class="language-julia-repl hljs" style="display:block;">julia&gt; JLD2.print_header_messages(f, JLD2.RelOffset(4520))</code><code class="nohighlight hljs ansi" style="display:block;">┌─ Header Message: HmDatatype
 │ ┌─ offset:	RelOffset(4527)
 │ │  size:	38
 │ └─ flags:	64
@@ -35,4 +141,4 @@
 │    dataspace_offset:	RelOffset(4602)
 │    dataspace_message:	UInt8[0x02, 0x00, 0x00, 0x00]
 └─   data_offset:	RelOffset(4606)
-    data: &quot;Tuple{Int64, Int64}&quot;</code></pre><p>This object consists of just two messages:</p><ul><li>The datatype message defines the hdf5 datatype and therefore describes the byte layout</li></ul><p>and field types.</p><ul><li>The attribute message has the name <code>julia_type</code> and as payload the julia <code>DataType</code></li></ul><p>signature <code>Tuple{Int64, Int64}</code> which is needed for reconstruction.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../legacy/">« Legacy</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Tuesday 25 November 2025 10:59">Tuesday 25 November 2025</span>. Using Julia version 1.12.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+    data: &quot;Tuple{Int64, Int64}&quot;</code></pre><p>This object consists of just two messages:</p><ul><li>The datatype message defines the hdf5 datatype and therefore describes the byte layout</li></ul><p>and field types.</p><ul><li>The attribute message has the name <code>julia_type</code> and as payload the julia <code>DataType</code></li></ul><p>signature <code>Tuple{Int64, Int64}</code> which is needed for reconstruction.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../legacy/">« Legacy</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Tuesday 25 November 2025 11:13">Tuesday 25 November 2025</span>. Using Julia version 1.12.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
