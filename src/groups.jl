@@ -122,9 +122,8 @@ function pathize(g::Group, name::AbstractString, create::Bool)
     return (g::G, name)
 end
 
-@nospecializeinfer function Base.getindex(g::Group, name::AbstractString)
-    f = g.f
-    f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
+function Base.getindex(g::Group, name::AbstractString)
+    g.f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
 
     (g, name) = pathize(g, name, false)
     isempty(name) && return g
@@ -133,15 +132,11 @@ end
     haskey(g.unwritten_child_groups, name) && return g.unwritten_child_groups[name]
 
     link = lookup_link(g, name)
-    !is_set(link) && throw(KeyError(name))
-
-    if is_hard_link(link)
-        return Base.inferencebarrier(load_dataset(f, link.offset))
-    elseif is_external_link(link)
+    if is_external_link(link)
         return load_external_dataset(g.f, link)
-    else  # soft link
-        haskey(g, link.path) || throw(ArgumentError("Soft link target not found: $(link.path)"))
-        return g[link.path]
+    else
+        offset = getoffset(g, link)
+        return load_dataset(g.f, offset)
     end
 end
 
@@ -264,13 +259,9 @@ Handles hard links (type 0), soft links (type 1), and external links (type 64).
 function parse_link_message(wmsg::HmWrap{HmLinkMessage})::Link
     if isset(wmsg.flags, 3)
         link_type = wmsg.link_type
-        if link_type == 0  # Hard link
-            wmsg.target == UNDEFINED_ADDRESS &&
-                throw(InvalidDataException("Hard link has UNDEFINED_ADDRESS target"))
-            return Link(wmsg.target)
-        elseif link_type == 1  # Soft link
-            return Link(UNDEFINED_ADDRESS, String(wmsg.soft_link), "")
-        elseif link_type == 64  # External link
+        link_type == 0 && return Link(wmsg.target)
+        link_type == 1 && return Link(UNDEFINED_ADDRESS, String(wmsg.soft_link), "")
+        if link_type == 64 &&
             strings = split(String(wmsg.external_link), '\0', keepempty=false)
             length(strings) == 2 ||
                 throw(InvalidDataException("External link must have two null-terminated strings"))
@@ -278,12 +269,9 @@ function parse_link_message(wmsg::HmWrap{HmLinkMessage})::Link
         else
             throw(UnsupportedFeatureException("Unsupported link type: $link_type"))
         end
-    else
-        # Default to hard link when type flag not set
-        wmsg.target != UNDEFINED_ADDRESS ||
-            throw(InvalidDataException("Link has no type and UNDEFINED_ADDRESS target"))
-        return Link(wmsg.target)
     end
+    # Default to hard link when type flag not set
+    return Link(wmsg.target)
 end
 
 function load_group(f::JLDFile, offset::RelOffset)

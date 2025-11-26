@@ -114,6 +114,19 @@ end
         f["soft_link_to_data"] = JLD2.Link("/original_data")
     end
 
+    jldopen("test_main.jld2", "r+") do f
+        @test f["direct_external"] == collect(1:5)
+        @test_throws ArgumentError f["direct_external/dummy"] = 42
+        @test_throws ArgumentError f["original_data/dummy"] = 42
+
+        jldopen("test_external.jld2" "r") do _
+            # Hit different code path if external file is already open
+            @test f["direct_external"] == collect(1:5)
+        end
+    end
+
+
+
     # Clean up test files
     for file in ["test_main.jld2", "test_external.jld2"]
         isfile(file) && rm(file)

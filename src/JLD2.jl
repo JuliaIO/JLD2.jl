@@ -413,8 +413,6 @@ Base.keys(f::JLDFile) = filter!(x->x != "_types", keys(f.root_group))
 Base.keytype(f::JLDFile) = String
 Base.length(f::Union{JLDFile, Group}) = length(keys(f))
 
-lookup_link(f::JLDFile, name::AbstractString) = lookup_link(f.root_group, name)
-
 Base.get(default::Function, f::Union{JLDFile, Group}, name::AbstractString) =
     haskey(f, name) ? f[name] : default()
 Base.get(f::Union{JLDFile, Group}, name::AbstractString, default) =
