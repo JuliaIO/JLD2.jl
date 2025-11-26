@@ -16,19 +16,11 @@ Construct a group named `name` as a child of group `g`.
 """
 Group(g::Group{T}, name::AbstractString; kwargs...) where {T} = (g[name] = Group{T}(g.f; kwargs...))
 
-
-"""
-    lookup_link(g::Group, name::AbstractString) -> Union{Link, Nothing}
-
-Lookup a link in a group by name. Returns the Link object if found, or `nothing`
-if not present. Supports all link types (hard, soft, external).
-"""
+# Lookup a link in a group by name. Returns a Link object.
+# Use is_set(link) to check if it is valid.
 function lookup_link(g::Group, name::AbstractString)
-    if g.last_chunk_start_offset != -1
-        # Has been saved to file, so written_links exists
-        link = get(g.written_links, name, nothing)
-        link !== nothing && return link
-    end
+    link = get(g.written_links, name, nothing)
+    link !== nothing && return link
     return get(g.unwritten_links, name, Link())
 end
 
@@ -46,10 +38,12 @@ This centralizes link resolution logic and simplifies calling code.
 """
 function getoffset(g::Group, link::Link; erroroninvalid::Bool=true)
     if is_hard_link(link)
+        erroroninvalid && !is_set(link) && throw(ArgumentError("Invalid hard link"))
         return link.offset
     elseif is_soft_link(link)
         # Recursively resolve soft link
-        target_link = lookup_link(g, link.path)
+        (g, name) = pathize(g, link.path, false)
+        target_link = lookup_link(g, name)
         if !is_set(target_link)
             erroroninvalid && throw(ArgumentError("Soft link target not found: $(link.path)"))
             return UNDEFINED_ADDRESS
@@ -132,12 +126,10 @@ function Base.getindex(g::Group, name::AbstractString)
     haskey(g.unwritten_child_groups, name) && return g.unwritten_child_groups[name]
 
     link = lookup_link(g, name)
-    if is_external_link(link)
-        return load_external_dataset(g.f, link)
-    else
-        offset = getoffset(g, link)
-        return load_dataset(g.f, offset)
-    end
+    !is_set(link) && throw(KeyError(name))
+    is_external_link(link) && return load_external_dataset(g.f, link)
+    offset = getoffset(g, link)
+    return load_dataset(g.f, offset)
 end
 
 @nospecializeinfer function Base.write(
@@ -261,7 +253,7 @@ function parse_link_message(wmsg::HmWrap{HmLinkMessage})::Link
         link_type = wmsg.link_type
         link_type == 0 && return Link(wmsg.target)
         link_type == 1 && return Link(UNDEFINED_ADDRESS, String(wmsg.soft_link), "")
-        if link_type == 64 &&
+        if link_type == 64
             strings = split(String(wmsg.external_link), '\0', keepempty=false)
             length(strings) == 2 ||
                 throw(InvalidDataException("External link must have two null-terminated strings"))

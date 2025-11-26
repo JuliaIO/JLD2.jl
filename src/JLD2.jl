@@ -265,8 +265,7 @@ function initialize_fileobject!(f::JLDFile)
     end
     f.root_group = load_group(f, f.root_group_offset)
 
-    # Use lookup_link directly instead of lookup_offset
-    types_offset = getoffset(f.root_group, lookup_link(f.root_group, "_types"))
+    types_offset = getoffset(f.root_group, lookup_link(f.root_group, "_types"), erroroninvalid=false)
     if types_offset !== UNDEFINED_ADDRESS
         f.types_group = f.loaded_groups[types_offset] = load_group(f, types_offset)
         for (i, link) in enumerate(values(f.types_group.written_links))

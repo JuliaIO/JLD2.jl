@@ -119,7 +119,7 @@ end
         @test_throws ArgumentError f["direct_external/dummy"] = 42
         @test_throws ArgumentError f["original_data/dummy"] = 42
 
-        jldopen("test_external.jld2" "r") do _
+        jldopen("test_external.jld2", "r") do _
             # Hit different code path if external file is already open
             @test f["direct_external"] == collect(1:5)
         end
@@ -175,9 +175,9 @@ using JLD2: UnsupportedFeatureException
 
             jldopen(test_file, "r") do f
                 # Test that broken soft links throw appropriate errors
-                @test_throws ArgumentError f["data/broken_absolute"]
-                @test_throws ArgumentError f["data/broken_relative"]
-                @test_throws ArgumentError f["broken_root"]
+                @test_throws KeyError f["data/broken_absolute"]
+                @test_throws KeyError f["data/broken_relative"]
+                @test_throws KeyError f["broken_root"]
             end
         end
     end
