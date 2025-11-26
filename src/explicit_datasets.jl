@@ -362,21 +362,8 @@ end
 
 # Links
 message_size(msg::Pair{String, RelOffset}) = jlsizeof(Val(HmLinkMessage); link_name=msg.first)
-message_size(msg::Pair{String, Link}) = message_size_for_link(msg.first, msg.second)
-
-write_header_message(io, f, msg::Pair{String, RelOffset}, _=nothing) =
-    write_header_message(io, Val(HmLinkMessage); link_name=msg.first, target=msg.second)
-write_header_message(io, f, msg::Pair{String, Link}, _=nothing) =
-    write_link_message(io, msg.first, msg.second)
-
-"""
-    message_size_for_link(name::String, link::Link) -> Int
-
-Calculate the size of a link message for the given link type.
-"""
-function message_size_for_link(link_name::String, link::Link)
+function message_size((link_name, link)::Pair{String, Link})
     is_hard_link(link) && return jlsizeof(Val(HmLinkMessage); link_name)
-
     flags = UInt8(0x10 | 0x08 | size_flag(sizeof(link_name)))
     if is_soft_link(link)
         jlsizeof(Val(HmLinkMessage); link_name, flags, link_type=UInt8(1),
@@ -387,6 +374,11 @@ function message_size_for_link(link_name::String, link::Link)
                  external_link=UInt8[])
     end
 end
+
+write_header_message(io, f, msg::Pair{String, RelOffset}, _=nothing) =
+    write_header_message(io, Val(HmLinkMessage); link_name=msg.first, target=msg.second)
+write_header_message(io, f, msg::Pair{String, Link}, _=nothing) =
+    write_link_message(io, msg.first, msg.second)
 
 """
     write_link_message(io, name::String, link::Link)

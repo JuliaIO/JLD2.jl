@@ -341,20 +341,6 @@ function load_group(f::JLDFile, offset::RelOffset)
                      OrderedDict{String,Link}(), OrderedDict{String,Group}(), links)
 end
 
-"""
-    links_size(pairs)
-
-Returns the size of several link messages. `pairs` is an iterator of
-`String => AbstractLink` pairs.
-"""
-function links_size(pairs)
-    sz = 0
-    for (name::String, link) in pairs
-        sz += message_size_for_link(name, link)
-    end
-    sz
-end
-
 function group_extra_space(g)
     remaining_entries = g.est_num_entries - length(g.unwritten_links)
     extraspace = remaining_entries * (12 + g.est_link_name_len + 4)
@@ -389,7 +375,7 @@ function save_group(g::Group)
         totalsize = jlsizeof(Val(HmLinkInfo))
         totalsize += jlsizeof(Val(HmGroupInfo); g.est_num_entries, g.est_link_name_len)
         totalsize += CONTINUATION_MSG_SIZE
-        totalsize += links_size(g.unwritten_links)
+        totalsize += sum(message_size, g.unwritten_links, init=0)
         # add to size to make space for additional links
         totalsize += group_extra_space(g)
 
