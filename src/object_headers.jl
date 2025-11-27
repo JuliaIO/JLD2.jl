@@ -80,13 +80,13 @@ print_header_messages(f::JLDFile, name::AbstractString) =
 function print_header_messages(g::Group, name::AbstractString)
     g.f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
     (g, name) = pathize(g, name, false)
-    roffset = lookup_offset(g, name)
-    if roffset == UNDEFINED_ADDRESS
-        if isempty(name)
-            roffset = g.f.root_group_offset
-        else
-            throw(ArgumentError("did not find a group or dataset named \"$name\""))
-        end
+
+    if isempty(name)
+        # This is the group itself
+        roffset = g.f.root_group_offset
+    else
+        link = lookup_link(g, name)
+        roffset = getoffset(g, link; erroroninvalid=true)
     end
     return print_header_messages(g.f, roffset)
 end

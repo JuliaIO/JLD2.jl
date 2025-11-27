@@ -16,19 +16,44 @@ Construct a group named `name` as a child of group `g`.
 """
 Group(g::Group{T}, name::AbstractString; kwargs...) where {T} = (g[name] = Group{T}(g.f; kwargs...))
 
-"""
-    lookup_offset(g::Group, name::AbstractString) -> RelOffset
+# Lookup a link in a group by name. Returns a Link object.
+# Use is_set(link) to check if it is valid.
+function lookup_link(g::Group, name::AbstractString)
+    link = get(g.written_links, name, nothing)
+    link !== nothing && return link
+    return get(g.unwritten_links, name, Link())
+end
 
-Lookup the offset of a dataset in a group. Returns `UNDEFINED_ADDRESS` if the dataset is
-not present. Does not inspect `unwritten_child_groups`.
+
 """
-function lookup_offset(g::Group, name::AbstractString)
-    if g.last_chunk_start_offset != -1
-        # Has been saved to file, so written_links exists
-        roffset = get(g.written_links, name, UNDEFINED_ADDRESS)
-        roffset != UNDEFINED_ADDRESS && return roffset
+    getoffset(group::Group, link::Link; erroroninvalid::Bool=true) -> RelOffset
+
+Get the offset for a link by resolving it if necessary.
+
+- **Hard links**: Returns `link.offset` directly (may be UNDEFINED_ADDRESS)
+- **Soft links**: Recursively resolves the soft link path and returns the target offset
+- **External links**: Errors if `erroroninvalid=true`, otherwise returns UNDEFINED_ADDRESS
+
+This centralizes link resolution logic and simplifies calling code.
+"""
+function getoffset(g::Group, link::Link; erroroninvalid::Bool=true)
+    if is_hard_link(link)
+        erroroninvalid && !is_set(link) && throw(ArgumentError("Invalid hard link"))
+        return link.offset
+    elseif is_soft_link(link)
+        # Recursively resolve soft link
+        (g, name) = pathize(g, link.path, false)
+        target_link = lookup_link(g, name)
+        if !is_set(target_link)
+            erroroninvalid && throw(ArgumentError("Soft link target not found: $(link.path)"))
+            return UNDEFINED_ADDRESS
+        end
+        # Recursively resolve in case target is also a soft link
+        return getoffset(g, target_link; erroroninvalid)
+    else  # external link
+        erroroninvalid && throw(ArgumentError("Cannot get offset for external link to $(link.external_file):$(link.path)"))
+        return UNDEFINED_ADDRESS
     end
-    roffset = get(g.unwritten_links, name, UNDEFINED_ADDRESS)
 end
 
 """
@@ -51,26 +76,33 @@ function pathize(g::Group, name::AbstractString, create::Bool)
                 continue
             end
             # See if a group already exists
-            offset = lookup_offset(g, dir)
-            if offset == UNDEFINED_ADDRESS
-                if haskey(g.unwritten_child_groups, dir)
-                    # It's possible that lookup_offset fails because the group has not yet
-                    # been written to the file
-                    g = g.unwritten_child_groups[dir]
-                elseif create
-                    # No group exists, so create a new group
-                    newg = G(f)
-                    g.unwritten_child_groups[dir] = newg
-                    g = newg
-                else
-                    throw(KeyError(join(dirs[1:i], '/')))
-                end
-            elseif haskey(f.loaded_groups, offset)
-                g = f.loaded_groups[offset]::G
-            elseif !isgroup(f, offset)
-                throw(ArgumentError("path $(join(dirs[1:i], '/')) points to a dataset, not a group"))
+            # Check unwritten_child_groups first
+            if haskey(g.unwritten_child_groups, dir)
+                g = g.unwritten_child_groups[dir]
             else
-                g = f.loaded_groups[offset] = load_group(f, offset)::G
+                link = lookup_link(g, dir)
+                if !is_set(link)
+                    if create
+                        # No group exists, so create a new group
+                        newg = G(f)
+                        g.unwritten_child_groups[dir] = newg
+                        g = newg
+                    else
+                        throw(KeyError(join(dirs[1:i], '/')))
+                    end
+                elseif is_hard_link(link)
+                    offset = link.offset
+                    if haskey(f.loaded_groups, offset)
+                        g = f.loaded_groups[offset]::G
+                    elseif !isgroup(f, offset)
+                        throw(ArgumentError("path $(join(dirs[1:i], '/')) points to a dataset, not a group"))
+                    else
+                        g = f.loaded_groups[offset] = load_group(f, offset)::G
+                    end
+                else
+                    # Non-hard links (soft/external) cannot be used for group navigation in pathize
+                    throw(ArgumentError("path $(join(dirs[1:i], '/')) contains a link that cannot be used for group navigation"))
+                end
             end
         end
 
@@ -85,18 +117,19 @@ function pathize(g::Group, name::AbstractString, create::Bool)
 end
 
 function Base.getindex(g::Group, name::AbstractString)
-    f = g.f
-    f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
+    g.f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
 
     (g, name) = pathize(g, name, false)
     isempty(name) && return g
-    roffset = lookup_offset(g, name)
-    if roffset == UNDEFINED_ADDRESS
-        haskey(g.unwritten_child_groups, name) && return g.unwritten_child_groups[name]
-        throw(KeyError(name))
-    end
 
-    Base.inferencebarrier(load_dataset(f, roffset))
+    # Check for unwritten child groups first
+    haskey(g.unwritten_child_groups, name) && return g.unwritten_child_groups[name]
+
+    link = lookup_link(g, name)
+    !is_set(link) && throw(KeyError(name))
+    is_external_link(link) && return load_external_dataset(g.f, link)
+    offset = getoffset(g, link)
+    return load_dataset(g.f, offset)
 end
 
 @nospecializeinfer function Base.write(
@@ -141,9 +174,19 @@ function Base.setindex!(g::Group, offset::RelOffset, name::AbstractString)
     if g.last_chunk_start_offset != -1 && g.continuation_message_goes_here == -1
         error("objects cannot be added to this group because it was created with a previous version of JLD2")
     end
-    g.unwritten_links[name] = offset
+    g.unwritten_links[name] = Link(offset)
     g
 end
+
+# New method to accept Link directly
+function Base.setindex!(g::Group, link::Link, name::AbstractString)
+    if g.last_chunk_start_offset != -1 && g.continuation_message_goes_here == -1
+        error("objects cannot be added to this group because it was created with a previous version of JLD2")
+    end
+    g.unwritten_links[name] = link
+    g
+end
+
 
 function Base.haskey(g::Group, name::AbstractString)
     G = typeof(g)
@@ -160,21 +203,20 @@ function Base.haskey(g::Group, name::AbstractString)
             end
 
             # See if a group already exists
-            offset = lookup_offset(g, dir)
-            if offset == UNDEFINED_ADDRESS
-                if haskey(g.unwritten_child_groups, dir)
-                    # It's possible that lookup_offset fails because the group has not yet
-                    # been written to the file
-                    g = g.unwritten_child_groups[dir]::G
-                else
-                    return false
-                end
-            elseif haskey(f.loaded_groups, offset)
-                g = f.loaded_groups[offset]::G
-            elseif !isgroup(f, offset)
-                return false
+            # Check unwritten_child_groups first
+            if haskey(g.unwritten_child_groups, dir)
+                g = g.unwritten_child_groups[dir]::G
             else
-                g = f.loaded_groups[offset] = load_group(f, offset)::G
+                link = lookup_link(g, dir)
+                offset = getoffset(g, link; erroroninvalid=false)
+                offset == UNDEFINED_ADDRESS && return false
+                if haskey(f.loaded_groups, offset)
+                    g = f.loaded_groups[offset]::G
+                elseif !isgroup(f, offset)
+                    return false
+                else
+                    g = f.loaded_groups[offset] = load_group(f, offset)::G
+                end
             end
         end
 
@@ -200,9 +242,33 @@ end
 
 Base.keytype(::Group) = String
 
+"""
+    parse_link_message(wmsg::HmWrap{HmLinkMessage}) -> Link
+
+Parse a link message from the HDF5 format and return the appropriate Link.
+Handles hard links (type 0), soft links (type 1), and external links (type 64).
+"""
+function parse_link_message(wmsg::HmWrap{HmLinkMessage})::Link
+    if isset(wmsg.flags, 3)
+        link_type = wmsg.link_type
+        link_type == 0 && return Link(wmsg.target)
+        link_type == 1 && return Link(UNDEFINED_ADDRESS, String(wmsg.soft_link), "")
+        if link_type == 64
+            strings = split(String(wmsg.external_link), '\0', keepempty=false)
+            length(strings) == 2 ||
+                throw(InvalidDataException("External link must have two null-terminated strings"))
+            return Link(UNDEFINED_ADDRESS, String(strings[2]), String(strings[1]))
+        else
+            throw(UnsupportedFeatureException("Unsupported link type: $link_type"))
+        end
+    end
+    # Default to hard link when type flag not set
+    return Link(wmsg.target)
+end
+
 function load_group(f::JLDFile, offset::RelOffset)
     # Messages
-    links = OrderedDict{String,RelOffset}()
+    links = OrderedDict{String,Link}()
 
     next_link_offset::Int64 = -1
     link_phase_change_max_compact::Int64 = -1
@@ -244,7 +310,7 @@ function load_group(f::JLDFile, offset::RelOffset)
             end
         elseif msg.type == HmLinkMessage
             wmsg = HmWrap(HmLinkMessage, msg)
-            links[wmsg.link_name] = wmsg.target
+            links[wmsg.link_name] = parse_link_message(wmsg)
         elseif msg.type == HmSymbolTable
             wmsg = HmWrap(HmSymbolTable, msg)
             v1btree_address = wmsg.v1btree_address
@@ -255,14 +321,14 @@ function load_group(f::JLDFile, offset::RelOffset)
     if fractal_heap_address != UNDEFINED_ADDRESS
         records = read_btree(f, fractal_heap_address, name_index_btree)::Vector{Tuple{String, RelOffset}}
         for r in records
-            links[r[1]] = r[2]
+            links[r[1]] = Link(r[2])
         end
     end
 
     if v1btree_address != UNDEFINED_ADDRESS
         records = read_oldstyle_group(f, v1btree_address, name_index_heap)::Vector{Tuple{String, RelOffset}}
         for r in records
-            links[r[1]] = r[2]
+            links[r[1]] = Link(r[2])
         end
     end
 
@@ -272,21 +338,7 @@ function load_group(f::JLDFile, offset::RelOffset)
 
     Group{typeof(f)}(f, chunk_start, continuation_msg_address, chunk_end, next_link_offset,
                      est_num_entries, est_link_name_len,
-                     OrderedDict{String,RelOffset}(), OrderedDict{String,Group}(), links)
-end
-
-"""
-    links_size(pairs)
-
-Returns the size of several link messages. `pairs` is an iterator of
-`String => RelOffset` pairs.
-"""
-function links_size(pairs)
-    sz = 0
-    for (name::String,) in pairs
-        sz += jlsizeof(Val(HmLinkMessage); link_name=name)
-    end
-    sz
+                     OrderedDict{String,Link}(), OrderedDict{String,Group}(), links)
 end
 
 function group_extra_space(g)
@@ -309,7 +361,7 @@ function save_group(g::Group)
     if !isempty(g.unwritten_child_groups)
         for (name, child_group) in g.unwritten_child_groups
             retval = save_group(child_group)
-            g.unwritten_links[name] = retval
+            g.unwritten_links[name] = Link(retval)
         end
         empty!(g.unwritten_child_groups)
     end
@@ -323,7 +375,7 @@ function save_group(g::Group)
         totalsize = jlsizeof(Val(HmLinkInfo))
         totalsize += jlsizeof(Val(HmGroupInfo); g.est_num_entries, g.est_link_name_len)
         totalsize += CONTINUATION_MSG_SIZE
-        totalsize += links_size(g.unwritten_links)
+        totalsize += sum(message_size, g.unwritten_links, init=0)
         # add to size to make space for additional links
         totalsize += group_extra_space(g)
 
@@ -347,6 +399,11 @@ function save_group(g::Group)
         chunk_start = g.last_chunk_start_offset,
         chunk_end = g.last_chunk_checksum_offset,
         next_msg_offset)
+
+    # Transfer unwritten links to written links after successful write
+    merge!(g.written_links, g.unwritten_links)
+    empty!(g.unwritten_links)
+
     # this is clearly suboptimal
     # TODO: this should always return the object start
     # but for "continued" versions this is not the case
@@ -391,12 +448,30 @@ function show_group(io::IO, g::Group, maxnumlines::Int=10, prefix::String=" ", s
     for i = 1:length(ks)
         k = ks[i]
         islast = i == length(ks)
-        isagroup = haskey(g.unwritten_child_groups, k) || isgroup(g.f, lookup_offset(g, k))
+        # Check if this is a group
+        link = lookup_link(g, k)
+        if haskey(g.unwritten_child_groups, k)
+            isagroup = true
+        else
+            # Try to get the offset; for external links or unresolvable soft links, treat as non-group
+            offset = getoffset(g, link; erroroninvalid=false)
+            isagroup = (offset != UNDEFINED_ADDRESS) && isgroup(g.f, offset)
+        end
         if (maxnumlines <= 1 && !islast) #|| (maxnumlines < 2 && isagroup))
             print(io, prefix, "└─ ⋯ ($(length(ks)-i+1) more entries)")
             return 0
         end
-        print(io, prefix, islast ? "└─" : "├─", isagroup ? "📂 " : "🔢 ", k)
+        # Choose appropriate icon based on link type and whether it's a group
+        icon = if isagroup
+            "📂 "  # folder for groups
+        elseif is_external_link(link)
+            "🔗 "  # link icon for external links
+        elseif is_soft_link(link)
+            "↗️ "   # arrow for soft links
+        else
+            "🔢 "  # default for hard link datasets
+        end
+        print(io, prefix, islast ? "└─" : "├─", icon, k)
         maxnumlines = maxnumlines - 1
         if isagroup
             newg = g[k]

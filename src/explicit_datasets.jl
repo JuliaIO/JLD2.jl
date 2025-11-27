@@ -315,15 +315,15 @@ function get_dataset(g::Group, name::String)
     f.n_times_opened == 0 && throw(ArgumentError("file is closed"))
 
     (g, name) = pathize(g, name, false)
-    roffset = lookup_offset(g, name)
-    if roffset == UNDEFINED_ADDRESS
-        if isempty(name)
-            # this is a group
-            return get_dataset(f, group_offset(g), g, name)
-        end
-        throw(KeyError(name))
+
+    if isempty(name)
+        # this is a group
+        return get_dataset(f, group_offset(g), g, name)
     end
-    get_dataset(f, roffset, g, name)
+
+    link = lookup_link(g, name)
+    offset = getoffset(g, link)
+    return get_dataset(f, offset, g, name)
 end
 
 function get_dataset(f::JLDFile, offset::RelOffset, g=f.root_group, name="")
@@ -362,8 +362,45 @@ end
 
 # Links
 message_size(msg::Pair{String, RelOffset}) = jlsizeof(Val(HmLinkMessage); link_name=msg.first)
+function message_size((link_name, link)::Pair{String, Link})
+    is_hard_link(link) && return jlsizeof(Val(HmLinkMessage); link_name)
+    flags = UInt8(0x10 | 0x08 | size_flag(sizeof(link_name)))
+    if is_soft_link(link)
+        jlsizeof(Val(HmLinkMessage); link_name, flags, link_type=UInt8(1),
+                 link_info_size=sizeof(link.path), soft_link=UInt8[])
+    else  # external link
+        jlsizeof(Val(HmLinkMessage); link_name, flags, link_type=UInt8(64),
+                 link_info_size=3+sizeof(link.external_file)+sizeof(link.path),
+                 external_link=UInt8[])
+    end
+end
+
 write_header_message(io, f, msg::Pair{String, RelOffset}, _=nothing) =
     write_header_message(io, Val(HmLinkMessage); link_name=msg.first, target=msg.second)
+write_header_message(io, f, msg::Pair{String, Link}, _=nothing) =
+    write_link_message(io, msg.first, msg.second)
+
+"""
+    write_link_message(io, name::String, link::Link)
+
+Write a link message for the given link type to the I/O stream.
+"""
+function write_link_message(io, link_name::String, link::Link)
+    if is_hard_link(link)
+        return write_header_message(io, Val(HmLinkMessage); link_name, target=link.offset)
+    end
+    flags = UInt8(0x10 | 0x08 | size_flag(sizeof(link_name)))
+    if is_soft_link(link)
+        soft_link = Vector{UInt8}(link.path)
+        write_header_message(io, Val(HmLinkMessage); link_name, flags, link_type=1, soft_link)
+    elseif is_external_link(link)
+        # External link data: two null-terminated strings
+        external_link = vcat(0x00, Vector{UInt8}(link.external_file), 0x00,
+                            Vector{UInt8}(link.path), 0x00)
+        write_header_message(io, Val(HmLinkMessage); link_name, flags, link_type=64,
+                           external_link)
+    end
+end
 
 function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession();
     chunk_start,

@@ -140,7 +140,10 @@ macro load(filename, vars...)
         f = jldopen(filename)
         try
             for n in keys(f)
-                if !isgroup(f, lookup_offset(f.root_group, n))
+                # Eagerly resolve links to determine if this is a group
+                # When using @load, users want all data loaded, including through soft/external links
+                val = f[n]
+                if !isa(val, Group)
                     push!(vars, Symbol(n))
                 end
             end
