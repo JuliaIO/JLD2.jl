@@ -44,6 +44,7 @@ include("test_dataset_show.jl")
 include("mmap_test.jl")
 include("generic_io_tests.jl")
 include("links.jl")
+include("chunked_io.jl")
 
 using TestItemRunner
 

@@ -8,6 +8,8 @@ using ScopedValues: ScopedValue, with
 using PrecompileTools: @setup_workload, @compile_workload
 export jldopen, @load, @save, save_object, load_object, jldsave
 export Shuffle, Deflate, ZstdFilter
+export WriteChunkedArray, write_chunked
+
 
 include("types.jl")
 include("links.jl")
@@ -405,7 +407,7 @@ end
 
 Base.read(f::JLDFile, name::AbstractString) = Base.inferencebarrier(f.root_group[name])
 Base.getindex(f::JLDFile, name::AbstractString) = Base.inferencebarrier(f.root_group[name])
-Base.setindex!(f::JLDFile, obj, name::AbstractString) = (f.root_group[name] = obj; f)
+Base.setindex!(f::JLDFile, obj, name::AbstractString; kwargs...) = (setindex!(f.root_group, obj, name; kwargs...); f)
 Base.haskey(f::JLDFile, name::AbstractString) = haskey(f.root_group, name)
 Base.isempty(f::JLDFile) = isempty(f.root_group)
 Base.keys(f::JLDFile) = filter!(x->x != "_types", keys(f.root_group))
@@ -539,6 +541,34 @@ include("Filters.jl")
 using .Filters: WrittenFilterPipeline, FilterPipeline, iscompressed
 using .Filters: Shuffle, Deflate, ZstdFilter
 
+# Load BTrees before Chunking (BTrees is independent, Chunking calls BTrees)
+include("btrees/BTrees.jl")
+using .BTrees: write_v2btree_chunked_dataset,
+    read_v1btree, read_v2btree_header
+
+include("chunking/Chunking.jl")
+using .Chunking: WriteChunkedArray,
+    read_chunked_array, get_chunked_array, chunk_dimensions, num_chunks, chunk_grid_size,
+    extract_chunk_region, write_chunked
+
+# Specialized method for WriteChunkedArray using multiple dispatch
+function Base.write(
+        g::Group,
+        name::AbstractString,
+        obj::WriteChunkedArray,
+        wsession::JLDWriteSession=JLDWriteSession();
+        compress=nothing,
+        chunk=nothing
+        )
+    f = g.f
+    prewrite(f)
+    (g, name) = pathize(g, name, true)
+
+    # Write chunked array using its own configuration
+    Chunking.write_chunked(f, name, obj)
+    nothing
+end
+
 include("datasets.jl")
 include("global_heaps.jl")
 include("fractal_heaps.jl")
@@ -559,7 +589,6 @@ include("inlineunion.jl")
 include("fileio.jl")
 include("explicit_datasets.jl")
 include("committed_datatype_introspection.jl")
-
 
 if ccall(:jl_generating_output, Cint, ()) == 1   # if we're precompiling the package
     include("precompile.jl")

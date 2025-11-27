@@ -75,7 +75,7 @@ function stringify_object(f, offset)
     dataspace = ReadDataspace()
     attrs = EMPTY_READ_ATTRIBUTES
     datatype::H5Datatype = PlaceholderH5Datatype()
-    layout::DataLayout = DataLayout(0,LcCompact,0,-1)
+    layout::DataLayout = DataLayout(0,LcCompact,0,UNDEFINED_ADDRESS)
     filter_pipeline::WrittenFilterPipeline = WrittenFilterPipeline()
     for msg in HeaderMessageIterator(f, offset)
         if msg.type == HmDataspace
@@ -102,10 +102,10 @@ function stringify_object(f, offset)
     if datatype isa SharedDatatype && haskey(f.datatype_locations, datatype.header_offset)
         # Committed datatype
         rr = jltype(f, f.datatype_locations[datatype.header_offset])
-        jlconvert_string_wrap(rr, f, layout.data_offset)
+        jlconvert_string_wrap(rr, f, fileoffset(f, layout.data_offset))
     else
         rr = jltype(f, datatype)
-        seek(f.io, layout.data_offset)
+        seek(f.io, fileoffset(f, layout.data_offset))
         read_dataspace = (dataspace, NULL_REFERENCE, layout, FilterPipeline(filter_pipeline))
         res = read_data(f, rr, read_dataspace, nothing)
         string(res)
@@ -178,17 +178,17 @@ end
 # Safe attribute reading that provides useful info without risking reconstruction errors
 function safe_read_attribute_info(f::JLDFile, attr::ReadAttribute)
     (; dataspace, datatype) = attr
-    layout =  DataLayout(0,LcCompact,-1,attr.data_offset)
+    layout =  DataLayout(0,LcCompact,-1,h5offset(f, attr.data_offset))
 
     if isshared(datatype)
         # Retrieve committed datatype if it is committed
         dt = get(f.datatype_locations, datatype.header_offset, dt)
         rr = jltype(f, dt)
-        jlconvert_string_wrap(rr, f, layout.data_offset)
+        jlconvert_string_wrap(rr, f, fileoffset(f, layout.data_offset))
     else
         rr = jltype(f, datatype)
-        seek(f.io, layout.data_offset)
-        read_dataspace = (dataspace, NULL_REFERENCE, layout, FilterPipeline())
+        seek(f.io, fileoffset(f, layout.data_offset))
+        read_dataspace = (dataspace, NULL_REFERENCE, layout, FilterPipeline(), nothing)
         res = read_data(f, rr, read_dataspace, nothing)
         string(res)
     end

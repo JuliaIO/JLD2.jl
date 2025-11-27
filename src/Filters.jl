@@ -94,7 +94,38 @@ end
 FilterPipeline(filters::Array{<:Filter}) = FilterPipeline(filters...)
 FilterPipeline(filters::Tuple) = FilterPipeline(filters...)
 
+"""
+    iscompressed(fp::FilterPipeline, filter_mask::Integer=0)
+
+Check if a filter pipeline will perform compression given a filter mask.
+
+When `filter_mask` is 0 (default), returns true if the pipeline has any filters.
+When `filter_mask` is non-zero, returns true only if there are filters that are NOT masked.
+A bit set in `filter_mask` indicates that the corresponding filter (1-indexed) was skipped.
+"""
 iscompressed(fp::FilterPipeline) = !isempty(fp.filters)
+function iscompressed(fp::FilterPipeline, filter_mask::Integer)
+    filter_mask = UInt32(filter_mask)
+    isempty(fp.filters) && return false
+    filter_mask == 0 && return true
+    # Check if any filters are not masked (bit n set = filter n+1 is masked)
+    any(i -> (filter_mask & 2^(i-1)) == 0, eachindex(fp.filters))
+end
+
+"""
+    apply_filter_mask(fp::FilterPipeline, filter_mask::Integer)
+
+Return a new FilterPipeline containing only the filters that are not masked.
+A bit set in `filter_mask` indicates that the corresponding filter (1-indexed) was skipped.
+Returns the original pipeline if `filter_mask` is 0.
+"""
+function apply_filter_mask(fp::FilterPipeline, filter_mask::Integer)
+    filter_mask = UInt32(filter_mask)
+    filter_mask == 0 && return fp
+    mask = [filter_mask & 2^(i-1) == 0 for i in eachindex(fp.filters)]
+    FilterPipeline(fp.filters[mask])
+end
+
 Base.iterate(fp::FilterPipeline, state=1) = iterate(fp.filters, state)
 Base.length(fp::FilterPipeline) = length(fp.filters)
 
@@ -110,7 +141,8 @@ function compress(fp::FilterPipeline, data::Array{T}, odr::Type, f::JLDFile, wse
     end
     ref = Ref(buf)
     retcodes = map(fil -> apply_filter!(fil, ref), fp)
-    ref[], retcodes
+    filter_mask = UInt32(sum(2^(i-1)*c for (i,c) in enumerate(retcodes); init=0))
+    ref[], filter_mask
 end
 
 # Special case of `samelayout` data: Use unsafe_wrap to avoid copying
@@ -123,9 +155,10 @@ function compress(fp::FilterPipeline, data::Array{T}, odr::Type{T}, f::JLDFile, 
         )
         ref = Ref(buf)
         retcodes = map(fil -> apply_filter!(fil, ref), fp)
+        filter_mask = UInt32(sum(2^(i-1)*c for (i,c) in enumerate(retcodes); init=0))
         # Do a copy if all compression failed to not return the original unsafe_wrap
         ref[] === buf && (ref[] = copy(buf))
-        ref[], retcodes
+        ref[], filter_mask
     end
 end
 
@@ -158,10 +191,14 @@ const KNOWN_FILTERS = Dict(
 )
 
 function normalize_filters(compress)
-    if compress isa Bool && compress == false
+    if isnothing(compress) || compress == () || (compress isa Bool && compress == false)
         return FilterPipeline(())
     elseif compress isa Bool && compress == true
         return FilterPipeline(Deflate())
+    elseif compress == :gzip || compress == :deflate
+        return FilterPipeline(Deflate())
+    elseif compress == :shuffle
+        return FilterPipeline(Shuffle())
     elseif compress isa FilterPipeline
         return compress
     elseif compress isa Filter
@@ -385,6 +422,7 @@ end
 
 
 function pipeline_message_size(fp::FilterPipeline)
+    iscompressed(fp) || return 0
     sz = 4 + 2
     for filter in fp
         sz += 6 + 4 * length(Filters.client_values(filter))
@@ -399,6 +437,8 @@ function pipeline_message_size(fp::FilterPipeline)
 end
 
 function write_filter_pipeline_message(io, fp::FilterPipeline)
+    # Empty filter pipeline messages are disallowed. Therefore don't write them.
+    iscompressed(fp) || return nothing
     hmsize = pipeline_message_size(fp) - 4
     jlwrite(io, HeaderMessage(HmFilterPipeline, hmsize, 0))
     jlwrite(io, UInt8(2))                   # Version

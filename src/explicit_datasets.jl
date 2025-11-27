@@ -607,7 +607,7 @@ function readmmap(dset::Dataset)
     seek(io, offset)
     dims = reverse([jlread(io, Int64) for i in 1:ndims])
     iobackend = io isa IOStream ? io : io.f
-    seek(iobackend, DataLayout(f, dset.layout).data_offset)
+    seek(iobackend, fileoffset(f, DataLayout(f, dset.layout).data_offset))
     # May be pos != data_offset for files with custom offset
     pos = position(iobackend)
     if (pos % 8 == 0) ||

@@ -137,11 +137,40 @@ end
         name::AbstractString,
         @nospecialize(obj),
         wsession::JLDWriteSession=JLDWriteSession();
-        compress=nothing
+        compress=nothing,
+        chunk=nothing
         )
     f = g.f
     prewrite(f)
     (g, name) = pathize(g, name, true)
+
+    # Handle chunked arrays
+    if !isnothing(chunk)
+        if !(obj isa Array)
+            throw(ArgumentError("chunk parameter can only be used with arrays"))
+        end
+
+        # Convert chunk to Vector{Int}
+        chunk_dims = if chunk isa Tuple
+            collect(Int, chunk)
+        elseif chunk isa AbstractVector
+            collect(Int, chunk)
+        else
+            throw(ArgumentError("chunk must be a tuple or vector of integers"))
+        end
+
+        # Validate chunk dimensions
+        if length(chunk_dims) != ndims(obj)
+            throw(ArgumentError("chunk dimensions ($(length(chunk_dims))) must match array dimensions ($(ndims(obj)))"))
+        end
+
+        # Use write_chunked helper function
+        filters = isnothing(compress) ? nothing : compress
+        Chunking.write_chunked(g, name, obj; chunk=Tuple(chunk_dims), indexing=:v1btree, filters=filters)
+        return nothing
+    end
+
+    # Original behavior for non-chunked arrays
     if !isnothing(compress)
         if obj isa Array
             filters = Filters.normalize_filters(compress)
@@ -154,8 +183,8 @@ end
     nothing
 end
 
-function Base.setindex!(g::Group, obj, name::AbstractString)
-    write(g, name, obj)
+function Base.setindex!(g::Group, obj, name::AbstractString; chunk=nothing, compress=nothing)
+    write(g, name, obj; chunk, compress)
     g
 end
 
@@ -319,7 +348,7 @@ function load_group(f::JLDFile, offset::RelOffset)
     end
 
     if fractal_heap_address != UNDEFINED_ADDRESS
-        records = read_btree(f, fractal_heap_address, name_index_btree)::Vector{Tuple{String, RelOffset}}
+        records = read_fractal_heap_group(f, fractal_heap_address, name_index_btree)::Vector{Tuple{String, RelOffset}}
         for r in records
             links[r[1]] = Link(r[2])
         end

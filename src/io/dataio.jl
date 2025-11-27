@@ -87,10 +87,13 @@ function read_array! end
 
 
 """
-    read_compressed_array!(v::Array, f::JLDFile, rr, data_length::Int, Val(filter_id))
+    read_compressed_array!(v::Array, f::JLDFile, rr, data_length::Int, filter, filter_mask=0)
 
 Fill the array `v` with the compressed contents of JLDFile `f` at the current position,
 assuming a [`ReadRepresentation`](@ref) `rr` and that the compressed data has length `data_length`.
+
+The optional `filter_mask` parameter (currently unused) is reserved for future support of
+selective filter application in chunked datasets.
 """
 function read_compressed_array! end
 
@@ -283,6 +286,7 @@ function read_compressed_array!(
     rr::ReadRepresentation{T,RR},
     data_length::Integer,
     filter,
+    filter_mask::Integer = 0,
 ) where {T,RR}
     io = f.io
     data_offset = position(io)
