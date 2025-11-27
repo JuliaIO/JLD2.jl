@@ -172,17 +172,14 @@ Base.isreadable(::RWBuffer) = true
 Base.iswritable(::RWBuffer) = true
 isseekable(::RWBuffer) = true
 
+_getsize(io::RWBuffer) = io.size
+
 function _getsize(io::IO)
-    try
-        return filesize(io)
-    catch
-        # fallback
-        pos = position(io)
-        seekend(io)
-        sz = position(io)
-        seek(io, pos)
-        return sz
-    end
+    pos = position(io)
+    seekend(io)
+    sz = position(io)
+    seek(io, pos)
+    return sz
 end
 
 ###########################################################################################

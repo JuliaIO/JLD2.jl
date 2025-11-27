@@ -63,7 +63,8 @@ Base.show(io::IO, ::BufferedReader) = print(io, "BufferedReader")
 
 function readmore!(io::BufferedReader, n::Integer)
     f = io.f
-    amount = max(bytesavailable(f), n) #TODO: check if this reads way to much
+    sz = _getsize(f)
+    amount = min(max(n, 2^14), sz-position(f))
     amount < n && throw(EOFError())
     buffer = io.buffer
     pos = bufferpos(io)
