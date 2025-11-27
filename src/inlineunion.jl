@@ -54,13 +54,14 @@ end
 function read_array(f::JLDFile, dataspace::ReadDataspace,
                     rr::ReadRepresentation{InlineUnionEl{T1,T2},RR}, layout::DataLayout,
                     filters::FilterPipeline, header_offset::RelOffset,
-                    attributes::Union{Vector{ReadAttribute},Nothing}) where {T1,T2,RR}
+                    attributes::Union{Vector{ReadAttribute},Nothing},
+                    fill_value=nothing) where {T1,T2,RR}
     io = f.io
     ndims, offset = get_ndims_offset(f, dataspace, attributes)
     seek(io, offset)
     v = construct_array(io, InlineUnionEl{T1,T2}, Int(ndims))
     n = length(v)
-    seek(io, layout.data_offset)
+    seek(io, fileoffset(f, layout.data_offset))
     if iscompressed(filters)
         read_compressed_array!(v, f, rr, layout.data_length, filters)
     else
