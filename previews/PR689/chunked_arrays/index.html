@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Chunked Arrays (Experimental) · Julia Data Format</title><meta name="title" content="Chunked Arrays (Experimental) · Julia Data Format"/><meta property="og:title" content="Chunked Arrays (Experimental) · Julia Data Format"/><meta property="twitter:title" content="Chunked Arrays (Experimental) · Julia Data Format"/><meta name="description" content="Documentation for Julia Data Format."/><meta property="og:description" content="Documentation for Julia Data Format."/><meta property="twitter:description" content="Documentation for Julia Data Format."/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">Julia Data Format</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../basic_usage/">Basic Usage</a></li><li><a class="tocitem" href="../customserialization/">Custom Serialization</a></li><li><a class="tocitem" href="../compression/">Compression</a></li><li><a class="tocitem" href="../internals/">Internals &amp; Design</a></li><li><a class="tocitem" href="../hdf5compat/">HDF5 Compatibility</a></li><li><a class="tocitem" href="../advanced/">Advanced Usage</a></li><li><a class="tocitem" href="../external_links/">Dataset Links</a></li><li class="is-active"><a class="tocitem" href>Chunked Arrays (Experimental)</a><ul class="internal"><li><a class="tocitem" href="#What-is-Chunking?"><span>What is Chunking?</span></a></li><li><a class="tocitem" href="#Quick-Start"><span>Quick Start</span></a></li><li><a class="tocitem" href="#Writing-Chunked-Arrays-2"><span>Writing Chunked Arrays</span></a></li><li><a class="tocitem" href="#Reading-Chunked-Arrays-2"><span>Reading Chunked Arrays</span></a></li><li><a class="tocitem" href="#Choosing-Chunk-Sizes"><span>Choosing Chunk Sizes</span></a></li><li><a class="tocitem" href="#Advanced-Features"><span>Advanced Features</span></a></li><li><a class="tocitem" href="#Compatibility"><span>Compatibility</span></a></li><li><a class="tocitem" href="#When-to-Use-Chunking"><span>When to Use Chunking</span></a></li><li><a class="tocitem" href="#Performance-Tips"><span>Performance Tips</span></a></li><li><a class="tocitem" href="#API-Reference"><span>API Reference</span></a></li><li><a class="tocitem" href="#See-Also"><span>See Also</span></a></li></ul></li><li><a class="tocitem" href="../legacy/">Legacy</a></li><li><a class="tocitem" href="../troubleshooting/">Troubleshooting</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Chunked Arrays (Experimental)</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Chunked Arrays (Experimental)</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/JuliaIO/JLD2.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/JuliaIO/JLD2.jl/blob/master/docs/src/chunked_arrays.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Chunked-Arrays"><a class="docs-heading-anchor" href="#Chunked-Arrays">Chunked Arrays</a><a id="Chunked-Arrays-1"></a><a class="docs-heading-anchor-permalink" href="#Chunked-Arrays" title="Permalink"></a></h1><h2 id="What-is-Chunking?"><a class="docs-heading-anchor" href="#What-is-Chunking?">What is Chunking?</a><a id="What-is-Chunking?-1"></a><a class="docs-heading-anchor-permalink" href="#What-is-Chunking?" title="Permalink"></a></h2><p>Chunking divides large arrays into fixed-size rectangular blocks stored separately in the file. This enables:</p><ul><li><strong>Partial I/O</strong>: Read only the chunks you need without loading the entire array</li><li><strong>Compression</strong>: Each chunk compresses independently, improving both speed and ratio</li><li><strong>Memory efficiency</strong>: Process arrays larger than RAM by working chunk-by-chunk</li><li><strong>Optimized access patterns</strong>: Align chunks with how you&#39;ll access the data</li></ul><h3 id="Visual-Example"><a class="docs-heading-anchor" href="#Visual-Example">Visual Example</a><a id="Visual-Example-1"></a><a class="docs-heading-anchor-permalink" href="#Visual-Example" title="Permalink"></a></h3><p>Consider a small 4×6 array chunked into 2×3 blocks:</p><pre><code class="language-julia hljs"># Create a 4×6 array with values 1-24
+data = collect(reshape(1:24, 4, 6))
+println(&quot;Complete 4×6 array:&quot;)
+println(data)
+println()
+
+# Show how it divides into chunks with chunk=(2,3)
+println(&quot;Chunked with chunk=(2,3) → creates a 2×2 grid of chunks:&quot;)
+println()
+for row in 1:2
+    for col in 1:2
+        r_start, r_end = 2(row-1)+1, 2row
+        c_start, c_end = 3(col-1)+1, 3col
+        println(&quot;Chunk ($row,$col) = data[$r_start:$r_end, $c_start:$c_end]:&quot;)
+        println(data[r_start:r_end, c_start:c_end])
+        println()
+    end
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Complete 4×6 array:
+[1 5 9 13 17 21; 2 6 10 14 18 22; 3 7 11 15 19 23; 4 8 12 16 20 24]
+
+Chunked with chunk=(2,3) → creates a 2×2 grid of chunks:
+
+Chunk (1,1) = data[1:2, 1:3]:
+[1 5 9; 2 6 10]
+
+Chunk (1,2) = data[1:2, 4:6]:
+[13 17 21; 14 18 22]
+
+Chunk (2,1) = data[3:4, 1:3]:
+[3 7 11; 4 8 12]
+
+Chunk (2,2) = data[3:4, 4:6]:
+[15 19 23; 16 20 24]</code></pre><p>When you save with <code>chunk=(2,3)</code>, the file stores these 4 chunks separately. Reading <code>data[2:3, 4:5]</code> loads only chunk (2,2) - not the entire array.</p><h2 id="Quick-Start"><a class="docs-heading-anchor" href="#Quick-Start">Quick Start</a><a id="Quick-Start-1"></a><a class="docs-heading-anchor-permalink" href="#Quick-Start" title="Permalink"></a></h2><h3 id="Writing-Chunked-Arrays"><a class="docs-heading-anchor" href="#Writing-Chunked-Arrays">Writing Chunked Arrays</a><a id="Writing-Chunked-Arrays-1"></a><a class="docs-heading-anchor-permalink" href="#Writing-Chunked-Arrays" title="Permalink"></a></h3><pre><code class="language-julia hljs">using JLD2
+
+data = rand(1000, 1000)
+
+# Simple chunking with write()
+jldopen(&quot;example.jld2&quot;, &quot;w&quot;) do f
+    write(f, &quot;data&quot;, data; chunk=(100, 100))
+end
+
+# With compression
+jldopen(&quot;compressed.jld2&quot;, &quot;w&quot;) do f
+    write(f, &quot;data&quot;, data; chunk=(100, 100), compress=Deflate())
+end</code></pre><h3 id="Reading-Chunked-Arrays"><a class="docs-heading-anchor" href="#Reading-Chunked-Arrays">Reading Chunked Arrays</a><a id="Reading-Chunked-Arrays-1"></a><a class="docs-heading-anchor-permalink" href="#Reading-Chunked-Arrays" title="Permalink"></a></h3><p>Reading is transparent - chunked arrays work like normal arrays:</p><pre><code class="language-julia hljs">data = collect(reshape(1.0:60.0, 6, 10))
+
+jldopen(&quot;test.jld2&quot;, &quot;w&quot;) do f
+    write(f, &quot;data&quot;, data; chunk=(3, 5))
+end
+
+result = jldopen(&quot;test.jld2&quot;, &quot;r&quot;) do f
+    f[&quot;data&quot;]  # Loads entire array
+end
+
+println(&quot;Data matches: &quot;, result == data)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Data matches: true</code></pre><h2 id="Writing-Chunked-Arrays-2"><a class="docs-heading-anchor" href="#Writing-Chunked-Arrays-2">Writing Chunked Arrays</a><a class="docs-heading-anchor-permalink" href="#Writing-Chunked-Arrays-2" title="Permalink"></a></h2><h3 id="Basic-Syntax"><a class="docs-heading-anchor" href="#Basic-Syntax">Basic Syntax</a><a id="Basic-Syntax-1"></a><a class="docs-heading-anchor-permalink" href="#Basic-Syntax" title="Permalink"></a></h3><p>Three equivalent ways to write chunked arrays:</p><pre><code class="language-julia hljs">data = rand(Float32, 100, 50)
+
+jldopen(&quot;methods.jld2&quot;, &quot;w&quot;) do f
+    # Method 1: write() with chunk keyword
+    write(f, &quot;v1&quot;, data; chunk=(20, 10))
+
+    # Method 2: setindex! with chunk keyword
+    f[&quot;v2&quot;, chunk=(20, 10)] = data
+
+    # Method 3: WriteChunkedArray wrapper
+    wca = WriteChunkedArray(data; chunk=(20, 10))
+    f[&quot;v3&quot;] = wca
+end</code></pre><h3 id="Compression"><a class="docs-heading-anchor" href="#Compression">Compression</a><a id="Compression-1"></a><a class="docs-heading-anchor-permalink" href="#Compression" title="Permalink"></a></h3><p>Apply compression filters to chunks:</p><pre><code class="language-julia hljs"># Create repetitive integer data
+# Make a 1000×1000 array with repeating pattern of small integers
+base_pattern = reshape([1, 2, 3, 4, 5, 6, 7, 8], 2, 4)
+compressible_data = repeat(base_pattern, inner=(500, 250))  # 1000×1000 Int64 array
+
+# Write with different compression settings
+jldopen(&quot;uncompressed.jld2&quot;, &quot;w&quot;) do f
+    write(f, &quot;data&quot;, compressible_data; chunk=(100, 50))
+end
+
+jldopen(&quot;deflate.jld2&quot;, &quot;w&quot;) do f
+    write(f, &quot;data&quot;, compressible_data; chunk=(100, 50), compress=Deflate())
+end
+
+jldopen(&quot;shuffle_deflate.jld2&quot;, &quot;w&quot;) do f
+    write(f, &quot;data&quot;, compressible_data; chunk=(100, 50),
+          compress=[Shuffle(), Deflate()])
+end
+
+# Compare file sizes
+raw_size = sizeof(compressible_data) / 1024
+uncompressed_size = filesize(&quot;uncompressed.jld2&quot;) / 1024
+deflate_size = filesize(&quot;deflate.jld2&quot;) / 1024
+shuffle_deflate_size = filesize(&quot;shuffle_deflate.jld2&quot;) / 1024
+
+println(&quot;Raw data size: &quot;, round(raw_size, digits=1), &quot; KB&quot;)
+println(&quot;Uncompressed file: &quot;, round(uncompressed_size, digits=1), &quot; KB&quot;)
+println(&quot;Deflate only: &quot;, round(deflate_size, digits=1), &quot; KB (&quot;,
+        round(raw_size/deflate_size, digits=1), &quot;× smaller)&quot;)
+println(&quot;Shuffle + Deflate: &quot;, round(shuffle_deflate_size, digits=1), &quot; KB (&quot;,
+        round(raw_size/shuffle_deflate_size, digits=1), &quot;× smaller)&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Raw data size: 7812.5 KB
+Uncompressed file: 7821.5 KB
+Deflate only: 25.2 KB (309.5× smaller)
+Shuffle + Deflate: 21.9 KB (356.3× smaller)</code></pre><h3 id="Extensible-Arrays"><a class="docs-heading-anchor" href="#Extensible-Arrays">Extensible Arrays</a><a id="Extensible-Arrays-1"></a><a class="docs-heading-anchor-permalink" href="#Extensible-Arrays" title="Permalink"></a></h3><p>Create datasets that can grow along specified dimensions:</p><pre><code class="language-julia hljs">timeseries = rand(Float32, 100, 50)
+
+jldopen(&quot;extensible.jld2&quot;, &quot;w&quot;) do f
+    # Can grow in first dimension (time), fixed in second dimension
+    wca = WriteChunkedArray(timeseries;
+                           chunk=(10, 50),
+                           maxshape=(nothing, 50))
+    f[&quot;timeseries&quot;] = wca
+end</code></pre><p>The <code>maxshape</code> parameter determines which dimensions can grow:</p><ul><li><code>maxshape=nothing</code> - fixed size (default)</li><li><code>maxshape=(nothing, 100)</code> - first dim unlimited, second fixed at 100</li><li><code>maxshape=(nothing, nothing)</code> - both dims unlimited</li></ul><h2 id="Reading-Chunked-Arrays-2"><a class="docs-heading-anchor" href="#Reading-Chunked-Arrays-2">Reading Chunked Arrays</a><a class="docs-heading-anchor-permalink" href="#Reading-Chunked-Arrays-2" title="Permalink"></a></h2><h3 id="Standard-Loading"><a class="docs-heading-anchor" href="#Standard-Loading">Standard Loading</a><a id="Standard-Loading-1"></a><a class="docs-heading-anchor-permalink" href="#Standard-Loading" title="Permalink"></a></h3><pre><code class="language-julia hljs">demo_data = collect(reshape(1:120, 10, 12))
+
+jldopen(&quot;read.jld2&quot;, &quot;w&quot;) do f
+    write(f, &quot;data&quot;, demo_data; chunk=(5, 6))
+end
+
+# Load entire array
+result = jldopen(&quot;read.jld2&quot;, &quot;r&quot;) do f
+    f[&quot;data&quot;]
+end
+
+println(&quot;Size: &quot;, size(result))
+println(&quot;Matches: &quot;, result == demo_data)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Size: (10, 12)
+Matches: true</code></pre><h3 id="Chunk-by-Chunk-Access"><a class="docs-heading-anchor" href="#Chunk-by-Chunk-Access">Chunk-by-Chunk Access</a><a id="Chunk-by-Chunk-Access-1"></a><a class="docs-heading-anchor-permalink" href="#Chunk-by-Chunk-Access" title="Permalink"></a></h3><p>For large datasets, access individual chunks without loading everything:</p><pre><code class="language-julia hljs"># Use a small 4×6 array for demonstration
+small_data = collect(reshape(1:24, 4, 6))
+
+jldopen(&quot;chunks.jld2&quot;, &quot;w&quot;) do f
+    write(f, &quot;data&quot;, small_data; chunk=(2, 3))
+end
+
+jldopen(&quot;chunks.jld2&quot;, &quot;r&quot;) do f
+    chunked = JLD2.get_chunked_array(f, &quot;data&quot;)
+
+    println(&quot;Dataset: &quot;, size(small_data))
+    println(&quot;Chunk size: &quot;, JLD2.chunk_dimensions(chunked))
+    println(&quot;Chunk grid: &quot;, JLD2.chunk_grid_size(chunked))
+    println()
+
+    # Access a specific chunk
+    chunk = chunked[2, 1]  # Bottom-left chunk
+    println(&quot;Accessing chunk (2,1):&quot;)
+    println(chunk.data)
+    println(&quot;\nThis is data[3:4, 1:3] without loading the full array&quot;)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Dataset: (4, 6)
+Chunk size: (2, 3)
+Chunk grid: (2, 2)
+
+Accessing chunk (2,1):
+[3 7 11; 4 8 12]
+
+This is data[3:4, 1:3] without loading the full array</code></pre><h3 id="Iterating-Chunks"><a class="docs-heading-anchor" href="#Iterating-Chunks">Iterating Chunks</a><a id="Iterating-Chunks-1"></a><a class="docs-heading-anchor-permalink" href="#Iterating-Chunks" title="Permalink"></a></h3><p>Process large datasets chunk-by-chunk to limit memory usage:</p><pre><code class="language-julia hljs"># Save the 4×6 array
+jldopen(&quot;iterate.jld2&quot;, &quot;w&quot;) do f
+    write(f, &quot;data&quot;, small_data; chunk=(2, 3))
+end
+
+jldopen(&quot;iterate.jld2&quot;, &quot;r&quot;) do f
+    chunked = JLD2.get_chunked_array(f, &quot;data&quot;)
+
+    println(&quot;Processing all chunks:&quot;)
+    for (i, chunk) in enumerate(chunked)
+        println(&quot;\nChunk $i:&quot;)
+        println(chunk.data)
+        println(&quot;Sum = &quot;, sum(chunk.data))
+    end
+
+    println(&quot;\n---&quot;)
+    println(&quot;Total sum across chunks: &quot;, sum(c -&gt; sum(c.data), chunked))
+    println(&quot;Verified: &quot;, sum(small_data))
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Processing all chunks:
+
+Chunk 1:
+[1 5 9; 2 6 10]
+Sum = 33
+
+Chunk 2:
+[3 7 11; 4 8 12]
+Sum = 45
+
+Chunk 3:
+[13 17 21; 14 18 22]
+Sum = 105
+
+Chunk 4:
+[15 19 23; 16 20 24]
+Sum = 117
+
+---
+Total sum across chunks: 300
+Verified: 300</code></pre><h2 id="Choosing-Chunk-Sizes"><a class="docs-heading-anchor" href="#Choosing-Chunk-Sizes">Choosing Chunk Sizes</a><a id="Choosing-Chunk-Sizes-1"></a><a class="docs-heading-anchor-permalink" href="#Choosing-Chunk-Sizes" title="Permalink"></a></h2><p>Good chunk sizes balance I/O performance with access patterns:</p><p><strong>General Guidelines:</strong></p><ul><li><strong>Target 10-100 KB per chunk</strong> for most use cases</li><li><strong>Match your access pattern:</strong><ul><li>Row access → <code>(1, ncols)</code> or <code>(small, ncols)</code></li><li>Column access → <code>(nrows, 1)</code> or <code>(nrows, small)</code></li><li>Block access → <code>(sqrt(n), sqrt(n))</code></li></ul></li><li><strong>Larger chunks</strong> compress better but reduce access flexibility</li><li><strong>Smaller chunks</strong> increase metadata overhead</li></ul><pre><code class="language-julia hljs">data = rand(Float32, 10000, 1000)
+
+# For row-wise access (reading rows at a time)
+row_chunks = (1, 1000)
+
+# For column-wise access (Julia&#39;s default)
+col_chunks = (10000, 1)
+
+# Balanced for block access
+block_chunks = (500, 500)
+
+println(&quot;Row chunk size: &quot;, prod(row_chunks) * sizeof(Float32), &quot; bytes&quot;)
+println(&quot;Block chunk size: &quot;, prod(block_chunks) * sizeof(Float32), &quot; bytes&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Row chunk size: 4000 bytes
+Block chunk size: 1000000 bytes</code></pre><h2 id="Advanced-Features"><a class="docs-heading-anchor" href="#Advanced-Features">Advanced Features</a><a id="Advanced-Features-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-Features" title="Permalink"></a></h2><h3 id="Fill-Values"><a class="docs-heading-anchor" href="#Fill-Values">Fill Values</a><a id="Fill-Values-1"></a><a class="docs-heading-anchor-permalink" href="#Fill-Values" title="Permalink"></a></h3><p>Specify values for unallocated sparse data:</p><pre><code class="language-julia hljs"># Sparse array with mostly zeros
+sparse_data = zeros(Float32, 100, 100)
+sparse_data[25:50, 25:50] .= rand(Float32, 26, 26)
+
+jldopen(&quot;sparse.jld2&quot;, &quot;w&quot;) do f
+    wca = WriteChunkedArray(sparse_data;
+                           chunk=(25, 25),
+                           fill_value=0.0f0)
+    f[&quot;sparse&quot;] = wca
+end</code></pre><h3 id="Manual-Index-Type-Selection"><a class="docs-heading-anchor" href="#Manual-Index-Type-Selection">Manual Index Type Selection</a><a id="Manual-Index-Type-Selection-1"></a><a class="docs-heading-anchor-permalink" href="#Manual-Index-Type-Selection" title="Permalink"></a></h3><p>JLD2 automatically selects the optimal chunk index type, but you can override:</p><pre><code class="language-julia hljs">data = rand(Float32, 100, 100)
+
+jldopen(&quot;manual.jld2&quot;, &quot;w&quot;) do f
+    # Force V1 B-tree indexing
+    wca = WriteChunkedArray(data;
+                           chunk=(20, 20),
+                           indexing=:v1btree)
+    f[&quot;data&quot;] = wca
+end</code></pre><p>Available index types:</p><ul><li><code>:single_chunk</code> - Single chunk (no chunking overhead)</li><li><code>:implicit_index</code> - Simple fixed grid with fill value</li><li><code>:fixed_array</code> - Default for fixed-size arrays</li><li><code>:extensible_array</code> - For arrays with one unlimited dimension</li><li><code>:v2btree</code> - For multiple unlimited dimensions</li><li><code>:v1btree</code> - Legacy format (default for compatibility)</li></ul><h2 id="Compatibility"><a class="docs-heading-anchor" href="#Compatibility">Compatibility</a><a id="Compatibility-1"></a><a class="docs-heading-anchor-permalink" href="#Compatibility" title="Permalink"></a></h2><p>Chunked arrays are fully compatible with:</p><ul><li><strong>HDF5 tools</strong> (<code>h5dump</code>, <code>h5ls</code>, <code>h5debug</code>)</li><li><strong>Python h5py</strong> for cross-language access</li><li><strong>Other HDF5 libraries</strong> (C, C++, R, MATLAB)</li></ul><pre><code class="language-python hljs"># Reading JLD2 chunked arrays in Python
+import h5py
+
+with h5py.File(&#39;data.jld2&#39;, &#39;r&#39;) as f:
+    data = f[&#39;dataset&#39;][:]
+    print(f&quot;Shape: {data.shape}&quot;)
+    print(f&quot;Chunks: {f[&#39;dataset&#39;].chunks}&quot;)</code></pre><h2 id="When-to-Use-Chunking"><a class="docs-heading-anchor" href="#When-to-Use-Chunking">When to Use Chunking</a><a id="When-to-Use-Chunking-1"></a><a class="docs-heading-anchor-permalink" href="#When-to-Use-Chunking" title="Permalink"></a></h2><p><strong>Use chunking when:</strong></p><ul><li>Arrays are larger than available memory</li><li>You need partial array access (slicing)</li><li>Compression is beneficial</li><li>Building incremental processing pipelines</li></ul><p><strong>Avoid chunking when:</strong></p><ul><li>Arrays are small (&lt; 64 KB)</li><li>You always load the complete dataset</li><li>Working with 1D vectors (minimal benefit)</li></ul><h2 id="Performance-Tips"><a class="docs-heading-anchor" href="#Performance-Tips">Performance Tips</a><a id="Performance-Tips-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Tips" title="Permalink"></a></h2><pre><code class="language-julia hljs"># Good: Balanced chunks (~50KB)
+data = rand(Float32, 1000, 1000)
+jldopen(&quot;good.jld2&quot;, &quot;w&quot;) do f
+    write(f, &quot;data&quot;, data; chunk=(100, 125))  # 50KB chunks
+end
+
+# Bad: Tiny chunks (overhead dominates)
+jldopen(&quot;bad.jld2&quot;, &quot;w&quot;) do f
+    write(f, &quot;data&quot;, data; chunk=(5, 5))  # Only 100 bytes per chunk!
+end</code></pre><p><strong>Tips:</strong></p><ol><li>Benchmark different chunk sizes for your workload</li><li>Use compression for archival (trades speed for space)</li><li>Only use unlimited dimensions when actually needed</li><li>Pre-allocate with <code>fill_value</code> for sparse datasets</li><li>Keep chunks between 10 KB and 1 MB</li></ol><h2 id="API-Reference"><a class="docs-heading-anchor" href="#API-Reference">API Reference</a><a id="API-Reference-1"></a><a class="docs-heading-anchor-permalink" href="#API-Reference" title="Permalink"></a></h2><article class="docstring"><header><a class="docstring-article-toggle-button fa-solid fa-chevron-down" href="javascript:;" title="Collapse docstring"></a><a class="docstring-binding" id="JLD2.Chunking.WriteChunkedArray" href="#JLD2.Chunking.WriteChunkedArray"><code>JLD2.Chunking.WriteChunkedArray</code></a> — <span class="docstring-category">Type</span><span class="is-flex-grow-1 docstring-article-toggle-button" title="Collapse docstring"></span></header><section><div><pre><code class="language-julia hljs">WriteChunkedArray{T,N,A&lt;:AbstractArray{T,N}} &lt;: AbstractArray{T,N}</code></pre><p>Wrapper type for arrays that should be written with chunking to JLD2 files.</p><p>The chunk index type (Single Chunk, Fixed Array, Extensible Array, or V2 B-tree) is automatically selected based on the <code>maxshape</code> parameter, matching h5py&#39;s behavior.</p><p><strong>Fields</strong></p><ul><li><code>data::AbstractArray{T,N}</code> - The array data to write</li><li><code>chunks::NTuple{N,Int}</code> - Chunk dimensions (must match array dimensionality)</li><li><code>maxshape::Union{Nothing, NTuple{N,Union{Int,Nothing}}}</code> - Maximum dimensions<ul><li><code>nothing</code> for fixed-size dataset</li><li><code>nothing</code> in tuple for unlimited dimension (e.g., <code>(nothing, 100)</code>)</li></ul></li><li><code>fill_value::Union{Nothing, T}</code> - Fill value for unallocated chunks</li><li><code>indexing::Union{Symbol, Nothing}</code> - Manual chunk index type override<ul><li>Valid values: <code>:single_chunk</code>, <code>:implicit_index</code>, <code>:fixed_array</code>, <code>:extensible_array</code>, <code>:v2btree</code></li><li><code>nothing</code> for automatic selection</li></ul></li><li><code>filters::Union{Nothing, FilterPipeline}</code> - Compression filters to apply</li></ul><p><strong>Examples</strong></p><pre><code class="language-julia hljs">using JLD2
+
+data = rand(Float32, 100, 50)
+
+ca1 = WriteChunkedArray(data, chunks=(10, 10))
+ca2 = WriteChunkedArray(data, chunks=(10, 10), maxshape=(nothing, 50))
+ca3 = WriteChunkedArray(data, chunks=(10, 10), maxshape=(nothing, nothing))
+ca4 = WriteChunkedArray(data, chunks=(10, 10), filters=:gzip)
+ca5 = WriteChunkedArray(data, chunks=(10, 10), indexing=:v2btree)
+
+jldsave(&quot;output.jld2&quot;; data1=ca1, data2=ca2, data3=ca3)</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/JuliaIO/JLD2.jl/blob/e2de51c434dd3c3fb320263d43ff8bbbb08f554d/src/chunking/write_api.jl#L1-L37">source</a></section></article><article class="docstring"><header><a class="docstring-article-toggle-button fa-solid fa-chevron-down" href="javascript:;" title="Collapse docstring"></a><a class="docstring-binding" id="JLD2.Chunking.write_chunked" href="#JLD2.Chunking.write_chunked"><code>JLD2.Chunking.write_chunked</code></a> — <span class="docstring-category">Function</span><span class="is-flex-grow-1 docstring-article-toggle-button" title="Collapse docstring"></span></header><section><div><pre><code class="language-julia hljs">write_chunked(f::JLDFile, name::String, data; kwargs...)
+write_chunked(g::Group, name::String, data; kwargs...)</code></pre><p>Write a chunked dataset to a JLD2 file.</p><p><strong>Arguments</strong></p><ul><li><code>f::JLDFile</code> or <code>g::Group</code> - Open JLD2 file/group in write mode</li><li><code>name::String</code> - Dataset name</li><li><code>data::AbstractArray{T,N}</code> - Data to write</li></ul><p><strong>Keyword Arguments</strong></p><ul><li><code>chunks::Union{NTuple{N,Int}, Symbol}</code> - Chunk dimensions (required) or <code>:auto</code></li><li><code>maxshape::Union{Nothing, NTuple{N,Union{Int,Nothing}}}=nothing</code> - Maximum dimensions</li><li><code>fill_value::Union{Nothing, T}=nothing</code> - Fill value for unallocated chunks</li><li><code>indexing::Union{Symbol, Nothing}=nothing</code> - Manual chunk index type override</li><li><code>filters=nothing</code> - Compression filters</li></ul><p><strong>Examples</strong></p><pre><code class="language-julia hljs">jldopen(&quot;file.jld2&quot;, &quot;w&quot;) do f
+    data = rand(Float32, 1000, 1000)
+    write_chunked(f, &quot;data1&quot;, data; chunk=(100, 100))
+    write_chunked(f, &quot;data2&quot;, data; chunk=(100, 100), maxshape=(nothing, 1000))
+    write_chunked(f, &quot;data3&quot;, data; chunk=(100, 100), filters=:gzip)
+    write_chunked(f, &quot;data4&quot;, data; chunk=:auto)
+end</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/JuliaIO/JLD2.jl/blob/e2de51c434dd3c3fb320263d43ff8bbbb08f554d/src/chunking/write_api.jl#L75-L104">source</a></section></article><h2 id="See-Also"><a class="docs-heading-anchor" href="#See-Also">See Also</a><a id="See-Also-1"></a><a class="docs-heading-anchor-permalink" href="#See-Also" title="Permalink"></a></h2><ul><li><a href="@ref">Compression</a> - Details on compression filters</li><li><a href="../hdf5compat/#HDF5-Compatibility">HDF5 Compatibility</a> - Cross-platform file access</li><li><a href="../advanced/#Advanced-Usage">Advanced Usage</a> - Performance optimization techniques</li></ul></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../external_links/">« Dataset Links</a><a class="docs-footer-nextpage" href="../legacy/">Legacy »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.14.1 on <span class="colophon-date" title="Sunday 12 October 2025 11:31">Sunday 12 October 2025</span>. Using Julia version 1.11.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
