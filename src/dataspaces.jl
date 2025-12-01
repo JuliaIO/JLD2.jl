@@ -12,7 +12,12 @@ struct WriteDataspace{N,A<:Tuple}
     dataspace_type::UInt8
     size::NTuple{N,Length}
     attributes::A
+    max_dimensions::NTuple{N,UInt64}
 end
+
+# Outer constructors for convenience
+WriteDataspace(dataspace_type::UInt8, size::NTuple{N,UInt64}, attributes::A) where {N,A<:Tuple} =
+    WriteDataspace{N,A}(dataspace_type, size, attributes, size)
 
 struct ReadDataspace
     dataspace_type::UInt8
@@ -21,7 +26,7 @@ struct ReadDataspace
 end
 ReadDataspace() = ReadDataspace(DS_SCALAR, 0, -1)
 
-ReadDataspace(f, msg_::Union{Hmessage, Message}) = 
+ReadDataspace(f, msg_::Union{Hmessage, Message}) =
     ReadDataspace(f,  HmWrap(HmDataspace, msg_))
 ReadDataspace(f, msg::HmWrap{HmDataspace}) =
     ReadDataspace(msg.dataspace_type, msg.dimensionality, fileoffset(f, msg.dim_offset))
