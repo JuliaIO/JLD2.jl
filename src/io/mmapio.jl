@@ -201,14 +201,13 @@ end
 
 # Read a null-terminated string
 function read_bytestring(io::MmapIO)
-    # Find the null terminator position without allocating
     ptr = pconvert(Ptr{UInt8}, io.curptr)
-    len = 0
-    while unsafe_load(ptr, len + 1) != 0x00
-        len += 1
-    end
-    str = len == 0 ? "" : unsafe_string(ptr, len)
-    io.curptr += len + 1
+    maxbytes = io.endptr - io.curptr + 1
+    q = @ccall memchr(ptr::Ptr{UInt8}, 0::Int32, maxbytes::Csize_t)::Ptr{UInt8}
+    q == C_NULL && throw(EOFError())
+
+    str = unsafe_string(ptr, (q - ptr) % Int)
+    io.curptr += (q - ptr) % Int + 1
     str
 end
 
