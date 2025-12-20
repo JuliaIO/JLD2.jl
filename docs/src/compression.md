@@ -122,7 +122,7 @@ zstd_fast = ZstdFilter(level=1)    # Fast compression
 zstd_best = ZstdFilter(level=22)   # Best compression
 
 # Bzip2 with custom block size
-bzip2_filter = Bzip2Filter(blocksize100k=4)
+bzip2_filter = Bzip2Filter(4) # blocksize100k
 
 # Example usage
 jldopen("example.jld2", "w") do f
