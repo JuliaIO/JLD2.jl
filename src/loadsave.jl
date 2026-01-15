@@ -1,9 +1,11 @@
 @nospecializeinfer function jldopen(@nospecialize(f::Function), args...; kws...)
     jld = jldopen(args...; kws...)
-    try
-        return f(jld)
-    finally
-        close(jld)
+    with(LOADED_MODULES => Base.loaded_modules_array()) do
+        try
+            return f(jld)
+        finally
+            close(jld)
+        end
     end
 end
 

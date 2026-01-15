@@ -324,7 +324,7 @@ If the type is not found, it returns `nothing`.
 function find_type(typepath::String)
     parts = split(typepath, '.')
     # Find a type in the loaded modules by traversing the parts
-    for mod in Base.loaded_modules_array()
+    for mod in LOADED_MODULES[]
         for part in parts
             sym = Symbol(part)
             (!isa(mod, Module) || !isdefined(mod, sym)) && break
@@ -378,6 +378,12 @@ or a type. This is needed to allow a custom typemap function to return an `Upgra
 when the type is going to be used for reconstructing an instance. (as a type)
 """
 const TYPE_AS_DATA = ScopedValue(true)
+
+"""
+    LOADED_MODULES::ScopedValue{Vector{Module}}
+Store a copy of the loaded modules at the time a loading function is invoked and carry it forward.
+"""
+const LOADED_MODULES = ScopedValue(Base.loaded_modules_array())
 
 # Read a type. Returns an instance of UnknownType if the type or parameters
 # could not be resolved.
