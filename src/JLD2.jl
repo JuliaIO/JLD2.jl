@@ -180,69 +180,67 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool,
     parallel_read::Bool=false,
     plain::Bool=false
 ) where T<:Union{Type{IOStream},Type{MmapIO}}
-    with(LOADED_MODULES => Base.loaded_modules_array()) do
-        mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog = 1
-        filters = Filters.normalize_filters(compress)
+    mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog = 1
+    filters = Filters.normalize_filters(compress)
 
-        # Can only open multiple in parallel if mode is "r"
-        if parallel_read && (wr, create, truncate) != (false, false, false)
-            throw(ArgumentError("Cannot open file in a parallel context unless mode is \"r\""))
-        end
+    # Can only open multiple in parallel if mode is "r"
+    if parallel_read && (wr, create, truncate) != (false, false, false)
+        throw(ArgumentError("Cannot open file in a parallel context unless mode is \"r\""))
+    end
 
-        lock(OPEN_FILES_LOCK)
+    lock(OPEN_FILES_LOCK)
 
-        f = try
-            exists = ispath(fname)
-            if exists
-                rname = realpath(fname)
-                # catch existing file system entities that are not regular files
-                !isfile(rname) && throw(ArgumentError("not a regular file: $fname"))
+    f = try
+        exists = ispath(fname)
+        if exists
+            rname = realpath(fname)
+            # catch existing file system entities that are not regular files
+            !isfile(rname) && throw(ArgumentError("not a regular file: $fname"))
 
-                f = get(OPEN_FILES, rname, (; value=nothing)).value
-                # If in serial, return existing handle. In parallel always generate a new handle
-                if !isnothing(f)
-                    if parallel_read
-                        f.writable && throw(ArgumentError("Tried to open file in a parallel context but it is open in write-mode elsewhere in a serial context."))
-                    else
-                        if truncate
-                            throw(ArgumentError("attempted to truncate a file that was already open"))
-                        elseif !isa(f, JLDFile{iotype})
-                            throw(ArgumentError("attempted to open file with $iotype backend, but already open with a different backend"))
-                        elseif f.writable != wr
-                            current = wr ? "read/write" : "read-only"
-                            previous = f.writable ? "read/write" : "read-only"
-                            throw(ArgumentError("attempted to open file $(current), but file was already open $(previous)"))
-                        elseif f.compress != filters
-                            throw(ArgumentError("attempted to open file with compress=$(filters), but file was already open with compress=$(f.compress)"))
-                        elseif f.mmaparrays != mmaparrays
-                            throw(ArgumentError("attempted to open file with mmaparrays=$(mmaparrays), but file was already open with mmaparrays=$(f.mmaparrays)"))
-                        end
-                        f = f::JLDFile{iotype}
-                        f.n_times_opened += 1
-                        return f
+            f = get(OPEN_FILES, rname, (; value=nothing)).value
+            # If in serial, return existing handle. In parallel always generate a new handle
+            if !isnothing(f)
+                if parallel_read
+                    f.writable && throw(ArgumentError("Tried to open file in a parallel context but it is open in write-mode elsewhere in a serial context."))
+                else
+                    if truncate
+                        throw(ArgumentError("attempted to truncate a file that was already open"))
+                    elseif !isa(f, JLDFile{iotype})
+                        throw(ArgumentError("attempted to open file with $iotype backend, but already open with a different backend"))
+                    elseif f.writable != wr
+                        current = wr ? "read/write" : "read-only"
+                        previous = f.writable ? "read/write" : "read-only"
+                        throw(ArgumentError("attempted to open file $(current), but file was already open $(previous)"))
+                    elseif f.compress != filters
+                        throw(ArgumentError("attempted to open file with compress=$(filters), but file was already open with compress=$(f.compress)"))
+                    elseif f.mmaparrays != mmaparrays
+                        throw(ArgumentError("attempted to open file with mmaparrays=$(mmaparrays), but file was already open with mmaparrays=$(f.mmaparrays)"))
                     end
+                    f = f::JLDFile{iotype}
+                    f.n_times_opened += 1
+                    return f
                 end
             end
-
-            io = openfile(iotype, fname, wr, create, truncate, fallback)
-            created = !exists || truncate
-            rname = realpath(fname)
-            f = JLDFile(io, rname, wr, created, plain, filters, mmaparrays, typemap)
-
-            !parallel_read && (OPEN_FILES[rname] = WeakRef(f))
-
-            f
-        finally
-            unlock(OPEN_FILES_LOCK)
         end
-        try
-            initialize_fileobject!(f)
-        catch e
-            close(f)
-            throw(e)
-        end
-        return f
-    end    
+
+        io = openfile(iotype, fname, wr, create, truncate, fallback)
+        created = !exists || truncate
+        rname = realpath(fname)
+        f = JLDFile(io, rname, wr, created, plain, filters, mmaparrays, typemap)
+
+        !parallel_read && (OPEN_FILES[rname] = WeakRef(f))
+
+        f
+    finally
+        unlock(OPEN_FILES_LOCK)
+    end
+    try
+        initialize_fileobject!(f)
+    catch e
+        close(f)
+        throw(e)
+    end
+    return f
 end
 
 function initialize_fileobject!(f::JLDFile)
@@ -354,13 +352,11 @@ function jldopen(io::Union{IO,Vector{UInt8}}, writable::Bool, create::Bool, trun
                 plain::Bool=false,
                 compress=false,
                 typemap=default_typemap)
-    with(LOADED_MODULES => Base.loaded_modules_array()) do
-        wrapped_io, path_name, created = _wrap_io(io, writable, truncate)
-        filters = Filters.normalize_filters(compress)
-        f = JLDFile(wrapped_io, path_name, writable, created, plain, filters, false, typemap)
-        initialize_fileobject!(f)
-        return f
-    end
+    wrapped_io, path_name, created = _wrap_io(io, writable, truncate)
+    filters = Filters.normalize_filters(compress)
+    f = JLDFile(wrapped_io, path_name, writable, created, plain, filters, false, typemap)
+    initialize_fileobject!(f)
+    return f
 end
 
 """

@@ -313,6 +313,24 @@ function types_from_refs(f::JLDFile, ptr::Ptr)
     end
 end
 
+if VERSION ≥ v"1.12"
+    const loaded_modules = OncePerTask{Ref{Tuple{UInt, Vector{Module}}}}() do 
+        Ref{Tuple{UInt, Vector{Module}}}((Base.tls_world_age(), Base.loaded_modules_array()))
+    end
+
+    function get_loaded_modules()
+        loaded_modules_cache = loaded_modules()
+        cached_world_age, cached_loaded_modules = loaded_modules_cache[]
+        if Base.tls_world_age() ≥ cached_world_age
+            cached_loaded_modules = Base.loaded_modules_array()
+            loaded_modules_cache[] = (Base.tls_world_age(), cached_loaded_modules)
+        end
+        return cached_loaded_modules
+    end
+else
+    get_loaded_modules() = Base.loaded_modules_array()
+end
+
 """
     find_type(typepath::String)
 
@@ -324,7 +342,7 @@ If the type is not found, it returns `nothing`.
 function find_type(typepath::String)
     parts = split(typepath, '.')
     # Find a type in the loaded modules by traversing the parts
-    for mod in LOADED_MODULES[]
+    for mod in get_loaded_modules()
         for part in parts
             sym = Symbol(part)
             (!isa(mod, Module) || !isdefined(mod, sym)) && break
@@ -378,12 +396,6 @@ or a type. This is needed to allow a custom typemap function to return an `Upgra
 when the type is going to be used for reconstructing an instance. (as a type)
 """
 const TYPE_AS_DATA = ScopedValue(true)
-
-"""
-    LOADED_MODULES::ScopedValue{Vector{Module}}
-Store a copy of the loaded modules at the time a loading function is invoked and carry it forward.
-"""
-const LOADED_MODULES = ScopedValue(Base.loaded_modules_array())
 
 # Read a type. Returns an instance of UnknownType if the type or parameters
 # could not be resolved.
