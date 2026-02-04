@@ -31,6 +31,11 @@ which h5diff && echo "h5diff: $(which h5diff)"
 
 # Install Julia dependencies for the project
 echo "Installing Julia dependencies..."
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
+if julia --project=. -e 'using Pkg; Pkg.instantiate()'; then
+    echo "Julia dependencies installed successfully!"
+else
+    echo "Warning: Failed to install Julia dependencies."
+    echo "You may need to run 'julia --project=. -e \"using Pkg; Pkg.instantiate()\"' manually later."
+fi
 
 echo "Setup complete!"
