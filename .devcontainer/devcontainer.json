@@ -1,0 +1,26 @@
+{
+  "name": "JLD2.jl Development Environment",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+  
+  "features": {
+    "ghcr.io/devcontainers-contrib/features/juliaup:1": {
+      "channels": "1.10,1.12",
+      "defaultChannel": "1.12"
+    }
+  },
+
+  "postCreateCommand": ".devcontainer/setup.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "julialang.language-julia"
+      ],
+      "settings": {
+        "julia.environmentPath": "${workspaceFolder}"
+      }
+    }
+  },
+
+  "remoteUser": "vscode"
+}
