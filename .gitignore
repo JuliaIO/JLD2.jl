@@ -9,3 +9,4 @@
 docs/build/
 Manifest.toml
 .vscode/
+julia_depot/
