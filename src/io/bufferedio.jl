@@ -61,20 +61,19 @@ end
 
 Base.show(io::IO, ::BufferedReader) = print(io, "BufferedReader")
 
-function readmore!(io::BufferedReader, n::Integer)
+function ensureroom(io::BufferedReader, n::Integer)
+    buf_end = length(io.buffer)
+    bufferpos(io) + n > buf_end || return  # already have enough data ahead of cursor
+    needed = n - (buf_end - bufferpos(io))
     f = io.f
     sz = _getsize(f)
-    amount = min(max(n, 2^14), sz-position(f))
-    amount < n && throw(EOFError())
-    buffer = io.buffer
+    amount = min(max(needed, 2^14), sz - position(f))
+    amount < needed && throw(EOFError())
     pos = bufferpos(io)
-    resize!(buffer, length(buffer) + amount)
-    io.curptr = pointer(buffer, pos+1)
-    unsafe_read(f, io.curptr, amount)
+    resize!(io.buffer, buf_end + amount)
+    io.curptr = pointer(io.buffer, pos + 1)         # restore after potential realloc
+    unsafe_read(f, pointer(io.buffer, buf_end + 1), amount)  # append at end of buffer
 end
-
-ensureroom(io::BufferedReader, n::Integer) = 
-    (bufferpos(io) + n >= length(io.buffer)) && readmore!(io, n)
 
 
 Base.position(io::BufferedReader) = io.file_position + bufferpos(io)

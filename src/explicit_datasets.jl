@@ -447,7 +447,7 @@ function attach_message(f::JLDFile, offset, messages, wsession=JLDWriteSession()
     while !isempty(messages)
         msg = popfirst!(messages)
         sz = message_size(msg)
-        write_header_message(io, f, msg, wsession)
+        write_header_message(cio, f, msg, wsession)
         next_msg_offset += sz
         remaining_space -= sz
     end
