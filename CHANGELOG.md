@@ -1,7 +1,8 @@
-## Unreleased
+## 0.6.4
  - Support for directly reading from and writing to Vector{UInt8}
  - Fix for working with opened IOStream objects
  - Proper boundscheck for internal `read_bytestring`
+ - Fixes for working in IOStream mode
 
 ## 0.6.3
  - Fix edge case in datatype loading (#692)
