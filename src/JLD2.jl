@@ -180,7 +180,6 @@ function jldopen(fname::AbstractString, wr::Bool, create::Bool, truncate::Bool,
     parallel_read::Bool=false,
     plain::Bool=false
 ) where T<:Union{Type{IOStream},Type{MmapIO}}
-  
     mmaparrays && @warn "mmaparrays keyword is currently ignored" maxlog = 1
     filters = Filters.normalize_filters(compress)
 
