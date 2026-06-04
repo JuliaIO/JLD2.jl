@@ -75,7 +75,7 @@ function fieldodr(::Type{T}, initialized::Bool) where T
         if !hasfielddata(T)
             # A ghost type, so no need to store at all
             return nothing
-        elseif isa(T, DataType) && sizeof(T) ≤ MAX_INLINE_SIZE
+        elseif (isa(T, DataType) || Base.isType(T)) && sizeof(T) ≤ MAX_INLINE_SIZE
             if isbitstype(T)
                 return odr(T)
             elseif !ismutabletype(T)
@@ -109,13 +109,27 @@ end
 end
 
 
+# typeof_serializable returns the type that determines how a value is
+# serialized. It is normally just `typeof(x)`, but under the TypeEq type-system
+# refactor (JuliaLang/julia#61915) `typeof(Type{T}) === Core.TypeEq` rather than
+# `DataType`. Such values are still `Type{T} <: DataType`, so we map them back
+# to `DataType` to route them through the existing `DataType` machinery and to
+# keep the on-disk format identical to older Julia versions.
+@static if isdefined(Core, :TypeEq)
+    @nospecializeinfer typeof_serializable(@nospecialize(x)) =
+        isa(x, Core.TypeEq) ? DataType : typeof(x)
+else
+    @nospecializeinfer typeof_serializable(@nospecialize(x)) = typeof(x)
+end
+
 # objodr gives the on-disk representation of a given object. This is
 # almost always the on-disk representation of the type. The only
 # exception is strings, where the length is encoded in the datatype in
 # HDF5, but in the object in Julia.
 @nospecializeinfer function objodr(@nospecialize(x))
-    writtenas = writeas(typeof(x))
-    _odr(writtenas, typeof(x), odr(writtenas))
+    T = typeof_serializable(x)
+    writtenas = writeas(T)
+    _odr(writtenas, T, odr(writtenas))
 end
 _odr(writtenas::DataType, readas::DataType, odr) =
     CustomSerialization(writtenas, readas, odr)
@@ -126,7 +140,7 @@ _odr(writtenas::DataType, readas::DataType, odr) =
 # Performance note: this should be inferable.
 @nospecializeinfer function h5type(f::JLDFile, @nospecialize(writtenas), @nospecialize(x))
     check_writtenas_type(writtenas)
-    T = typeof(x)
+    T = typeof_serializable(x)
     @lookup_committed f T
     if !hasdata(writtenas)
         commit(f, OpaqueDatatype(1), writtenas, T, WrittenAttribute(f, :empty, UInt8(1)))
@@ -138,7 +152,7 @@ _odr(writtenas::DataType, readas::DataType, odr) =
 end
 check_writtenas_type(::DataType) = nothing
 check_writtenas_type(::Any) = throw(ArgumentError("writeas(leaftype) must return a leaf type"))
-@nospecializeinfer h5type(f::JLDFile, @nospecialize(x)) = h5type(f, writeas(typeof(x)), x)
+@nospecializeinfer h5type(f::JLDFile, @nospecialize(x)) = h5type(f, writeas(typeof_serializable(x)), x)
 
 # Make a compound datatype from a set of names and types
 @nospecializeinfer  function commit_compound(f::JLDFile, names::AbstractVector{Symbol},
@@ -213,8 +227,8 @@ end
 # Write an HDF5 datatype to the file
 @nospecializeinfer function commit(f::JLDFile,
         @nospecialize(dtype),#::H5Datatype,
-        @nospecialize(writeas::DataType),
-        @nospecialize(readas::DataType),
+        @nospecialize(writeas::Type),
+        @nospecialize(readas::Type),
         attributes::WrittenAttribute...)
     if f.disable_commit
         throw(ArgumentError("Attempted to commit DataType $readas but committing is disabled."))
@@ -413,7 +427,7 @@ h5type(f::JLDFile, ::Type{T}, x) where {T<:DataType} =
     h5fieldtype(f, DataType, typeof(x), Val{true})
 odr(::Type{T}) where {T<:DataType} = DataTypeODR
 
-function typename(T::DataType)
+function typename(T::Type)
     s = IOBuffer()
     join(s, fullname(T.name.module), '.')
     print(s, '.', T.name.name)
@@ -422,7 +436,7 @@ end
 
 function refs_from_types(f::JLDFile, types, wsession::JLDWriteSession)
     refs = RelOffset[
-        if isa(x, DataType)
+        if isa(x, DataType) || Base.isType(x)
             # The heuristic here is that, if the field type is a committed data type,
             # then we commit the datatype and write it as a reference to the committed
             # datatype. Otherwise we write it as a name. This ensures that type
@@ -441,7 +455,7 @@ function refs_from_types(f::JLDFile, types, wsession::JLDWriteSession)
     for x in types]
 end
 
-function h5convert!(out::Pointers, ::Type{DataTypeODR}, f::JLDFile, T::DataType, wsession::JLDWriteSession)
+function h5convert!(out::Pointers, ::Type{DataTypeODR}, f::JLDFile, T::Type, wsession::JLDWriteSession)
     t = typename(T)
     if T <: Function && isgensym(Symbol(T))
         @warn LazyString("Attempting to store ", T, ".\n",
