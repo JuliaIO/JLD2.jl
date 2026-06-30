@@ -1,4 +1,3 @@
-# First copy out the different pieces
 ENV["JULIA_PKG_PRECOMPILE_AUTO"]=0
 
 pkgs_under_test = [
@@ -21,6 +20,7 @@ function run_out_tree_tests(;devs=nothing, adds=nothing)
     run(`$(Base.julia_cmd()) --project=$(test_dir) $(joinpath(test_dir, "runtests.jl"))`)
 end
 
+# First copy out the different packages under test to break the workspace
 pkg_temp_dirs = map(pkgs_under_test) do (;name, old_version, localpath)
     cp(joinpath(@__DIR__, localpath), joinpath(mktempdir(), name))
 end
