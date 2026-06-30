@@ -123,8 +123,11 @@ end
         if version == 4 && layout_class == LcChunked
             flags::UInt8 = 2 # Single index with filter
             dimensionality::UInt8 = length(kw.dimensions)
-            dim_size::UInt8 = 8 # 8 bytes per dimension
-            dimensions::NTuple{Int(dimensionality), uintofsize(dim_size)}
+            dim_size::UInt8 = let md = Int(maximum(kw.dimensions)); UInt8((ndigits(md, base=2) + 7) ÷ 8) end
+            chunk_dims_raw::@Blob(Int(dimensionality) * Int(dim_size)) = let dsz = Int(dim_size), buf = IOBuffer()
+                foreach(d -> write_nb_int(buf, d, dsz), kw.dimensions)
+                take!(buf)
+            end
             chunk_indexing_type::UInt8 = 1 # Single Chunk
             if chunk_indexing_type == 1 # Single Chunk
                 data_size::@Int(8)#Int64 # Lengths
