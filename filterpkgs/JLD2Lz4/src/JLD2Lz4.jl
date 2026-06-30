@@ -19,6 +19,9 @@ This is filter id 32004.
 
 ## Keyword arguments:
 - `blocksize::Integer = 2^30`: Block size in bytes at most 2,113,929,216 bytes. Default is 1 GiB.
+- `level::Integer = 0`: Compression level, 0: default (fast mode).
+
+  Levels > 12 count as 12; levels < 0 trigger fast acceleration.
 
 # External Links
 * [LZ4 HDF5 Filter ID 32004](https://github.com/HDFGroup/hdf5_plugins/blob/master/docs/RegisteredFilterPlugins.md)
@@ -26,13 +29,27 @@ This is filter id 32004.
 """
 struct Lz4Filter <: Filters.Filter
     blocksize::Cuint
+    level::Int32
 end
-Lz4Filter(; blocksize::Integer=DEFAULT_BLOCK_SIZE) = Lz4Filter(blocksize)
-
+function Lz4Filter(; blocksize::Integer=DEFAULT_BLOCK_SIZE, level::Integer=Int32(0))
+    # lz4 c library requires Int32 level
+    _level = clamp(level, Int32)
+    Lz4Filter(blocksize, _level)
+end
+# This constructor is used when converting a WrittenFilter that has at least one client data value
+function Lz4Filter(cd_head::UInt32, cd_tail::Vararg{UInt32})
+    blocksize = cd_head
+    level = if length(cd_tail) ≥ 1
+        first(cd_tail) % Int32
+    else
+        Int32(0)
+    end
+    Lz4Filter(blocksize, level)
+end
 
 Filters.filterid(::Type{Lz4Filter}) = UInt16(32004)
 Filters.filtername(::Type{Lz4Filter}) = "LZ4H5"
-Filters.client_values(filter::Lz4Filter) = (filter.blocksize, )
+Filters.client_values(filter::Lz4Filter) = (filter.blocksize, filter.level % UInt32, )
 Filters.filtertype(::Val{32004}) = Lz4Filter
 
 function Filters.apply_filter!(filter::Lz4Filter, ref::Ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)
@@ -48,7 +65,7 @@ function Filters.apply_filter!(filter::Lz4Filter, ref::Ref, forward::Bool=true, 
         ref[] = encode(
             LZ4HDF5EncodeOptions(;
                 blockSize=filter.blocksize,
-                compressionLevel = 0,
+                compressionLevel = filter.level,
             ),
             ref[]
         )
