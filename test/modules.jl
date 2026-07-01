@@ -1,4 +1,4 @@
-push!(LOAD_PATH, joinpath(pwd(),"testmodules/"))
+push!(LOAD_PATH, joinpath(@__DIR__,"testmodules/"))
 module TestModule
 
 using A

@@ -22,8 +22,6 @@
         """
 
         saving_contents = """
-            append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
-            unique!(Base.LOAD_PATH)
             using FileIO, JLD2, Random
             my_rng = Random.MersenneTwister(1)
             my_rng_filename = "$(my_rng_filename)"
@@ -32,8 +30,6 @@
         """
 
         loading_contents = """
-            append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
-            unique!(Base.LOAD_PATH)
             tmpdir = "$(tmpdir)"
             include(joinpath(tmpdir, "mycustomload.jl"))
             using Random, Test
@@ -65,8 +61,8 @@
             println(io, loading_contents)
         end
 
-        saving_cmd = `$(Base.julia_cmd()) $(saving_filename)`
-        loading_cmd = `$(Base.julia_cmd()) $(loading_filename)`
+        saving_cmd = `$(julia_proj_cmd) $(saving_filename)`
+        loading_cmd = `$(julia_proj_cmd) $(loading_filename)`
 
         rm(my_rng_filename; force = true, recursive = true)
 
@@ -98,8 +94,6 @@
         """
 
         saving_contents = """
-            append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
-            unique!(Base.LOAD_PATH)
             using FileIO, JLD2
             abstract type AbstractFoo end
             abstract type AbstractBar <: AbstractFoo end
@@ -115,8 +109,6 @@
         """
 
         loading_contents = """
-            append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
-            unique!(Base.LOAD_PATH)
             tmpdir = "$(tmpdir)"
             include(joinpath(tmpdir, "mycustomload.jl"))
             using Test
@@ -158,8 +150,8 @@
             println(io, loading_contents)
         end
 
-        saving_cmd = `$(Base.julia_cmd()) $(saving_filename)`
-        loading_cmd = `$(Base.julia_cmd()) $(loading_filename)`
+        saving_cmd = `$(julia_proj_cmd) $(saving_filename)`
+        loading_cmd = `$(julia_proj_cmd) $(loading_filename)`
 
         rm(my_object_filename; force = true, recursive = true)
 
@@ -191,8 +183,6 @@
         """
 
         saving_contents = """
-            append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
-            unique!(Base.LOAD_PATH)
             using FileIO, JLD2
             abstract type AbstractFoo end
             abstract type AbstractBar <: AbstractFoo end
@@ -208,8 +198,6 @@
         """
 
         loading_contents = """
-            append!(Base.LOAD_PATH, $(Base.LOAD_PATH))
-            unique!(Base.LOAD_PATH)
             tmpdir = "$(tmpdir)"
             include(joinpath(tmpdir, "mycustomload.jl"))
             using Test
@@ -242,8 +230,8 @@
             println(io, loading_contents)
         end
 
-        saving_cmd = `$(Base.julia_cmd()) $(saving_filename)`
-        loading_cmd = `$(Base.julia_cmd()) $(loading_filename)`
+        saving_cmd = `$(julia_proj_cmd) $(saving_filename)`
+        loading_cmd = `$(julia_proj_cmd) $(loading_filename)`
 
         rm(my_object_filename; force = true, recursive = true)
 
@@ -318,7 +306,7 @@
         Test.@test result[1] isa LinearAlgebra.Symmetric{Float64,Array{Float64,2}}
         Test.@test result[2] isa Pkg.Types.PackageSpec
         """
-        my_cmd = `$(Base.julia_cmd()) --project=$(pwd()) -e $(code)`
+        my_cmd = `$(julia_proj_cmd) -e $(code)`
         cd(mktempdir()) do
             @test better_success(my_cmd)
         end

@@ -86,7 +86,7 @@ using JLD2
 hello = "there"
 @save $(repr(fn))
 """
-run(`$(Base.julia_cmd()) -e $cmd`)
+run(`$(julia_proj_cmd) -e $cmd`)
 jldopen(fn, "r") do f
     @test read(f, "hello") == "there"
 end
