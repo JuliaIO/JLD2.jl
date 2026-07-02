@@ -42,6 +42,20 @@ Depending on the filter type, this may include something like a compression leve
 client_values(::Filter) = ()
 
 """
+    from_client_values(::Type{F}, client_data::AbstractVector{UInt32})::F where {F<:Filter}
+
+Construct a filter of type `F` based on client values in `client_data`.
+Extra client data values should generally be ignored.
+Missing client values should generally be replaced with defaults, with errors
+delayed to use of the filter.
+"""
+function from_client_values(::Type{F}, client_data::AbstractVector{UInt32})::F where {F<:Filter}
+    # Default to calling the Filter constructor
+    # This default will be removed in the future so new filters have clearer method errors.
+    F(client_data...)
+end
+
+"""
     filtertype(id)
 
 Retrieve the filter type for a given id.
@@ -196,6 +210,13 @@ end
 Shuffle() = Shuffle(UInt32(0))
 filterid(::Type{Shuffle}) = UInt16(2)
 client_values(filter::Shuffle) = (filter.element_size,)
+function from_client_values(::Type{Shuffle}, client_values::AbstractVector{UInt32})::Shuffle
+    if isempty(client_values)
+        Shuffle()
+    else
+        Shuffle(client_values[1])
+    end
+end
 filtertype(::Val{2}) = Shuffle
 
 function set_local(fil::Shuffle, odr, dataspace, datasetcreationprops)
@@ -248,6 +269,13 @@ Deflate(; level::Integer=5) = Deflate(level)
 
 filterid(::Type{Deflate}) = UInt16(1)
 client_values(filter::Deflate) = (filter.level, )
+function from_client_values(::Type{Deflate}, client_values::AbstractVector{UInt32})::Deflate
+    if isempty(client_values)
+        Deflate()
+    else
+        Deflate(client_values[1])
+    end
+end
 filtertype(::Val{1}) = Deflate
 
 function apply_filter!(filter::Deflate, ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)
@@ -300,6 +328,13 @@ end
 filterid(::Type{ZstdFilter}) = UInt16(32015)
 filtername(::Type{ZstdFilter}) = "ZSTD"
 client_values(filter::ZstdFilter) = (filter.level % UInt32, )
+function from_client_values(::Type{ZstdFilter}, client_values::AbstractVector{UInt32})::ZstdFilter
+    if isempty(client_values)
+        ZstdFilter()
+    else
+        ZstdFilter(client_values[1])
+    end
+end
 filtertype(::Val{32015}) = ZstdFilter
 
 function apply_filter!(filter::ZstdFilter, ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)
@@ -380,7 +415,7 @@ function Filter(fil::WrittenFilter)
             """))
         end
     end
-    return F(fil.client_data...)
+    return from_client_values(F, fil.client_data)
 end
 
 
