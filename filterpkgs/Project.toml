@@ -1,0 +1,2 @@
+[workspace]
+projects = ["JLD2Bzip2", "JLD2Lz4"]

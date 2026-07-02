@@ -1,10 +1,10 @@
 using JLD2, Test
 
 for ioty in [JLD2.MmapIO, IOStream]
-    fn = joinpath(mktempdir(), "test.jld")
+    local fn = joinpath(mktempdir(), "test.jld")
 
     # Ensure we can handle cases where the same file is open multiple times
-    f = jldopen(fn, true, true, true, ioty)
+    local f = jldopen(fn, true, true, true, ioty)
     write(f, "hello", "world")
     @test_throws ArgumentError jldopen(fn, true, true, true, ioty)
     f2 = jldopen(fn, true, false, false, ioty)
@@ -25,7 +25,7 @@ for ioty in [JLD2.MmapIO, IOStream]
     # Make sure that the file gets written properly regardless of the order in which the
     # IO and JLDFile are finalized
     for order in [[1, 2], [2, 1]]
-        f = jldopen(fn, true, true, true, ioty)
+        local f = jldopen(fn, true, true, true, ioty)
         write(f, "x", 1:10)
 
         objs = isa(f, JLD2.JLDFile{IOStream}) ? [f, f.io] : [f, f.io.f]

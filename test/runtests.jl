@@ -2,12 +2,20 @@ using JLD2, FileIO
 using Test
 
 using Pkg
-filterpath = joinpath(pkgdir(JLD2), "filterpkgs")
-Pkg.develop([
-    PackageSpec(name="JLD2Bzip2", path=joinpath(filterpath, "JLD2Bzip2")),
-    PackageSpec(name="JLD2Lz4", path=joinpath(filterpath, "JLD2Lz4")),
-])
+
+const in_tree = pkgdir(JLD2) == dirname(@__DIR__)
+@show in_tree
+if in_tree && VERSION < v"1.12.0"
+    # No workspace support before 1.12
+    filterpath = joinpath(pkgdir(JLD2), "filterpkgs")
+    Pkg.develop([
+        PackageSpec(name="JLD2Bzip2", path=joinpath(filterpath, "JLD2Bzip2")),
+        PackageSpec(name="JLD2Lz4", path=joinpath(filterpath, "JLD2Lz4")),
+    ])
+end
 using JLD2Bzip2, JLD2Lz4
+
+const julia_proj_cmd = `$(Base.julia_cmd()) --project=$(Base.active_project())`
 
 function better_success(cmd)
     fn1, _ = mktemp()
@@ -48,13 +56,17 @@ using TestItemRunner
 
 @run_package_tests
 
-@testitem "Aqua Testing" begin
-    using Aqua
-    Aqua.test_all(JLD2;
-        deps_compat = (;
-            ignore = [:Mmap,],
-        ),
-        # There are a whole bunch of pseudo-ambiguities which can never be hit.
-        ambiguities = false,
-    )
+if in_tree
+    @testitem "Aqua Testing" begin
+        using Aqua
+        Aqua.test_all(JLD2;
+            deps_compat = (;
+                ignore = [:Mmap,],
+            ),
+            # There are a whole bunch of pseudo-ambiguities which can never be hit.
+            ambiguities = false,
+        )
+    end
+else
+    @info "skipping Aqua tests when not in tree"
 end
