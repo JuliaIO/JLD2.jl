@@ -214,7 +214,7 @@ function from_client_values(::Type{Shuffle}, client_data)::Shuffle
     if isempty(client_data)
         Shuffle()
     else
-        Shuffle(client_data[1])
+        Shuffle(client_data[1]::UInt32)
     end
 end
 filtertype(::Val{2}) = Shuffle
@@ -273,7 +273,7 @@ function from_client_values(::Type{Deflate}, client_data)::Deflate
     if isempty(client_data)
         Deflate()
     else
-        Deflate(client_data[1])
+        Deflate(client_data[1]::UInt32)
     end
 end
 filtertype(::Val{1}) = Deflate
@@ -332,7 +332,7 @@ function from_client_values(::Type{ZstdFilter}, client_data)::ZstdFilter
     if isempty(client_data)
         ZstdFilter()
     else
-        ZstdFilter(client_data[1])
+        ZstdFilter(client_data[1]::UInt32)
     end
 end
 filtertype(::Val{32015}) = ZstdFilter

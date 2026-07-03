@@ -38,7 +38,7 @@ if isdefined(Filters, :from_client_values)
         if isempty(client_data)
             Bzip2Filter()
         else
-            Bzip2Filter(client_data[1])
+            Bzip2Filter(client_data[1]::UInt32)
         end
     end
 end

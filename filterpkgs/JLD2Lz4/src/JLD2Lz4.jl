@@ -38,7 +38,7 @@ if isdefined(Filters, :from_client_values)
         if isempty(client_data)
             Lz4Filter()
         else
-            Lz4Filter(client_data[1])
+            Lz4Filter(client_data[1]::UInt32)
         end
     end
 end
