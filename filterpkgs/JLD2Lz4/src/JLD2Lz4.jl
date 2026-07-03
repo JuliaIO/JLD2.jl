@@ -34,11 +34,11 @@ Filters.filterid(::Type{Lz4Filter}) = UInt16(32004)
 Filters.filtername(::Type{Lz4Filter}) = "LZ4H5"
 Filters.client_values(filter::Lz4Filter) = (filter.blocksize, )
 if isdefined(Filters, :from_client_values)
-    function Filters.from_client_values(::Type{Lz4Filter}, client_values::AbstractVector{UInt32})::Lz4Filter
-        if isempty(client_values)
+    function Filters.from_client_values(::Type{Lz4Filter}, client_data)::Lz4Filter
+        if isempty(client_data)
             Lz4Filter()
         else
-            Lz4Filter(client_values[1])
+            Lz4Filter(client_data[1])
         end
     end
 end

@@ -1,9 +1,9 @@
 ENV["JULIA_PKG_PRECOMPILE_AUTO"]=0
 
-pkgs_under_test = [
-    (; name="JLD2",      old_version=v"0.6.4", localpath=".")
-    (; name="JLD2Bzip2", old_version=v"0.1.2", localpath="filterpkgs/JLD2Bzip2")
-    (; name="JLD2Lz4",   old_version=v"0.1.1", localpath="filterpkgs/JLD2Lz4")
+old_jld2_version = v"0.6.4"
+filter_adds = [
+    (; name="JLD2Bzip2", version=v"0.1.2")
+    (; name="JLD2Lz4",   version=v"0.1.1")
 ]
 
 function run_out_tree_tests(;devs=nothing, adds=nothing)
@@ -20,21 +20,33 @@ function run_out_tree_tests(;devs=nothing, adds=nothing)
     run(`$(Base.julia_cmd()) --project=$(test_dir) $(joinpath(test_dir, "runtests.jl"))`)
 end
 
-# First copy out the different packages under test to break the workspace
-pkg_temp_dirs = map(pkgs_under_test) do (;name, old_version, localpath)
-    cp(joinpath(@__DIR__, localpath), joinpath(mktempdir(), name))
+# Run the old JLD2's own test suite with the current filter packages swapped
+# into its source tree.
+function run_old_jld2_tests(old_version)
+    jld2_dir = joinpath(mktempdir(), "JLD2")
+    copy_code = """
+    using Pkg
+    Pkg.activate(; temp=true)
+    Pkg.add(name="JLD2", version=$(repr(old_version)))
+    using JLD2
+    cp(pkgdir(JLD2), $(repr(jld2_dir)))
+    """
+    run(`$(Base.julia_cmd()) -e $copy_code`)
+    # Files copied out of the julia package store are read-only
+    chmod(jld2_dir, 0o755; recursive=true)
+    # Swap in the current filter packages
+    cp(joinpath(@__DIR__, "filterpkgs"), joinpath(jld2_dir, "filterpkgs"); force=true)
+    test_code = """
+    using Pkg
+    Pkg.activate($(repr(jld2_dir)))
+    Pkg.test()
+    """
+    run(`$(Base.julia_cmd()) -e $test_code`)
 end
 
-filter_devs = map(2:length(pkgs_under_test)) do i
-    (;path=pkg_temp_dirs[i],)
-end
-filter_adds = map(2:length(pkgs_under_test)) do i
-    (;name=pkgs_under_test[i].name, version=pkgs_under_test[i].old_version,)
-end
-main_devs = [(;path=pkg_temp_dirs[1],)]
-main_adds = [(;name=pkgs_under_test[1].name, version=pkgs_under_test[1].old_version,)]
+main_devs = [(;path=@__DIR__,)]
 
 # current JLD2, old filters
 run_out_tree_tests(devs=main_devs, adds=filter_adds)
 # old JLD2, current filters
-run_out_tree_tests(devs=filter_devs, adds=main_adds)
+run_old_jld2_tests(old_jld2_version)

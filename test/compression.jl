@@ -101,6 +101,26 @@ end
     if pkgversion(JLD2Lz4) > v"0.1.1"
         @test Lz4Filter(blocksize=12345).blocksize == 12345
     end
+
+    # Test reconstruction from stored client data
+    fcv = JLD2.Filters.from_client_values
+    # Missing client values are replaced with defaults
+    @test fcv(Deflate, UInt32[]) == Deflate()
+    @test fcv(Shuffle, UInt32[]) == Shuffle()
+    @test fcv(ZstdFilter, UInt32[]) == ZstdFilter()
+    # Extra client values are ignored
+    @test fcv(Deflate, UInt32[7, 99]) == Deflate(7)
+    # Negative Zstd levels round-trip through the UInt32 encoding
+    zstd = ZstdFilter(-10)
+    @test fcv(ZstdFilter, JLD2.Filters.client_values(zstd)) == zstd
+    if pkgversion(JLD2Bzip2) > v"0.1.2"
+        @test fcv(Bzip2Filter, UInt32[]) == Bzip2Filter()
+        @test fcv(Bzip2Filter, UInt32[5]) == Bzip2Filter(blocksize100k=5)
+    end
+    if pkgversion(JLD2Lz4) > v"0.1.1"
+        @test fcv(Lz4Filter, UInt32[]) == Lz4Filter()
+        @test fcv(Lz4Filter, UInt32[12345]) == Lz4Filter(blocksize=12345)
+    end
 end
 
 @testset "Compression Filters Coverage" begin
