@@ -33,15 +33,6 @@ Bzip2Filter(; blocksize100k::Integer=9) = Bzip2Filter(blocksize100k)
 Filters.filterid(::Type{Bzip2Filter}) = UInt16(307)
 Filters.filtername(::Type{Bzip2Filter}) = "BZIP2"
 Filters.client_values(filter::Bzip2Filter) = (filter.blocksize100k, )
-if isdefined(Filters, :from_client_values)
-    function Filters.from_client_values(::Type{Bzip2Filter}, client_data)::Bzip2Filter
-        if isempty(client_data)
-            Bzip2Filter()
-        else
-            Bzip2Filter(client_data[1]::UInt32)
-        end
-    end
-end
 Filters.filtertype(::Val{307}) = Bzip2Filter
 
 function Filters.apply_filter!(filter::Bzip2Filter, ref::Ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)

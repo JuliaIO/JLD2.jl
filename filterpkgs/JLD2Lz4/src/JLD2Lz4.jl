@@ -33,15 +33,6 @@ Lz4Filter(; blocksize::Integer=DEFAULT_BLOCK_SIZE) = Lz4Filter(blocksize)
 Filters.filterid(::Type{Lz4Filter}) = UInt16(32004)
 Filters.filtername(::Type{Lz4Filter}) = "LZ4H5"
 Filters.client_values(filter::Lz4Filter) = (filter.blocksize, )
-if isdefined(Filters, :from_client_values)
-    function Filters.from_client_values(::Type{Lz4Filter}, client_data)::Lz4Filter
-        if isempty(client_data)
-            Lz4Filter()
-        else
-            Lz4Filter(client_data[1]::UInt32)
-        end
-    end
-end
 Filters.filtertype(::Val{32004}) = Lz4Filter
 
 function Filters.apply_filter!(filter::Lz4Filter, ref::Ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)
