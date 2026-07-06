@@ -1,3 +1,6 @@
+## 0.6.5
+ - Update OrderedCollections compat
+
 ## 0.6.4
  - Support for directly reading from and writing to Vector{UInt8}
  - Fix for working with opened IOStream objects
