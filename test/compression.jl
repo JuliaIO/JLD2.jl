@@ -98,9 +98,7 @@ end
 
     # Test Lz4Filter
     @test Lz4Filter(12345).blocksize == 12345
-    if pkgversion(JLD2Lz4) > v"0.1.1"
-        @test Lz4Filter(blocksize=12345).blocksize == 12345
-    end
+    @test Lz4Filter(blocksize=12345).blocksize == 12345
 end
 
 @testset "Compression Filters Coverage" begin
