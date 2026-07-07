@@ -78,29 +78,33 @@ end
 
 @testset "Filter Constructor API" begin
     # Test that both positional and keyword constructors work for all filters
+    fcv = JLD2.Filters.from_client_values
 
     # Test Deflate filter
     @test Deflate(3).level == 3
     @test Deflate(level=3).level == 3
     @test Deflate(level=7).level == 7
+    @test fcv(Deflate, [UInt32(7),]).level == 7
 
     # Test ZstdFilter
     @test ZstdFilter(10).level == 10
     @test ZstdFilter(level=10).level == 10
     @test (ZstdFilter(-10) |> JLD2.Filters.client_values) == (-10 % UInt32, )
+    @test fcv(ZstdFilter, [-10%UInt32,]).level == -10
 
     # Test Shuffle filter
     @test Shuffle(UInt32(8)).element_size == 8
+    @test fcv(Shuffle, [UInt32(8),]).element_size == 8
 
     # Test Bzip2Filter
     @test Bzip2Filter(5).blocksize100k == 5
     @test Bzip2Filter(blocksize100k=5).blocksize100k == 5
+    @test fcv(Bzip2Filter, [UInt32(5),]).blocksize100k == 5
 
     # Test Lz4Filter
     @test Lz4Filter(12345).blocksize == 12345
-    if pkgversion(JLD2Lz4) > v"0.1.1"
-        @test Lz4Filter(blocksize=12345).blocksize == 12345
-    end
+    @test Lz4Filter(blocksize=12345).blocksize == 12345
+    @test fcv(Lz4Filter, [UInt32(12345),]).blocksize == 12345
 end
 
 @testset "Compression Filters Coverage" begin

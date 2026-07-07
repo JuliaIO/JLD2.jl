@@ -1,9 +1,9 @@
 ENV["JULIA_PKG_PRECOMPILE_AUTO"]=0
 
-old_jld2_version = v"0.6.4"
+old_jld2_version = v"0.6.5"
 filter_adds = [
     (; name="JLD2Bzip2", version=v"0.1.2")
-    (; name="JLD2Lz4",   version=v"0.1.1")
+    (; name="JLD2Lz4",   version=v"0.1.2")
 ]
 
 function run_out_tree_tests(;devs=nothing, adds=nothing)

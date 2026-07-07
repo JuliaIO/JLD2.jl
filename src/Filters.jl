@@ -12,6 +12,24 @@ using JLD2: odr_sizeof, h5convert!
     Filter
 
 Abstract type to describe HDF5 Filters.
+
+## Filter construction
+
+The user facing constructor uses keyword arguments to control filter options used for encoding.
+
+Before encoding, `set_local` is called to construct a filter specialized for the dataset.
+
+Before decoding, a filter of type `F` is constructed with
+`from_client_values(::Type{F}, client_data)`, where `client_data` is a collection
+of `UInt32` values stored in the file for that filter and dataset.
+`from_client_values` has a fallback implementation of `F(@view(client_data[begin:min(end, fieldcount(F))])...)`.
+
+Typically each field of `F` corresponds to one client data value.
+Missing values are replaced with defaults, extra values are ignored,
+and invalid values only throw an error when the filter is later applied.
+
+Specialize `from_client_values` if this typical behavior should not apply.
+
 """
 abstract type Filter end
 
@@ -38,8 +56,18 @@ filtername(x::Filter) = filtername(typeof(x))
     client_values(::Filter)
 Retrieve the client values of a filter.
 Depending on the filter type, this may include something like a compression level.
+Return a collection of `UInt32`.
 """
 client_values(::Filter) = ()
+
+"""
+    from_client_values(::Type{F}, client_data)::F where {F<:Filter}
+
+Construct a filter of type `F` based on `UInt32` values in `client_data`.
+"""
+function from_client_values(::Type{F}, client_data)::F where {F<:Filter}
+    F(@view(client_data[begin:min(end, fieldcount(F))])...)
+end
 
 """
     filtertype(id)
@@ -380,7 +408,7 @@ function Filter(fil::WrittenFilter)
             """))
         end
     end
-    return F(fil.client_data...)
+    return from_client_values(F, fil.client_data)
 end
 
 
