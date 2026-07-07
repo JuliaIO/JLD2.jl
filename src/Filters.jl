@@ -15,18 +15,18 @@ Abstract type to describe HDF5 Filters.
 
 ## Filter construction
 
-The user facing constructor used keyword arguments to control filter options used for encoding.
+The user facing constructor uses keyword arguments to control filter options used for encoding.
 
-Before encoding `set_local` is called to construct a filter specialized for the dataset.
+Before encoding, `set_local` is called to construct a filter specialized for the dataset.
 
 Before decoding, a filter of type `F` is constructed with
 `from_client_values(::Type{F}, client_data)`, where `client_data` is a collection
 of `UInt32` values stored in the file for that filter and dataset.
 `from_client_values` has a fallback implementation of `F(@view(client_data[begin:min(end, fieldcount(F))])...)`.
 
-Typically each field of `F` corresponds to one client data value. 
-Missing client values are replaced with defaults, extra client data values are ignored, and errors are
-delayed to use of the filter.
+Typically each field of `F` corresponds to one client data value.
+Missing values are replaced with defaults, extra values are ignored,
+and invalid values only throw an error when the filter is later applied.
 
 Specialize `from_client_values` if this typical behavior should not apply.
 
