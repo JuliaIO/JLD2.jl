@@ -172,4 +172,97 @@ This can be useful for performance when one expects to append many additional da
 ## Fallback Behaviour
 By default JLD2 will attempt to open files using the `MmapIO` backend. If that fails, it retries using `IOStream`.
 
+## Virtual Datasets
+
+Virtual datasets (VDS) allow you to create datasets that reference data from multiple source files without copying the data. This is useful for combining large distributed datasets efficiently.
+
+### Basic Usage
+
+Create a virtual dataset mapping entire source files:
+
+```julia
+using JLD2
+
+# Create source files
+jldsave("data1.jld2"; x = fill(1.0, 3))
+jldsave("data2.jld2"; x = fill(2.0, 3))
+
+# Create virtual dataset
+jldopen("virtual.jld2", "w") do f
+    mappings = [
+        JLD2.VirtualMapping("./data1.jld2", "x"),
+        JLD2.VirtualMapping("./data2.jld2", "x")
+    ]
+    JLD2.create_virtual_dataset(f, "combined", (3, 2), Float64, mappings)
+end
+
+# Read back
+data = jldopen("virtual.jld2", "r") do f
+    f["combined"]  # Returns [1.0 2.0; 1.0 2.0; 1.0 2.0]
+end
+```
+
+### Selection Methods
+
+Virtual mappings support three ways to specify regions:
+
+**1. Julia index ranges (recommended)**
+```julia
+mapping = JLD2.VirtualMapping("./data.jld2", "measurements";
+    vds_indices=(1:1, 1:5))  # Place in first row, columns 1-5
+
+mapping = JLD2.VirtualMapping("./data.jld2", "measurements";
+    src_indices=(1:10, 5:15),   # Take rows 1-10, cols 5-15 from source
+    vds_indices=(1:10, 1:11))   # Place at rows 1-10, cols 1-11 in VDS
+```
+
+**2. Root index + shape (most intuitive)**
+```julia
+mapping = JLD2.VirtualMapping("./data.jld2", "measurements";
+    vds_root=(2, 1),      # Start at row 2, column 1
+    vds_shape=(1, 5))     # Block is 1 row × 5 columns
+
+mapping = JLD2.VirtualMapping("./data.jld2", "measurements";
+    src_root=(5, 10), src_shape=(3, 4),  # Take 3×4 block from source
+    vds_root=(1, 1),  vds_shape=(3, 4))  # Place at top-left of VDS
+```
+
+**3. Direct HyperslabSelection (advanced)**
+```julia
+vds_sel = JLD2.HyperslabSelection([0x0, 0x0], [0x1, 0x1], [0x1, 0x1], [0x5, 0x1])
+mapping = JLD2.VirtualMapping("./data.jld2", "measurements"; vds_selection=vds_sel)
+```
+
+### Strided Selections
+
+Select non-contiguous regions using strided ranges:
+
+```julia
+# Every other row
+mapping = JLD2.VirtualMapping("./data.jld2", "measurements";
+    vds_indices=(1:2:10, 1:5))  # Rows 1, 3, 5, 7, 9 in VDS
+```
+
+### Automatic Inference
+
+Automatically infer dimensions and types from source files:
+
+```julia
+jldopen("virtual.jld2", "w") do f
+    source_files = ["./data1.jld2", "./data2.jld2", "./data3.jld2"]
+
+    # Automatically determines dimensions and element type
+    JLD2.create_virtual_dataset(f, "combined", source_files, "measurements")
+end
+```
+
+### Pattern-based File Names
+
+Use `%b` for sequential file patterns:
+
+```julia
+# Expands to sub-0.jld2, sub-1.jld2, etc.
+mapping = JLD2.VirtualMapping("./sub-%b.jld2", "dataset")
+```
+
 

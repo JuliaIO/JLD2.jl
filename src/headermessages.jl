@@ -11,8 +11,10 @@
     (version == 1) && dataspace_type::@computed(DS_V1)
     version == 1 && @skip(5)
     dim_offset::@Offset
-    dimensions::NTuple{Int(dimensionality), Int64}
-    isset(flags,0) && max_dimension_size::NTuple{Int(dimensionality), Int64}
+    dimensions::NTuple{Int(dimensionality), UInt64}
+    if isset(flags,0)
+        max_dimension_size::NTuple{Int(dimensionality), UInt64} = kw.dimensions
+    end
 end
 
 @pseudostruct HmLinkInfo begin
@@ -148,8 +150,10 @@ end
             data_address::RelOffset
         end
         if layout_class == LcVirtual # Virtual Storage
-            data_address::RelOffset
-            index::UInt32
+            # Virtual Dataset Storage Layout
+            # Points to global heap containing virtual dataset mappings
+            data_address::RelOffset  # Global heap address containing VDS mappings
+            index::UInt32  # Index within the global heap collection
         end
     end
 end
