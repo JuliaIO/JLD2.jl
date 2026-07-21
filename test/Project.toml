@@ -15,3 +15,4 @@ UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 
 [compat]
 Aqua = "0.8"
+JLD2Lz4 = "0.1.2"
