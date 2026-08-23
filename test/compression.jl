@@ -110,7 +110,7 @@ end
     # requested one. Check that the encode options constructed for a filter
     # actually carry the requested level.
     F = JLD2.Filters
-    for level in (1, 3, 22)
+    for level in (-100, 1, 3, 22)
         @test F.encode_options(ZstdFilter(level)).compressionLevel == level
     end
     for level in (1, 5, 9)
