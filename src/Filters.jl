@@ -250,9 +250,18 @@ filterid(::Type{Deflate}) = UInt16(1)
 client_values(filter::Deflate) = (filter.level, )
 filtertype(::Val{1}) = Deflate
 
+"""
+    encode_options(filter::Filter)
+
+Construct the `ChunkCodecCore.EncodeOptions` used to encode data with `filter`,
+carrying over the filter's parameters (such as the compression level).
+"""
+function encode_options end
+encode_options(filter::Deflate) = ZlibEncodeOptions(; filter.level)
+
 function apply_filter!(filter::Deflate, ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)
     if forward
-        ref[] = encode(ZlibEncodeOptions(; filter.level), ref[])
+        ref[] = encode(encode_options(filter), ref[])
     else
         if output_size !== nothing
              ref[] = decode(ZlibDecodeOptions(), ref[]; size_hint=output_size)
@@ -302,9 +311,11 @@ filtername(::Type{ZstdFilter}) = "ZSTD"
 client_values(filter::ZstdFilter) = (filter.level % UInt32, )
 filtertype(::Val{32015}) = ZstdFilter
 
+encode_options(filter::ZstdFilter) = ZstdEncodeOptions(; compressionLevel=filter.level)
+
 function apply_filter!(filter::ZstdFilter, ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)
     if forward
-        ref[] = encode(ZstdEncodeOptions(; filter.level), ref[])
+        ref[] = encode(encode_options(filter), ref[])
     else
         if output_size !== nothing
              ref[] = decode(ZstdDecodeOptions(), ref[]; size_hint=output_size)
