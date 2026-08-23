@@ -103,6 +103,30 @@ end
     end
 end
 
+@testset "Compression level is applied" begin
+    # Regression test: ZstdEncodeOptions names its keyword `compressionLevel`
+    # and silently discards unknown keywords, so passing the level as `level`
+    # made every ZstdFilter compress at the default level regardless of the
+    # requested one. Check that the encode options constructed for a filter
+    # actually carry the requested level.
+    F = JLD2.Filters
+    for level in (1, 3, 22)
+        @test F.encode_options(ZstdFilter(level)).compressionLevel == level
+    end
+    for level in (1, 5, 9)
+        @test F.encode_options(Deflate(level)).level == level
+    end
+
+    # Round-trip through the file API at non-default levels
+    dir = mktempdir()
+    data = repeat(rand(2000), 50)
+    for filter in (ZstdFilter(1), ZstdFilter(22), Deflate(1), Deflate(9))
+        fn = joinpath(dir, "leveltest.jld2")
+        jldsave(fn, filter; data)
+        @test load(fn, "data") == data
+    end
+end
+
 @testset "Compression Filters Coverage" begin
     using JLD2.Filters
 

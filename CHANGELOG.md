@@ -1,3 +1,6 @@
+## 0.6.6
+ - Fix `ZstdFilter` ignoring the requested compression level
+
 ## 0.6.5
  - Update OrderedCollections compat
 
