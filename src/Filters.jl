@@ -176,6 +176,8 @@ end
 ##############################################################################
 ## Shuffle Filter implementation
 ##############################################################################
+using ChunkCodecCore: ShuffleCodec, encode, decode
+
 """
     Shuffle() <: Filter
 
@@ -203,30 +205,19 @@ function set_local(fil::Shuffle, odr, dataspace, datasetcreationprops)
 end
 
 function apply_filter!(fil::Shuffle, ref, forward::Bool=true, output_size::Union{Nothing,Integer}=nothing)
-    buf = ref[]
-    (; element_size) = fil
-    nbytes = length(buf)
-    @assert length(buf) % element_size == 0
-    nelems = nbytes ÷ element_size
-    newbuf = similar(buf)
-    for n = eachindex(newbuf)
-        # Convert to an Int64 to avoid overflow on 32bit systems
-        j = 1 + Int64(n - 1) * nelems
-        i = mod1(j, nbytes) + (j - 1) ÷ nbytes
-        if forward
-            newbuf[i] = buf[n]
-        else
-            newbuf[n] = buf[i]
-        end
+    codec = ShuffleCodec(fil.element_size)
+    if forward
+        ref[] = encode(codec, ref[])
+    else
+        ref[] = decode(codec, ref[])
     end
-    ref[] = newbuf
     return 0
 end
 
 ##############################################################################
 ## Deflate Filter implementation
 ##############################################################################
-using ChunkCodecLibZlib: ZlibEncodeOptions, ZlibDecodeOptions, encode, decode
+using ChunkCodecLibZlib: ZlibEncodeOptions, ZlibDecodeOptions
 
 """
     Deflate <: Filter

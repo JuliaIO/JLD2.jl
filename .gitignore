@@ -10,3 +10,5 @@ docs/build/
 Manifest.toml
 .vscode/
 julia_depot/
+agent-depot/
+agent-logs/
