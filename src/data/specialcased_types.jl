@@ -311,13 +311,13 @@ wconvert(::Type{String}, x::Module) = string(x)
 function rconvert(::Type{Module}, x::String)
     pkg = Symbol(x)
     # Try to find the module
-    for m in Base.loaded_modules_array()
+    for m in get_loaded_modules()
         (Symbol(m) == pkg) && return m
     end
     @warn "Encountered reference to module $x, but it is not currently loaded."
     return try
         @eval Base.__toplevel__  import $pkg
-        for m in Base.loaded_modules_array()
+        for m in get_loaded_modules()
             (Symbol(m) == pkg) && return m
         end
     catch
