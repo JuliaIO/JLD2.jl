@@ -16,33 +16,26 @@ isatend(f::JLDFile, gh::GlobalHeap) =
 heap_object_length(data::AbstractArray) = length(data)
 heap_object_length(::Any) = 1
 
-function write_heap_object(f::JLDFile, odr::ODR, data, wsession::JLDWriteSession) where ODR
-    # The type parameter ODR is needed to convince the compiler to specialize on ODR.
-    psz = odr_sizeof(odr) * heap_object_length(data)
-    objsz = 8 + jlsizeof(Length) + psz
-    objsz += 8 - mod1(objsz, 8)
-    io = f.io
+"""
+    allocate_in_global_heap(f::JLDFile, objsz::Int) -> GlobalHeap
 
-    # This is basically a memory allocation problem. Right now we do it
-    # in a pretty naive way. We:
-    #
-    # 1. Put the object in the last created global heap if it fits
-    # 2. Extend the last global heap if it's at the end of the file
-    # 3. Create a new global heap if we can't do 1 or 2
-    #
-    # This is not a great approach if we're writing objects of
-    # different sizes interspersed with new datasets. The torture case
-    # would be a Vector{Any} of mutable objects, some of which contain
-    # large (>4080 byte) strings and some of which contain small
-    # strings. In that case, we'd be better off trying to put the small
-    # strings into existing heaps, rather than writing new ones. This
-    # should be revisited at a later date.
+Allocate space in the global heap for an object of size `objsz`.
+Returns the GlobalHeap that has space for the object.
+
+Allocation strategy:
+1. Use existing heap if object fits
+2. Extend existing heap if it's at end of file
+3. Create new heap otherwise
+"""
+function allocate_in_global_heap(f::JLDFile, objsz::Int)
+    io = f.io
 
     # Can only fit up to typemax(UInt16) items in a single heap
     heap_filled = length(f.global_heap.objects) >= typemax(UInt16)
+
     if objsz + 8 + jlsizeof(Length) < f.global_heap.free && !heap_filled
         # Fits in existing global heap
-        gh = f.global_heap
+        return f.global_heap
     elseif isatend(f, f.global_heap) && !heap_filled
         # Global heap is at end and can be extended
         gh = f.global_heap
@@ -52,6 +45,7 @@ function write_heap_object(f::JLDFile, odr::ODR, data, wsession::JLDWriteSession
         seek(io, gh.offset + 8)
         jlwrite(io, gh.length)
         f.end_of_data += delta
+        return gh
     else
         # Need to create a new global heap
         heapsz = max(objsz, 4096)
@@ -63,9 +57,21 @@ function write_heap_object(f::JLDFile, odr::ODR, data, wsession::JLDWriteSession
         f.end_of_data = position(io) + heapsz
         gh = f.global_heap = f.global_heaps[h5offset(f, offset)] =
             GlobalHeap(offset, heapsz, heapsz, Int64[])
+        return gh
     end
+end
 
-    # Write data
+function write_heap_object(f::JLDFile, odr::ODR, data, wsession::JLDWriteSession) where ODR
+    # The type parameter ODR is needed to convince the compiler to specialize on ODR.
+    psz = odr_sizeof(odr) * heap_object_length(data)
+    objsz = 8 + jlsizeof(Length) + psz
+    objsz += 8 - mod1(objsz, 8)
+    io = f.io
+
+    # Allocate space in global heap
+    gh = allocate_in_global_heap(f, objsz)
+
+    # Write object header
     index = length(gh.objects) + 1
     objoffset = gh.offset + 8 + jlsizeof(Length) + gh.length - gh.free
     seek(io, objoffset)
@@ -74,7 +80,7 @@ function write_heap_object(f::JLDFile, odr::ODR, data, wsession::JLDWriteSession
     jlwrite(io, UInt32(0))               # Reserved
     jlwrite(io, Length(psz))             # Object size
 
-    # Update global heap object
+    # Update global heap
     gh.free -= objsz
     push!(gh.objects, objoffset)
 
@@ -85,9 +91,9 @@ function write_heap_object(f::JLDFile, odr::ODR, data, wsession::JLDWriteSession
         jlwrite(io, Length(gh.free - 8 - jlsizeof(Length))) # Object size
     end
 
-    # Write data
+    # Write actual data
     seek(io, objoffset + 8 + jlsizeof(Length))
-    write_data(io, f, data, odr, datamode(odr), wsession) # Object data
+    write_data(io, f, data, odr, datamode(odr), wsession)
 
     GlobalHeapID(h5offset(f, gh.offset), index)
 end

@@ -15,6 +15,7 @@ struct DataLayout
 end
 
 ischunked(dl::DataLayout) = dl.storage_type == LcChunked
+isvirtual(dl::DataLayout) = dl.storage_type == LcVirtual
 DataLayout(f::JLD2.JLDFile, msg_::Hmessage) =
     DataLayout(f, HmWrap(HmDataLayout, msg_))
 
@@ -44,7 +45,14 @@ function DataLayout(f::JLD2.JLDFile, msg::HmWrap{HmDataLayout})
 
             chunk_dimensions = Int[msg.dimensions[1:end-1]...] # drop element size as last dimension
             chunked_storage = true
-            DataLayout(version, storage_type, data_length, data_offset, msg.dimensionality, 0, chunk_dimensions) 
+            DataLayout(version, storage_type, data_length, data_offset, msg.dimensionality, 0, chunk_dimensions)
+        elseif storage_type == LcVirtual
+            # Virtual dataset layout
+            data_length = -1  # Virtual datasets don't have a fixed data length
+            heap_address = msg.data_address
+            index = msg.index
+            # Store the global heap address in data_offset for now
+            DataLayout(version, storage_type, data_length, fileoffset(f, heap_address), 0, index, UInt64[])
         else
             throw(UnsupportedFeatureException("Unknown data layout"))
         end
