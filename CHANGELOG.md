@@ -1,3 +1,6 @@
+## 0.6.7
+ - Improve performance of the `Shuffle` filter
+
 ## 0.6.6
  - Fix `ZstdFilter` ignoring the requested compression level
 
