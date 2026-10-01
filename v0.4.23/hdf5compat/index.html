@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>HDF5 Compatibility · Julia Data Format</title><link href="https://fonts.googleapis.com/css?family=Lato|Roboto+Mono" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.11.1/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit">Julia Data Format</span></div><form class="docs-search" action="../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../">Basics</a></li><li><a class="tocitem" href="../customserialization/">Custom Serialization</a></li><li><a class="tocitem" href="../compression/">Compression</a></li><li><a class="tocitem" href="../internals/">Internals &amp; Design</a></li><li class="is-active"><a class="tocitem" href>HDF5 Compatibility</a><ul class="internal"><li><a class="tocitem" href="#Understanding-how-Julia-structs-are-encoded"><span>Understanding how Julia <code>struct</code>s are encoded</span></a></li><li><a class="tocitem" href="#A-note-on-pointers"><span>A note on pointers</span></a></li></ul></li><li><a class="tocitem" href="../advanced/">Advanced Usage</a></li><li><a class="tocitem" href="../legacy/">Legacy</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>HDF5 Compatibility</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>HDF5 Compatibility</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/JuliaIO/JLD2.jl" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="HDF5-Compatibility"><a class="docs-heading-anchor" href="#HDF5-Compatibility">HDF5 Compatibility</a><a id="HDF5-Compatibility-1"></a><a class="docs-heading-anchor-permalink" href="#HDF5-Compatibility" title="Permalink"></a></h1><p>JLD2 is built upon the <a href="https://support.hdfgroup.org/HDF5/doc/H5.format.html">HDF5 Format Specification</a> and produces files that are compatible with the official <a href="https://www.hdfgroup.org/solutions/hdf5">HDF5</a> C library.</p><p>This has the advantage that other libraries that use HDF5 such as the Julia wrapper <a href="https://github.com/JuliaIO/HDF5.jl"><code>HDF5.jl</code></a> or  even with <a href="https://www.h5py.org/"><code>h5py</code></a> using Python. In addition to that, adhering to the HDF5 standards allows you to use the file introspection tools  such as <code>h5dump</code> and <code>h5debug</code> provided by the HDF5 group.</p><div class="admonition is-warning"><header class="admonition-header">Warning</header><div class="admonition-body"><p>General compatibility only holds for a list of basic types:     - Numbers <code>FloatXX</code>, <code>IntXX</code> and <code>UIntXX</code>     - Strings     - Arrays of those types Other structures can in principle also be decoded but may involve work.  See below for more information</p></div></div><h2 id="Understanding-how-Julia-structs-are-encoded"><a class="docs-heading-anchor" href="#Understanding-how-Julia-structs-are-encoded">Understanding how Julia <code>struct</code>s are encoded</a><a id="Understanding-how-Julia-structs-are-encoded-1"></a><a class="docs-heading-anchor-permalink" href="#Understanding-how-Julia-structs-are-encoded" title="Permalink"></a></h2><p>The HDF5 standard supports so-called <code>compound datatypes</code> that comprise of a set of  already known datatypes. This is very similar to julia&#39;s <code>struct</code>s.  When a user wants to write a non-default type to disk then JLD2 will create the corresponding compound datatypes and <em>commit</em> them to the file. All custom type definitions in a JLD2 file will be stored  in a <code>_types/</code> group. This way, the type definitions only needs to be written to the file once and all instances of that <code>struct</code> reference it.</p><h4 id="Example"><a class="docs-heading-anchor" href="#Example">Example</a><a id="Example-1"></a><a class="docs-heading-anchor-permalink" href="#Example" title="Permalink"></a></h4><pre><code class="language-julia">julia&gt; using JLD2
+
+julia&gt; struct MyCustomStruct
+       x::Int64
+       y::Float64
+       end
+
+julia&gt; @save &quot;test.jld2&quot; a=MyCustomStruct(42, π)</code></pre><p>Let&#39;s see what JLD2 makes out of my simple <code>MyCustomStruct</code>. To do that we view the output of <code>h5dump</code></p><pre><code class="language-bash">$&gt; h5dump test.jld2
+HDF5 &quot;test.jld2&quot; {
+GROUP &quot;/&quot; {
+   GROUP &quot;_types&quot; {
+      DATATYPE &quot;00000001&quot; H5T_COMPOUND {
+         H5T_STRING {
+            STRSIZE H5T_VARIABLE;
+            STRPAD H5T_STR_NULLPAD;
+            CSET H5T_CSET_UTF8;
+            CTYPE H5T_C_S1;
+         } &quot;name&quot;;
+         H5T_VLEN { H5T_REFERENCE { H5T_STD_REF_OBJECT }} &quot;parameters&quot;;
+      }
+         ATTRIBUTE &quot;julia_type&quot; {
+            DATATYPE  &quot;/_types/00000001&quot;
+            DATASPACE  SCALAR
+            DATA {
+            (0): {
+                  &quot;Core.DataType&quot;,
+                  ()
+               }
+            }
+         }
+      DATATYPE &quot;00000002&quot; H5T_COMPOUND {
+         H5T_STD_I64LE &quot;x&quot;;
+         H5T_IEEE_F64LE &quot;y&quot;;
+      }
+         ATTRIBUTE &quot;julia_type&quot; {
+            DATATYPE  &quot;/_types/00000001&quot;
+            DATASPACE  SCALAR
+            DATA {
+            (0): {
+                  &quot;Main.MyCustomStruct&quot;,
+                  ()
+               }
+            }
+         }
+   }
+   DATASET &quot;a&quot; {
+      DATATYPE  &quot;/_types/00000002&quot;
+      DATASPACE  SCALAR
+      DATA {
+      (0): {
+            42,
+            3.14159
+         }
+      }
+   }
+}
+}</code></pre><p>We can see that the file contains two things at top-level. There is a dataset <code>&quot;a&quot;</code> (that is what we wanted to store) and there is a group <code>_types</code> which is where all the necessary type information is stored.</p><p>You can see that JLD2 <em>committed</em> two compound datatypes. The first one is <code>Core.Datatype</code> which at first seems rather unintuitive. It is needed to tell HDF5 what a serialized  julia datatype looks like (a name and a list of parameters).</p><p>Below that is the definition of <code>MyCustomStruct</code> with two fields  <code>H5T_STD_I64LE &quot;x&quot;</code> and <code>H5T_IEEE_F64LE &quot;y&quot;</code> defining the integer field <code>x</code> and the float field <code>y</code>.</p><h2 id="A-note-on-pointers"><a class="docs-heading-anchor" href="#A-note-on-pointers">A note on pointers</a><a id="A-note-on-pointers-1"></a><a class="docs-heading-anchor-permalink" href="#A-note-on-pointers" title="Permalink"></a></h2><p>In the julia programming language pointers <code>Ptr</code> are not needed very often. However, when binary dependencies come into play and memory is passed back and forth, pointers do become relevant. Pointers are addresses to locations in memory and thus lose their meaning after a program has terminated.</p><p>In principle, there is little point in storing a pointer to a file but in order to allow for a more seamless experience JLD2 will, similar to <code>Base.Serialization</code> silently accept pointers. This is useful when storing large structures such as a <code>DifferentialEquations.jl</code> solution object that might contain a pointer somewhere. Upon deserialization any pointer fields are instantiated as null pointers.</p><p>This is done with just three lines of code utilizing the custom serialization logic and  it is shown here as it serves as a good example for usage of that feature.</p><pre><code class="language-julia">   writeas(::Type{&lt;:Ptr}) = Nothing
+   rconvert(::Type{Ptr{T}}, ::Nothing) where {T} = Ptr{T}()</code></pre><p>Usually one would also have to define a method for <code>wconvert</code>. However, in this  case JLD2 figures out that no explicit conversion is needed to construct <code>nothing</code>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../internals/">« Internals &amp; Design</a><a class="docs-footer-nextpage" href="../advanced/">Advanced Usage »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Saturday 10 September 2022 08:33">Saturday 10 September 2022</span>. Using Julia version 1.8.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
