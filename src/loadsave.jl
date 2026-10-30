@@ -199,10 +199,10 @@ end
 const SINGLE_OBJECT_NAME = "single_stored_object"
 
 """
-    save_object(filename, x)
+    save_object(filename, x; kwargs...)
 
 Stores an object `x` in a new JLD2 file at `filename`. If a file exists at this
-path, it will be overwritten.
+path, it will be overwritten. Keyword arguments are passed to [`jldopen`](@ref).
 
 Since the JLD2 format requires that all objects have a name, the object will be
 stored as `single_stored_object`. If you want to store more than one object, use
