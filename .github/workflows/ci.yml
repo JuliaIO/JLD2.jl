@@ -12,6 +12,13 @@ jobs:
   test:
     name: Tests, Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
+    env:
+      # glibc >= 2.41 (e.g. Ubuntu 26.04) refuses to dlopen shared libraries that request
+      # an executable stack. Julia 1.9's bundled libopenlibm.so does, causing
+      # "cannot enable executable stack as shared object requires: Invalid argument".
+      # This tunable restores the old behavior; it is ignored by older glibc and other OSes.
+      # Remove when min version is above 1.9
+      GLIBC_TUNABLES: glibc.rtld.execstack=2
     strategy:
       fail-fast: false
       matrix:
