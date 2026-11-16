@@ -84,3 +84,11 @@ and field types.
  * The attribute message has the name `julia_type` and as payload the julia `DataType`
  signature `Tuple{Int64, Int64}` which is needed for reconstruction.
 
+## Cluster Filesystems and other uncommon filesystems
+
+If you're using JLD2 in a cluster environment or similar, the saved data may not correspond to the actual data due to interactions with `mmap`. To solve this, override `mmap` with `IOStream` to save data like so:
+```@repl
+using JLD2
+a = rand(1000)
+JLD2.jldsave("myfile.jld2", IOStream; a)
+```
