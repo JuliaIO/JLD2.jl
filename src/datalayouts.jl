@@ -31,7 +31,9 @@ function DataLayout(f::JLD2.JLDFile, msg::HmWrap{HmDataLayout})
             data_length = Int64(msg.data_size)
             return DataLayout(version, storage_type, data_length, data_offset) 
         elseif version == 4 && storage_type == LcChunked
-            chunk_dimensions = Int[msg.dimensions...]
+            dsz = Int(msg.dim_size)
+            buf = IOBuffer(msg.chunk_dims_raw)
+            chunk_dimensions = [Int(read_nb_uint(buf, dsz)) for _ in 1:Int(msg.dimensionality)]
             chunk_indexing_type = msg.chunk_indexing_type
             chunk_indexing_type == 1 || throw(UnsupportedFeatureException("Unknown chunk indexing type"))
             data_length = Int64(msg.data_size)
